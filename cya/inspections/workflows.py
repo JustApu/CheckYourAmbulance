@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.urls import reverse
 
 from cya.authorization.policy import ResourceContext, permitted
@@ -73,7 +73,7 @@ def deficiency_history(deficiency):
             organization_id=org,
             deficiency=deficiency,
         )
-        .select_related("actor_user")
+        .select_related("actor_user", "assignee")
         .order_by("sequence"),
         1000,
     )
@@ -280,3 +280,26 @@ def _obligation_control(user, roles, check, obligation, determination, history, 
         if completed
         else None,
     }
+
+
+def verification_scope(deficiency):
+    """Newest materialized scope and effective Passes; fail closed on missing/large evidence."""
+    from cya.deficiencies.effects import satisfied_scope_rows
+    from cya.deficiencies.models import VerificationScopeRow
+
+    query = VerificationScopeRow.objects.filter(
+        organization_id=deficiency.organization_id, deficiency=deficiency
+    )
+    revision = query.aggregate(newest=Max("scope_revision"))["newest"]
+    rows = bounded(
+        query.filter(scope_revision=revision)
+        .select_related("item", "kit_instance")
+        .order_by("item_id", "instance_key"),
+        2000,
+    )
+    if not rows:
+        raise ValueError("verification scope unavailable")
+    satisfied = satisfied_scope_rows(str(deficiency.organization_id), str(deficiency.pk), rows)
+    for row in rows:
+        row.satisfied = row.pk in satisfied
+    return rows

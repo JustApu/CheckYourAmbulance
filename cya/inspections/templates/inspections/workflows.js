@@ -18,7 +18,7 @@
     NOT_FOUND: "This record is no longer available.", AUTHENTICATION_REQUIRED: "Sign in again.",
     UNKNOWN_CATEGORY: "Report choices changed. Refresh and choose a current category.",
     INVALID_SEVERITY: "Report choices changed. Refresh and choose a current severity.",
-    EMPTY_SCOPE: "That scope has no current checklist items. Refresh and choose another scope.",
+    EMPTY_SCOPE: "That scope has no current checklist items. Refresh the report or contact a supervisor before recording a repair.",
     INELIGIBLE_CHECK: "This is no longer an eligible linked Unable check. Refresh history.",
     INELIGIBLE_OBLIGATION: "This obligation changed or is no longer current. Refresh history.",
     CSRF_REJECTED: "Refresh the page to renew its security token.",
@@ -29,16 +29,41 @@
     OPERATION_REUSED: "This operation has different content. Refresh before making another decision.",
     ALREADY_LINKED: "These reports are already linked.", NOT_LINKED: "These reports are not linked.",
     DEFICIENCY_NOT_ACTIVE: "That deficiency is closed or Reported in Error. Choose another report.",
-    DEFICIENCY_CHANGED: "This deficiency changed. Refresh history before recording a repair.",
+    DEFICIENCY_CHANGED: "This deficiency changed. Refresh history before making a new decision.",
+    INVALID_EXTENSION_DATE: "Choose a future date later than the governing deadline.",
+    NO_DEADLINE: "A supervisor must set a deadline before an extension can be requested.",
+    INVALID_FOLLOW_UP: "Choose a future follow-up date.",
+    DEPENDENCY_UNCHANGED: "Change the dependency explanation or follow-up date.",
+    NO_ACTIVE_DEPENDENCY: "This dependency has ended. Refresh history.",
+    DEPENDENCY_ALREADY_RECORDED: "A dependency is already recorded. Refresh to update it.",
+    MALFORMED_REQUEST: "Check the form values and try again.",
     INVALID_TRANSITION: "This deficiency is not in a status that allows this action.",
     NOT_YET_SUPPORTED: "This action is not available yet. Record a fresh independent check when appropriate."
   };
   function field(form, name) { return form.querySelector('[name="' + name + '"]'); }
   function value(form, name) { var input = field(form, name); return input ? input.value.trim() : ""; }
   function required(text, message) { if (!text) { throw new Error(message); } return text; }
+  function utcInstant(text) {
+    required(text, "Choose a date and time in UTC.");
+    var date = new Date(text + "Z");
+    if (isNaN(date.getTime())) { throw new Error("Enter a valid date and time in UTC."); }
+    return date.toISOString();
+  }
   function build(form) {
     var body = {operation_id: uuid4()}, kind = form.dataset.kind;
-    if (kind === "repair") { body.expected_event_id = form.dataset.expectedEvent; }
+    if (["repair", "extension", "note", "dependency", "dependency-exit"].indexOf(kind) !== -1) {
+      body.expected_event_id = form.dataset.expectedEvent;
+    }
+    if (kind === "extension") {
+      body.reason = required(value(form, "reason"), "A reason is required.");
+      body.proposed_deadline = utcInstant(value(form, "proposed_deadline"));
+    }
+    if (kind === "note") { body.note = required(value(form, "note"), "A note is required."); }
+    if (kind === "dependency") {
+      body.explanation = required(value(form, "explanation"), "An explanation is required.");
+      if (value(form, "follow_up_at")) { body.follow_up_at = utcInstant(value(form, "follow_up_at")); }
+    }
+    if (kind === "dependency-exit" && value(form, "return_to")) { body.return_to = value(form, "return_to"); }
     if (kind === "link") { body.related_deficiency_id = required(value(form, "related_deficiency_id"), "Choose a report."); }
     if (kind === "correction") {
       body.expected_tip_check_id = form.dataset.tip;

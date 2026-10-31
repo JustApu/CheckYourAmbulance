@@ -7,7 +7,7 @@
     <span id="op-status" class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>
     <span id="op-restrictions" class="muted">{{ status.restrictions|default:"" }}</span>
   </p>
-  <p class="muted">{{ template_label }} · Session {{ state_label|lower }}</p>
+  {% if verification %}<p class="muted">Verification checks</p>{% else %}<p class="muted">{{ template_label }} · Session {{ state_label|lower }}</p>{% endif %}
 </section>
 <div id="live-banner" class="banner banner-error" role="alert" hidden>
   <span class="indicator-icon" aria-hidden="true">&#9888;</span>
@@ -21,7 +21,9 @@
 <form id="csrf-holder">{% csrf_token %}</form>
 <p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent deficiency report</a></p>
 
-{% if state != "OPEN" %}
+{% if verification %}
+<section class="notice"><p>Verification for <a href="{% url 'deficiencies-detail' verification.pk %}">{{ verification.summary }}</a>. Each outstanding row needs a Pass; a Fail returns the deficiency to In Progress. Unable to Inspect does not verify.</p></section>
+{% elif state != "OPEN" %}
 <section class="notice" aria-label="Session ended">
   <p>This session is {{ state_label|lower }}. Reopen it to record more checks; completed checks keep their original times.</p>
   <button type="button" id="reopen-session" class="button primary">Reopen session</button>
@@ -49,12 +51,12 @@
 
 <section aria-labelledby="checklist-heading">
   <h2 id="checklist-heading">Checklist</h2>
-  <div class="view-controls" role="group" aria-label="Checklist view">
+  {% if not verification %}<div class="view-controls" role="group" aria-label="Checklist view">
     <button type="button" id="view-normal" class="button" aria-pressed="false">Normal</button>
     <button type="button" id="view-priority" class="button" aria-pressed="false">Priority</button>
     <label class="check"><input type="checkbox" id="only-attention"> Needs Attention Only</label>
   </div>
-  <p id="pref-state" class="muted" role="status"></p>
+  {% endif %}<p id="pref-state" class="muted" role="status"></p>
   <p id="screen-notice" class="notice" role="status" hidden></p>
   <ol id="items" class="items" aria-live="polite"></ol>
 </section>

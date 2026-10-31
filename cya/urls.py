@@ -33,6 +33,16 @@ urlpatterns = [
     ),
     path("deficiencies/", workflow_views.deficiencies, name="deficiencies"),
     path(
+        "deficiencies/<str:deficiency_id>/verification/",
+        workflow_views.verification,
+        name="deficiency-verification",
+    ),
+    path(
+        "deficiencies/<str:deficiency_id>/verification-items/",
+        workflow_views.verification_items,
+        name="deficiency-verification-items",
+    ),
+    path(
         "deficiencies/<str:deficiency_id>/", workflow_views.deficiency, name="deficiencies-detail"
     ),
     path(

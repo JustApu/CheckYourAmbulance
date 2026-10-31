@@ -327,6 +327,14 @@ satisfied by a check (readings are odometer entries), so such a deficiency stays
 Verification until an administrator closes it. Outbox, notification and suspension-end effects
 arrive with [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13) and [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14).
 
+[Issue #15](https://github.com/JustApu/CheckYourAmbulance/issues/15) exposes the stored
+`verification` result through the HTTP check acknowledgement as `result.verification` when
+present: `deficiency_id`, `scope_revision`, `counts_toward_scope`, `remaining_scope_rows`,
+`closure_withheld` and `status`. A replay returns that original committed result even if the
+deficiency has since changed. Routine acknowledgements keep their existing shape. The
+[crew verification screen](deficiency-workflows.md#crew-deficiency-actions-issue-15) uses these
+fields to distinguish a saved check from a verified or explicitly withheld closure.
+
 ## Not built yet, and refused
 
 Each of these is a valid part of the contract, so the command answers `422 NOT_YET_SUPPORTED`

@@ -144,7 +144,7 @@ def _acknowledgement(result, user):
     if row is None:
         raise DatabaseError("committed check could not be read back")
     recorded = row["recorded_at"].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    return {
+    acknowledgement = {
         "check_id": result.body["check_id"],
         "outcome": result.body["outcome"],
         "server_recorded_at": recorded,
@@ -152,6 +152,10 @@ def _acknowledgement(result, user):
         "deficiency_ids": result.body["deficiency_ids"],
         "event_ids": result.body["event_ids"],
     }
+
+    if "verification" in result.body:
+        acknowledgement["verification"] = result.body["verification"]
+    return acknowledgement
 
 
 def _correction_acknowledgement(result, user):

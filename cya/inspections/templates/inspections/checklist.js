@@ -8,6 +8,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var list = $("items"), liveBanner = $("live-banner"), notice = $("screen-notice");
   var entries = {};       // item key -> {status, payload, text, operationId}
+  var verificationRows = {}, verificationNotice = "";
   var drafts = {};        // item key -> typed value, kept across re-renders
   var rows = [];
   var view = config.view, onlyAttention = config.needs_attention_only;
@@ -37,6 +38,8 @@
     UNKNOWN_CATEGORY: "Report choices changed. Refresh and choose a current category.",
     INVALID_SEVERITY: "Report choices changed. Refresh and choose a current severity.",
     DEFICIENCY_NOT_ACTIVE: "That report is closed or Reported in Error. Choose another report.",
+    VERIFICATION_NOT_PENDING: "This deficiency is no longer Pending Verification. Refresh its history.",
+    NOT_IN_VERIFICATION_SCOPE: "This item and kit are no longer in the verification scope. Refresh history.",
     INVALID_OBSERVATION: "That value is not accepted for this item.",
     INVALID_OUTCOME: "That result is not allowed for this item.",
     FORBIDDEN: "You are not permitted to record this.",
@@ -83,8 +86,13 @@
     var p = {
       operation_id: entry.operationId, vehicle_id: config.vehicle_id, item_id: row.item_id,
       checklist_version_id: row.checklist_version_id, purpose: "ROUTINE",
-      session_id: config.session_id, basis_check_id: entry.basis
+      basis_check_id: entry.basis
     };
+    if (config.session_id) { p.session_id = config.session_id; }
+    if (config.verification_for_deficiency_id) {
+      p.purpose = "VERIFICATION";
+      p.verification_for_deficiency_id = config.verification_for_deficiency_id;
+    }
     if (row.kit_id) { p.kit_id = row.kit_id; }
     if (entry.acknowledges) { p.acknowledges_check_id = entry.acknowledges; }
     if (entry.outcome) { p.outcome = entry.outcome; }
@@ -105,6 +113,7 @@
     var entry = {status: "pending", operationId: uuid4(), basis: row.latest_check_id, value: value,
                  retryable: true, outcome: outcome, deficiency: deficiency, explanation: explanation};
     entries[k] = entry;
+    if (config.verification_for_deficiency_id) { verificationRows[k] = row; }
     send(row, entry);
   }
   function retryCheck(row) {
@@ -119,6 +128,17 @@
     post(config.urls.checks, entry.payload).then(function (answer) {
       if (answer.kind === "committed") {
         entry.status = "saved"; entry.text = "Recorded " + when(answer.body.result.server_recorded_at);
+        var verification = answer.body.result.verification;
+        if (verification) {
+          var detail = verification.status === "CLOSED_VERIFIED" ? "Closed — Verified." :
+            verification.status === "IN_PROGRESS" ? "Verification failed — back in progress." :
+            verification.closure_withheld ? "Scope satisfied; automatic closure withheld. Contact a supervisor." :
+            verification.counts_toward_scope ? verification.remaining_scope_rows + " scope rows remain." :
+            "Saved check does not count toward the verification scope.";
+          entry.text += ". " + detail;
+          verificationNotice = "Saved. " + detail;
+          $("session-message").textContent = verificationNotice;
+        }
         delete drafts[key(row)];
         scheduleReload(0);
       } else if (answer.kind === "conflict") {
@@ -140,11 +160,12 @@
   // A row that has left the list (Needs Attention Only, after a live reload) cannot show its own
   // indicator, so the outcome is said in the screen's status line instead.
   function announceHidden(row, entry) {
-    var shown = rows.some(function (r) { return key(r) === key(row) && r.checklist_version_id === config.checklist_version_id; });
+    var shown = rows.some(function (r) { return key(r) === key(row) && (config.verification_for_deficiency_id || r.checklist_version_id === config.checklist_version_id); });
     if (shown || entry.status === "pending" || entry.status === "idle") { return; }
     var words = {saved: "was saved", failed: "was not saved", unconfirmed: "is unconfirmed: it may or may not have been recorded"};
     $("session-message").textContent = "Your check of \"" + row.item_label + "\" " + words[entry.status] + "." +
-      (entry.status === "saved" ? "" : " Turn off Needs Attention Only to see the item and retry.");
+      (entry.text ? " " + entry.text : "") +
+      (entry.status === "saved" || config.verification_for_deficiency_id ? "" : " Turn off Needs Attention Only to see the item and retry.");
   }
 
   // ---- conflict dialog (CON-2, CON-3) ----------------------------------------------------
@@ -189,6 +210,16 @@
   function outcomeValue(name) { var input = outcomeForm.querySelector('[name="' + name + '"]'); return input ? input.value.trim() : ""; }
   function openOutcome(row, outcome, observation) {
     if (entries[key(row)] && (entries[key(row)].status === "pending" || entries[key(row)].status === "unconfirmed")) { return; }
+    if (config.verification_for_deficiency_id) {
+      if (outcome !== "FAILED") { return; }
+      if (row.kind === "QUANTITY" || row.kind === "MEASUREMENT") {
+        var observed = observation === undefined ? (drafts[key(row)] || "").trim() : String(observation);
+        var validObservation = row.kind === "QUANTITY" ? /^[0-9]{1,6}$/.test(observed) : /^-?[0-9]+(\.[0-9]+)?$/.test(observed);
+        if (!validObservation) { entries[key(row)] = {status: "failed", text: "Enter the observation before reporting Fail."}; render(); return; }
+        observation = row.kind === "QUANTITY" ? parseInt(observed, 10) : observed;
+      }
+      startCheck(row, observation, "FAILED"); return;
+    }
     if (outcome === "FAILED" && (row.kind === "QUANTITY" || row.kind === "MEASUREMENT") && observation === undefined) {
       var raw = (drafts[key(row)] || "").trim();
       var valid = row.kind === "QUANTITY" ? /^[0-9]{1,6}$/.test(raw) : /^-?[0-9]+(\.[0-9]+)?$/.test(raw);
@@ -237,6 +268,7 @@
 
   // ---- rendering -------------------------------------------------------------------------
   function stateText(row) {
+    if (config.verification_for_deficiency_id) { return "Outstanding verification"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED") { return "Inspected — failed"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED") { return "Completed by supervisor — unable to inspect"; }
     var map = {OVERDUE: "Overdue", DUE: "Due", CURRENT: "Due soon", SATISFIED: "Done for this window",
@@ -258,7 +290,7 @@
     var box = el("div", "item-controls");
     if (config.state !== "OPEN") { return box; }
     if (row.kind === "VEHICLE_READING") {
-      box.appendChild(el("p", "muted", "Recorded with the odometer form above."));
+      box.appendChild(el("p", "muted", config.verification_for_deficiency_id ? "A vehicle reading cannot verify this scope through an item check. Contact a supervisor; it remains outstanding." : "Recorded with the odometer form above."));
       return box;
     }
     var label = row.item_label + (row.kit_label ? " (" + row.kit_label + ")" : "");
@@ -292,7 +324,7 @@
     }
     if (row.allowed_outcomes.indexOf("PASSED") !== -1) { box.appendChild(button); }
     ["FAILED", "UNABLE_TO_INSPECT"].forEach(function (outcome) {
-      if (row.allowed_outcomes.indexOf(outcome) === -1) { return; }
+      if (row.allowed_outcomes.indexOf(outcome) === -1 || (config.verification_for_deficiency_id && outcome === "UNABLE_TO_INSPECT")) { return; }
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
       action.type = "button"; action.disabled = !!busy;
       action.setAttribute("aria-label", action.textContent + " " + label);
@@ -341,14 +373,14 @@
   }
   function render() {
     var focused = document.activeElement, focusId = focused && focused.id && list.contains(focused) ? focused.id : null;
-    var shown = rows.filter(function (r) { return r.checklist_version_id === config.checklist_version_id; });
+    var shown = rows.filter(function (r) { return (config.verification_for_deficiency_id || r.checklist_version_id === config.checklist_version_id); });
     while (list.firstChild) { list.removeChild(list.firstChild); }
     shown.forEach(function (row, i) { list.appendChild(itemNode(row, i)); });
     var message = "";
     if (rows.length && !shown.length) {
       message = "This vehicle's checklist changed after the session started. Start a new session to use the current one.";
     } else if (!rows.length) {
-      message = onlyAttention ? "Nothing needs attention right now." : "This vehicle has no checklist items.";
+      message = config.verification_for_deficiency_id ? "No outstanding verification items available here. See the report for scope and status." : onlyAttention ? "Nothing needs attention right now." : "This vehicle has no checklist items.";
     } else if (!shown.length) {
       message = "";
     }
@@ -372,6 +404,16 @@
     }).then(function (a) {
       if (!a.ok || a.body.status !== "OK") { throw new Error("checklist"); }
       rows = a.body.items; setStatus(a.body.vehicle_status);
+      if (config.verification_for_deficiency_id) {
+        // An acknowledgement may be lost after the row was satisfied or removed. Keep its
+        // exact request reachable until Retry resolves, even after automatic closure.
+        Object.keys(verificationRows).forEach(function (k) {
+          if (entries[k] && ["pending", "unconfirmed"].indexOf(entries[k].status) !== -1 &&
+              !rows.some(function (r) { return key(r) === k; })) { rows.push(verificationRows[k]); }
+        });
+        $("session-message").textContent = verificationNotice + " " + a.body.verification_status + ". " + a.body.remaining_scope_rows + " outstanding scope rows." +
+          (a.body.unavailable_scope_rows ? " Some items are unavailable on the current checklist. Contact a supervisor; they remain outstanding." : "");
+      }
       $("stale").hidden = true; render();
     }).catch(function () {
       $("stale").hidden = false;   // data on screen may be out of date
@@ -406,6 +448,7 @@
 
   // ---- view and filter (VW-1, VW-2) ------------------------------------------------------
   function syncControls() {
+    if (config.verification_for_deficiency_id) { return; }
     $("view-normal").setAttribute("aria-pressed", String(view === "NORMAL"));
     $("view-priority").setAttribute("aria-pressed", String(view === "PRIORITY"));
     $("only-attention").checked = onlyAttention;
@@ -419,11 +462,13 @@
     });
   }
   function changeView(next) { view = next; syncControls(); savePreferences(); scheduleReload(0); }
-  $("view-normal").addEventListener("click", function () { changeView("NORMAL"); });
-  $("view-priority").addEventListener("click", function () { changeView("PRIORITY"); });
-  $("only-attention").addEventListener("change", function () {
-    onlyAttention = $("only-attention").checked; savePreferences(); scheduleReload(0);
-  });
+  if (!config.verification_for_deficiency_id) {
+    $("view-normal").addEventListener("click", function () { changeView("NORMAL"); });
+    $("view-priority").addEventListener("click", function () { changeView("PRIORITY"); });
+    $("only-attention").addEventListener("change", function () {
+      onlyAttention = $("only-attention").checked; savePreferences(); scheduleReload(0);
+    });
+  }
 
   // ---- session actions -------------------------------------------------------------------
   var reopenButton = $("reopen-session");
