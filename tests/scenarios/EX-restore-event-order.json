@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "EX-restore-event-order",
+  "criterion": "AC-26",
+  "requirements": [
+    "ARC-7",
+    "AUD-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "ordered event stream and persisted projection"
+  ],
+  "when": [
+    "restore and replay after snapshot"
+  ],
+  "then": [
+    "same final statuses and event attribution"
+  ],
+  "status": "contract",
+  "spec_refs": [
+    "§19.3"
+  ]
+}

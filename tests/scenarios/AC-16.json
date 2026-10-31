@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-16",
+  "criterion": "AC-16",
+  "requirements": [
+    "VER-2",
+    "VER-3",
+    "VER-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "kit deficiency, vehicle-system deficiency, expanded scope"
+  ],
+  "when": [
+    "record purpose VERIFICATION passes after correction; ordinary passes; expanded item absent"
+  ],
+  "then": [
+    "only complete post-correction scoped verification closes; routine passes do not"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

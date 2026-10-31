@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "AC-8",
+  "criterion": "AC-8",
+  "requirements": [
+    "REC-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "operation op1, crew member e1"
+  ],
+  "when": [
+    "send same operation id twice"
+  ],
+  "then": [
+    "one immutable check record and identical response"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

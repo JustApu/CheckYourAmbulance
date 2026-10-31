@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "AC-34",
+  "criterion": "AC-34",
+  "requirements": [
+    "SEAL-2",
+    "SEAL-5",
+    "SEAL-6",
+    "STK-D"
+  ],
+  "fixture": "../fixtures/sealed-kit.json",
+  "synthetic": true,
+  "given": [
+    "kit k1 sealed and intact; station-local today is 2026-01-15"
+  ],
+  "when": [
+    "e1 breaks the seal without a reason, then with reason 'used on call'",
+    "e1 reseals: omitting one item; with an item dated 2026-01-14 (yesterday); without a new crew ID; without the attestation",
+    "e1 reseals with every item entered fresh and k1-opa dated 2026-01-15 (today)",
+    "e1 reseals with every item entered fresh, k1-gauze counted 9 of 10, earliest date 2026-02-28, new marking E-2001"
+  ],
+  "then": [
+    "the reasonless break is rejected; the break with a reason is recorded with actor, instant, marking and reason",
+    "each incomplete, expired-item, missing-ID or unattested reseal is refused; the reseal with an item dated today is accepted; no field is prefilled from the previous seal, so a reseal request that omits an item's count or expiration is refused rather than defaulted to the prior seal's values",
+    "the short-count reseal succeeds, records a count deficiency for k1-gauze, and that seal does not substitute",
+    "the computed date to write is 2026-02-28 (earliest across all items); the repeated crew ID E-2001 is accepted"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until issue 19 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/19) Part B."
+}

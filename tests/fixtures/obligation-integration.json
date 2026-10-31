@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "non_authoritative": true,
+  "note": "M2 exit test only. Fleet comes from demo-fleet.json. The extra glucometer and 01:30 fold schedule are invented test configuration, not operational requirements.",
+  "station_zone": "America/New_York",
+  "start_date": "2026-10-28",
+  "days": 7,
+  "glucometer_label": "Synthetic: glucometer inspection",
+  "fold_slot": "synthetic-fold-0130",
+  "unchanged_crew": ["synthetic-crew-a", "synthetic-crew-b"],
+  "changed_crew": ["synthetic-crew-a", "synthetic-crew-c"]
+}

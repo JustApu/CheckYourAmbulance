@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-24",
+  "criterion": "AC-24",
+  "requirements": [],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "action not present in permission matrix"
+  ],
+  "when": [
+    "directly submit unlisted action"
+  ],
+  "then": [
+    "403 equivalent; denied action audited; no business mutation"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection.",
+  "spec_refs": [
+    "§3.2",
+    "§3.4"
+  ]
+}

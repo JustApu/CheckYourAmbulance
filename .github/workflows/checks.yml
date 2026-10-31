@@ -1,0 +1,252 @@
+# Repository checks (issue 19 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/19)): stack-neutral checks (Part A) and the
+# Django/MariaDB lint, migration and test job (Part B).
+# Uses no secrets; the token is read-only and is not left in the checkout.
+name: checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Do not create a workflow run for recognized documentation-only PRs. Keep an
+    # include-all pattern first so every unrecognized path (including workflow and
+    # application changes) still starts CI; a mixed PR starts CI if any path is included.
+    paths:
+      - '**'
+      - '!*.md'
+      - '!**/*.md'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keep manual fallback runs isolated from push/pull_request runs for the same ref.
+  group: checks-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  handoff-guard:
+    if: github.event_name == 'pull_request' && github.event.action == 'synchronize' && !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Require draft updates before pushing
+        run: |
+          printf '::error::Return the PR to draft before pushing, then mark it ready for review to run CI.\n'
+          exit 1
+
+  stack-neutral:
+    if: github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'synchronize')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pull-requests: read
+      contents: read
+    outputs:
+      run-django: ${{ steps.filter.outputs.run-django }}
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, from the release's checksums file.
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # scan the full history, not just the tip
+
+      - name: Check documentation-only path policy
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          workflow = Path(".github/workflows/checks.yml").read_text(encoding="utf-8")
+          pull_request = workflow.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
+          block = re.search(r"^    paths:\n((?:      - .*\n)+)", pull_request, re.MULTILINE)
+          assert block, "pull_request.paths filter is missing"
+          patterns = re.findall(r"^      - '([^']+)'$", block.group(1), re.MULTILINE)
+          assert patterns == ["**", "!*.md", "!**/*.md"], patterns
+
+          def should_run(paths):
+              # Test the path policy, not GitHub's service-side glob engine.
+              # The exact pattern list above is separately checked against the
+              # documented root/nested matching cases below.
+              return not paths or any(not path.endswith(".md") for path in paths)
+
+          for path in ("README.md", "AGENTS.md", "SPEC.md", "docs/guide.md", "docs/data-model-contracts.md"):
+              assert not should_run([path]), f"documentation-only path unexpectedly runs CI: {path}"
+          for path in ("cya/app.py", "tests/test_app.py", "tools/new-tool.py", "requirements/dev.txt", ".github/workflows/other.yml", "docs/unknown.json", ".gitignore", ".gitattributes"):
+              assert should_run([path]), f"unrecognized or executable path skipped CI: {path}"
+          assert not should_run(["README.md", "docs/guide.md"]), "Markdown-only PR must skip CI"
+          assert should_run(["README.md", "cya/app.py"]), "mixed PR must run CI"
+          assert should_run(["cya/old.py", "README.md"]), "rename from code to docs must run CI"
+          assert should_run(["cya/deleted.py"]), "deletion of executable path must run CI"
+          assert should_run([]), "an unavailable changed-file list must fail closed"
+          assert "Failed to query changed files from GitHub API; failing closed to run django." in workflow
+          assert "  workflow_dispatch:\n" in workflow, "manual full-check dispatch is missing"
+          event_expression = "$" + "{{ github.event_name }}"
+          dispatch_condition = f'if [ "{event_expression}" != "pull_request" ]; then'
+          assert dispatch_condition in workflow
+          group_expression = "group: checks-" + "$" + "{{ github.event_name }}-" + "$" + "{{ github.ref }}"
+          assert group_expression in workflow
+          print("Documentation-only path policy scenarios passed.")
+          PY
+
+      - name: Check changed files
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Non-PR event; running all checks."
+            echo "run-django=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Include filename and previous_filename so renamed files do not escape checks.
+          if ! files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
+            echo "Failed to query changed files from GitHub API; failing closed to run django."
+            echo "run-django=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed and previous files in PR:"
+          echo "$files"
+
+          if [ -z "$files" ]; then
+            echo "No files returned; running django."
+            echo "run-django=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Files read by tests must never skip checks:
+          # docs/data-model-contracts.md is parsed by tests/test_contract_manifest.py.
+          if echo "$files" | grep -qx "docs/data-model-contracts.md"; then
+            echo "docs/data-model-contracts.md modified (read by contract manifest test); running django."
+            echo "run-django=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Workflow definitions are validated by Actions on the PR event; they do not require Django/MariaDB.
+          # This classifier decides only whether the Django job is needed. The top-level PR path filter decides whether any workflow starts.
+          # Stack-neutral checks still run for workflow files and other non-Markdown paths outside the Django allowlist.
+          if echo "$files" | grep -qvE '^(docs/|\.github/workflows/[^/]+\.ya?ml$|\.gitignore$|\.gitattributes$|[^/]+\.md$)'; then
+            echo "Non-documentation files modified; will run django job."
+            echo "run-django=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Django-app files modified; skipping Django while retaining stack-neutral checks."
+            echo "run-django=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Unit tests for the check tools
+        run: python3 -m unittest discover -s tools/tests -v
+
+      - name: Markdown link check (relative links and anchors; no network)
+        run: python3 tools/check_markdown_links.py
+
+      - name: Scenario, contract and fixture validation
+        run: python3 tools/validate_scenarios.py
+
+      - name: Install gitleaks (pinned version, checksum verified)
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/gitleaks"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $dir/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Secret scan of git history
+        run: gitleaks git --redact --no-banner --timeout 300 .
+
+  django:
+    needs: [stack-neutral]
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'synchronize')) && needs.stack-neutral.outputs.run-django == 'true'
+    runs-on: ubuntu-24.04
+    # The serial suite reached the old 15-minute cap (PR 186 (https://github.com/JustApu/CheckYourAmbulance-archive/pull/186)); tests now run in two processes
+    # and the cap keeps a margin.
+    timeout-minutes: 20
+    # python:3.13-bookworm includes a C compiler and the MariaDB Connector/C
+    # headers that mysqlclient needs. Index digest recorded 2026-10-20.
+    container:
+      image: python:3.13-bookworm@sha256:073ffebb96ae4d0ed73ccad59f08c47bd84af8a79f5258130f8458ac50ad9ff4
+    services:
+      mariadb:
+        # mariadb:10.11 (SPEC 17.5); same digest as compose.yaml.
+        image: mariadb:10.11@sha256:0d0945c57f75b3a3b9ebe71aedaaad005fa5305054e8fca3d2e42a8c92b43b5e
+        env:
+          # Throwaway CI-only database; the value is not a secret.
+          MARIADB_ROOT_PASSWORD: ci-only-root-password
+        options: >-
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      CYA_SECRET_KEY: ci-only-not-a-secret
+      CYA_DB_HOST: mariadb
+      # CI uses the throwaway server's root account as the schema owner, which
+      # can create the cya and test_cya databases. Development uses cya_owner
+      # (tools/dev-db/accounts.sql).
+      CYA_DB_USER: root
+      CYA_DATABASE_ROLE: schema_owner
+      CYA_DB_SECURITY_TESTS: '1'
+      CYA_DB_PASSWORD: ci-only-root-password
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Django's parallel test runner copies the test database with mysqldump.
+      - name: Install the MariaDB client tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends mariadb-client
+
+      - name: Install pinned dependencies into local/venv (hash-checked)
+        run: |
+          python3 -m venv local/venv
+          local/venv/bin/pip install --require-hashes -r requirements/dev.txt
+
+      - name: Lint and format check
+        run: |
+          local/venv/bin/ruff check .
+          local/venv/bin/ruff format --check .
+
+      # Created before the Django checks: with models present, the system and
+      # migration checks connect to the database.
+      - name: Create the database
+        run: |
+          local/venv/bin/python - <<'PY'
+          import os, MySQLdb
+          conn = MySQLdb.connect(host=os.environ["CYA_DB_HOST"], user=os.environ["CYA_DB_USER"],
+                                 password=os.environ["CYA_DB_PASSWORD"])
+          cursor = conn.cursor()
+          cursor.execute("CREATE DATABASE IF NOT EXISTS cya CHARACTER SET utf8mb4 "
+                         "COLLATE utf8mb4_unicode_ci")
+          # In disposable CI, disable synchronous disk flushes to avoid virtualized disk I/O bottlenecks.
+          cursor.execute("SET GLOBAL innodb_flush_log_at_trx_commit = 0")
+          cursor.execute("SET GLOBAL sync_binlog = 0")
+          conn.close()
+          PY
+
+      - name: Django system checks
+        run: local/venv/bin/python manage.py check --fail-level WARNING
+
+      - name: No model change without a migration
+        run: local/venv/bin/python manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations
+        run: local/venv/bin/python manage.py migrate --noinput
+
+      - name: Offline tests against MariaDB 10.11
+        run: |
+          test "${CYA_DB_SECURITY_TESTS:-}" = 1
+          local/venv/bin/python manage.py test cya --noinput -v 2 --parallel 2
+
+      - name: Audit helper and transaction tests
+        env:
+          DJANGO_SETTINGS_MODULE: cya.settings
+        run: local/venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v

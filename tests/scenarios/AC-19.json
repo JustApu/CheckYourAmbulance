@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-19",
+  "criterion": "AC-19",
+  "requirements": [
+    "OPS-1",
+    "OPS-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "vehicle In Service; critical fail, overdue certification"
+  ],
+  "when": [
+    "record severity events then supervisor changes status"
+  ],
+  "then": [
+    "no automatic status change; supervisor change audited"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

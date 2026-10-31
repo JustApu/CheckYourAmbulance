@@ -1,0 +1,39 @@
+{% extends "shell/base.html" %}
+{% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
+{% block content %}
+<p><a href="{% url 'status' %}">All vehicles</a> · <a href="{% url 'inspection-vehicle' vehicle.pk %}">Inspection</a></p>
+<p id="status-live-banner" class="notice" role="status" hidden>Live updates are paused. Changes by others may not appear until you reload.</p>
+<p id="status-stale" class="notice" role="alert" hidden>This screen could not be refreshed and may be out of date.</p>
+<p id="status-update" class="notice" role="status" hidden>The status changed while you were working. <button type="button" id="status-update-show" class="link-button">Show the update</button></p>
+<div id="status-live">
+{% include "operations/panel.html" %}
+</div>
+{% if can_set %}
+<form class="panel status-write" data-kind="set" aria-labelledby="set-heading">
+{% csrf_token %}
+<h2 id="set-heading">Set status</h2>
+<label>Status <select name="status" required>
+{% for code, label in statuses %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+</select></label>
+<label>Restrictions (required for Limited Service) <input type="text" name="restrictions" maxlength="4000"></label>
+<label>Explanation <textarea name="explanation" rows="2" maxlength="4000" required></textarea></label>
+<button type="submit" class="button primary">Set status</button>
+<p class="status-result" role="status"></p>
+</form>
+{% elif can_request %}
+<form class="panel status-write" data-kind="request" aria-labelledby="request-heading">
+{% csrf_token %}
+<h2 id="request-heading">Request a status change</h2>
+<p>A supervisor decides. Nothing changes until they do.</p>
+<label>Requested status <select name="requested_status" required>
+{% for code, label in statuses %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+</select></label>
+<label>Reason <textarea name="reason" rows="2" maxlength="4000" required></textarea></label>
+<button type="submit" class="button primary">Send request</button>
+<p class="status-result" role="status"></p>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}{{ config|json_script:"status-config" }}<script>
+{% include "operations/status.js" %}
+</script>{% endblock %}

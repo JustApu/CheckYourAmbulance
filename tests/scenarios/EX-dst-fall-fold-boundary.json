@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "EX-dst-fall-fold-boundary",
+  "criterion": "AC-4",
+  "requirements": [
+    "TIME-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "America/New_York 2026-11-01 due 01:30"
+  ],
+  "when": [
+    "generate due time"
+  ],
+  "then": [
+    "first occurrence EDT = 05:30Z, not 06:30Z"
+  ],
+  "status": "contract"
+}

@@ -1,0 +1,23 @@
+{% extends "shell/base.html" %}
+{% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
+{% block content %}
+{% if pending_total %}<p class="notice" role="status">{{ pending_total }} status-change request{{ pending_total|pluralize }} waiting for a supervisor{% if pending_truncated %} (showing the oldest){% endif %}.</p>{% endif %}
+{% if vehicles %}
+<ul class="vehicle-list">
+{% for v in vehicles %}
+  <li class="vehicle-card">
+    <a class="vehicle-link" href="{{ v.url }}">
+      <span class="vehicle-name">{{ v.name }}{% if v.number %} <span class="muted">#{{ v.number }}</span>{% endif %}</span>
+      <span>
+        {% if v.pending %}<span class="muted">{{ v.pending }} request{{ v.pending|pluralize }}</span>{% endif %}
+        <span class="pill status-pill" data-status="{{ v.code }}">{{ v.label }}</span>
+      </span>
+    </a>
+  </li>
+{% endfor %}
+</ul>
+<p class="muted">Status changes only when a supervisor or administrator sets it. Failed checks, deficiencies and expired items never change it.</p>
+{% else %}
+<p>No active vehicles are set up yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "EX-suspended-not-satisfied",
+  "criterion": "AC-18",
+  "requirements": [
+    "SUS-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "suspended item obligation"
+  ],
+  "when": [
+    "compute compliance"
+  ],
+  "then": [
+    "not satisfied and never counted Pass"
+  ],
+  "status": "contract"
+}

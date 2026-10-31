@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-race-fail-then-pass",
+  "criterion": "AC-10",
+  "requirements": [
+    "CON-3",
+    "PRN-6"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "failure creates deficiency; second user passes"
+  ],
+  "when": [
+    "commit both in reverse order with warning acknowledged"
+  ],
+  "then": [
+    "deficiency remains open regardless of latest Pass"
+  ],
+  "status": "contract"
+}

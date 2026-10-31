@@ -1,0 +1,16 @@
+Copyright (c) 2026 JustApu. All rights reserved.
+
+No license is granted. This repository may be visible to the public, but
+visibility is not permission. You may not copy, modify, distribute,
+sublicense, host or run this software, in whole or in part, without prior
+written permission from the copyright holder.
+
+GitHub's Terms of Service (section D.5) let other GitHub users view and fork
+public repositories through GitHub's own features. That permission comes from
+GitHub's terms, not from this notice, and no other right is granted.
+
+Outside contributions are not accepted. Do not open pull requests or submit
+code, documentation or other material for inclusion.
+
+Third-party dependencies listed in requirements/ are not part of this notice
+and remain under their own licenses.

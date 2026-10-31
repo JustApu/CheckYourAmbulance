@@ -1,0 +1,42 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}{% endif %}
+{% if error %}<p class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ error }}</p>{% endif %}
+
+{% if show %}
+<h2>Change a role</h2>
+<form method="post" action="{% url 'administration-roles' %}">
+  {% csrf_token %}
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <p><label>User
+    <select name="target" required>
+      {% for target in targets %}<option value="{{ target.pk }}">{{ target.display_name|default:target.email }} ({{ target.email }})</option>{% endfor %}
+    </select></label></p>
+  <p><label>Role
+    <select name="role" required>{% for role in roles %}<option value="{{ role }}">{{ role }}</option>{% endfor %}</select></label></p>
+  <p><label>Action
+    <select name="action" required>{% for action in actions %}<option value="{{ action }}">{{ action }}</option>{% endfor %}</select></label></p>
+  <p><button type="submit" class="button">Save change</button></p>
+</form>
+
+<h2>Role history</h2>
+{% if history %}
+<table>
+  <thead><tr><th scope="col">When (UTC)</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead>
+  <tbody>
+  {% for event in history %}
+    <tr>
+      <td>{{ event.recorded_at|date:"Y-m-d H:i:s" }}</td>
+      <td>{{ event.user.email }}</td>
+      <td>{{ event.action }}</td>
+      <td>{{ event.role }}</td>
+      <td>{% if event.actor_user %}{{ event.actor_user.email }}{% else %}System{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No role changes have been recorded.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

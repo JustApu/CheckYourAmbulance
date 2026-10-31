@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-12",
+  "criterion": "AC-12",
+  "requirements": [
+    "COR-1",
+    "COR-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "crew member e1 authored check; supervisor s1 distinct"
+  ],
+  "when": [
+    "s1 corrects then records new independent check; e1 corrects"
+  ],
+  "then": [
+    "s1 correction denied, new check allowed; e1 correction creates linked immutable version"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

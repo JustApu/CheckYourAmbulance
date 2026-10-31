@@ -1,0 +1,52 @@
+{
+  "synthetic": true,
+  "non_authoritative": true,
+  "note": "Synthetic seed for sample EMS organization (SPEC CHK-7, OQ-01). Every item, quantity, location and instruction below is invented for development and testing and asserts no stocking requirement. Use the organization's approved checklist before operational deployment.",
+  "namespace": "5b0f3a52-7c1e-4a43-9f0d-6a1f2f9b7c10",
+  "vehicles": [
+    {"key": "first-due", "display_name": "Ambulance 1", "number": "SYN-1"},
+    {"key": "second-due", "display_name": "Ambulance 2", "number": "SYN-2"},
+    {"key": "third-due", "display_name": "Ambulance 3", "number": "SYN-3"},
+    {"key": "fourth-due", "display_name": "Ambulance 4", "number": "SYN-4"}
+  ],
+  "compartments": [
+    {"key": "driver-exterior-1", "label": "Synthetic driver-side exterior compartment 1"},
+    {"key": "patient-cabinet", "label": "Synthetic patient compartment cabinet"}
+  ],
+  "systems": [
+    {"key": "lights-sirens", "label": "Synthetic lights and sirens"},
+    {"key": "vehicle-readings", "label": "Synthetic vehicle readings"}
+  ],
+  "items": [
+    {"key": "suction-unit", "label": "Synthetic: suction unit present and clean"},
+    {"key": "oxygen-masks", "label": "Synthetic: adult oxygen masks"},
+    {"key": "cylinder-pressure", "label": "Synthetic: portable cylinder pressure"},
+    {"key": "airway-kit-seal", "label": "Synthetic: airway kit seal and expiry"},
+    {"key": "warning-lights", "label": "Synthetic: warning lights and siren operate"},
+    {"key": "odometer", "label": "Synthetic: odometer"}
+  ],
+  "template": {
+    "key": "ambulance-daily",
+    "label": "Synthetic ambulance checklist (NON-AUTHORITATIVE, OQ-01)",
+    "definitions": [
+      {"item": "suction-unit", "compartment": "patient-cabinet", "display_order": 10,
+       "kind": "PRESENCE_CONDITION", "instructions": "Synthetic: confirm present and clean.",
+       "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]},
+      {"item": "oxygen-masks", "compartment": "patient-cabinet", "display_order": 20,
+       "kind": "QUANTITY", "expected_quantity": 6, "instructions": "Synthetic: count masks.",
+       "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]},
+      {"item": "cylinder-pressure", "compartment": "driver-exterior-1", "display_order": 30,
+       "kind": "MEASUREMENT", "unit": "psi", "instructions": "Synthetic: record gauge reading.",
+       "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]},
+      {"item": "airway-kit-seal", "compartment": "driver-exterior-1", "display_order": 40,
+       "kind": "SPECIAL_OBSERVATION", "instructions": "Synthetic: inspect seal and expiry.",
+       "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]},
+      {"item": "warning-lights", "system": "lights-sirens", "display_order": 50,
+       "kind": "PRESENCE_CONDITION", "instructions": "Synthetic: operate lights and siren.",
+       "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]},
+      {"item": "odometer", "system": "vehicle-readings", "display_order": 60,
+       "kind": "VEHICLE_READING", "unit": "mi", "instructions": "Synthetic: record odometer.",
+       "allowed_outcomes": ["PASSED", "UNABLE_TO_INSPECT"]}
+    ]
+  }
+}

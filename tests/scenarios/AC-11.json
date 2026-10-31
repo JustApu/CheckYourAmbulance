@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "AC-11",
+  "criterion": "AC-11",
+  "requirements": [],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "R1 build: Bulk Pass deferred (SPEC 1.2.0, §7.6); item a has a reserved bulk_eligible flag set true"
+  ],
+  "when": [
+    "e1 attempts a bulk pass of items a and b",
+    "e1 records an individual check on a carrying a non-null bulk_group_id"
+  ],
+  "then": [
+    "no bulk action is exposed and the bulk attempt is denied and audited (§3.4: action absent from §3.3)",
+    "the check carrying bulk_group_id is rejected; bulk_eligible changes nothing",
+    "no check records are created by either attempt"
+  ],
+  "status": "contract",
+  "notes": "Deferred-feature contract for R1. The pre-1.2.0 Bulk Pass scenario (BLK-1–BLK-4: five separate attributed records, two rejections, concurrent exclusion) is preserved in git history and must be restored if a later release re-enables the feature (§7.6 retains BLK-1–BLK-5).",
+  "spec_refs": [
+    "§7.6",
+    "§2.1a"
+  ]
+}

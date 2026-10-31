@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-race-newer-between-warning-ack",
+  "criterion": "AC-31",
+  "requirements": [
+    "CON-3",
+    "REC-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "e1 commits c1, e2 warned, e3 commits c2"
+  ],
+  "when": [
+    "e2 acknowledges c1"
+  ],
+  "then": [
+    "fresh warning naming c2, no e2 check committed"
+  ],
+  "status": "contract"
+}

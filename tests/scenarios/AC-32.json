@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-32",
+  "criterion": "AC-32",
+  "requirements": [
+    "INV-2a",
+    "COR-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "check c1 corrected c2 corrected c3, linked deficiency"
+  ],
+  "when": [
+    "admin invalidates c3 then author attempts correction"
+  ],
+  "then": [
+    "entire chain excluded, no c1/c2 revival, correction refused, deficiency stays open"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

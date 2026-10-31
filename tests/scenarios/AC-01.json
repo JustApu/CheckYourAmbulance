@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-1",
+  "criterion": "AC-1",
+  "requirements": [
+    "PRN-1",
+    "SCH-1"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "vehicle v1 items a b obligations due; crew members e1 e2"
+  ],
+  "when": [
+    "e1 passes a and e2 passes b within window; session remains open"
+  ],
+  "then": [
+    "both obligations satisfied independently, check author retained; session state irrelevant"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

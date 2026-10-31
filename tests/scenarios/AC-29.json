@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-29",
+  "criterion": "AC-29",
+  "requirements": [
+    "UTI-1",
+    "UTI-2",
+    "UTI-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "open obligation and crew member/supervisor"
+  ],
+  "when": [
+    "crew member submits unable without reason; with reason; crew member and supervisor attempt completion"
+  ],
+  "then": [
+    "missing reason rejected; valid unable leaves open; only supervisor explanation completes as unable not Pass"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

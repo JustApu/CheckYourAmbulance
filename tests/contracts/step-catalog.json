@@ -1,0 +1,677 @@
+{
+  "schema_version": 1,
+  "source": "SPEC.md §23 (version 1.2.0)",
+  "synthetic": true,
+  "contract_kind": "symbolic_runner_bindings",
+  "description": "Step IDs are semantic contracts, not implemented commands. Future runner must implement every step and assertion, rejecting unknown IDs.",
+  "cases": {
+    "AC-1": {
+      "setup": [
+        "create_due_obligations",
+        "open_sessions"
+      ],
+      "actions": [
+        "record_pass_e1_a",
+        "record_pass_e2_b"
+      ],
+      "assert": [
+        "satisfied_a_by_e1",
+        "satisfied_b_by_e2",
+        "session_state_irrelevant"
+      ],
+      "requirements": [
+        "PRN-1",
+        "SCH-1"
+      ]
+    },
+    "AC-2": {
+      "setup": [
+        "create_due_obligation_c"
+      ],
+      "actions": [
+        "close_session_without_c"
+      ],
+      "assert": [
+        "obligation_c_unsatisfied"
+      ],
+      "requirements": [
+        "PRN-1",
+        "SCH-1"
+      ],
+      "spec_refs": [
+        "§6.1"
+      ]
+    },
+    "AC-3": {
+      "setup": [
+        "create_daily_due_0600"
+      ],
+      "actions": [
+        "run_isolated_checks_at_0515_0701_0459"
+      ],
+      "assert": [
+        "early_on_time",
+        "late_history_preserved",
+        "pre_window_unlinked"
+      ],
+      "requirements": [
+        "SCH-1",
+        "SCH-2",
+        "SCH-6"
+      ]
+    },
+    "AC-4": {
+      "setup": [
+        "set_timezone_America_New_York"
+      ],
+      "actions": [
+        "resolve_spring_gap_due",
+        "resolve_fall_fold_due"
+      ],
+      "assert": [
+        "gap_first_valid",
+        "fold_first_occurrence"
+      ],
+      "requirements": [
+        "TIME-1",
+        "TIME-2",
+        "TIME-3"
+      ]
+    },
+    "AC-5": {
+      "setup": [
+        "create_roster_and_midnight_check"
+      ],
+      "actions": [
+        "evaluate_same_new_missing_rosters"
+      ],
+      "assert": [
+        "same_crew_waived",
+        "new_crew_required",
+        "missing_required"
+      ],
+      "requirements": [
+        "CND-1",
+        "CND-2",
+        "CND-3"
+      ]
+    },
+    "AC-6": {
+      "setup": [
+        "create_session_v1"
+      ],
+      "actions": [
+        "heartbeat",
+        "advance_6_hours",
+        "reopen"
+      ],
+      "assert": [
+        "incomplete",
+        "checks_preserved",
+        "v1_preserved",
+        "reopen_audited"
+      ],
+      "requirements": [
+        "SES-1",
+        "SES-2",
+        "SES-3",
+        "CHK-4"
+      ]
+    },
+    "AC-7": {
+      "setup": [
+        "create_item"
+      ],
+      "actions": [
+        "submit_pending",
+        "ack_or_reject"
+      ],
+      "assert": [
+        "pending_before_ack",
+        "saved_only_on_ack",
+        "failed_retry_on_reject"
+      ],
+      "requirements": [
+        "REC-1",
+        "REC-2"
+      ]
+    },
+    "AC-8": {
+      "setup": [
+        "operation_op1"
+      ],
+      "actions": [
+        "submit_op1_twice"
+      ],
+      "assert": [
+        "single_record",
+        "same_response"
+      ],
+      "requirements": [
+        "REC-4"
+      ]
+    },
+    "AC-9": {
+      "setup": [
+        "open_e1_e2_same_item"
+      ],
+      "actions": [
+        "commit_e1",
+        "submit_e2",
+        "acknowledge_conflict"
+      ],
+      "assert": [
+        "warning_names_e1",
+        "two_independent_records",
+        "no_lock"
+      ],
+      "requirements": [
+        "CON-1",
+        "CON-2",
+        "CON-3"
+      ]
+    },
+    "AC-10": {
+      "setup": [
+        "two_actors_same_item"
+      ],
+      "actions": [
+        "race_pass_fail_with_ack"
+      ],
+      "assert": [
+        "both_committed",
+        "open_deficiency_attention"
+      ],
+      "requirements": [
+        "CON-1",
+        "CON-2",
+        "CON-4",
+        "PRN-6"
+      ]
+    },
+    "AC-11": {
+      "setup": [
+        "r1_build_bulk_deferred",
+        "items_with_reserved_bulk_eligible_true"
+      ],
+      "actions": [
+        "attempt_bulk_pass_request",
+        "record_check_with_bulk_group_id"
+      ],
+      "assert": [
+        "no_bulk_action_exposed",
+        "bulk_request_denied_and_audited",
+        "check_with_bulk_group_id_rejected",
+        "bulk_eligible_ignored",
+        "no_check_records_created"
+      ],
+      "requirements": [],
+      "spec_refs": [
+        "§7.6",
+        "§2.1a"
+      ]
+    },
+    "AC-12": {
+      "setup": [
+        "check_owned_by_e1"
+      ],
+      "actions": [
+        "supervisor_correct",
+        "supervisor_new_check",
+        "author_correct"
+      ],
+      "assert": [
+        "supervisor_correction_denied",
+        "independent_allowed",
+        "linked_history"
+      ],
+      "requirements": [
+        "COR-1",
+        "COR-2"
+      ]
+    },
+    "AC-13": {
+      "setup": [
+        "failed_check_deficiency"
+      ],
+      "actions": [
+        "correct_fail_to_pass_three_variants"
+      ],
+      "assert": [
+        "reported_in_error_if_sole_unrepaired",
+        "open_if_other_fail_or_repair"
+      ],
+      "requirements": [
+        "COR-3",
+        "COR-4"
+      ]
+    },
+    "AC-14": {
+      "setup": [
+        "failed_check_deficiency"
+      ],
+      "actions": [
+        "admin_invalidate_with_reason"
+      ],
+      "assert": [
+        "compliance_recomputed",
+        "deficiency_open"
+      ],
+      "requirements": [
+        "INV-1",
+        "INV-2",
+        "INV-3"
+      ]
+    },
+    "AC-15": {
+      "setup": [
+        "check_exists"
+      ],
+      "actions": [
+        "nonadmin_invalidate",
+        "admin_invalidate_without_reason"
+      ],
+      "assert": [
+        "both_denied",
+        "check_immutable"
+      ],
+      "requirements": [
+        "INV-1",
+        "INV-2"
+      ]
+    },
+    "AC-16": {
+      "setup": [
+        "kit_and_vehicle_deficiencies"
+      ],
+      "actions": [
+        "verify_full_scope",
+        "attempt_routine_only"
+      ],
+      "assert": [
+        "scoped_verification_required",
+        "routine_not_verification"
+      ],
+      "requirements": [
+        "VER-2",
+        "VER-3",
+        "VER-4"
+      ]
+    },
+    "AC-17": {
+      "setup": [
+        "closed_assigned_deficiency"
+      ],
+      "actions": [
+        "supervisor_adds_verification"
+      ],
+      "assert": [
+        "reopened",
+        "assignee_only_notification",
+        "new_deadline_old_preserved"
+      ],
+      "requirements": [],
+      "spec_refs": [
+        "§8.7"
+      ]
+    },
+    "AC-18": {
+      "setup": [
+        "suspended_check"
+      ],
+      "actions": [
+        "compute_views",
+        "verify_close"
+      ],
+      "assert": [
+        "not_satisfied",
+        "attention_only_excluded",
+        "full_view_included",
+        "auto_end_suspension"
+      ],
+      "requirements": [
+        "SUS-1",
+        "SUS-2",
+        "SUS-3"
+      ]
+    },
+    "AC-19": {
+      "setup": [
+        "vehicle_in_service"
+      ],
+      "actions": [
+        "critical_fail",
+        "expire_certificate",
+        "supervisor_status_change"
+      ],
+      "assert": [
+        "no_automatic_change",
+        "manual_change_audited"
+      ],
+      "requirements": [
+        "OPS-1",
+        "OPS-2"
+      ]
+    },
+    "AC-20": {
+      "setup": [
+        "vehicle_out_of_service"
+      ],
+      "actions": [
+        "generate_routine_obligations"
+      ],
+      "assert": [
+        "no_obligations",
+        "exempt_not_passed"
+      ],
+      "requirements": [
+        "OPS-5"
+      ],
+      "spec_refs": [
+        "§5.9"
+      ]
+    },
+    "AC-21": {
+      "setup": [
+        "previous_odometer_12000"
+      ],
+      "actions": [
+        "submit_lower_without_confirm",
+        "submit_lower_with_confirm"
+      ],
+      "assert": [
+        "confirmation_required",
+        "one_obligation_any_emt",
+        "engine_hours_optional"
+      ],
+      "requirements": [
+        "ODO-1",
+        "ODO-2",
+        "ODO-3"
+      ]
+    },
+    "AC-22": {
+      "setup": [
+        "workspace_stub_identities"
+      ],
+      "actions": [
+        "attempt_personal_domain_only_disabled"
+      ],
+      "assert": [
+        "rejected",
+        "historical_attribution_kept"
+      ],
+      "requirements": [
+        "AUTH-1",
+        "AUTH-2",
+        "AUTH-3"
+      ]
+    },
+    "AC-23": {
+      "setup": [
+        "scheduled_roster_two_sessions"
+      ],
+      "actions": [
+        "conflicting_actual_rosters",
+        "resolve_conflict"
+      ],
+      "assert": [
+        "humanity_not_written",
+        "fail_closed",
+        "supervisor_notified",
+        "resolved_latest_governs"
+      ],
+      "requirements": [
+        "CND-2",
+        "CND-3"
+      ]
+    },
+    "AC-24": {
+      "setup": [
+        "permission_matrix"
+      ],
+      "actions": [
+        "direct_unlisted_action"
+      ],
+      "assert": [
+        "server_deny",
+        "audit_denial",
+        "no_business_mutation"
+      ],
+      "requirements": [],
+      "spec_refs": [
+        "§3.2",
+        "§3.4"
+      ]
+    },
+    "AC-25": {
+      "setup": [
+        "append_only_tables"
+      ],
+      "actions": [
+        "insert",
+        "update",
+        "delete"
+      ],
+      "assert": [
+        "insert_allowed",
+        "update_delete_denied"
+      ],
+      "requirements": [
+        "AUD-1",
+        "AUD-3",
+        "ARC-2"
+      ]
+    },
+    "AC-26": {
+      "setup": [
+        "seeded_event_stream"
+      ],
+      "actions": [
+        "replay_twice"
+      ],
+      "assert": [
+        "identical_projections"
+      ],
+      "requirements": [
+        "AUD-2"
+      ]
+    },
+    "AC-27": {
+      "setup": [
+        "historical_versions"
+      ],
+      "actions": [
+        "query_as_of_before_after"
+      ],
+      "assert": [
+        "historical_state_unchanged"
+      ],
+      "requirements": [
+        "REG-4",
+        "REG-6",
+        "CHK-3"
+      ]
+    },
+    "AC-28": {
+      "setup": [
+        "inject_google_humanity_stubs"
+      ],
+      "actions": [
+        "run_all_offline"
+      ],
+      "assert": [
+        "zero_network_calls"
+      ],
+      "requirements": [
+        "ARC-8"
+      ]
+    },
+    "AC-29": {
+      "setup": [
+        "due_obligation"
+      ],
+      "actions": [
+        "unable_missing_reason",
+        "unable_with_reason",
+        "emt_complete",
+        "supervisor_complete"
+      ],
+      "assert": [
+        "missing_reason_denied",
+        "obligation_open_after_unable",
+        "only_supervisor_completes_not_pass"
+      ],
+      "requirements": [
+        "UTI-1",
+        "UTI-2",
+        "UTI-3"
+      ]
+    },
+    "AC-30": {
+      "setup": [
+        "overlapping_obligations"
+      ],
+      "actions": [
+        "link_check",
+        "second_link_no_shared_rule",
+        "invalidate"
+      ],
+      "assert": [
+        "earliest_due_linked",
+        "second_denied",
+        "all_links_voided"
+      ],
+      "requirements": [
+        "SCH-5",
+        "SCH-6",
+        "INV-2"
+      ]
+    },
+    "AC-31": {
+      "setup": [
+        "op1_and_concurrent_item"
+      ],
+      "actions": [
+        "lose_response_retry",
+        "conflict_ack_stale"
+      ],
+      "assert": [
+        "original_response",
+        "warning_keeps_id",
+        "fresh_warning_if_newer"
+      ],
+      "requirements": [
+        "REC-4",
+        "CON-3"
+      ]
+    },
+    "AC-32": {
+      "setup": [
+        "correction_chain"
+      ],
+      "actions": [
+        "invalidate_middle_or_tip",
+        "attempt_new_correction"
+      ],
+      "assert": [
+        "whole_chain_excluded",
+        "no_prior_revived",
+        "correction_denied",
+        "deficiency_open"
+      ],
+      "requirements": [
+        "INV-2a",
+        "COR-2"
+      ]
+    },
+    "AC-33": {
+      "setup": [
+        "sealed_kit_intact_unexpired",
+        "no_pending_audit",
+        "listed_items_no_open_deficiency",
+        "kit_contents_obligation_due_unsatisfied"
+      ],
+      "actions": [
+        "verify_matching_emt_id_with_attestation",
+        "verify_mismatched_emt_id",
+        "open_damaged_packaging_deficiency_on_listed_item",
+        "verify_with_open_deficiency"
+      ],
+      "assert": [
+        "one_seal_substitution_event",
+        "obligation_satisfied_by_seal_substitution",
+        "no_individual_passed_checks",
+        "mismatched_id_rejected",
+        "obligation_unsatisfied_after_rejection",
+        "non_count_non_expiration_deficiency_blocks_verification",
+        "obligation_unsatisfied_full_inspection_required",
+        "deficiency_not_closed_or_hidden"
+      ],
+      "requirements": [
+        "SEAL-4",
+        "STK-B",
+        "PRN-1"
+      ]
+    },
+    "AC-34": {
+      "setup": [
+        "sealed_kit_intact_unexpired"
+      ],
+      "actions": [
+        "break_without_reason",
+        "break_with_reason",
+        "reseal_missing_item_entry",
+        "reseal_with_expired_item",
+        "reseal_with_item_dated_today",
+        "reseal_without_new_emt_id",
+        "reseal_without_attestation",
+        "reseal_with_short_count",
+        "reseal_with_repeated_emt_id"
+      ],
+      "assert": [
+        "break_without_reason_rejected",
+        "break_recorded_with_reason",
+        "incomplete_or_expired_or_unattested_reseal_refused",
+        "item_dated_today_accepted",
+        "inputs_not_prefilled_from_previous_seal",
+        "omitted_reseal_fields_not_defaulted_from_previous_seal",
+        "short_count_reseals_and_records_deficiency",
+        "short_count_seal_does_not_substitute",
+        "written_date_is_earliest_expiration",
+        "repeated_emt_id_accepted"
+      ],
+      "requirements": [
+        "SEAL-2",
+        "SEAL-5",
+        "SEAL-6",
+        "STK-D"
+      ]
+    },
+    "AC-35": {
+      "setup": [
+        "sealed_kit_intact_unexpired"
+      ],
+      "actions": [
+        "emt_requests_audit",
+        "supervisor_requests_audit",
+        "emt_verifies_matching_id_during_audit",
+        "break_full_inspection_reseal",
+        "verify_on_earliest_expiration_date",
+        "verify_day_after_earliest_expiration_date"
+      ],
+      "assert": [
+        "emt_audit_request_denied",
+        "verification_refused_while_audit_pending",
+        "audit_fulfilled_recorded",
+        "verification_accepted_on_expiration_date",
+        "verification_refused_after_expiration_date",
+        "full_inspection_required_after_expiration"
+      ],
+      "requirements": [
+        "SEAL-7",
+        "SEAL-8"
+      ]
+    }
+  }
+}

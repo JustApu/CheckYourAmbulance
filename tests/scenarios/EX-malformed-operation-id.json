@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "EX-malformed-operation-id",
+  "criterion": "AC-31",
+  "requirements": [
+    "REC-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "synthetic authenticated crew member"
+  ],
+  "when": [
+    "submit missing or malformed operation id"
+  ],
+  "then": [
+    "validation failure; no check committed"
+  ],
+  "status": "contract"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "EX-replay-rebuild-idempotent",
+  "criterion": "AC-26",
+  "requirements": [
+    "AUD-2",
+    "REC-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "deterministic event stream with duplicate delivery"
+  ],
+  "when": [
+    "rebuild twice with deduplication"
+  ],
+  "then": [
+    "identical projections; no double-counted events"
+  ],
+  "status": "contract",
+  "spec_refs": [
+    "§19"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-auth-own-correction",
+  "criterion": "AC-12",
+  "requirements": [
+    "COR-1",
+    "COR-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "admin and crew member own checks"
+  ],
+  "when": [
+    "each corrects other user's check"
+  ],
+  "then": [
+    "both denied even admin; independent check permitted"
+  ],
+  "status": "contract"
+}

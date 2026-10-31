@@ -1,0 +1,65 @@
+{% extends "inspections/workflow_base.html" %}
+{% block content %}
+<p>
+<a href="{% url 'deficiencies' %}">All deficiencies</a> · <a href="{% url 'inspection-check-history' deficiency.vehicle_id %}">Check history</a>
+</p>
+<section class="panel">
+<h2>{{ deficiency.vehicle.display_name }}</h2>
+<p>{{ status }} · {{ severity.label }} · {{ deficiency.category_version.label }}</p>
+<p>{{ deficiency.description }}</p>
+<p>Reported by {{ deficiency.reporter.display_name }} at {{ deficiency.reported_at|date:"Y-m-d H:i" }} UTC</p>
+</section>
+{% if can_record_repair %}
+<form class="panel workflow-write" data-kind="repair" data-url="{{ config.correction_url }}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}
+<p>Record that the repair is complete and request verification of the affected scope.</p>
+<button type="submit" class="button primary">Record repair</button>
+<p class="workflow-result" role="status"></p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+<h2>History</h2>
+<p>Correct entry fixes an accidental check entry. It is never a repair or verification.</p>
+<ol>
+{% for event in events %}
+<li>{{ event.recorded_at|date:"Y-m-d H:i" }} UTC · {{ event.actor_user.display_name }} · {{ event.type_label }} → {{ event.status_label }}{% if event.explanation %}
+<p>{{ event.explanation }}</p>
+{% endif %}
+{% if event.event_type == "ADMINISTRATOR_CLOSED" or event.event_type == "EMPTY_SCOPE_CLOSED" %}
+<p>Check suspensions ended: {{ event.suspensions_ended|default:"none" }}</p>
+{% endif %}
+</li>
+{% endfor %}
+</ol>
+<h2>Related reports</h2>
+<p>Links are informational. Removing a link never closes either report.</p>
+{% for related in related %}
+<section class="panel">
+<a href="{% url 'deficiencies-detail' related.pk %}">{{ related.summary }}</a>
+<form class="workflow-write" data-kind="link" data-url="{% url 'api-deficiency-link-removals' deficiency.pk %}">
+{% csrf_token %}
+<input type="hidden" name="related_deficiency_id" value="{{ related.pk }}">
+<button type="submit" class="button">Remove link</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+</section>
+{% empty %}
+<p>No related reports.</p>
+{% endfor %}
+<form class="panel workflow-write" data-kind="link" data-url="{% url 'api-deficiency-links' deficiency.pk %}">
+{% csrf_token %}
+<label>Add a related report <select name="related_deficiency_id" required>
+<option value="">Choose a report</option>
+{% for match in suggestions %}
+<option value="{{ match.deficiency_id }}">{{ match.summary }} ({{ match.status }})</option>
+{% endfor %}
+</select>
+</label>
+<button type="submit" class="button">Add informational link</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endblock %}

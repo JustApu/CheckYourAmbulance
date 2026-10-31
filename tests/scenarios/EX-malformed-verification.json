@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-malformed-verification",
+  "criterion": "AC-16",
+  "requirements": [
+    "VER-2",
+    "VER-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "kit deficiency; incomplete item set"
+  ],
+  "when": [
+    "attempt verification closure"
+  ],
+  "then": [
+    "deficiency remains open with missing item IDs"
+  ],
+  "status": "contract"
+}

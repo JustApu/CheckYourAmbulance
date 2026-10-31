@@ -1,0 +1,53 @@
+{% extends "inspections/workflow_base.html" %}
+{% block content %}
+<p>
+<a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Deficiency history</a>
+</p>
+<form class="panel workflow-write" data-kind="report" data-url="{% url 'api-deficiencies' %}" novalidate>
+{% csrf_token %}
+<label>What is affected? <select name="target" required>
+<option value="">Choose the affected scope</option>
+<optgroup label="Item">
+{% for id,label in items %}
+<option value="item:{{ id }}">{{ label }}</option>
+{% endfor %}
+</optgroup>
+{% if kits %}
+<optgroup label="Physical kit">
+{% for id,label in kits %}
+<option value="kit:{{ id }}">{{ label }}</option>
+{% endfor %}
+</optgroup>
+{% endif %}
+<optgroup label="Compartment">
+{% for id,label in compartments %}
+<option value="compartment:{{ id }}">{{ label }}</option>
+{% endfor %}
+</optgroup>
+{% if systems %}
+<option value="systems">Vehicle systems — choose below</option>
+{% endif %}
+</select>
+</label>
+{% if systems %}
+<fieldset>
+<legend>Systems (for a vehicle-systems report)</legend>
+{% for id,label in systems %}
+<label>
+<input type="checkbox" name="system_ids" value="{{ id }}"> {{ label }}</label>
+{% endfor %}
+</fieldset>
+{% endif %}
+<p class="muted">An item report covers that item across its kit instances. Choose a physical kit to report on that kit's current contents.</p>
+{% include "inspections/report_fields.html" %}
+<label>Related existing reports (optional; choose explicitly) <select name="related_deficiency_ids" multiple size="4" aria-describedby="match-note">
+</select>
+</label>
+<p id="match-note" role="status">Loading possible matches…</p>
+<p>Related links are informational: they do not merge or close reports.</p>
+<button type="submit" class="button primary">Report deficiency</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="{% url 'deficiencies' %}" hidden>View deficiency history</a>
+</form>
+{% endblock %}

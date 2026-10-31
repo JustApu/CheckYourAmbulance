@@ -1,0 +1,55 @@
+{
+  "synthetic": true,
+  "timezone": "America/New_York",
+  "base": "base.json",
+  "kits": [
+    {
+      "id": "k1",
+      "label": "Synthetic Airway Kit",
+      "vehicle_id": "v1",
+      "listed_items": [
+        {
+          "id": "k1-gauze",
+          "expected_quantity": 10,
+          "expiration": "2026-02-28"
+        },
+        {
+          "id": "k1-tape",
+          "expected_quantity": 2,
+          "expiration": "2026-03-31"
+        },
+        {
+          "id": "k1-opa",
+          "expected_quantity": 1,
+          "expiration": "2027-06-30"
+        }
+      ]
+    }
+  ],
+  "deficiency_categories": [
+    {
+      "id": "count",
+      "kind": "quantity differs from target"
+    },
+    {
+      "id": "expiration",
+      "kind": "item expired"
+    },
+    {
+      "id": "damaged-packaging",
+      "kind": "neither count nor expiration"
+    }
+  ],
+  "seal_events": [
+    {
+      "kit_id": "k1",
+      "sequence": 1,
+      "type": "RESEAL",
+      "actor": "e2",
+      "recorded_at": "2026-01-10T14:00:00Z",
+      "marking_emt_id": "E-2001",
+      "earliest_expiration": "2026-02-28"
+    }
+  ],
+  "note": "All identifiers synthetic. Users, vehicles and rosters come from base.json. Scenarios that need a different earliest expiration state it in their given clause."
+}

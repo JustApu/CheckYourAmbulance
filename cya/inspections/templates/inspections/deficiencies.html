@@ -1,0 +1,27 @@
+{% extends "inspections/workflow_base.html" %}
+{% block content %}
+<section class="panel">
+<h2>Report a deficiency independently</h2>
+<p>A report does not record a check, repair or change to vehicle status.</p>
+<ul>
+{% for vehicle in vehicles %}
+<li>
+<a href="{% url 'inspection-deficiency-report' vehicle.pk %}">{{ vehicle.display_name }}</a>
+</li>
+{% empty %}
+<li>No active vehicles available.</li>
+{% endfor %}
+</ul>
+</section>
+<h2>Recent deficiencies</h2>
+<p>Up to 100 most recent reports, including Reported in Error history.</p>
+<ul class="plain">
+{% for row in deficiencies %}
+<li class="panel">
+<a href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · {{ row.deficiency.reported_at|date:"Y-m-d H:i" }} UTC</p>
+</li>
+{% empty %}
+<li>No deficiency reports yet.</li>
+{% endfor %}
+</ul>
+{% endblock %}

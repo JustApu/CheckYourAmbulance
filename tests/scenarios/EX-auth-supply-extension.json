@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "EX-auth-supply-extension",
+  "criterion": "AC-24",
+  "requirements": [
+    "DEF-5"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "Supply Officer assigned deficiency d1 but not d2"
+  ],
+  "when": [
+    "request extension on both"
+  ],
+  "then": [
+    "d1 allowed; d2 denied"
+  ],
+  "status": "contract"
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-auth-last-admin",
+  "criterion": "AC-24",
+  "requirements": [],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "one active administrator"
+  ],
+  "when": [
+    "attempt revoke final admin role"
+  ],
+  "then": [
+    "denied and audited"
+  ],
+  "status": "contract",
+  "spec_refs": [
+    "§3.6"
+  ]
+}

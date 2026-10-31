@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-21",
+  "criterion": "AC-21",
+  "requirements": [
+    "ODO-1",
+    "ODO-2",
+    "ODO-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "vehicle last odometer 12000, due inspection"
+  ],
+  "when": [
+    "crew member enters 11990 without and with confirmation; engine hours omitted"
+  ],
+  "then": [
+    "confirmation required for decrease; one odometer obligation per inspection; engine hours optional"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

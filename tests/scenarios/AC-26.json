@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "AC-26",
+  "criterion": "AC-26",
+  "requirements": [
+    "AUD-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "seeded randomized deterministic synthetic event stream"
+  ],
+  "when": [
+    "rebuild projections twice and compare with live"
+  ],
+  "then": [
+    "same obligations, deficiency, vehicle status and attribution"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

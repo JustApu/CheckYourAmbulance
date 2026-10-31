@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-15",
+  "criterion": "AC-15",
+  "requirements": [
+    "INV-1",
+    "INV-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "check authored by crew member"
+  ],
+  "when": [
+    "non-admin attempts invalidation; admin omits reason"
+  ],
+  "then": [
+    "both denied; original check unchanged"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

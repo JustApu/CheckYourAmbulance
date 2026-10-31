@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "AC-20",
+  "criterion": "AC-20",
+  "requirements": [
+    "OPS-5"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "vehicle Out of Service for interval"
+  ],
+  "when": [
+    "generate routine obligations in interval"
+  ],
+  "then": [
+    "no routine obligations; interval Exempt not Passed"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection.",
+  "spec_refs": [
+    "§5.9"
+  ]
+}

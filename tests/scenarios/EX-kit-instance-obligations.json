@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "EX-kit-instance-obligations",
+  "criterion": "AC-1",
+  "requirements": ["TIME-1a", "SCH-6", "CON-3", "SEAL-10"],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "an ambulance whose checklist has an item inside a kit, with two identical kit instances in that slot and a second ambulance with none"
+  ],
+  "when": [
+    "obligations are generated for a day, one kit instance is checked, and an instance is later added, removed or moved between ambulances"
+  ],
+  "then": [
+    "each instance owes its own obligation, so checking one leaves the other unsatisfied",
+    "an ambulance with no instance owes nothing for the item",
+    "an instance added or returned inside an open window is owed from the next due instant and a removed one retires only the obligations due after the removal",
+    "history queried as-of an earlier instant is unaffected by later additions or removals"
+  ],
+  "status": "contract",
+  "spec_refs": ["§4.2", "§5.1", "§18.1", "§19.4"],
+  "notes": "issue 92 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/92). Executable evidence today: cya/obligations/tests/test_kits.py and cya/kits/tests. The 'checking one instance' step needs check-to-obligation linking (issue 74 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/74)), so this scenario stays a pending contract until that issue binds it. SPEC §23 has no numbered criterion for kit instances; adding one needs a SPEC amendment, so this is an EX-* scenario citing AC-1."
+}

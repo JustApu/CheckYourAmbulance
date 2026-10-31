@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "AC-35",
+  "criterion": "AC-35",
+  "requirements": [
+    "SEAL-7",
+    "SEAL-8"
+  ],
+  "fixture": "../fixtures/sealed-kit.json",
+  "synthetic": true,
+  "given": [
+    "kit k1 sealed and intact (fixture earliest expiration 2026-02-28)"
+  ],
+  "when": [
+    "e1 requests a full-content audit; s1 requests one",
+    "e1 verifies with the matching marking while the audit is pending",
+    "e1 breaks, inspects every item, replaces the gauze (new date 2026-04-30) and reseals; the computed earliest expiration is now 2026-03-31",
+    "e1 verifies the new seal on 2026-03-31 and again on 2026-04-01 (station-local)"
+  ],
+  "then": [
+    "e1's audit request is denied and audited; s1's is recorded",
+    "verification during the pending audit is refused despite the matching marking",
+    "the reseal records 'audit fulfilled' referencing s1's request",
+    "verification on 2026-03-31 is accepted; on 2026-04-01 it is refused and a full inspection is required"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until issue 19 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/19) Part B."
+}

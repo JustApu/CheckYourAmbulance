@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-30",
+  "criterion": "AC-30",
+  "requirements": [
+    "SCH-5",
+    "SCH-6",
+    "INV-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "overlapping obligations and shared rule IDs"
+  ],
+  "when": [
+    "link check to earliest due; attempt second without shared rule; invalidate"
+  ],
+  "then": [
+    "only earliest linked unless approved shared rule; invalidation voids all links"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

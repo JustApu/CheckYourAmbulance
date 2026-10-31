@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-22",
+  "criterion": "AC-22",
+  "requirements": [
+    "AUTH-1",
+    "AUTH-2",
+    "AUTH-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "stub identities managed, personal, domain-only, disabled"
+  ],
+  "when": [
+    "attempt sign in for each"
+  ],
+  "then": [
+    "only managed active organization identity accepted; disabled history remains attributed"
+  ],
+  "status": "bound",
+  "notes": "Bound to cya/accounts/scenario_steps.py (issue 21 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/21)); runs against the offline Google stub and the MariaDB test database."
+}

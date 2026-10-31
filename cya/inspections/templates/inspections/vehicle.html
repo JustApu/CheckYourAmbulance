@@ -1,0 +1,42 @@
+{% extends "shell/base.html" %}
+{% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
+{% block content %}
+<p class="status-line"><span class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>{% if status.restrictions %} <span class="muted">{{ status.restrictions }}</span>{% endif %}</p>
+<p id="vehicle-message" class="notice" role="status" hidden></p>
+<form id="csrf-holder">{% csrf_token %}</form>
+<p><a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Report a deficiency</a> · <a href="{% url 'inspection-check-history' vehicle.pk %}">Checks, corrections and supervisor completion</a></p>
+
+<section aria-labelledby="start-heading">
+  <h2 id="start-heading">Start or join an inspection</h2>
+  {% if templates %}
+  <ul class="plain">
+  {% for t in templates %}
+    <li>
+      <button type="button" class="button primary start-session" data-template="{{ t.id }}">{{ t.label }}</button>
+    </li>
+  {% endfor %}
+  </ul>
+  <p class="muted">If a crew member already has an inspection open on this vehicle, you join it. You can also <button type="button" class="link-button start-separate" data-template="{{ templates.0.id }}">start a separate one</button>.</p>
+  {% else %}
+  <p>No checklist is set up for this vehicle yet.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="sessions-heading">
+  <h2 id="sessions-heading">Recent sessions</h2>
+  {% if sessions %}
+  <ul class="plain">
+  {% for s in sessions %}
+    <li class="session-row">
+      <span>{{ s.state_label }} · opened <time datetime="{{ s.opened_at.isoformat }}">{{ s.opened_at|date:"Y-m-d H:i" }} UTC</time></span>
+      {% if s.participant %}<a class="button" href="{{ s.url }}">{% if s.state == "OPEN" %}Continue{% else %}View{% endif %}</a>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p>No sessions yet.</p>
+  {% endif %}
+</section>
+{{ config|json_script:"cya-config" }}
+{% endblock %}
+{% block scripts %}<script>{% include "inspections/vehicle.js" %}</script>{% endblock %}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "AC-28",
+  "criterion": "AC-28",
+  "requirements": [
+    "ARC-8"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "Google and Humanity injected stub fixtures; network disabled"
+  ],
+  "when": [
+    "run all scenario evaluations offline"
+  ],
+  "then": [
+    "no network attempted; outcomes deterministic"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

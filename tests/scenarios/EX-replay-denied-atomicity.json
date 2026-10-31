@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "EX-replay-denied-atomicity",
+  "criterion": "AC-25",
+  "requirements": [
+    "AUD-1",
+    "AUD-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "invalid request with business write and audit"
+  ],
+  "when": [
+    "force transaction failure after staging business write"
+  ],
+  "then": [
+    "no partial business/event rows; denied/failure entry follows separate safe path"
+  ],
+  "status": "contract",
+  "spec_refs": [
+    "§3.4"
+  ]
+}

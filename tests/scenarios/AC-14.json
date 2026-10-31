@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-14",
+  "criterion": "AC-14",
+  "requirements": [
+    "INV-1",
+    "INV-2",
+    "INV-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "failed check linked to open deficiency"
+  ],
+  "when": [
+    "administrator invalidates with reason then explicitly closes deficiency"
+  ],
+  "then": [
+    "check excluded and compliance recalculated; deficiency remains open until explicit audited close"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

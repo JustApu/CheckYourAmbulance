@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "EX-as-of-post-correction",
+  "criterion": "AC-27",
+  "requirements": [
+    "REG-4",
+    "REG-6",
+    "COR-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "original check before T, correction after T"
+  ],
+  "when": [
+    "query as-of T"
+  ],
+  "then": [
+    "original historical effective state at T; no future correction leaked"
+  ],
+  "status": "contract"
+}

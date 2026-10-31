@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "EX-auth-unlisted-direct",
+  "criterion": "AC-24",
+  "requirements": [],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "valid crew member authenticated"
+  ],
+  "when": [
+    "POST unlisted privileged operation bypassing UI"
+  ],
+  "then": [
+    "deny and audit; zero business writes"
+  ],
+  "status": "contract",
+  "spec_refs": [
+    "§3.2",
+    "§3.4"
+  ]
+}

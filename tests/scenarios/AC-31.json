@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-31",
+  "criterion": "AC-31",
+  "requirements": [
+    "REC-4",
+    "CON-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "op1 request and newer checks on item"
+  ],
+  "when": [
+    "lose response then retry; conflict then ack; newer third check before ack variant"
+  ],
+  "then": [
+    "retry same result; warning leaves id reusable; stale acknowledgement re-warns"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

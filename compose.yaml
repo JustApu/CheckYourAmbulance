@@ -1,0 +1,24 @@
+# Local development database only: MariaDB 10.11 (SPEC 17.5), pinned by digest.
+# All values are synthetic development defaults, never production settings.
+# Usage: CONTRIBUTING.md#python-and-django.
+name: cya-dev
+services:
+  db:
+    # mariadb:10.11, multi-platform index digest recorded 2026-10-20.
+    image: mariadb:10.11@sha256:0d0945c57f75b3a3b9ebe71aedaaad005fa5305054e8fca3d2e42a8c92b43b5e
+    environment:
+      MARIADB_ROOT_PASSWORD: dev-only-root-password
+    ports:
+      # Loopback only: the development database is never exposed to the network.
+      - "127.0.0.1:${CYA_DB_PORT:-3306}:3306"
+    volumes:
+      - ./tools/dev-db/accounts.sql:/docker-entrypoint-initdb.d/10-accounts.sql:ro
+      - cya-dev-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  cya-dev-db:

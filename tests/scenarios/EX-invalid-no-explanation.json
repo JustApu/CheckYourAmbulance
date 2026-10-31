@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "EX-invalid-no-explanation",
+  "criterion": "AC-15",
+  "requirements": [
+    "INV-1"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "admin authorized, check exists"
+  ],
+  "when": [
+    "submit invalidation with blank/whitespace reason"
+  ],
+  "then": [
+    "reject with no audit of successful invalidation and no mutation"
+  ],
+  "status": "contract"
+}

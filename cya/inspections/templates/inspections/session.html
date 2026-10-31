@@ -1,0 +1,87 @@
+{% extends "shell/base.html" %}
+{% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="{% url 'inspection-vehicle' vehicle.pk %}">&larr; {{ vehicle.display_name }} sessions</a></p>
+<section class="vehicle-status" aria-label="Vehicle status">
+  <p class="status-line">
+    <span id="op-status" class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>
+    <span id="op-restrictions" class="muted">{{ status.restrictions|default:"" }}</span>
+  </p>
+  <p class="muted">{{ template_label }} · Session {{ state_label|lower }}</p>
+</section>
+<div id="live-banner" class="banner banner-error" role="alert" hidden>
+  <span class="indicator-icon" aria-hidden="true">&#9888;</span>
+  <strong>Live updates lost.</strong> <span id="live-detail">What you see may be out of date. Reconnecting&hellip; An item marked Unconfirmed may have been recorded: use its Retry button, not a new tap.</span>
+</div>
+<div id="stale" class="banner banner-error" role="alert" hidden>
+  <span class="indicator-icon" aria-hidden="true">&#9888;</span>
+  <strong>This list could not be refreshed.</strong> It may be out of date.
+</div>
+<p id="session-message" class="notice" role="status"></p>
+<form id="csrf-holder">{% csrf_token %}</form>
+<p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent deficiency report</a></p>
+
+{% if state != "OPEN" %}
+<section class="notice" aria-label="Session ended">
+  <p>This session is {{ state_label|lower }}. Reopen it to record more checks; completed checks keep their original times.</p>
+  <button type="button" id="reopen-session" class="button primary">Reopen session</button>
+</section>
+{% else %}
+<section aria-labelledby="odo-heading" class="panel">
+  <h2 id="odo-heading">Odometer</h2>
+  <form id="odometer-form" novalidate>
+    <label for="odo-value">Odometer reading</label>
+    <input id="odo-value" class="number-input" type="text" inputmode="decimal" autocomplete="off" required>
+    <label for="odo-unit">Unit</label>
+    <select id="odo-unit"><option value="mi">miles</option><option value="km">kilometres</option></select>
+    <label for="odo-hours">Engine hours (optional)</label>
+    <input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off">
+    <button type="submit" class="button primary">Save reading</button>
+  </form>
+  <div id="odo-confirm" hidden>
+    <label for="odo-why">Why is this reading correct? (optional)</label>
+    <textarea id="odo-why" rows="2" maxlength="1000"></textarea>
+    <button type="button" id="odo-confirm-button" class="button">The reading is correct. Save it.</button>
+  </div>
+  <p id="odometer-state" class="save-state" role="status" hidden><span class="indicator-icon" aria-hidden="true"></span><span class="save-state-text"></span></p>
+</section>
+{% endif %}
+
+<section aria-labelledby="checklist-heading">
+  <h2 id="checklist-heading">Checklist</h2>
+  <div class="view-controls" role="group" aria-label="Checklist view">
+    <button type="button" id="view-normal" class="button" aria-pressed="false">Normal</button>
+    <button type="button" id="view-priority" class="button" aria-pressed="false">Priority</button>
+    <label class="check"><input type="checkbox" id="only-attention"> Needs Attention Only</label>
+  </div>
+  <p id="pref-state" class="muted" role="status"></p>
+  <p id="screen-notice" class="notice" role="status" hidden></p>
+  <ol id="items" class="items" aria-live="polite"></ol>
+</section>
+
+<dialog id="conflict-dialog" aria-labelledby="conflict-title">
+  <h2 id="conflict-title">Someone else already checked this</h2>
+  <p id="conflict-text"></p>
+  <p>You can cancel, or record your check as well. Both records are kept.</p>
+  <div class="dialog-buttons">
+    <button type="button" id="conflict-cancel" class="button">Cancel</button>
+    <button type="button" id="conflict-proceed" class="button primary">Record mine too</button>
+  </div>
+</dialog>
+<dialog id="outcome-dialog" aria-labelledby="outcome-title">
+  <h2 id="outcome-title">Record a failed or unable check</h2>
+  <form id="outcome-form" class="panel" novalidate>
+    <label id="outcome-reason-label">Reason <textarea name="outcome_explanation" maxlength="4000"></textarea></label>
+    <label>Choose an existing deficiency, or report a new one
+      <select id="outcome-existing"><option value="">Report a new deficiency</option></select>
+    </label>
+    <p id="outcome-matches" role="status"></p>
+    <fieldset id="outcome-create-fields"><legend>New deficiency</legend>{% include "inspections/report_fields.html" with options=report_options %}</fieldset>
+    <p id="outcome-error" role="status"></p>
+    <button type="submit" class="button primary">Record check and deficiency</button>
+    <button type="button" id="outcome-cancel" class="button">Cancel</button>
+  </form>
+</dialog>
+{{ config|json_script:"cya-config" }}
+{% endblock %}
+{% block scripts %}<script>{% include "inspections/checklist.js" %}</script>{% endblock %}

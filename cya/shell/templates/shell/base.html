@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if refresh_to %}<meta http-equiv="refresh" content="0;url={{ refresh_to }}">{% endif %}
+<title>{{ title }} - Check Your Ambulance</title>
+<style>{% include "shell/shell.css" %}</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header class="site-header">
+  <a class="brand" href="{% url 'home' %}">Check Your Ambulance</a>
+  {% if cya_user %}
+  <div class="account">
+    <span class="account-name">{{ cya_user.display_name|default:cya_user.email }}</span>
+    <form method="post" action="{% url 'sign-out' %}">{% csrf_token %}<button type="submit" class="button">Sign out</button></form>
+  </div>
+  {% endif %}
+</header>
+{% if cya_menu %}
+<nav class="site-nav" aria-label="Main">
+  <ul>
+  {% for item in cya_menu %}
+    <li><a href="{{ item.url }}"{% if item.current %} aria-current="page"{% endif %}>{{ item.label }}</a></li>
+  {% endfor %}
+  </ul>
+</nav>
+{% endif %}
+<div id="connection-banner" class="banner banner-error" role="alert" hidden>
+  <span class="indicator-icon" aria-hidden="true">&#9888;</span>
+  <strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded: use its Retry button, not a new tap.
+</div>
+<main id="main" tabindex="-1">
+  <h1>{{ title }}</h1>
+  {% block content %}{{ body }}{% endblock %}
+</main>
+<script>{% include "shell/shell.js" %}</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

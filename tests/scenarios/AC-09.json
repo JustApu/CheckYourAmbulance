@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-9",
+  "criterion": "AC-9",
+  "requirements": [
+    "CON-1",
+    "CON-2",
+    "CON-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "two crew member sessions open item a"
+  ],
+  "when": [
+    "e1 commits; e2 attempts, acknowledges named conflict and resubmits"
+  ],
+  "then": [
+    "two independent checks; no lock; e2 warned before commit"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-3",
+  "criterion": "AC-3",
+  "requirements": [
+    "SCH-1",
+    "SCH-2",
+    "SCH-6"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "06:00 due ±1h and no competing obligation"
+  ],
+  "when": [
+    "checks at 05:15, 07:01, and 04:59 in isolated runs"
+  ],
+  "then": [
+    "05:15 satisfies on time; 07:01 links late preserving Overdue history; 04:59 unlinked"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

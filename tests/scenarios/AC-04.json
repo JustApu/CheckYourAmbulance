@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-4",
+  "criterion": "AC-4",
+  "requirements": [
+    "TIME-1",
+    "TIME-2",
+    "TIME-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "America/New_York; synthetic gap and fold due 02:30 and 01:30"
+  ],
+  "when": [
+    "generate due instants across spring and fall transitions"
+  ],
+  "then": [
+    "spring gap uses first valid instant; fall fold uses first occurrence; unique UTC instants"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

@@ -1,0 +1,10 @@
+{% extends "shell/base.html" %}
+{% block head %}
+<style>
+{% include "inspections/inspection.css" %}
+</style>
+{% endblock %}
+{% block scripts %}{{ config|json_script:"workflow-config" }}<script>
+{% include "inspections/workflows.js" %}
+</script>
+{% endblock %}

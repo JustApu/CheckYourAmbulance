@@ -1,0 +1,49 @@
+.plain { list-style: none; margin: 0; padding: 0; }
+.vehicle-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.vehicle-link { display: flex; justify-content: space-between; align-items: center; gap: 1rem; min-height: 48px; padding: .75rem 1rem; border: 2px solid var(--line); border-radius: .5rem; color: var(--fg); text-decoration: none; }
+.vehicle-name { font-weight: 700; }
+.muted { color: var(--muted); }
+.pill { display: inline-flex; align-items: center; min-height: 32px; padding: 0 .75rem; border: 2px solid currentColor; border-radius: 1rem; font-weight: 700; }
+.status-pill[data-status="IN_SERVICE"] { background: var(--ok-bg); color: var(--ok-fg); }
+.status-pill[data-status="LIMITED_SERVICE"] { background: var(--wait-bg); color: var(--wait-fg); }
+.status-pill[data-status="OUT_OF_SERVICE"] { background: var(--bad-bg); color: var(--bad-fg); }
+.pill-attention { background: var(--bad-bg); color: var(--bad-fg); }
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; font-size: 1.125rem; }
+.notice { padding: .75rem 1rem; border: 2px solid var(--line); border-radius: .5rem; }
+.notice[hidden], #session-message:empty { display: none; }
+.panel { border: 1px solid var(--line); border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
+.panel label, .panel select, .panel input, .panel textarea { display: block; margin-top: .5rem; font: inherit; }
+.panel input, .panel select, .panel textarea, .number-input { min-height: 48px; padding: .25rem .5rem; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .5rem; max-width: 100%; }
+.panel button { margin-top: .75rem; }
+.button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700; }
+.button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700; }
+.button:disabled { opacity: .6; cursor: progress; }
+a.button { display: inline-flex; align-items: center; text-decoration: none; }
+.link-button { background: none; border: 0; padding: 0; min-height: 48px; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.view-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; margin-bottom: .5rem; }
+.check { display: inline-flex; align-items: center; gap: .5rem; min-height: 48px; }
+.check input { width: 1.5rem; height: 1.5rem; }
+.items { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.item { border: 2px solid var(--line); border-radius: .5rem; padding: .75rem 1rem; }
+.item-attention { border-left-width: 8px; border-color: var(--bad-fg); }
+.item-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+.item h3 { font-size: 1.0625rem; margin: 0; flex: 1 1 12rem; }
+.item p { margin: .25rem 0; }
+.known-deficiency { background: var(--wait-bg); color: var(--wait-fg); border: 2px solid currentColor; border-radius: .5rem; padding: .5rem .75rem; margin: .5rem 0; }
+.item-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .5rem; }
+.item-controls .button { min-width: 6rem; }
+.number-input { width: 8rem; }
+.session-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; padding: .25rem 0; border-bottom: 1px solid var(--line); min-height: 48px; }
+dialog { max-width: 32rem; width: calc(100% - 2rem); color: var(--fg); background: var(--bg); border: 3px solid var(--line); border-radius: .75rem; }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.dialog-buttons { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; }
+
+.workflow-write { margin: .75rem 0; }
+.workflow-write label, .workflow-write select, .workflow-write input, .workflow-write textarea { display: block; margin-top: .5rem; font: inherit; max-width: 100%; }
+.workflow-write input, .workflow-write select, .workflow-write textarea { min-height: 48px; padding: .25rem .5rem; }
+.workflow-result:empty { display: none; }
+.severity-choice { padding: .5rem 0; }
+.panel input[type=radio], .panel input[type=checkbox], .workflow-write input[type=checkbox] { display: inline-block; min-height: auto; width: 1.5rem; height: 1.5rem; vertical-align: middle; }
+.workflow-refresh[hidden], fieldset[hidden] { display: none; }
+.workflow-write input[type=hidden] { display: none; }
+.status-result:empty { display: none; }

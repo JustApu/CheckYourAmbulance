@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-auth-supply-scope",
+  "criterion": "AC-24",
+  "requirements": [],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "Supply Officer, supply and non-supply deficiencies"
+  ],
+  "when": [
+    "assign each"
+  ],
+  "then": [
+    "supply allowed, non-supply denied"
+  ],
+  "status": "contract",
+  "spec_refs": [
+    "§3.3 PERM-07"
+  ]
+}

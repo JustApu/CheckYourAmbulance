@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-23",
+  "criterion": "AC-23",
+  "requirements": [
+    "CND-2",
+    "CND-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "scheduled and actual synthetic rosters; two sessions"
+  ],
+  "when": [
+    "edit actual roster; then conflicting concurrent edits; resolve"
+  ],
+  "then": [
+    "scheduled preserved, no Humanity write, conflict fails closed and notifies supervisors; latest resolved correction governs"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

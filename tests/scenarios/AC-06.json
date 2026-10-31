@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "AC-6",
+  "criterion": "AC-6",
+  "requirements": [
+    "SES-1",
+    "SES-2",
+    "SES-3",
+    "CHK-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "session with persisted activity at t0, original template v1"
+  ],
+  "when": [
+    "heartbeat and view; advance 6h; reopen after publishing v2"
+  ],
+  "then": [
+    "session Incomplete with checks intact; heartbeat not activity; reopen audited and v1 retained"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

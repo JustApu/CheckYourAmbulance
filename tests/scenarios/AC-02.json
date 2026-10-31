@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "AC-2",
+  "criterion": "AC-2",
+  "requirements": [
+    "PRN-1",
+    "SCH-1"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "session closed; item c obligation open"
+  ],
+  "when": [
+    "session closes without c check"
+  ],
+  "then": [
+    "c remains unsatisfied"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection.",
+  "spec_refs": [
+    "§6.1"
+  ]
+}

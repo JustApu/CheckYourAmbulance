@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "EX-role-change-end-to-end",
+  "criterion": "AC-24",
+  "requirements": [
+    "REC-4",
+    "AUD-1"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "an administrator and a Crew user signed in through the stub identity provider"
+  ],
+  "when": [
+    "the administrator grants Supervisor to the Crew user through the web interface",
+    "the same request is sent again with the same operation id",
+    "the Crew user submits a role change directly"
+  ],
+  "then": [
+    "the grant is persisted, shown in history and audited with its actor",
+    "the replay adds no role, receipt or audit row",
+    "the Crew user is refused with a committed denial audit and nothing changes"
+  ],
+  "status": "bound",
+  "database": "commit",
+  "steps": [
+    "role_change_identities",
+    "administrator_changes_role",
+    "administrator_replays_operation",
+    "crew_attempts_role_change",
+    "change_persisted_visible_audited",
+    "replay_yields_one_record",
+    "denial_audited_nothing_changed"
+  ],
+  "spec_refs": [
+    "§3.2",
+    "§16.1"
+  ],
+  "notes": "issue 25 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) walking-skeleton exit scenario, bound to cya/authorization/scenario_steps.py. Not an AC-24 'unlisted action' case: it exercises a listed action (manage_users_roles) end to end. Proves application logic against the offline stub; the real-Workspace verification is separate and outside CI."
+}

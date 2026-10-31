@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-chain-middle-invalidation",
+  "criterion": "AC-32",
+  "requirements": [
+    "INV-2a",
+    "COR-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "c1→c2→c3 corrected chain"
+  ],
+  "when": [
+    "invalidate c2"
+  ],
+  "then": [
+    "whole chain excluded; c1 and c3 never revive"
+  ],
+  "status": "contract"
+}

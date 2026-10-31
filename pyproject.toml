@@ -1,0 +1,20 @@
+# Project metadata and tool configuration. Dependencies are pinned with hashes
+# in requirements/ (see CONTRIBUTING.md#python-and-django); this file is not
+# used to install the project.
+[project]
+name = "checkyourambulance"
+version = "0.0.0"
+description = "EMS ambulance and equipment inspections (pre-release)"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# Throwaway spike prototypes and the static UI prototype are not linted.
+extend-exclude = ["spike", "prototype"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, Django-specific rules.
+select = ["E", "W", "F", "I", "B", "UP", "DJ"]
+# Line length is enforced by `ruff format`; long strings it cannot split are allowed.
+ignore = ["E501"]

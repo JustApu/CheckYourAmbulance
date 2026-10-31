@@ -1,0 +1,88 @@
+{
+  "synthetic": true,
+  "timezone": "America/New_York",
+  "vehicles": [
+    {
+      "id": "v1",
+      "name": "Synthetic Ambulance One",
+      "status": "IN_SERVICE"
+    },
+    {
+      "id": "v2",
+      "name": "Synthetic Ambulance Two",
+      "status": "OUT_OF_SERVICE"
+    }
+  ],
+  "users": [
+    {
+      "id": "e1",
+      "roles": [
+        "Crew"
+      ]
+    },
+    {
+      "id": "e2",
+      "roles": [
+        "Crew"
+      ]
+    },
+    {
+      "id": "s1",
+      "roles": [
+        "Supervisor"
+      ]
+    },
+    {
+      "id": "supply1",
+      "roles": [
+        "Supply Officer"
+      ]
+    },
+    {
+      "id": "admin1",
+      "roles": [
+        "Administrator"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "a",
+      "kind": "presence"
+    },
+    {
+      "id": "b",
+      "kind": "presence"
+    },
+    {
+      "id": "c",
+      "kind": "presence"
+    },
+    {
+      "id": "measurement",
+      "kind": "measurement"
+    }
+  ],
+  "rosters": [
+    {
+      "id": "r00",
+      "users": [
+        "e1",
+        "e2"
+      ],
+      "start": "2026-01-15T00:00:00-05:00",
+      "end": "2026-01-15T06:00:00-05:00"
+    },
+    {
+      "id": "r06",
+      "users": [
+        "e1",
+        "e2"
+      ],
+      "start": "2026-01-15T06:00:00-05:00",
+      "end": "2026-01-15T12:00:00-05:00"
+    }
+  ],
+  "event_history": [],
+  "note": "All identifiers and persons synthetic. Narrative cases supply per-scenario events."
+}

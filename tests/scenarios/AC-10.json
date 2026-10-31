@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "AC-10",
+  "criterion": "AC-10",
+  "requirements": [
+    "CON-1",
+    "CON-2",
+    "CON-4",
+    "PRN-6"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "same item pass and fail pending"
+  ],
+  "when": [
+    "commit pass and fail with conflict acknowledgement"
+  ],
+  "then": [
+    "both recorded; linked open deficiency keeps attention red"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-27",
+  "criterion": "AC-27",
+  "requirements": [
+    "REG-4",
+    "REG-6",
+    "CHK-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "template v1, later v2; check corrected and invalidated after T"
+  ],
+  "when": [
+    "query at T and later"
+  ],
+  "then": [
+    "T sees only historical rules/events/exemptions, later changes not retroactive"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "non_authoritative": true,
+  "note": "Invented M3 exit-test configuration; not an operational checklist or roster.",
+  "start": "2026-06-01T00:00:00+00:00",
+  "organization": "Synthetic M3 sample EMS agency",
+  "crew": ["crew-a", "crew-b", "crew-c"],
+  "items": ["suction", "oxygen", "lighting", "unchecked", "replay", "race", "correction", "supported defect", "unable", "kit contents", "link cardinality", "live delivery"]
+}

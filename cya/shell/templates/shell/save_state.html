@@ -1,0 +1,5 @@
+{# Save-state indicator. state is one of pending, saved, failed. Shows an icon and text, never color alone (SPEC PRN-7, 16.4). shell.js updates [data-save-state] elements. #}
+<p class="save-state save-state-{{ state }}" data-save-state="{{ state }}" role="status">
+  <span class="indicator-icon" aria-hidden="true">{% if state == "pending" %}&#8987;{% elif state == "failed" %}&#10005;{% else %}&#10003;{% endif %}</span>
+  <span class="save-state-text">{% if state == "pending" %}Saving&hellip;{% elif state == "failed" %}Not saved. Try again.{% else %}Saved{% endif %}</span>
+</p>

@@ -1,0 +1,17 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if vehicles %}
+<ul class="vehicle-list">
+{% for v in vehicles %}
+  <li class="vehicle-card">
+    <a class="vehicle-link" href="{{ v.url }}">
+      <span class="vehicle-name">{{ v.name }}{% if v.number %} <span class="muted">#{{ v.number }}</span>{% endif %}</span>
+      <span class="pill status-pill" data-status="{{ v.status.code }}">{{ v.status.label }}</span>
+    </a>
+  </li>
+{% endfor %}
+</ul>
+{% else %}
+<p>No active vehicles are set up yet.</p>
+{% endif %}
+{% endblock %}

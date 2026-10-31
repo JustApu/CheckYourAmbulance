@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-roster-missing-failclosed",
+  "criterion": "AC-5",
+  "requirements": [
+    "CND-2",
+    "CND-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "no Humanity data at due instant"
+  ],
+  "when": [
+    "evaluate conditional waiver"
+  ],
+  "then": [
+    "obligation required, never waived"
+  ],
+  "status": "contract"
+}

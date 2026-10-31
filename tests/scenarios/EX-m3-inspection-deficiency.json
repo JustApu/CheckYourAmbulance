@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "EX-m3-inspection-deficiency",
+  "criterion": "AC-1",
+  "requirements": ["PRN-1", "REC-4", "CON-3", "CON-4", "COR-1", "COR-4", "INV-2a", "INV-3", "INV-7", "SES-1", "SES-6", "ODO-2", "SCH-6", "TIME-1a"],
+  "fixture": "../fixtures/inspection-integration.json",
+  "synthetic": true,
+  "given": ["three synthetic crew members, a supervisor and an administrator", "one ambulance with two identical kits, overlapping inspection windows, and a zero-kit control vehicle"],
+  "when": ["crew check concurrently and replay a lost response", "Pass and Fail race, a warning is acknowledged, and author corrections and administrator invalidations follow", "a supervisor completes Unable to Inspect, crew record odometer readings, and kit instances change mid-window", "a session auto-closes after six hours and is reopened"],
+  "then": ["item-level attribution and compliance survive all session transitions", "failures remain red until explicit lifecycle decisions and invalidation never closes a deficiency", "checks link only to the earliest eligible obligation and only to their own kit instance", "T1/T2/T3 historical reads equal shuffled event replay after later events", "a committed check update is delivered in-process and external networking is blocked"],
+  "status": "bound",
+  "database": "commit",
+  "steps": ["m3_inspection_setup", "m3_crew_checks", "m3_replay_and_race", "m3_corrections", "m3_unable_and_odometer", "m3_kits_and_links", "m3_live_delivery", "m3_idle_and_history"],
+  "spec_refs": ["§2.1", "§6", "§7", "§8", "§19", "§23"],
+  "notes": "issue 88 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/88) M3 exit integration. Exercises AC-1/2/6/8/9/10/12/13/14/15/21/26/27/28/29/30/31/32/36 without changing their symbolic catalog status. Real audited commands and database guards; only the clock and local channel-layer collaborator are injected. Browser rendering and external providers remain covered separately."
+}

@@ -1,0 +1,112 @@
+{% extends "inspections/workflow_base.html" %}
+{% block content %}
+<p>
+<a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Deficiencies</a>
+</p>
+<p>Complete chains for the 200 most recent entries recorded in the last 14 days. Original entries remain in history.</p>
+<p>
+<a class="button" href="{% url 'inspection-vehicle' vehicle.pk %}">Record a fresh independent check</a> Start or join an inspection to record your own result. You cannot correct another person’s check.</p>
+{% for check in checks %}
+<section class="panel" id="check-{{ check.record.pk }}">
+<h2>{{ check.record.item.label }}{% if check.record.kit %} — {{ check.record.kit.label }}{% endif %}
+</h2>
+<p>
+<strong>{{ check.label }}</strong> · {{ check.state }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|date:"Y-m-d H:i:s" }} UTC</p>
+{% if check.record.explanation %}
+<p>{{ check.record.explanation }}</p>
+{% endif %}
+{% if check.can_correct %}
+<details>
+<summary>Correct entry — fix my accidental entry</summary>
+<p>This is not repair or verification. An ended session must be reopened before correcting its checks.{% if check.record.session_id %} <a href="{% url 'inspection-session' check.record.session_id %}">View or reopen the original session</a>.{% endif %}
+</p>
+<form class="workflow-write" data-kind="correction" data-url="{{ check.correction_url }}" data-tip="{{ check.record.pk }}" data-unit="{{ check.record.item_def.unit|default:'' }}">
+{% csrf_token %}
+<label>Correct outcome <select name="outcome">
+{% for outcome in check.correction_outcomes %}
+<option value="{{ outcome }}">{{ outcome }}</option>
+{% endfor %}
+</select>
+</label>
+{% if check.record.item_def.kind == 'QUANTITY' %}
+<label>Correct count <input name="quantity" type="number" min="0" max="999999" value="{{ check.record.quantity|default_if_none:'' }}" required>
+</label>
+{% endif %}
+{% if check.record.item_def.kind == 'MEASUREMENT' %}
+<label>Correct measurement ({{ check.record.item_def.unit }}) <input name="measurement" value="{{ check.record.measurement_value|default_if_none:'' }}" inputmode="decimal" required>
+</label>
+{% endif %}
+<label>Reason (optional) <textarea name="explanation" maxlength="4000">
+</textarea>
+</label>
+<button type="submit" class="button">Record corrected entry</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+</details>
+{% endif %}
+{% if check.can_invalidate %}
+<details>
+<summary>Administrator: invalidate this check chain</summary>
+<p>The entire chain is excluded. No earlier outcome revives, and invalidation does not close a deficiency.</p>
+<form class="workflow-write" data-kind="explanation" data-url="{{ check.invalidation_url }}">
+{% csrf_token %}
+<label>Mandatory explanation <textarea name="explanation" required maxlength="4000">
+</textarea>
+</label>
+<button type="submit" class="button">Invalidate chain</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+</details>
+{% endif %}
+{% for obligation in check.obligations %}
+<section class="panel">
+<p>Inspection due {{ obligation.due_at|date:"Y-m-d H:i" }} UTC</p>
+{% if obligation.history %}
+<h3>Linked obligation history</h3>
+<ol>
+{% for determination in obligation.history %}
+<li>{{ determination.status_label }} · {{ determination.recorded_at|date:"Y-m-d H:i:s" }} UTC · {{ determination.actor_user.display_name|default:"System" }}{% if determination.explanation %}
+<p>{{ determination.explanation }}</p>
+{% endif %}
+</li>
+{% endfor %}
+</ol>
+{% endif %}
+{% if obligation.completed %}
+<p>Completed by supervisor — unable to inspect{% if obligation.self_completed %} (self-completed){% endif %}. This is not Passed and does not close the deficiency.</p>
+{% endif %}
+{% if obligation.can_complete %}
+<form class="workflow-write" data-kind="completion" data-check="{{ check.record.pk }}" data-url="{{ obligation.complete_url }}">
+{% csrf_token %}
+<label>Supervisor explanation <textarea name="explanation" maxlength="4000" required>
+</textarea>
+</label>
+<button type="submit" class="button">Complete unable-to-inspect obligation</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if obligation.can_invalidate %}
+<form class="workflow-write" data-kind="explanation" data-url="{{ obligation.invalidate_url }}">
+{% csrf_token %}
+<label>Administrator explanation <textarea name="explanation" maxlength="4000" required>
+</textarea>
+</label>
+<button type="submit" class="button">Invalidate supervisor completion</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+</section>
+{% endfor %}
+</section>
+{% empty %}
+<p>No recent checks.</p>
+{% endfor %}
+{% endblock %}

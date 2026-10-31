@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "EX-window-inclusive-boundaries",
+  "criterion": "AC-3",
+  "requirements": [
+    "SCH-2",
+    "SCH-6"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "06:00 due; E 05:00 G 07:00"
+  ],
+  "when": [
+    "submit at E and G and 1 second before E and after G"
+  ],
+  "then": [
+    "E and G on time; earlier unlinked; after G late if eligible"
+  ],
+  "status": "contract"
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-7",
+  "criterion": "AC-7",
+  "requirements": [
+    "REC-1",
+    "REC-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "pending unsaved item"
+  ],
+  "when": [
+    "submit then acknowledge; in separate run server rejects"
+  ],
+  "then": [
+    "Pending until ack then Saved; rejection Failed with retry and no saved display"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

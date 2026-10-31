@@ -1,0 +1,23 @@
+# Secrets and local config
+config/*.ini
+!config/config.example.ini
+ 
+# Runtime state
+*.sqlite
+*.sqlite3
+*.lock
+logs/
+archive/
+incoming/
+/data/
+
+# Project-local Perl dependencies (cpanm/carton target)
+/local/
+
+# MacOS
+.DS_Store
+
+
+# Python bytecode
+__pycache__/
+*.pyc

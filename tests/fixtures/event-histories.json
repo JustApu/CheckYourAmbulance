@@ -1,0 +1,280 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "timezone": "America/New_York",
+  "streams": [
+    {
+      "id": "correction_chain",
+      "initial": {
+        "checks": [],
+        "deficiencies": []
+      },
+      "events": [
+        {
+          "seq": 1,
+          "at": "2026-01-15T11:00:00Z",
+          "kind": "check",
+          "id": "c1",
+          "actor": "e1",
+          "item": "a",
+          "outcome": "Failed"
+        },
+        {
+          "seq": 2,
+          "at": "2026-01-15T11:01:00Z",
+          "kind": "deficiency_created",
+          "id": "d1",
+          "check_id": "c1",
+          "state": "Open"
+        },
+        {
+          "seq": 3,
+          "at": "2026-01-15T11:03:00Z",
+          "kind": "check",
+          "id": "c9",
+          "actor": "e2",
+          "item": "a",
+          "outcome": "Failed",
+          "note": "Independent unresolved failure evidence; COR-4 keeps deficiency open",
+          "acknowledges_check_id": "c1",
+          "supports_deficiency_id": "d1"
+        },
+        {
+          "seq": 4,
+          "at": "2026-01-15T11:05:00Z",
+          "kind": "check_corrected",
+          "id": "c2",
+          "previous": "c1",
+          "actor": "e1",
+          "outcome": "Passed",
+          "correction_flow": "author_correct_entry_with_independent_failure_evidence",
+          "deficiency_state_after": "Open"
+        },
+        {
+          "seq": 5,
+          "at": "2026-01-15T11:10:00Z",
+          "kind": "check_chain_invalidated",
+          "chain": [
+            "c1",
+            "c2"
+          ],
+          "actor": "admin1",
+          "explanation": "Synthetic mistaken record",
+          "deficiency_state_after": "Open"
+        }
+      ],
+      "expected": {
+        "effective_checks": [
+          "c9"
+        ],
+        "deficiencies": [
+          {
+            "id": "d1",
+            "state": "Open"
+          }
+        ],
+        "superseded_checks_retained": [
+          "c1",
+          "c2"
+        ],
+        "deficiency_reason": "Independent unresolved Failed check c9 persists after correction and invalidation"
+      }
+    },
+    {
+      "id": "concurrent_fail_pass",
+      "events": [
+        {
+          "seq": 1,
+          "at": "2026-01-15T11:00:00Z",
+          "kind": "check",
+          "id": "c3",
+          "actor": "e1",
+          "item": "a",
+          "outcome": "Failed"
+        },
+        {
+          "seq": 2,
+          "at": "2026-01-15T11:00:01Z",
+          "kind": "deficiency_created",
+          "id": "d2",
+          "check_id": "c3",
+          "state": "Open"
+        },
+        {
+          "seq": 3,
+          "at": "2026-01-15T11:00:02Z",
+          "kind": "check",
+          "id": "c4",
+          "actor": "e2",
+          "item": "a",
+          "outcome": "Passed",
+          "acknowledges_check_id": "c3"
+        }
+      ],
+      "expected": {
+        "effective_checks": [
+          "c3",
+          "c4"
+        ],
+        "deficiency_state": "Open",
+        "attention": true
+      }
+    },
+    {
+      "id": "roster_conflict",
+      "events": [
+        {
+          "seq": 1,
+          "at": "2026-01-15T10:00:00Z",
+          "kind": "roster_correction",
+          "id": "r1",
+          "actor": "e1",
+          "session": "sess1",
+          "crew": [
+            "e1",
+            "e2"
+          ]
+        },
+        {
+          "seq": 2,
+          "at": "2026-01-15T10:00:00Z",
+          "kind": "roster_correction",
+          "id": "r2",
+          "actor": "e2",
+          "session": "sess2",
+          "crew": [
+            "e1",
+            "e3"
+          ]
+        },
+        {
+          "seq": 3,
+          "at": "2026-01-15T10:00:01Z",
+          "kind": "roster_conflict_detected",
+          "ids": [
+            "r1",
+            "r2"
+          ]
+        }
+      ],
+      "expected": {
+        "conditional_waiver": false,
+        "obligation": "Required",
+        "supervisor_notification": true
+      }
+    },
+    {
+      "id": "as_of_version",
+      "events": [
+        {
+          "seq": 1,
+          "at": "2026-01-15T10:00:00Z",
+          "kind": "template_published",
+          "version": "v1"
+        },
+        {
+          "seq": 2,
+          "at": "2026-01-15T11:00:00Z",
+          "kind": "check",
+          "id": "c5",
+          "actor": "e1",
+          "outcome": "Passed"
+        },
+        {
+          "seq": 3,
+          "at": "2026-01-15T12:00:00Z",
+          "kind": "template_published",
+          "version": "v2"
+        },
+        {
+          "seq": 4,
+          "at": "2026-01-15T13:00:00Z",
+          "kind": "check_corrected",
+          "id": "c6",
+          "previous": "c5",
+          "actor": "e1",
+          "outcome": "Failed"
+        }
+      ],
+      "queries": [
+        {
+          "as_of": "2026-01-15T11:30:00Z",
+          "expected": {
+            "template": "v1",
+            "effective_check": "c5"
+          }
+        },
+        {
+          "as_of": "2026-01-15T13:30:00Z",
+          "expected": {
+            "template": "v2",
+            "effective_check": "c6"
+          }
+        }
+      ]
+    },
+    {
+      "id": "out_of_service",
+      "events": [
+        {
+          "seq": 1,
+          "at": "2026-01-15T10:00:00Z",
+          "kind": "vehicle_status_changed",
+          "actor": "s1",
+          "vehicle": "v2",
+          "status": "OUT_OF_SERVICE",
+          "reason": "Synthetic service work"
+        },
+        {
+          "seq": 2,
+          "at": "2026-01-15T11:00:00Z",
+          "kind": "obligation_evaluated",
+          "vehicle": "v2",
+          "result": "Exempt"
+        }
+      ],
+      "expected": {
+        "routine_obligations_generated": 0,
+        "exemption": "Exempt"
+      }
+    },
+    {
+      "id": "restore_replay",
+      "seed": 42017,
+      "events": [
+        {
+          "seq": 1,
+          "at": "2026-01-15T10:00:00Z",
+          "kind": "check",
+          "id": "c7",
+          "actor": "e1",
+          "outcome": "Passed",
+          "operation_id": "op7"
+        },
+        {
+          "seq": 2,
+          "at": "2026-01-15T10:01:00Z",
+          "kind": "check",
+          "id": "c8",
+          "actor": "e2",
+          "outcome": "Failed",
+          "operation_id": "op8"
+        },
+        {
+          "seq": 3,
+          "at": "2026-01-15T10:02:00Z",
+          "kind": "deficiency_created",
+          "id": "d3",
+          "check_id": "c8",
+          "state": "Open"
+        }
+      ],
+      "expected": {
+        "check_count": 2,
+        "deficiency_state": "Open",
+        "duplicate_delivery_does_not_duplicate_checks": true,
+        "replay_projection_equals_live": true
+      }
+    }
+  ]
+}

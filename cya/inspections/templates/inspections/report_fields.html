@@ -1,0 +1,24 @@
+{% if options.unavailable %}
+<p role="alert">Report choices could not be loaded. Refresh before reporting a new deficiency; an existing report may still be selected.</p>
+{% endif %}
+<label>Category <select name="category_id" required>
+<option value="">Choose a category</option>
+{% for category in options.categories %}
+<option value="{{ category.id }}">{{ category.label }}</option>
+{% endfor %}
+</select>
+</label>
+<fieldset>
+<legend>Severity — choose using these criteria</legend>
+{% for level in options.severities %}
+<label class="severity-choice">
+<input type="radio" name="severity" value="{{ level.code }}" required> <strong>{{ level.label }}</strong>: {{ level.description }}</label>
+{% empty %}
+<p>No severity levels are available. Tell an administrator.</p>
+{% endfor %}
+</fieldset>
+<label>Summary <input name="summary" maxlength="200" required>
+</label>
+<label>Description <textarea name="description" rows="3" maxlength="4000" required>
+</textarea>
+</label>

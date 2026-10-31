@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "EX-dst-spring-gap-boundary",
+  "criterion": "AC-4",
+  "requirements": [
+    "TIME-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "America/New_York 2026-03-08 due 02:30"
+  ],
+  "when": [
+    "generate due time"
+  ],
+  "then": [
+    "first valid local instant 03:00 EDT = 07:00Z"
+  ],
+  "status": "contract"
+}

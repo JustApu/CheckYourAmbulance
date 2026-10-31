@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-25",
+  "criterion": "AC-25",
+  "requirements": [
+    "AUD-1",
+    "AUD-3",
+    "ARC-2"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "append-only check, event and audit rows"
+  ],
+  "when": [
+    "attempt update/delete using app privileges; append authorized event"
+  ],
+  "then": [
+    "update/delete denied, insert allowed; original rows unchanged"
+  ],
+  "status": "contract",
+  "notes": "issue 23 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/23)'s owner-approved Option A proves the receipt/audit foundation using real MariaDB runtime privileges and preserves the full append-only catalogue. This scenario remains contract status because its check/event tables belong to future feature issues; each must add positive/negative enforcement tests before handoff. No complete future-catalogue behavior is claimed."
+}

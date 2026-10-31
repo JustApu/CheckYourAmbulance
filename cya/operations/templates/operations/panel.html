@@ -1,0 +1,75 @@
+<section class="panel" aria-labelledby="current-heading">
+<h2 id="current-heading">Current status</h2>
+{% if current %}
+<p class="status-line"><span class="pill status-pill" data-status="{{ current.status }}">{{ current.status_label }}</span>
+<span class="muted">since <time datetime="{{ current.recorded_at.isoformat }}">{{ current.recorded_at|date:"Y-m-d H:i" }} UTC</time> · set by {{ current.actor }}</span></p>
+{% if current.restrictions %}<p>Restrictions: {{ current.restrictions }}</p>{% endif %}
+<p>{{ current.explanation }}</p>
+{% else %}
+<p class="status-line"><span class="pill status-pill" data-status="IN_SERVICE">In Service</span> <span class="muted">No status has been recorded yet.</span></p>
+{% endif %}
+{% if current.status == "OUT_OF_SERVICE" %}<p>Routine inspections are <strong>Exempt</strong> while this vehicle is out of service. They are not recorded as Passed.</p>{% endif %}
+{% if can_order_inspection and current and current.status != "OUT_OF_SERVICE" %}
+<p>Returning to service creates no inspection requirement. You may require selected item checks below.</p>
+{% if inspection_unavailable %}
+<p role="status">Inspection choices could not be loaded. Refresh this screen before requiring an inspection.</p>
+{% else %}
+<details><summary>Require an ad hoc inspection</summary>
+<form class="status-write" data-kind="adhoc">
+{% csrf_token %}
+<fieldset><legend>Items to inspect (choose up to 200)</legend>
+{% for item in inspection_items %}
+<label><input type="checkbox" name="inspection_item" value="{{ item.item_id }}" data-kit="{{ item.kit_id|default_if_none:'' }}"> {{ item.item_label }}{% if item.kit_label %} · {{ item.kit_label }}{% endif %}</label>
+{% endfor %}
+</fieldset>
+<label>Due at (UTC) <input type="datetime-local" name="due_at" required></label>
+<label>Explanation <textarea name="explanation" maxlength="4000" required></textarea></label>
+<p>Checks are required from now until the due time, with no extra grace. Each kit instance is separate.</p>
+<button type="submit" class="button primary">Require inspection</button>
+<p class="status-result" role="status"></p>
+</form>
+</details>
+{% endif %}
+{% endif %}
+</section>
+
+<section class="panel" aria-labelledby="pending-heading">
+<h2 id="pending-heading">Pending requests</h2>
+{% for r in pending %}
+<div class="panel">
+<p><strong>{{ r.label }}</strong> requested by {{ r.requested_by }} <span class="muted">{{ r.recorded_at|date:"Y-m-d H:i" }} UTC</span></p>
+<p>{{ r.reason }}</p>
+{% if can_set %}
+<form class="status-write" data-kind="decide" data-decision="APPROVE" data-request="{{ r.request_id }}">
+{% csrf_token %}
+{% if r.requested_status == "LIMITED_SERVICE" %}<label>Restrictions <input type="text" name="restrictions" maxlength="4000" required></label>{% endif %}
+<label>Explanation <textarea name="explanation" rows="2" maxlength="4000" required></textarea></label>
+<button type="submit" class="button primary">Approve</button>
+<p class="status-result" role="status"></p>
+</form>
+<form class="status-write" data-kind="decide" data-decision="DENY" data-request="{{ r.request_id }}">
+{% csrf_token %}
+<label>Reason for denying <textarea name="explanation" rows="2" maxlength="4000" required></textarea></label>
+<button type="submit" class="button">Deny</button>
+<p class="status-result" role="status"></p>
+</form>
+{% endif %}
+</div>
+{% empty %}
+<p>No requests are waiting.</p>
+{% endfor %}
+{% if pending_truncated %}<p class="muted">Only the oldest requests are shown.</p>{% endif %}
+</section>
+
+<section aria-labelledby="history-heading">
+<h2 id="history-heading">History</h2>
+<ol>
+{% for e in history %}
+<li>{{ e.recorded_at|date:"Y-m-d H:i" }} UTC · {{ e.actor }} · {{ e.status_label }}{% if e.restrictions %} — {{ e.restrictions }}{% endif %}
+<p>{{ e.explanation }}</p></li>
+{% empty %}
+<li>No status changes have been recorded.</li>
+{% endfor %}
+</ol>
+{% if history_truncated %}<p class="muted">Only the newest changes are shown.</p>{% endif %}
+</section>

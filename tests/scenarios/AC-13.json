@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-13",
+  "criterion": "AC-13",
+  "requirements": [
+    "COR-3",
+    "COR-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "failed check and linked deficiency"
+  ],
+  "when": [
+    "author corrects Failed to Passed in three runs: alone, another effective failure, repair recorded"
+  ],
+  "then": [
+    "alone Reported in Error; other failed check or repair keeps deficiency open"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

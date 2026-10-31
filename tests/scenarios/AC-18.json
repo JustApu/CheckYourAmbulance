@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-18",
+  "criterion": "AC-18",
+  "requirements": [
+    "SUS-1",
+    "SUS-2",
+    "SUS-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "open known deficiency with supervisor suspension"
+  ],
+  "when": [
+    "render needs-attention/full lists then verify closure"
+  ],
+  "then": [
+    "suspended not Satisfied, absent attention-only, present full/dashboard, suspension ends after verified close"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

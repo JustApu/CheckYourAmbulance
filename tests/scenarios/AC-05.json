@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "AC-5",
+  "criterion": "AC-5",
+  "requirements": [
+    "CND-1",
+    "CND-2",
+    "CND-3"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "00:00 valid glucometer check; synthetic 00–06 and 06 crew rosters"
+  ],
+  "when": [
+    "evaluate identical crew, changed crew member and unavailable roster"
+  ],
+  "then": [
+    "identical crew waived with audit; changed and unavailable required"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+}

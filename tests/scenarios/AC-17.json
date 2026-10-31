@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "AC-17",
+  "criterion": "AC-17",
+  "requirements": [],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "closed deficiency assigned to e1"
+  ],
+  "when": [
+    "supervisor adds verification and new deadline"
+  ],
+  "then": [
+    "reopens; only current assignee notified; prior deadline retained"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection.",
+  "spec_refs": [
+    "§8.7"
+  ]
+}

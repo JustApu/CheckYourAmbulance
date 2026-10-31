@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "AC-33",
+  "criterion": "AC-33",
+  "requirements": [
+    "SEAL-4",
+    "STK-B",
+    "PRN-1"
+  ],
+  "fixture": "../fixtures/sealed-kit.json",
+  "synthetic": true,
+  "given": [
+    "kit k1 sealed by e2 with marking E-2001 / 2026-02-28; intact, unexpired, no pending audit",
+    "no open deficiency on any listed item; the obligation for k1 contents is due today and unsatisfied",
+    "each when step below starts from this state on its own isolated fixture snapshot"
+  ],
+  "when": [
+    "e1 enters E-2001 and attests the seal is intact",
+    "e1 enters E-9999 (mismatch)",
+    "a deficiency of category damaged-packaging (neither count nor expiration) is opened on listed item k1-tape; e1 then verifies with E-2001"
+  ],
+  "then": [
+    "the matching verification records exactly one SEAL_SUBSTITUTION event naming the relied-on reseal event, and the k1 contents obligation is satisfied by that substitution",
+    "no individual Passed check records exist for any listed item",
+    "the mismatched entry is rejected, records no substitution, and the obligation stays unsatisfied",
+    "with the damaged-packaging deficiency open, verification is refused, the obligation stays unsatisfied and requires a full contents inspection, and the deficiency stays open and visible"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until issue 19 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/19) Part B."
+}

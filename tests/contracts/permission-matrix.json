@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "source": "SPEC.md §3.3 approved 2026-10-16; seal rows added by SPEC 1.2.0 (2026-10-20); session rows PERM-29 to PERM-31 added by SPEC amendment 1.9.0 (2026-10-24); kit-assignment row PERM-32 added by SPEC amendment 1.10.0 (2026-10-24); rows PERM-33 and PERM-34 (deficiency configuration and severity re-grade) added by SPEC amendment 1.12.0 (2026-10-25); PERM-35 (administrator invalidation of supervisor Unable completion) added by issue 82 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/82) Part A; PERM-36 (add a progress note to a deficiency) added by SPEC amendment 1.17.0 (issue 149 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); PERM-37 (record a correction) added by SPEC amendment 1.18.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-38 (close an empty-scope deficiency) proposed by SPEC amendment 1.19.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-39 added by owner-approved SPEC 1.21.0 (issue 158 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/158))",
+  "synthetic": true,
+  "roles": [
+    "Crew",
+    "Supervisor",
+    "Supply Officer",
+    "Administrator"
+  ],
+  "semantics": {
+    "allow": "authorized for this action",
+    "deny": "server denies, logs denial, no mutation",
+    "own_only": "allow iff check author is acting user",
+    "author_only": "allow iff check author is acting user and COR-4 conditions hold",
+    "supply_only": "allow iff deficiency classified supply-related",
+    "assigned_only": "allow iff acting user is current assignee",
+    "request_only": "allow status-change request but deny direct status change",
+    "automatic": "no actor-triggered close action; only system closes after verification conditions",
+    "view_only": "view allowed; mutations denied",
+    "role_controlled": "SPEC does not enumerate object/filter-level export scope; do not assert universal allow or deny; verify applicable access policy and deny if unspecified"
+  },
+  "rows": [
+    {
+      "id": "PERM-01",
+      "action": "record_check",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-02",
+      "action": "correct_check",
+      "by_role": {
+        "Crew": "own_only",
+        "Supervisor": "own_only",
+        "Supply Officer": "own_only",
+        "Administrator": "own_only"
+      }
+    },
+    {
+      "id": "PERM-03",
+      "action": "record_independent_check",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-04",
+      "action": "invalidate_others_check",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-05",
+      "action": "create_deficiency",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-06",
+      "action": "link_unlink_deficiencies",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-07",
+      "action": "assign_deficiency_deadline",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "supply_only",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-08",
+      "action": "update_external_dependency",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "supply_only",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-09",
+      "action": "request_extension",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "assigned_only",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-10",
+      "action": "decide_extension",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-11",
+      "action": "expand_verification",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-12",
+      "action": "acknowledge_escalation",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-13",
+      "action": "complete_unable_inspect",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-14",
+      "action": "suspend_routine_checks",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-15",
+      "action": "close_deficiency_by_verification",
+      "by_role": {
+        "Crew": "automatic",
+        "Supervisor": "automatic",
+        "Supply Officer": "automatic",
+        "Administrator": "automatic"
+      }
+    },
+    {
+      "id": "PERM-16",
+      "action": "explicit_deficiency_close",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-17",
+      "action": "reported_in_error_by_correction",
+      "by_role": {
+        "Crew": "author_only",
+        "Supervisor": "author_only",
+        "Supply Officer": "author_only",
+        "Administrator": "author_only"
+      }
+    },
+    {
+      "id": "PERM-18",
+      "action": "set_vehicle_status",
+      "by_role": {
+        "Crew": "request_only",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-19",
+      "action": "draft_edit_template",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-20",
+      "action": "publish_template",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-21",
+      "action": "approve_stock_deviation",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-22",
+      "action": "approve_early_deviation_termination",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-23",
+      "action": "manage_users_roles",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-24",
+      "action": "manage_inventory_catalog_orders",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "view_only",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-25",
+      "action": "configure_schedules_thresholds_notifications",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-26",
+      "action": "export_saved_filters",
+      "by_role": {
+        "Crew": "role_controlled",
+        "Supervisor": "role_controlled",
+        "Supply Officer": "role_controlled",
+        "Administrator": "role_controlled"
+      }
+    },
+    {
+      "id": "PERM-27",
+      "action": "verify_break_reseal_kit_seal",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-28",
+      "action": "request_kit_audit",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-29",
+      "action": "open_join_inspection_session",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-30",
+      "action": "rejoin_inspection_session",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-31",
+      "action": "end_inspection_session",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-32",
+      "action": "manage_kit_assignment",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-33",
+      "action": "configure_deficiency_categories_severities",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-34",
+      "action": "regrade_deficiency_severity",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-35",
+      "action": "invalidate_unable_completion",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-36",
+      "action": "add_progress_note",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "supply_only",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-37",
+      "action": "record_deficiency_correction",
+      "by_role": {
+        "Crew": "allow",
+        "Supervisor": "allow",
+        "Supply Officer": "allow",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-38",
+      "action": "close_empty_scope_deficiency",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-39",
+      "action": "request_ad_hoc_inspection",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    }
+  ]
+}
