@@ -9,6 +9,8 @@ from datetime import timedelta
 from unittest import mock
 from uuid import uuid4
 
+from cya.authorization.commands import change_role
+from cya.checklists.tests.support import ids
 from cya.core.models import AuditEvent
 from cya.deficiencies import acknowledgement
 from cya.deficiencies.commands import assign_deficiency, set_deadline
@@ -170,6 +172,44 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertNotContains(page, 'data-kind="extension-decision"')
         self.assertContains(page, "Different date")
         self.assertContains(page, "Synthetic: one day is enough.")
+
+    def test_assignee_list_is_bounded_searchable_and_follows_current_roles(self):
+        pk = self.report()
+        _client, revoked = self.harness.sign_in("crew-revoked")
+        change_role(
+            organization_id=str(self.org.pk),
+            actor_id=str(self.admin.pk),
+            target_id=str(revoked.pk),
+            role="CREW",
+            action="REVOKE",
+            **ids(),
+        )
+        everyone = dict(self.page(self.sup, pk).context["supervisor"]["assignees"])
+        self.assertIn(str(self.user.pk), everyone)
+        self.assertIn(str(self.sup[1].pk), everyone)  # Supervisors can be assigned
+        self.assertNotIn(str(revoked.pk), everyone)
+        self.assertGreater(len(everyone), 2)
+        # PR 31 review: more eligible people than the list holds must not take the page down.
+        with (
+            mock.patch("cya.inspections.workflow_views.MAX_CHOICES", 2),
+            mock.patch("cya.notifications.enqueue.MAX_RECIPIENTS", 2),  # the old resolver's cap
+        ):
+            page = self.page(self.sup, pk)
+            self.assertEqual(page.status_code, 200)
+            self.assertEqual(len(page.context["supervisor"]["assignees"]), 2)
+            self.assertTrue(page.context["supervisor"]["assignees_more"])
+            self.assertContains(page, "More people can be assigned than this list shows")
+            self.assert_every_form_can_submit(page.content.decode())
+            name = self.user.display_name
+            found = self.sup[0].get(f"/deficiencies/{pk}/", {"assignee_search": name})
+            self.assertIn((str(self.user.pk), name), found.context["supervisor"]["assignees"])
+            self.assertTrue(
+                all(
+                    name.lower() in n.lower() for _id, n in found.context["supervisor"]["assignees"]
+                )
+            )
+            nobody = self.sup[0].get(f"/deficiencies/{pk}/", {"assignee_search": "zz-nobody"})
+            self.assertContains(nobody, "No one matching that name can be assigned.")
 
     def test_acknowledgement_regrade_and_suspension_round_trip(self):
         pk = self.report()

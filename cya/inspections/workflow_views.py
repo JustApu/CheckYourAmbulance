@@ -17,10 +17,12 @@ from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from cya.accounts.models import User
 from cya.attention.api import _authors, _row
 from cya.attention.checklist import vehicle_checklist
 from cya.authorization.backend import canonical_id
-from cya.authorization.policy import ResourceContext, permitted
+from cya.authorization.models import RoleGrant
+from cya.authorization.policy import ResourceContext, Role, permitted
 from cya.checklists.models import Item, KitInstance, Vehicle
 from cya.deficiencies import acknowledgement, overdue, service, suspension
 from cya.deficiencies.commands import ASSIGNEE_ROLES
@@ -39,7 +41,6 @@ from cya.inspections.workflows import (
     report_options,
     verification_scope,
 )
-from cya.notifications.enqueue import resolve_recipients
 from cya.shell.navigation import roles_for
 from cya.shell.views import deny_section
 
@@ -206,6 +207,27 @@ def _item_choices(organization_id, vehicle_id, now, within=None):
     return sorted(choices.items(), key=lambda p: (p[1], p[0]))[:MAX_CHOICES]
 
 
+def _assignees(organization_id, search=""):
+    """([(user id, name)], more) for the assignment selector: active users currently holding Crew
+    (or EMT), Supervisor or Supply Officer, by name, at most MAX_CHOICES; `more` says the list was
+    cut short. One query: a current grant is a GRANT row no REVOKE row answers (prior_grant), the
+    rule the role replay applies. The assignment command checks the chosen person again.
+    """
+    held = RoleGrant.objects.filter(
+        organization_id=organization_id,
+        user_id=OuterRef("pk"),
+        action="GRANT",
+        role__in=[*(r.value for r in ASSIGNEE_ROLES), Role.EMT.value],
+    ).exclude(Exists(RoleGrant.objects.filter(prior_grant_id=OuterRef("pk"))))
+    users = User.objects.filter(organization_id=organization_id, active=True).filter(Exists(held))
+    if search:
+        users = users.filter(display_name__icontains=search)
+    found = list(
+        users.order_by("display_name", "id").values_list("id", "display_name")[: MAX_CHOICES + 1]
+    )
+    return [(str(pk), name) for pk, name in found[:MAX_CHOICES]], len(found) > MAX_CHOICES
+
+
 def _suspensions(organization_id, deficiency_id):
     rows = suspension.suspension_state(organization_id, deficiency_id)["suspensions"]
     items = {
@@ -229,7 +251,7 @@ def _suspensions(organization_id, deficiency_id):
     return rows
 
 
-def _supervisor_controls(user, found, status, roles, context, deadline):
+def _supervisor_controls(user, found, status, roles, context, deadline, assignee_search=""):
     """What the supervisor and administrator forms need; None for a form the user cannot use.
 
     Visibility only: each command rechecks the permission, the status and the expected event.
@@ -242,6 +264,8 @@ def _supervisor_controls(user, found, status, roles, context, deadline):
 
     controls = {
         "assignees": None,
+        "assignees_more": False,
+        "assignee_search": "",
         "can_set_deadline": False,
         "can_start_work": False,
         "pending_extensions": [],
@@ -254,13 +278,8 @@ def _supervisor_controls(user, found, status, roles, context, deadline):
         "can_reopen": False,
     }
     if active and may("assign_deficiency_deadline"):
-        controls["assignees"] = sorted(
-            (
-                (str(u.pk), u.display_name)
-                for u in resolve_recipients(org, roles=[r.value for r in ASSIGNEE_ROLES])
-            ),
-            key=lambda p: (p[1], p[0]),
-        )[:MAX_CHOICES]
+        controls["assignees"], controls["assignees_more"] = _assignees(org, assignee_search)
+        controls["assignee_search"] = assignee_search
         controls["can_set_deadline"] = True
         controls["can_start_work"] = status.status == "OPEN"
     if active and may("decide_extension"):
@@ -287,7 +306,7 @@ def _supervisor_controls(user, found, status, roles, context, deadline):
     controls["shown"] = bool(controls["pending_extensions"]) or any(
         value is not None and value is not False
         for key, value in controls.items()
-        if key not in ("pending_extensions", "expanding")
+        if key not in ("pending_extensions", "expanding", "assignees_more", "assignee_search")
     )
     return controls
 
@@ -354,7 +373,15 @@ def deficiency(request, user, deficiency_id):
             "assignee": status.assignee,
             "scope": verification_scope(found) if status.status == "PENDING_VERIFICATION" else [],
             "suspensions": _suspensions(str(user.organization_id), str(found.pk)),
-            "supervisor": _supervisor_controls(user, found, status, roles, context, deadline),
+            "supervisor": _supervisor_controls(
+                user,
+                found,
+                status,
+                roles,
+                context,
+                deadline,
+                request.GET.get("assignee_search", "").strip()[:100],
+            ),
             "config": {
                 "correction_url": reverse("api-deficiency-corrections", args=[found.pk]),
                 "expected_event_id": str(status.last_applied_event_id),

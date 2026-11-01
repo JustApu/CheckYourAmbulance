@@ -161,7 +161,7 @@ what to offer; the command rechecks the permission, the status and every choice.
 
 | Form | Offered when (permission, status) | Fields |
 |---|---|---|
-| Assign, Set deadline | `assign_deficiency_deadline` (Supply Officer only on supply-related deficiencies); active | Assignee from active Crew, Supervisor and Supply Officer users; deadline in UTC |
+| Assign, Set deadline | `assign_deficiency_deadline` (Supply Officer only on supply-related deficiencies); active | Assignee from active users currently holding Crew, Supervisor or Supply Officer, by name (the first 500, with a name search when there are more); deadline in UTC |
 | Start work | same; Open | none |
 | Decide extension request | `decide_extension`; active; one form per request still pending under the current deadline | Approve, approve a different date (UTC) or deny; explanation |
 | Acknowledge escalation | `acknowledge_escalation`; active | Explanation, action plan, period in days up to the administrator maximum (the form says when none is set) |
@@ -197,7 +197,7 @@ plan and acknowledged-until time.
 
 `cya/inspections/tests/test_supervisor_ui.py` covers form visibility by role, role union, supply
 context and status; assignment, deadline, extension decision (including a forged crew decision),
-acknowledgement with the maximum, re-grade, suspension (scope choices, repeat refusal),
+the assignee list (current roles only, more people than it holds, name search), acknowledgement with the maximum, re-grade, suspension (scope choices, repeat refusal),
 expansion while Pending Verification (adding verification after closure is covered by the
 harness and the existing command tests), administrator close and reopen (including a forged
 supervisor reopen), escaping, and the queue's access and three lists. The Node harness covers each

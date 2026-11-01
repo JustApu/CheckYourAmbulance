@@ -83,9 +83,17 @@
 {% if supervisor.shown %}
 <h2>Supervisor actions</h2>
 {% if supervisor.assignees is not None %}
+{% if supervisor.assignees_more or supervisor.assignee_search %}
+<form class="panel" method="get" action="">
+<p>{% if supervisor.assignees_more %}More people can be assigned than this list shows; it lists the first {{ supervisor.assignees|length }} by name.{% endif %} Search by name to narrow it.</p>
+<label>Assignee name <input name="assignee_search" type="search" maxlength="100" value="{{ supervisor.assignee_search }}"></label>
+<button type="submit" class="button">Search</button>
+</form>
+{% endif %}
 <form class="panel workflow-write" data-kind="assign" data-url="{% url 'api-deficiency-assignments' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Assign</h2>
 <label>Assignee <select name="assignee_id" required><option value="">Choose a person</option>{% for id, name in supervisor.assignees %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+{% if not supervisor.assignees %}<p>No one{% if supervisor.assignee_search %} matching that name{% endif %} can be assigned.</p>{% endif %}
 <button type="submit" class="button primary">Assign</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
