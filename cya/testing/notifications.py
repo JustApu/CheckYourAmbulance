@@ -22,3 +22,13 @@ class StubSender:
 
 def transient():
     return SenderError("TRANSIENT")
+
+
+def notified(event_type, source_event_id=None):
+    """Sorted recipient ids of the in-app notifications of one event type (issue 14 tests)."""
+    from cya.notifications.models import NotificationOutbox
+
+    rows = NotificationOutbox.objects.filter(event_type=event_type, channel="IN_APP")
+    if source_event_id is not None:
+        rows = rows.filter(source_event_id=str(source_event_id))
+    return sorted(rows.values_list("recipient_user_id", flat=True))

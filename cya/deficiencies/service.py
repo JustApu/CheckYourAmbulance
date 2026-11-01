@@ -17,7 +17,7 @@ from cya.checklists.overlay import (
     ResolutionError,
     resolve_checklist,
 )
-from cya.deficiencies import deadlines
+from cya.deficiencies import deadlines, notices
 from cya.deficiencies.models import (
     CheckSuspension,
     Deficiency,
@@ -811,6 +811,7 @@ def insert_lifecycle(
     DeficiencyProjection.objects.filter(
         organization_id=organization_id, deficiency_id=last.deficiency_id
     ).update(**changes)
+    notices.notify_event(receipt, event)  # ASSIGNED only (issue 14)
     return event
 
 
@@ -893,6 +894,7 @@ def insert_extension_event(
     DeficiencyProjection.objects.filter(
         organization_id=organization_id, deficiency_id=last.deficiency_id
     ).update(last_applied_event=event)
+    notices.notify_event(receipt, event)  # extension requested or decided (issue 14)
     return event
 
 

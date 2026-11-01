@@ -9,7 +9,7 @@ from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 
 from cya.checks.commands import CheckError, correct_check, invalidate_chain
-from cya.checks.models import CheckRecord
+from cya.checks.models import CheckEvent, CheckRecord
 from cya.core.models import AuditEvent
 from cya.deficiencies import acknowledgement, effects
 from cya.deficiencies.closure import close_administrator, reopen_administrator
@@ -21,7 +21,9 @@ from cya.deficiencies.commands import (
 )
 from cya.deficiencies.models import DeficiencyEvent, DeficiencyEvidence, DeficiencyProjection
 from cya.deficiencies.tests.support import DeficiencyCase
+from cya.notifications.models import NotificationOutbox
 from cya.operations.models import VehicleStatusEvent
+from cya.testing.notifications import notified
 
 
 class DecisionTests(TestCase):
@@ -244,7 +246,10 @@ class EffectTests(DeficiencyCase):
         )
         self.assertEqual(self.status(deficiency_id), "OPEN")
         self.assertEqual(result.body["deficiency_effects"][0]["event_type"], "CORRECTION_NOTICE")
-        self.assertEqual(DeficiencyEvent.objects.get(sequence=2).correction_ref, first)
+        notice = DeficiencyEvent.objects.get(sequence=2)
+        self.assertEqual(notice.correction_ref, first)
+        # COR-4: supervisors are notified to resolve it (issue 14), never the correcting author.
+        self.assertEqual(notified("deficiency.correction_notice", notice.pk), [self.supervisor.pk])
         # the correction itself is recorded either way
         self.assertEqual(CheckRecord.objects.filter(root_check_id=first).count(), 2)
         # correcting the last failed check now cancels it (no other effective failed check)
@@ -365,6 +370,21 @@ class EffectTests(DeficiencyCase):
         self.assertEqual(self.events(deficiency_id), [(1, "REPORTED", None, "OPEN")])
         self.assertEqual(DeficiencyEvidence.objects.get().check_record_id, first.body["check_id"])
 
+    def test_an_outbox_write_failure_rolls_back_the_invalidation_and_its_reopening(self):
+        first = self.failed()
+        deficiency_id = first.body["deficiency_ids"][0]
+        corrected = self.correct(first.body["check_id"])
+        with (
+            mock.patch.object(
+                NotificationOutbox.objects, "bulk_create", side_effect=DatabaseError("synthetic")
+            ),
+            self.assertRaises(DatabaseError),
+        ):
+            self.invalidate(corrected.body["check_id"])
+        self.assertEqual(self.status(deficiency_id), "REPORTED_IN_ERROR")
+        self.assertFalse(DeficiencyEvent.objects.filter(event_type="REOPENED").exists())
+        self.assertFalse(CheckEvent.objects.filter(event_type="INVALIDATION").exists())
+
     def test_invalidating_the_chain_that_cancelled_a_deficiency_reopens_it(self):
         """INV-7 / AC-32: reopened atomically, attributed, nothing revived or inferred."""
         first = self.failed()
@@ -376,6 +396,9 @@ class EffectTests(DeficiencyCase):
         self.assertEqual(self.status(deficiency_id), "OPEN")
         reopened = DeficiencyEvent.objects.get(event_type="REOPENED")
         self.assertEqual((reopened.actor_user_id, reopened.sequence), (self.admin.pk, 3))
+        self.assertEqual(
+            notified("deficiency.reopened_reported_in_error", reopened.pk), [self.supervisor.pk]
+        )
         self.assertIn("ADMINISTRATOR", reopened.actor_roles_at_time)
         self.assertEqual(
             (reopened.from_status, reopened.to_status, reopened.correction_ref),
@@ -573,7 +596,6 @@ class HardeningTests(DeficiencyCase):
 
     def test_the_database_reopens_only_against_the_immediately_preceding_cancellation(self):
         """A neutral event after the cancellation must stop a direct writer from reopening."""
-        from cya.checks.models import CheckEvent
 
         deficiency_id, first, second = self.failed_pair()
         other = self.failed(self.special, deficiency={"existing_id": deficiency_id})

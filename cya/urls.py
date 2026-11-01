@@ -312,6 +312,11 @@ urlpatterns = [
     ),
     path("api/v1/notification-policy", notifications_api.policy, name="api-notification-policy"),
     path(
+        "api/v1/notification-recipients",
+        notifications_api.recipient_rules,
+        name="api-notification-recipients",
+    ),
+    path(
         "api/v1/notification-failures", notifications_api.failures, name="api-notification-failures"
     ),
     path("auth/status/", accounts.status, name="sign-in-status"),

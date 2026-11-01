@@ -5,7 +5,8 @@ from uuid import uuid4
 
 from django.test import Client, override_settings
 
-from cya.notifications import delivery
+from cya.core.models import AuditEvent
+from cya.notifications import delivery, recipients
 from cya.notifications.models import NotificationPolicy, NotificationPref, NotificationRead
 from cya.notifications.tests.support import NotificationCase
 from cya.testing.notifications import StubSender, transient
@@ -221,3 +222,63 @@ class PreferenceAndPolicyEndpointTests(NotificationHttpCase):
                 "last_error_code",
             },
         )
+
+
+class RecipientRuleEndpointTests(NotificationHttpCase):
+    """Issue 14: the documented default recipients and administrator overrides over HTTP."""
+
+    URL = "/api/v1/notification-recipients"
+
+    def change(self, client, token, **overrides):
+        body = {
+            "operation_id": str(uuid4()),
+            "event_type": "deficiency.assigned",
+            "recipient": "SUPERVISORS",
+            "enabled": True,
+            **overrides,
+        }
+        return self.post(self.URL, body, client, token)
+
+    def event(self, listing, event_type):
+        return next(e for e in listing["events"] if e["event_type"] == event_type)
+
+    def test_administrators_list_and_override_the_defaults(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 403)
+        self.assertEqual(self.change(self.client, self.token).status_code, 403)
+        admin, _, token = self.as_role("ADMINISTRATOR", "notify-admin")
+        listing = admin.get(self.URL).json()
+        defaults = recipients.defaults()
+        self.assertEqual([e["event_type"] for e in listing["events"]], sorted(defaults))
+        assigned = self.event(listing, "deficiency.assigned")
+        self.assertEqual(
+            (assigned["default"], assigned["recipients"], assigned["overrides"]),
+            (["ASSIGNEE"], ["ASSIGNEE"], []),
+        )
+        # The owner-approved defaults (2026-10-27 and 2026-11-01) are what ships.
+        self.assertEqual(
+            self.event(listing, "deficiency.reopened_verification_added")["recipients"],
+            ["ASSIGNEE"],
+        )
+        self.assertEqual(
+            self.event(listing, "deficiency.correction_notice")["recipients"], ["SUPERVISORS"]
+        )
+        saved = self.change(admin, token)
+        self.assertEqual(saved.status_code, 200, saved.content)
+        self.assertEqual(saved.json()["result"]["recipients"], ["ASSIGNEE", "SUPERVISORS"])
+        assigned = self.event(admin.get(self.URL).json(), "deficiency.assigned")
+        self.assertEqual(
+            (assigned["recipients"], assigned["overrides"]),
+            (["ASSIGNEE", "SUPERVISORS"], [{"recipient": "SUPERVISORS", "enabled": True}]),
+        )
+        succeeded = AuditEvent.objects.filter(
+            action="NOTIFICATION_RECIPIENT_SET", outcome="SUCCEEDED"
+        )
+        self.assertEqual(succeeded.count(), 1)
+        for overrides, status in (
+            ({"recipient": "REQUESTER"}, 400),
+            ({"event_type": "deficiency.unknown"}, 404),
+            ({"enabled": "yes"}, 400),
+            ({"extra": 1}, 400),
+        ):
+            with self.subTest(overrides=overrides):
+                self.assertEqual(self.change(admin, token, **overrides).status_code, status)

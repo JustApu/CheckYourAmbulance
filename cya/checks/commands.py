@@ -78,6 +78,7 @@ from cya.deficiencies.transitions import (
 )
 from cya.inspections.models import InspectionSession, SessionParticipant
 from cya.inspections.projections import current_state, is_expired, rebuild_session_projection
+from cya.notifications.recipients import notify
 from cya.operations.models import MAX_TEXT
 
 ACTION = "record_check"
@@ -1555,6 +1556,21 @@ def invalidate_chain(
                 event_id=event_id,
                 determination_type="INVALIDATED",
             )
+            for completion in completions:
+                # Supervisors resolve a voided supervisor completion (owner decision, issue 14).
+                notify(
+                    receipt,
+                    event_type="check.supervisor_completion_voided",
+                    source_event_type="obligation_determination",
+                    source_event_id=completion.id,
+                    deep_link=f"/inspection/vehicles/{root.vehicle_id}/check-history/",
+                    payload={
+                        "vehicle_id": str(root.vehicle_id),
+                        "obligation_id": str(completion.prior.obligation_id),
+                        "determination_id": str(completion.prior.pk),
+                    },
+                    actor_user_id=receipt.actor_user_id,
+                )
             for effect in effects:
                 deficiency_effects.append_effect(
                     receipt,

@@ -24,6 +24,7 @@ from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import ResourceContext, Role
 from cya.checklists.models import Vehicle
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
+from cya.notifications.recipients import notify
 from cya.operations.models import MAX_TEXT, STATUSES, StatusRequest, VehicleStatusEvent
 
 ACTION = "set_vehicle_status"
@@ -183,8 +184,12 @@ def _evidence(receipt, actor):
     }
 
 
+def _status_link(vehicle_id):
+    return f"/status/vehicles/{vehicle_id}/"
+
+
 def _append_event(receipt, actor, *, event_id, org, vehicle_id, latest, status, why, restrictions):
-    return VehicleStatusEvent.objects.create(
+    event = VehicleStatusEvent.objects.create(
         id=event_id,
         organization_id=org,
         vehicle_id=vehicle_id,
@@ -195,6 +200,17 @@ def _append_event(receipt, actor, *, event_id, org, vehicle_id, latest, status, 
         restrictions=restrictions,
         **_evidence(receipt, actor),
     )
+    # SPEC 9 OPS-1, NOT-3: a status change notifies (issue 14); set directly or by approval.
+    notify(
+        receipt,
+        event_type="vehicle.status_changed",
+        source_event_type="vehicle_status_event",
+        source_event_id=event_id,
+        deep_link=_status_link(vehicle_id),
+        payload={"vehicle_id": str(vehicle_id), "status": status},
+        actor_user_id=receipt.actor_user_id,
+    )
+    return event
 
 
 def _event_snapshots(latest, vehicle_id, status, restrictions, sequence):
@@ -298,6 +314,15 @@ def request_status_change(*, vehicle_id, requested_status, reason, **context):
                 action="REQUEST",
                 **_evidence(receipt, current),
             )
+            notify(
+                receipt,
+                event_type="vehicle.status_change_requested",
+                source_event_type="status_request",
+                source_event_id=request_id,
+                deep_link=_status_link(vehicle_id),
+                payload={"vehicle_id": str(vehicle_id), "requested_status": target},
+                actor_user_id=receipt.actor_user_id,
+            )
             _hint(org, vehicle_id, request_id, "status.request")
 
         new = _snapshot(vehicle_id=vehicle_id, requested_status=target, request_id=request_id)
@@ -376,6 +401,20 @@ def decide_status_request(*, request_id, decision, explanation, restrictions=Non
                 action=decision,
                 decision_explanation=why,
                 **_evidence(receipt, current),
+            )
+            notify(
+                receipt,
+                event_type="vehicle.status_request_decided",
+                source_event_type="status_request",
+                source_event_id=decision_id,
+                deep_link=_status_link(vehicle_id),
+                payload={
+                    "vehicle_id": str(vehicle_id),
+                    "requested_status": asked.requested_status,
+                    "decision": decision,
+                },
+                actor_user_id=receipt.actor_user_id,
+                requester_id=asked.actor_user_id,
             )
             if decision == "APPROVE":
                 _hint(org, vehicle_id, event_id, "status.changed")

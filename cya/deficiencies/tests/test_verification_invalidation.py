@@ -18,6 +18,7 @@ from cya.deficiencies.effects import decide_verification_reopen, supporting_defi
 from cya.deficiencies.models import DeficiencyEvent, DeficiencyProjection
 from cya.deficiencies.service import dependency_state
 from cya.deficiencies.tests.test_verification import VerificationBase
+from cya.testing.notifications import notified
 
 ADMIN_REASON = "Synthetic invalidation reason"
 
@@ -74,6 +75,11 @@ class ReopenBase(VerificationBase):
         self.assertEqual(reopen.predecessor_event_id, closed_event.pk)
         projection = DeficiencyProjection.objects.get(deficiency_id=deficiency_id)
         self.assertEqual((projection.status, projection.last_applied_event_id), ("OPEN", reopen.pk))
+        # INV-4: the assignee (none here) and all supervisors are notified (issue 14).
+        self.assertEqual(
+            notified("deficiency.reopened_verification_invalidated", reopen.pk),
+            [self.supervisor.pk],
+        )
         return reopen
 
 

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "description": "Default recipients of each notification event (SPEC 13 NOT-3; owner decisions 2026-10-27 and 2026-11-01, issue #14). An administrator overrides any row with notification_recipient_rule; nothing here is mandatory. 'available' lists the recipient kinds an event can name; 'default' lists those on unless overridden.",
+  "events": {
+    "deficiency.assigned": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["ASSIGNEE"]
+    },
+    "deficiency.reopened_verification_added": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["ASSIGNEE"]
+    },
+    "deficiency.reopened_verification_invalidated": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["ASSIGNEE", "SUPERVISORS"]
+    },
+    "deficiency.reopened_by_administrator": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["ASSIGNEE", "REPORTER"]
+    },
+    "deficiency.reopened_reported_in_error": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["SUPERVISORS"]
+    },
+    "deficiency.correction_notice": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["SUPERVISORS"]
+    },
+    "deficiency.extension_requested": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["SUPERVISORS"]
+    },
+    "deficiency.extension_decided": {
+      "available": ["REQUESTER", "ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["REQUESTER", "ASSIGNEE"]
+    },
+    "deficiency.deadline_overdue": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["ASSIGNEE", "SUPERVISORS"]
+    },
+    "deficiency.administrator_closed": {
+      "available": ["ASSIGNEE", "REPORTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["ASSIGNEE", "REPORTER"]
+    },
+    "check.supervisor_completion_voided": {
+      "available": ["SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["SUPERVISORS"]
+    },
+    "vehicle.status_changed": {
+      "available": ["SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["SUPERVISORS", "ADMINISTRATORS"]
+    },
+    "vehicle.status_change_requested": {
+      "available": ["SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["SUPERVISORS"]
+    },
+    "vehicle.status_request_decided": {
+      "available": ["REQUESTER", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["REQUESTER"]
+    },
+    "session.reopened": {
+      "available": ["PARTICIPANTS", "SUPERVISORS", "ADMINISTRATORS"],
+      "default": ["PARTICIPANTS"]
+    }
+  }
+}

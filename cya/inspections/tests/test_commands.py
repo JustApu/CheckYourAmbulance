@@ -28,8 +28,10 @@ from cya.inspections.projections import (
     read_session,
     rebuild_session_projection,
 )
+from cya.notifications.models import NotificationOutbox
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.tests.support import ObligationCase
+from cya.testing.notifications import notified
 
 
 class SessionCase(ChecklistCase):
@@ -208,6 +210,35 @@ class SessionCommandsTests(SessionCase):
         self.reopen(session_id)
         self.assertEqual(current_state(session).state, "OPEN")
         self.assertEqual(InspectionSession.objects.count(), 1)
+
+    def test_reopening_notifies_the_other_participants_only(self):
+        session_id = self.open().body["session_id"]
+        self.open(actor=self.supervisor)  # joins the same session
+        self.end(session_id)
+        self.reopen(session_id)
+        event = SessionEvent.objects.get(session_id=session_id, event_type="REOPEN")
+        # NOT-3 (issue 14): the other recorded participants, never the one who reopened it.
+        self.assertEqual(notified("session.reopened", event.pk), [self.supervisor.pk])
+        lone = self.open(separate=True).body["session_id"]
+        self.end(lone)
+        self.reopen(lone)
+        reopened = SessionEvent.objects.get(session_id=lone, event_type="REOPEN")
+        self.assertEqual(notified("session.reopened", reopened.pk), [])
+
+    def test_an_outbox_write_failure_rolls_back_the_reopening(self):
+        session_id = self.open().body["session_id"]
+        self.open(actor=self.supervisor)
+        self.end(session_id)
+        with (
+            mock.patch.object(
+                NotificationOutbox.objects, "bulk_create", side_effect=DatabaseError("synthetic")
+            ),
+            self.assertRaises(DatabaseError),
+        ):
+            self.reopen(session_id)
+        session = InspectionSession.objects.get(pk=session_id)
+        self.assertEqual(current_state(session).state, "CLOSED")
+        self.assertFalse(SessionEvent.objects.filter(event_type="REOPEN").exists())
 
     def test_replay_is_stable_and_does_not_append(self):
         context = self.context(self.crew)

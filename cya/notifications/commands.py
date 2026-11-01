@@ -6,6 +6,8 @@ in a transaction). Actor, organization and roles come from the signed-in user.
 
   set_policy      administrator only (configure_schedules_thresholds_notifications): which
                   event/channel pairs are mandatory. Data, not code; there are no default rows.
+  set_recipient_rule  administrator only (same permission): turn one recipient kind on or off
+                  for one event type, overriding the documented default (recipients.py).
   set_preference  any role holder, for themselves only. An optional preference cannot switch off
                   a mandatory event/channel (409 MANDATORY_EVENT), and enqueue also ignores a
                   stale off-switch once policy makes the pair mandatory.
@@ -18,12 +20,13 @@ from cya.authorization.locking import locked_identities
 from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import Role
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
-from cya.notifications import rules
+from cya.notifications import recipients, rules
 from cya.notifications.models import (
     NotificationOutbox,
     NotificationPolicy,
     NotificationPref,
     NotificationRead,
+    NotificationRecipientRule,
 )
 from cya.notifications.rules import NotificationError
 
@@ -122,6 +125,65 @@ def set_policy(*, event_type, channel, mandatory, **context):
     return _execute(
         command_type="NOTIFICATION_POLICY_SET",
         request={"event": event, "channel": chan, "mandatory": mandatory},
+        build=build,
+        permission=POLICY_ACTION,
+        **context,
+    )
+
+
+def set_recipient_rule(*, event_type, recipient, enabled, **context):
+    """Administrator turns one recipient kind on or off for one event (NOT-1, NOT-3; issue 14)."""
+    if not isinstance(enabled, bool):
+        raise NotificationError(
+            "enabled must be true or false", code="MALFORMED_REQUEST", status=400
+        )
+    event = recipients.known_event(event_type)
+    kind = recipients.available_kind(event, recipient)
+    org = context["organization_id"]
+
+    def build(actor):
+        before = sorted(recipients.effective_kinds(org, event))
+        row = (
+            NotificationRecipientRule.objects.select_for_update()
+            .filter(organization_id=org, event_type=event, recipient=kind)
+            .first()
+        )
+        prior = _snapshot(
+            event_type=event,
+            recipient=kind,
+            override=None if row is None else row.enabled,
+            recipients=before,
+        )
+        after = sorted((set(before) | {kind}) if enabled else (set(before) - {kind}))
+
+        def apply(receipt, current):
+            NotificationRecipientRule.objects.update_or_create(
+                organization_id=org,
+                event_type=event,
+                recipient=kind,
+                defaults={"enabled": enabled},
+            )
+
+        return Plan(
+            response_body={
+                "code": "SAVED",
+                "event_type": event,
+                "recipient": kind,
+                "enabled": enabled,
+                "recipients": after,
+            },
+            apply=apply,
+            target_type="ORGANIZATION",
+            target_id=org,
+            prior_snapshot=prior,
+            new_snapshot=_snapshot(
+                event_type=event, recipient=kind, override=enabled, recipients=after
+            ),
+        )
+
+    return _execute(
+        command_type="NOTIFICATION_RECIPIENT_SET",
+        request={"event": event, "recipient": kind, "enabled": enabled},
         build=build,
         permission=POLICY_ACTION,
         **context,

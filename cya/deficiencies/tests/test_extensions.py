@@ -18,6 +18,7 @@ from cya.deficiencies.extensions import decide_extension, request_extension
 from cya.deficiencies.models import DeficiencyEvent
 from cya.deficiencies.tests.test_dependency import DependencyCase
 from cya.notifications.models import NotificationOutbox
+from cya.testing.notifications import notified
 from cya.testing.role_http import RoleHttpHarness, real_collaborator_settings
 
 REASON = "The vendor delivers the synthetic part late."
@@ -87,7 +88,9 @@ class RequestTests(ExtensionCase):
         audit = AuditEvent.objects.get(action="DEFICIENCY_EXTENSION_REQUEST")
         self.assertEqual(audit.outcome, "SUCCEEDED")
         self.assertNotIn(REASON, json.dumps([audit.new_snapshot, audit.prior_snapshot]))
-        self.assertEqual(NotificationOutbox.objects.count(), 0)
+        # Issue 14: the request notifies the supervisors (in-app and email), nobody else.
+        self.assertEqual(notified("deficiency.extension_requested", event.pk), [self.supervisor.pk])
+        self.assertEqual(NotificationOutbox.objects.count(), 2)
 
     def test_a_request_needs_a_deadline_and_a_later_future_date_and_a_reason(self):
         self.refused("NO_DEADLINE", 422, self.ask)

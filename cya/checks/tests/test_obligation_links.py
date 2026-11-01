@@ -44,6 +44,7 @@ from cya.obligations.models import Obligation
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import State
 from cya.obligations.tests.support import ObligationCase
+from cya.testing.notifications import notified
 from cya.testing.role_http import RoleHttpHarness, real_collaborator_settings
 
 
@@ -339,6 +340,10 @@ class CheckObligationLinkTests(ObligationLinkCleanupMixin, ObligationCase):
         child = ObligationDetermination.objects.get(prior_determination=completion)
         self.assertEqual(child.determination_type, "INVALIDATED")
         self.assertEqual(child.command.operation_id, args["operation_id"])
+        # Supervisors are told in the same transaction (issue 14; the actor is an administrator).
+        self.assertEqual(
+            notified("check.supervisor_completion_voided", child.pk), [self.supervisor.pk]
+        )
         self.assertEqual(child.actor_user_id, self.admin.pk)
         self.assertEqual(
             self.obligation_state(obligation, completion.recorded_at).outcome,

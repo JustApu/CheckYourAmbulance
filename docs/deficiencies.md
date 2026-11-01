@@ -177,7 +177,7 @@ with `deficiency_evidence` from any row of the chain; one check may support seve
     creation, correction-effect and reopening events exists (any future repair, corrective
     action or verification event type blocks it, because only listed types are neutral).
   - otherwise it **stays open** and a `CORRECTION_NOTICE` event (status unchanged) records the
-    intent to notify a supervisor; delivery of notifications is M4.
+    intent to notify a supervisor; the same transaction notifies all supervisors ([notifications](notifications.md#which-events-notify-and-whom)).
   - a deficiency already closed or cancelled is left alone. Unable to Inspect to Passed does
     not act on its deficiency at all (UTI-3, INV-3).
   - Deliberate, owner-confirmed rule (SPEC COR-4 as amended by 1.13.0, OQ-57): another effective
@@ -303,7 +303,7 @@ Verification until an explicit closure under §8.8, which is generally Administr
   some row of that revision has no effective Pass left. A CHECK constraint
   (`defevent_verification_reopen_shape`) allows only the explanation and `verification_check_id`.
   `VERIFICATION_REOPENED` records no repair, so it is neutral for COR-4.
-- Notification intents to the assignee and supervisors are [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14); this command writes none.
+- The reopening notifies the assignee and all supervisors in the same transaction ([notifications](notifications.md#which-events-notify-and-whom)).
 
 ## Supervisor scope expansion and added verification
 
@@ -330,8 +330,8 @@ active physical kit instances on the vehicle (`KIT_REQUIRED`), and any other ite
   appends `VERIFICATION_ADDED`, which reopens it to Open with the new resolution deadline. The
   former deadline stays in the history (`assignment_state`, `extension_state`, as-of reads), the
   assignee is kept, and a pending extension request is superseded as by any new deadline. The
-  named items are verified after the next correction. Notifying only the current assignee is
-  [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14); this command writes no notification intent.
+  named items are verified after the next correction. The reopening notifies only the current
+  assignee (SPEC §8.7, AC-17; [notifications](notifications.md#which-events-notify-and-whom)).
 - **Expansions persist.** The named items are kept as `deficiency_scope_expansion` rows. Every
   later correction's scope includes each of them, resolved like the rest of the correction-time
   scope: the item must still be on the vehicle's current checklist (its current definition is
@@ -564,7 +564,8 @@ transaction. Every earlier assignee and deadline stays in the event history. Not
 changes: no link, evidence or vehicle status (OPS-2). After commit the command publishes the
 identifier-only `deficiency.changed` live hint. The audit record carries the deficiency, event
 and assignee ids and the event type. A replay returns the stored answer without a second event.
-Notification intents are not emitted here ([issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)).
+Assigning notifies the new assignee in the same transaction; setting a deadline and starting work
+notify nobody, and an overdue deadline is notified by a scheduled job ([notifications](notifications.md#which-events-notify-and-whom)).
 
 **Correction effects.** All three types are in `NEUTRAL_EVENT_TYPES`: they record no repair, so a
 Failed-to-Passed author correction still cancels the deficiency after them (COR-4, AC-13), and
@@ -626,7 +627,7 @@ date stay in the events; nothing is overwritten.
 **Follow-up date.** Optional, a timezone-aware instant that must lie in the future
 (`422 INVALID_FOLLOW_UP`; `400` when naive or malformed). It is stored and shown by the reader and is
 the only schedule fact the event carries: no reminder, notification or outbox row is created
-(SPEC §8.5; notifications are [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)).
+(SPEC §8.5; dependency updates are not in the notification set).
 
 **Leaving.** `return_to` names `OPEN` or `IN_PROGRESS` (anything else is `400`). With none, the
 deficiency returns to the status it was in before it began waiting, which the entering event records
