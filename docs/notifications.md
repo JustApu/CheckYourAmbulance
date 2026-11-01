@@ -111,7 +111,11 @@ Each notice is a worker command (service `worker.deficiency_overdue`, command
 is derived from the key, so a repeat or a second worker replays without writing. It locks the
 deficiency and checks again; one that stopped being overdue or was acknowledged meanwhile is
 skipped without a receipt. One deficiency's failure is logged and counted and never blocks the
-others. The pass reads at most five times the limit of candidates, oldest deadline first.
+others. Candidates are chosen by the governing deadline itself (the newest event carrying a
+deadline), not the stored base deadline, so an extended deficiency is not a candidate until its new
+date passes. The pass pages through them oldest governing deadline first, 200 per query, and
+recognizes those already notified with one receipt query per page; neither they nor suppressed
+ones count toward the limit, so a backlog cannot keep a newly overdue deficiency from being reached.
 
 ## Email delivery
 

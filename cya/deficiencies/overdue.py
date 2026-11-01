@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from django.db import DatabaseError
+from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
 
 from cya.accounts.models import Organization
@@ -30,7 +31,7 @@ from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
 from cya.core.models import CommandReceipt
 from cya.deficiencies import service
 from cya.deficiencies.acknowledgement import acknowledgement_state
-from cya.deficiencies.models import DeficiencyProjection
+from cya.deficiencies.models import DeficiencyEvent, DeficiencyProjection
 from cya.deficiencies.notices import deficiency_link, people
 from cya.deficiencies.service import DeficiencyError
 from cya.deficiencies.transitions import ACTIVE_STATUSES
@@ -42,7 +43,7 @@ SERVICE = "worker.deficiency_overdue"
 COMMAND = "DEFICIENCY_OVERDUE_NOTICE"
 EVENT = "deficiency.deadline_overdue"
 SOURCE = "deficiency_overdue"
-SCAN_FACTOR = 5
+PAGE = 200
 
 
 class NotDue(Exception):
@@ -146,56 +147,101 @@ def _notify_one(organization_id, deficiency_id, governing_event_id, now):
     )
 
 
-def notify_overdue(organization_id, *, now=None, limit=50):
-    """One bounded pass: notify at most `limit` newly overdue deficiencies; returns a report.
+def _candidates(organization_id, now):
+    """Active deficiencies whose governing deadline has passed, annotated with it.
 
-    Candidates are active deficiencies whose stored deadline has passed (the governing deadline is
-    never earlier than it), oldest deadline first. Those already notified for their governing
-    deadline are recognized from their worker receipt and do not count toward the limit; the scan
-    reads at most SCAN_FACTOR times the limit per pass, so a large backlog is reached over passes.
+    The governing deadline is the deadline of the newest event that carries one: a report or
+    revision, or an extension decision made after it (deadlines.deadline_state replays the same
+    rule). The projection's deadline is not used, because an extension decision leaves it at the
+    base deadline.
+    """
+    newest = DeficiencyEvent.objects.filter(
+        organization_id=OuterRef("organization_id"),
+        deficiency_id=OuterRef("deficiency_id"),
+        deadline__isnull=False,
+    ).order_by("-sequence")
+    return (
+        DeficiencyProjection.objects.filter(
+            organization_id=organization_id, status__in=ACTIVE_STATUSES
+        )
+        .annotate(
+            governing=Subquery(newest.values("deadline")[:1]),
+            governing_event=Subquery(newest.values("pk")[:1]),
+        )
+        .filter(governing__lt=now)
+    )
+
+
+def _pages(organization_id, now):
+    """Candidates oldest governing deadline first, PAGE rows per query (keyset, no offset)."""
+    query = _candidates(organization_id, now).order_by("governing", "deficiency_id")
+    after = None
+    while True:
+        page = query
+        if after is not None:
+            page = page.filter(
+                Q(governing__gt=after[0]) | Q(governing=after[0], deficiency_id__gt=after[1])
+            )
+        rows = list(page.values_list("deficiency_id", "governing", "governing_event")[:PAGE])
+        if not rows:
+            return
+        yield rows
+        if len(rows) < PAGE:
+            return
+        after = (rows[-1][1], rows[-1][0])
+
+
+def notify_overdue(organization_id, *, now=None, limit=50):
+    """One pass: notify at most `limit` newly overdue deficiencies; returns a report.
+
+    Candidates are active deficiencies whose governing deadline has passed, oldest first, read in
+    pages of PAGE. Those already notified for their governing deadline are recognized from their
+    worker receipts with one query per page and do not count toward the limit, so neither they
+    nor deficiencies extended past now can keep a later overdue deficiency from being reached.
     """
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 500:
         raise ValueError("limit must be an integer from 1 to 500")
     now = now or timezone.now()
     report = OverdueReport()
-    candidates = (
-        DeficiencyProjection.objects.filter(
-            organization_id=organization_id,
-            status__in=ACTIVE_STATUSES,
-            deadline__isnull=False,
-            deadline__lt=now,
-        )
-        .order_by("deadline", "deficiency_id")
-        .values_list("deficiency_id", flat=True)[: limit * SCAN_FACTOR]
-    )
-    for deficiency_id in candidates:
-        if report.notified >= limit:
-            break
-        deficiency_id = str(deficiency_id)
-        try:
-            due, reason = _due(organization_id, deficiency_id, now)
-            if due is None:
-                if reason == "suppressed":
-                    report.suppressed += 1
-                continue
-            operation = _operation(organization_id, _key(deficiency_id, due[0]))
-            if CommandReceipt.objects.filter(
-                organization_id=organization_id, operation_id=operation
-            ).exists():
+    for rows in _pages(organization_id, now):
+        operations = {row[0]: _operation(organization_id, _key(row[0], row[2])) for row in rows}
+        done = {
+            str(operation)
+            for operation in CommandReceipt.objects.filter(
+                organization_id=organization_id, operation_id__in=list(operations.values())
+            ).values_list("operation_id", flat=True)
+        }
+        for deficiency_id, _governing, _event in rows:
+            if report.notified >= limit:
+                return report
+            if operations[deficiency_id] in done:
                 report.already += 1
                 continue
-            result = _notify_one(organization_id, deficiency_id, due[0], now)
-        except NotDue:
-            report.skipped += 1
-            continue
-        except (DeficiencyError, DatabaseError):
-            # One deficiency's failure never blocks the others; its notice stays due.
-            logger.error("overdue notice unavailable for one deficiency")
-            report.errors += 1
-            continue
-        if result.replayed:
-            report.already += 1
-        else:
-            report.notified += 1
-            report.deficiency_ids.append(deficiency_id)
+            deficiency_id = str(deficiency_id)
+            try:
+                due, reason = _due(organization_id, deficiency_id, now)
+                if due is None:
+                    if reason == "suppressed":
+                        report.suppressed += 1
+                    continue
+                operation = _operation(organization_id, _key(deficiency_id, due[0]))
+                if CommandReceipt.objects.filter(
+                    organization_id=organization_id, operation_id=operation
+                ).exists():
+                    report.already += 1
+                    continue
+                result = _notify_one(organization_id, deficiency_id, due[0], now)
+            except NotDue:
+                report.skipped += 1
+                continue
+            except (DeficiencyError, DatabaseError):
+                # One deficiency's failure never blocks the others; its notice stays due.
+                logger.error("overdue notice unavailable for one deficiency")
+                report.errors += 1
+                continue
+            if result.replayed:
+                report.already += 1
+            else:
+                report.notified += 1
+                report.deficiency_ids.append(deficiency_id)
     return report

@@ -280,6 +280,41 @@ class OverdueTests(NoticeCase):
         self.assertEqual(self.run_pass().notified, 0)
         self.assertEqual(notified("deficiency.deadline_overdue"), [])
 
+    def test_an_extension_past_now_never_holds_back_a_later_overdue_deficiency(self):
+        # PR 30 review: an extended deficiency's base deadline has passed but its governing one
+        # has not; it is not a candidate, so it cannot fill a page ahead of a later overdue one.
+        request = request_extension(
+            reason=REASON,
+            proposed_deadline=timezone.now() + timedelta(hours=10),
+            **self.args(actor=self.fixer),
+        ).body["event_id"]
+        decide_extension(
+            request_event_id=request,
+            decision="APPROVED",
+            explanation="Synthetic approval.",
+            deadline=None,
+            **self.args(),
+        )
+        later = timezone.now() + timedelta(hours=1, minutes=30)
+        set_deadline(deadline=later, **self.args(deficiency_id=self.supply_id))
+        with mock.patch.object(overdue, "PAGE", 1):
+            report = self.run_pass(limit=1)
+        self.assertEqual(
+            (report.notified, report.deficiency_ids, report.already, report.skipped),
+            (1, [self.supply_id], 0, 0),
+        )
+        self.assertEqual(self.run_pass(hours=11).deficiency_ids, [self.deficiency_id])
+
+    def test_already_notified_deficiencies_never_hold_back_a_newly_overdue_one(self):
+        self.assertEqual(self.run_pass().deficiency_ids, [self.deficiency_id])
+        later = timezone.now() + timedelta(hours=3)
+        set_deadline(deadline=later, **self.args(deficiency_id=self.supply_id))
+        with mock.patch.object(overdue, "PAGE", 1):
+            report = self.run_pass(hours=4, limit=1)
+        self.assertEqual(
+            (report.notified, report.already, report.deficiency_ids), (1, 1, [self.supply_id])
+        )
+
     def test_the_limit_is_checked(self):
         for limit in (0, 501, True, "5"):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
