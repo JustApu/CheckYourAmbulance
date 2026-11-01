@@ -147,7 +147,7 @@ def _notify_one(organization_id, deficiency_id, governing_event_id, now):
     )
 
 
-def _candidates(organization_id, now):
+def candidates(organization_id, now):
     """Active deficiencies whose governing deadline has passed, annotated with it.
 
     The governing deadline is the deadline of the newest event that carries one: a report or
@@ -174,7 +174,7 @@ def _candidates(organization_id, now):
 
 def _pages(organization_id, now):
     """Candidates oldest governing deadline first, PAGE rows per query (keyset, no offset)."""
-    query = _candidates(organization_id, now).order_by("governing", "deficiency_id")
+    query = candidates(organization_id, now).order_by("governing", "deficiency_id")
     after = None
     while True:
         page = query

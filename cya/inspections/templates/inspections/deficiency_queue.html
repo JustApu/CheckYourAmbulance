@@ -1,0 +1,18 @@
+{% extends "inspections/workflow_base.html" %}
+{% block content %}
+<p><a href="{% url 'deficiencies' %}">All deficiencies</a></p>
+<p>Deficiencies still being worked that need a supervisor. The page is a snapshot at load: refresh to see changes. Overdue uses the deadline in force, including approved extensions.</p>
+{% for heading, rows, more in lists %}
+<section class="panel">
+<h2>{{ heading }} ({{ rows|length }}{% if more %}+{% endif %})</h2>
+{% if more %}<p>Only the first {{ rows|length }} are listed.</p>{% endif %}
+<ul class="plain">
+{% for row in rows %}
+<li><a href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.assignee.display_name|default:"Unassigned" }}{% if row.governing %} · deadline {{ row.governing|date:"Y-m-d H:i" }} UTC{% endif %}{% if row.requested_at %} · requested {{ row.requested_at|date:"Y-m-d H:i" }} UTC{% endif %}</p></li>
+{% empty %}
+<li>None.</li>
+{% endfor %}
+</ul>
+</section>
+{% endfor %}
+{% endblock %}

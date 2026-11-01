@@ -1,5 +1,6 @@
 {% extends "inspections/workflow_base.html" %}
 {% block content %}
+{% if can_view_queue %}<p><a class="button primary" href="{% url 'deficiency-queue' %}">Supervisor queue</a></p>{% endif %}
 <section class="panel">
 <h2>Report a deficiency independently</h2>
 <p>A report does not record a check, repair or change to vehicle status.</p>

@@ -112,8 +112,8 @@ use the record-check shape.
 
 ## Not built here
 
-The crew screens ([issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85)), live-update wiring of the checklist (hints from [issue #84](https://github.com/JustApu/CheckYourAmbulance-archive/issues/84) prompt
-a re-read of this endpoint), and the supervisor screens for the deficiency lifecycle and
-suspension ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16)).
+The crew screens ([issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85)), and live-update wiring of the checklist (hints from [issue #84](https://github.com/JustApu/CheckYourAmbulance-archive/issues/84) prompt
+a re-read of this endpoint). The supervisor screens for the deficiency lifecycle and suspension are
+[issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16) ([deficiency workflows](deficiency-workflows.md#supervisor-and-administrator-actions-issue-16)).
 
 [issue #86](https://github.com/JustApu/CheckYourAmbulance-archive/issues/86) adds `obligation_outcome` to checklist rows so clients can distinguish Failed satisfaction and supervisor completion from Passed; see [deficiency workflows](deficiency-workflows.md).

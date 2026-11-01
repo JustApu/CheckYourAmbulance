@@ -35,6 +35,7 @@ class Element {
   querySelectorAll(selector) {
     if (selector === "input, select, textarea, button") return [...Object.values(this.fields), this.querySelector('button[type="submit"]')];
     if (selector === '[name="system_ids"]:checked') return this.systems || [];
+    if (selector === '[name="items"]:checked') return (this.items || []).filter(node => node.checked);
     return [];
   }
 }
@@ -293,5 +294,67 @@ function generic(kind) {
     assert(controls.textContent.includes("remains outstanding"));
     assert(!controls.textContent.includes("odometer form above"));
   }
-  console.log("Offline workflow script regressions passed: outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions and single-flight forms.");
+  // Issue #16 supervisor and administrator forms: the payload each kind sends, and local refusals.
+  function supervisorForm(kind, values) {
+    const run = generic(kind); run.form.dataset.expectedEvent = "event-seen";
+    for (const [name, value] of Object.entries(values)) field(run.form, name, value);
+    return run;
+  }
+  {
+    const run = supervisorForm("assign", {assignee_id: ""}); run.form.fire("submit"); assert.equal(run.posts().length, 0);
+    run.form.fields.assignee_id.value = "person"; run.form.fire("submit");
+    assert.deepEqual({...run.posts()[0].body, operation_id: "x"}, {operation_id: "x", expected_event_id: "event-seen", assignee_id: "person"});
+  }
+  {
+    const run = supervisorForm("deadline", {deadline: "2026-06-03T10:00"}); run.form.fire("submit");
+    assert.equal(run.posts()[0].body.deadline, "2026-06-03T10:00:00.000Z");
+    const start = generic("start-work"); start.form.dataset.expectedEvent = "event-seen"; start.form.fire("submit");
+    assert.deepEqual(Object.keys(start.posts()[0].body).sort(), ["expected_event_id", "operation_id"]);
+  }
+  {
+    const decide = values => supervisorForm("extension-decision", {request_event_id: "request", explanation: "Synthetic decision.", deadline: "", ...values});
+    let run = decide({decision: "APPROVED"}); run.form.fire("submit");
+    assert.equal(run.posts()[0].body.request_event_id, "request"); assert(!("deadline" in run.posts()[0].body));
+    run = decide({decision: "APPROVED", deadline: "2026-06-09T08:00"}); run.form.fire("submit"); assert.equal(run.posts().length, 0);
+    run = decide({decision: "DIFFERENT_DATE", deadline: "2026-06-09T08:00"}); run.form.fire("submit");
+    assert.equal(run.posts()[0].body.deadline, "2026-06-09T08:00:00.000Z");
+    run = decide({decision: "DENIED", explanation: " "}); run.form.fire("submit"); assert.equal(run.posts().length, 0);
+    run = decide({decision: ""}); run.form.fire("submit"); assert.equal(run.posts().length, 0);
+  }
+  for (const [days, sent] of [["2", 2], ["0", null], ["1.5", null], ["", null]]) {
+    const run = supervisorForm("acknowledge", {explanation: "Synthetic review.", action_plan: "Synthetic plan.", period_days: days});
+    run.form.fire("submit");
+    if (sent === null) { assert.equal(run.posts().length, 0); } else { assert.equal(run.posts()[0].body.period_days, sent); assert.equal(run.posts()[0].body.action_plan, "Synthetic plan."); }
+  }
+  {
+    const run = supervisorForm("regrade", {explanation: "Synthetic re-grade."}); run.form.fire("submit"); assert.equal(run.posts().length, 0);
+    field(run.form, "severity", "LOW", "radio").checked = true; run.form.fire("submit");
+    assert.equal(run.posts()[0].body.severity, "LOW");
+  }
+  {
+    const run = supervisorForm("suspend", {explanation: ""}); run.form.fire("submit"); assert.equal(run.posts().length, 0);
+    run.form.items = ["item-1:", "item-2:kit-9", "item-3:"].map((value, index) => { const box = new Element("", "checkbox"); box.value = value; box.checked = index < 2; return box; });
+    run.form.fire("submit");
+    const body = run.posts()[0].body;
+    assert.deepEqual(body.items, [{item_id: "item-1"}, {item_id: "item-2", kit_instance_id: "kit-9"}]); assert(!("explanation" in body));
+    response(run.posts()[0], 409, {status: "REJECTED", code: "ITEM_NOT_IN_SCOPE"}); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.includes("outside this deficiency's affected scope"));
+  }
+  {
+    const run = supervisorForm("add-verification", {explanation: "Synthetic added.", deadline: ""});
+    run.form.items = [Object.assign(new Element("", "checkbox"), {value: "item-1:", checked: true})];
+    run.form.fire("submit"); assert.equal(run.posts().length, 0); // the deadline is required
+    run.form.fields.deadline.value = "2026-06-10T00:00"; run.form.fire("submit");
+    assert.equal(run.posts()[0].body.deadline, "2026-06-10T00:00:00.000Z");
+  }
+  for (const kind of ["admin-close", "admin-reopen", "expand"]) {
+    const run = supervisorForm(kind, {explanation: ""});
+    run.form.items = [Object.assign(new Element("", "checkbox"), {value: "item-1:", checked: true})];
+    run.form.fire("submit"); assert.equal(run.posts().length, 0);
+    run.form.fields.explanation.value = "Synthetic explanation."; run.form.fire("submit");
+    assert.equal(run.posts()[0].body.expected_event_id, "event-seen");
+    response(run.posts()[0], 403, {status: "REJECTED", code: "FORBIDDEN"}); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.includes("not permitted"));
+  }
+  console.log("Offline workflow script regressions passed: outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and the supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
