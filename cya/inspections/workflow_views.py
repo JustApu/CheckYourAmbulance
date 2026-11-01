@@ -9,6 +9,7 @@ import logging
 from functools import wraps
 
 from django.db import DatabaseError
+from django.db.models import Exists, OuterRef, Subquery
 from django.http import Http404, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -275,8 +276,8 @@ def _supervisor_controls(user, found, status, roles, context, deadline):
         controls["expanding"] = status.status == "PENDING_VERIFICATION"
     if active and may("suspend_routine_checks"):
         scope = {
-            (str(item), str(kit) if kit else None)
-            for item, _definition, kit in service.correction_scope(org, found, now)
+            (item_id, str(kit_id) if kit_id else None)
+            for item_id, _definition, kit_id in service.correction_scope(org, found, now)
         }
         controls["suspension_items"] = _item_choices(org, str(found.vehicle_id), now, scope)
     if may("explicit_deficiency_close"):
@@ -390,19 +391,32 @@ def queue(request, user):
         .select_related("deficiency__vehicle", "assignee")
         .order_by("governing", "deficiency_id")
     )
-    asked = active.filter(
-        deficiency_id__in=DeficiencyEvent.objects.filter(
-            organization_id=org, event_type="EXTENSION_REQUESTED"
-        ).values("deficiency_id")
-    ).order_by("deficiency__reported_at", "deficiency_id")
-    candidates, pending_more = _queue_rows(asked)
-    pending = []
-    for row in candidates:
-        state = service.extension_state(org, str(row.deficiency_id), now=now)
-        waiting = [r for r in state["requests"] if r["status"] == "PENDING" and not r["superseded"]]
-        if waiting:
-            row.requested_at = waiting[0]["requested_at"]
-            pending.append(row)
+    # A request is waiting while no decision answers it and no later deadline revision (an event
+    # carrying a deadline that is not a decision) has superseded it: deadlines.deadline_state's rule.
+    waiting = (
+        DeficiencyEvent.objects.filter(organization_id=org, event_type="EXTENSION_REQUESTED")
+        .exclude(Exists(DeficiencyEvent.objects.filter(request_event_id=OuterRef("pk"))))
+        .exclude(
+            Exists(
+                DeficiencyEvent.objects.filter(
+                    deficiency_id=OuterRef("deficiency_id"),
+                    sequence__gt=OuterRef("sequence"),
+                    deadline__isnull=False,
+                ).exclude(event_type="EXTENSION_DECIDED")
+            )
+        )
+    )
+    pending, pending_more = _queue_rows(
+        active.annotate(
+            requested_at=Subquery(
+                waiting.filter(deficiency_id=OuterRef("deficiency_id"))
+                .order_by("sequence")
+                .values("recorded_at")[:1]
+            )
+        )
+        .filter(requested_at__isnull=False)
+        .order_by("requested_at", "deficiency_id")
+    )
     return render(
         request,
         "inspections/deficiency_queue.html",

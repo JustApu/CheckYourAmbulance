@@ -187,7 +187,9 @@ extensions). Three lists of deficiencies still being worked, 200 each at most (t
 `+` when cut short): unassigned, oldest report first; overdue by the deadline in force (the same
 governing-deadline reader the overdue notice job uses, so an approved extension that has not
 passed is not overdue), oldest deadline first; and those with an extension request still waiting
-for a decision. Others get the audited 403 of a refused section. The page is a snapshot; refresh
+for a decision, oldest request first. Each list is selected by the database query itself (for the
+last: no decision answers the request and no later deadline revision superseded it, the rule the
+deadline replay applies), so rows that no longer qualify can never fill the 200 ahead of ones that do. Others get the audited 403 of a refused section. The page is a snapshot; refresh
 to see changes. It adds no business rule.
 
 History labels now cover every event type, including "Escalation acknowledged" with its action

@@ -12,6 +12,7 @@ from uuid import uuid4
 from cya.core.models import AuditEvent
 from cya.deficiencies import acknowledgement
 from cya.deficiencies.commands import assign_deficiency, set_deadline
+from cya.deficiencies.extensions import decide_extension
 from cya.deficiencies.models import DeficiencyProjection
 from cya.inspections.tests import test_deficiency_actions_ui as crew_actions
 from cya.inspections.tests.test_crew_ui import CrewUiCase
@@ -282,4 +283,44 @@ class QueueTests(SupervisorUiCase):
         found = self.lists(sup[0].get(self.URL))
         self.assertEqual(found["Unassigned"], [unassigned])
         self.assertEqual(found["Overdue"], [late])
+        self.assertEqual(found["Extension requests waiting for a decision"], [waiting])
+
+    def request_extension(self, pk):
+        return self.post(
+            f"/api/v1/deficiencies/{pk}/extension-requests",
+            {
+                "operation_id": str(uuid4()),
+                "expected_event_id": self.latest(pk),
+                "reason": "Synthetic delay.",
+                "proposed_deadline": (self.now + timedelta(days=5)).isoformat(),
+            },
+        ).json()["result"]["event_id"]
+
+    def test_decided_and_superseded_requests_never_hide_a_waiting_one(self):
+        decided = self.report(summary="Synthetic decided")
+        self.assign_and_due(decided, self.now + timedelta(days=2))
+        decide_extension(
+            deficiency_id=decided,
+            request_event_id=self.request_extension(decided),
+            decision="DENIED",
+            explanation="Synthetic denial.",
+            deadline=None,
+            expected_event_id=self.latest(decided),
+            **self.context(self.admin),
+        )
+        superseded = self.report(summary="Synthetic superseded")
+        self.assign_and_due(superseded, self.now + timedelta(days=2))
+        self.request_extension(superseded)
+        set_deadline(
+            deficiency_id=superseded,
+            deadline=self.now + timedelta(days=3),
+            expected_event_id=self.latest(superseded),
+            **self.context(self.admin),
+        )
+        waiting = self.report(summary="Synthetic waiting")
+        self.assign_and_due(waiting, self.now + timedelta(days=2))
+        self.request_extension(waiting)
+        sup = self.signed_in("sup-ui", "SUPERVISOR")
+        with mock.patch("cya.inspections.workflow_views.QUEUE_LIMIT", 1):
+            found = self.lists(sup[0].get(self.URL))
         self.assertEqual(found["Extension requests waiting for a decision"], [waiting])
