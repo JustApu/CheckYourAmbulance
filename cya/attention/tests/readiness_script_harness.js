@@ -47,8 +47,10 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.equal(page.sockets.length, 2);
     assert.equal(page.sockets[0].url, "wss://example.invalid/ws/a/");
     assert.equal(page.intervals[0].ms, 60000);  // the clock-only refresh
-    assert.match(page.nodes["readiness-live-state"].textContent, /0 of 4 vehicles/);
-    page.sockets[0].onopen(); page.sockets[1].onopen();
+    assert.match(page.nodes["readiness-live-state"].textContent, /^Connecting to live updates/);
+    page.sockets[0].onopen();
+    assert.match(page.nodes["readiness-live-state"].textContent, /^Connecting/);  // one still pending
+    page.sockets[1].onopen();
     assert.match(page.nodes["readiness-live-state"].textContent, /^Live for 2 of 4 vehicles/);
     page.fire();  // the reconcile after (re)connecting
     assert.equal(page.requests.length, 1);

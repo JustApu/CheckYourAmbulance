@@ -6,11 +6,12 @@
   var panel = document.getElementById("readiness-panel");
   var state = document.getElementById("readiness-live-state");
   var stale = document.getElementById("readiness-stale");
-  var refreshing = false, again = false, timer = null, open = 0, ended = false;
+  var refreshing = false, again = false, timer = null, open = 0, ended = false, tried = 0;
   function describe() {
     if (ended) { state.textContent = "Live updates stopped: sign in again to resume."; return; }
     var total = config.vehicle_count, every = "The picture re-reads every " + config.refresh_seconds + " seconds.";
     if (!config.sockets.length) { state.textContent = every; return; }
+    if (tried < config.sockets.length) { state.textContent = "Connecting to live updates… " + every; return; }
     state.textContent = (open === config.sockets.length ? "Live" : "Live updates partly lost") +
       " for " + open + " of " + total + " vehicles. " + every;
   }
@@ -32,13 +33,15 @@
   setInterval(refresh, config.refresh_seconds * 1000);
   document.addEventListener("visibilitychange", function () { if (!document.hidden) { schedule(0); } });
   config.sockets.forEach(function (path) {
-    var backoff = 1000;
+    var backoff = 1000, first = false;  // first: this vehicle's first attempt has settled
     function connect() {
       var scheme = location.protocol === "https:" ? "wss://" : "ws://";
       var socket = new WebSocket(scheme + location.host + path), counted = false;
-      socket.onopen = function () { backoff = 1000; counted = true; open += 1; describe(); schedule(0); };
+      function attempted() { if (!socket.attempted) { socket.attempted = true; if (!first) { first = true; tried += 1; } } }
+      socket.onopen = function () { attempted(); backoff = 1000; counted = true; open += 1; describe(); schedule(0); };
       socket.onmessage = function () { schedule(250); };
       socket.onclose = function (event) {
+        attempted();
         if (counted) { open -= 1; }
         if (event.code === 4401 || event.code === 4403) { ended = true; describe(); return; }
         describe();
