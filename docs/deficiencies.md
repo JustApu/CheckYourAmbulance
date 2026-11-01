@@ -424,7 +424,9 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   kit, `started_at`, `started_by`, explanation and, once ended, `ended_at` and the ending event's id
   and type. `?as_of=<instant>` answers for that moment (AC-26, AC-27): an instant before the
   deficiency was reported is `404`, a malformed or naive one `400`. Any signed-in member may read it.
-  The answer is bounded (`503` rather than truncated). **Not built here:** the supervisor screen
+  The answer is bounded (`503` rather than truncated).
+- **Deficiency page.** The history lists a start as "Routine checks suspended", and an event that
+  ended suspensions shows how many ("Check suspensions ended: 2"). **Not built here:** the supervisor screen
   ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16)) and the fleet dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)).
 
 ## The closed transition table

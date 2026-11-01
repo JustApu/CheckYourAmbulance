@@ -324,8 +324,9 @@ The corrected row repeats the chain's deficiency and scope revision, is not adde
 evidence and never closes anything. Every other verification correction (a Failed verification
 check, or a Pass corrected to Passed) stays refused with `422 NOT_YET_SUPPORTED`. A scope row for an item of kind `VEHICLE_READING` cannot be
 satisfied by a check (readings are odometer entries), so such a deficiency stays Pending
-Verification until an administrator closes it. Outbox, notification and suspension-end effects
-arrive with [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13) and [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14).
+Verification until an administrator closes it. A verified closure ends every check suspension
+still in force ([issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13), [deficiencies](deficiencies.md#supervisor-check-suspension)); outbox and notification
+effects arrive with [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14).
 
 [Issue #15](https://github.com/JustApu/CheckYourAmbulance/issues/15) exposes the stored
 `verification` result through the HTTP check acknowledgement as `result.verification` when
