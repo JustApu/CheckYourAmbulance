@@ -63,10 +63,14 @@ Distinct exemption/waiver/suspension reasons take display precedence over checks
   closed while it was suspended stays `SUSPENDED` after the suspension ends (never Overdue, never
   Satisfied), a suspension that starts after G cannot erase an inspection already missed, and one
   that ends while the window is open makes the check required again (Current, Due, then Overdue
-  unless checked). `evidence_id` is the suspension's `START` id; with several, the earliest start.
+  unless checked). A qualifying check, or supervisor completion, recorded before the suspension
+  started still satisfies the obligation, through G and after the end: a suspension covers only an
+  obligation still unsatisfied when it starts. `evidence_id` is the suspension's `START` id; with
+  several, the earliest start.
   `suspension_ended_at` is set when that suspension had ended by T (`suspension_in_force` is
   false), so a reader can tell an ended suspension kept in history from one still in force.
-  These two boundary readings are implementation assumptions of [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13), recorded on its PR.
+  The `min(T, G)` boundary readings are implementation assumptions of [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13), recorded on its PR;
+  the earlier-check rule is an owner decision (2026-11-01, PR #29).
 - An effective, explicitly linked Passed or Failed check satisfies the obligation.
   Not Applicable additionally needs applicable administrator-rule evidence.
   Unable alone does not satisfy it. A supervisor completion additionally requires an

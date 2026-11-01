@@ -219,6 +219,26 @@ class StateTests(SimpleTestCase):
             self.evaluate(8, suspensions=[early], checks=[later_check]).state, State.SATISFIED
         )
 
+    def test_a_check_recorded_before_the_suspension_started_still_satisfies_it(self):
+        # Owner decision (issue #13 review): a suspension never revokes an obligation already
+        # satisfied when it started, even when it lasts through G and after it ends.
+        suspension = SuspensionEvidence("obligation", self.at(6.5), self.at(9), "suspension")
+        earlier = self.check(at=6.25)
+        for at in (6.75, 8, 10):
+            result = self.evaluate(at, suspensions=[suspension], checks=[earlier])
+            self.assertEqual(
+                (result.state, result.evidence_id, result.outcome),
+                (State.SATISFIED, "check", "PASSED"),
+            )
+        failed = self.check("FAILED", at=6.25)
+        self.assertEqual(
+            self.evaluate(8, suspensions=[suspension], checks=[failed]).outcome, "FAILED"
+        )
+        # A check recorded at or after the start does not satisfy it (SUS-2).
+        for at in (6.5, 6.75):
+            result = self.evaluate(8, suspensions=[suspension], checks=[self.check(at=at)])
+            self.assertEqual(result.state, State.SUSPENDED)
+
     def test_suspension_needs_a_routine_obligation_known_by_t_and_starting_by_g(self):
         known_later = SuspensionEvidence("obligation", self.at(6.5))
         self.assertEqual(self.evaluate(6.25, suspensions=[known_later]).state, State.DUE)

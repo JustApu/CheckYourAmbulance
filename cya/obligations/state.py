@@ -240,6 +240,7 @@ def _suspension_for(obligation, suspensions, instant):
     suspended stays Suspended after the suspension ends (never Overdue, never Satisfied), and a
     suspension that starts after G cannot erase an inspection already missed. One that ends while
     the window is still open makes the check required again. Ties break on the earliest start.
+    The caller lets a qualifying check recorded before that start win.
     """
     basis = min(instant, obligation.grace_at)
     found = None
@@ -327,8 +328,15 @@ def evaluate_obligation(
             instant, obligation.due_at
         ):
             return ObligationState(obligation, State.WAIVED, determination.id)
+    satisfaction = _satisfaction(
+        obligation, _checks_for(obligation, checks, instant), determination
+    )
     suspension = _suspension_for(obligation, suspensions, instant)
-    if suspension is not None:
+    # A suspension never revokes an obligation already satisfied when it started (owner decision):
+    # it covers only an obligation still unsatisfied at its start.
+    if suspension is not None and (
+        satisfaction is None or satisfaction.completed_at >= suspension.recorded_at
+    ):
         ended = suspension.ended_at
         return ObligationState(
             obligation,
@@ -336,9 +344,6 @@ def evaluate_obligation(
             suspension.suspension_id,
             suspension_ended_at=ended if ended is not None and ended <= instant else None,
         )
-    satisfaction = _satisfaction(
-        obligation, _checks_for(obligation, checks, instant), determination
-    )
     if satisfaction is not None:
         return satisfaction
     if instant < obligation.early_at:

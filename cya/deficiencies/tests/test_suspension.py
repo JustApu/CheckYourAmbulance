@@ -67,6 +67,13 @@ class SuspensionMixin:
             **{**self.context(actor or self.admin), **fields},
         )
 
+    def cabinet_target(self):
+        """A compartment target whose scope holds suction, masks and the cabinet's other items."""
+        compartment = Compartment.objects.get(
+            vehicle=self.vehicle, stable_slot_id=self.cabinet.stable_slot_id
+        )
+        return {"compartment_id": str(compartment.pk)}
+
     def suspension_counts(self):
         return self.counts(), CheckSuspension.objects.count()
 
@@ -81,7 +88,7 @@ class SuspensionMixin:
 
 class StartTests(SuspensionMixin, VerificationBase):
     def test_a_suspension_is_an_event_and_start_rows_and_changes_nothing_else(self):
-        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        deficiency_id = self.report(self.cabinet_target())
         before = DeficiencyProjection.objects.get(deficiency_id=deficiency_id)
         statuses = VehicleStatusEvent.objects.count()
         result = self.suspend(
@@ -192,13 +199,27 @@ class StartTests(SuspensionMixin, VerificationBase):
         self.assertEqual(self.suspension_counts(), counts)
 
     def test_the_number_in_force_is_bounded(self):
-        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        deficiency_id = self.report(self.cabinet_target())
         with mock.patch.object(service, "MAX_SUSPENSIONS_IN_FORCE", 1):
             self.suspend(deficiency_id)
             self.refused_without_writes(
                 "TOO_MANY_SUSPENSIONS",
                 lambda: self.suspend(deficiency_id, [{"item_id": str(self.masks.pk)}]),
             )
+
+    def test_only_items_in_the_affected_scope_can_be_suspended(self):
+        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        error = self.refused_without_writes(
+            "ITEM_NOT_IN_SCOPE",
+            lambda: self.suspend(
+                deficiency_id,
+                [{"item_id": str(self.suction.pk)}, {"item_id": str(self.masks.pk)}],
+            ),
+        )
+        self.assertEqual(error.path, "items[1]")
+        self.assertEqual(len(self.starts(deficiency_id)), 0)
+        self.suspend(deficiency_id)  # the item the deficiency names is in scope
+        self.assertEqual(len(self.in_force(deficiency_id)), 1)
 
     def test_another_deficiency_may_suspend_the_same_item(self):
         first = self.report({"item_id": str(self.suction.pk)})
@@ -223,7 +244,7 @@ class KitStartTests(SuspensionMixin, VerificationBase):
         )
 
     def test_a_kit_item_names_its_physical_instance(self):
-        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        deficiency_id = self.report(self.cabinet_target())
         item = str(self.kit_item.pk)
         self.refused_without_writes(
             "KIT_REQUIRED", lambda: self.suspend(deficiency_id, [{"item_id": item}])
@@ -240,7 +261,7 @@ class KitStartTests(SuspensionMixin, VerificationBase):
             compartment_id=str(drawer.pk),
             **self.context(self.supervisor),
         ).body["kit_id"]
-        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        deficiency_id = self.report(self.cabinet_target())
         original = CheckSuspension.objects.bulk_create
 
         def elsewhere(rows, *rest, **kwargs):
@@ -289,11 +310,14 @@ class EndingTests(SuspensionMixin, VerificationBase):
         self.assertEqual(self.in_force(deficiency_id), [])
 
     def test_a_verified_closure_ends_every_suspension_and_lists_it(self):
-        deficiency_id = self.pending({"item_id": str(self.suction.pk)})
+        deficiency_id = self.pending(self.cabinet_target())
         self.suspend(deficiency_id, [{"item_id": str(self.suction.pk)}])
         self.suspend(deficiency_id, [{"item_id": str(self.masks.pk)}])
         starts = self.starts(deficiency_id)
-        result = self.verify(deficiency_id)
+        for item in (self.suction, self.masks, self.gauge, self.special):
+            self.verify(deficiency_id, item)
+        self.assertEqual(self.status(deficiency_id), "PENDING_VERIFICATION")
+        result = self.verify(deficiency_id, self.limited)
         event = self.last_event(deficiency_id)
         self.assertEqual(
             (event.event_type, self.status(deficiency_id)),
@@ -444,7 +468,7 @@ class RaceTests(SuspensionMixin, VerificationBase):
         deficiency_id = self.pending({"item_id": str(self.suction.pk)})
         with self.hold("cya.deficiencies.suspension.resolve_items"):
             suspended, passed = self.run_ordered(
-                lambda: self.suspend(deficiency_id, [{"item_id": str(self.masks.pk)}]),
+                lambda: self.suspend(deficiency_id),
                 lambda: self.verify(deficiency_id),
             )
         self.assertFalse(isinstance(suspended, Exception), suspended)
@@ -533,7 +557,7 @@ class DatabaseGuardTests(SuspensionMixin, VerificationBase):
     def test_no_other_event_may_end_a_suspension(self):
         from cya.deficiencies.models import DeficiencyEvent
 
-        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        deficiency_id = self.report(self.cabinet_target())
         self.suspend(deficiency_id)
         own = str(self.starts(deficiency_id)[0].pk)
         original = DeficiencyEvent.objects.create
@@ -767,7 +791,8 @@ class ObligationTests(SuspensionMixin, AttentionCase, VerificationBase):
 
     def test_only_the_named_kit_instance_is_suspended(self):
         self.clock.set(self.at(hours=5, minutes=30))
-        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        # A report on the kit item without an instance covers both physical kits.
+        deficiency_id = self.report({"item_id": str(self.kit_item.pk)})
         self.suspend(
             deficiency_id,
             [{"item_id": str(self.kit_item.pk), "kit_instance_id": self.reference}],
@@ -777,6 +802,21 @@ class ObligationTests(SuspensionMixin, AttentionCase, VerificationBase):
         only = self.item_ids(needs_attention_only=True)
         self.assertNotIn((str(self.kit_item.pk), self.reference), only)
         self.assertIn((str(self.kit_item.pk), self.kit_b), only)
+
+    def test_a_pass_recorded_before_the_suspension_keeps_its_obligation_satisfied(self):
+        self.clock.set(self.at(hours=5, minutes=30))
+        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        self.record(self.suction)
+        self.clock.set(self.at(hours=5, minutes=40))
+        self.suspend(deficiency_id)
+        self.assertEqual(self.states(self.suction)[self.at(hours=6)].state, State.SATISFIED)
+        # Past G and after the suspension ends, the earlier Pass still counts.
+        self.clock.set(self.at(hours=8))
+        self.assertEqual(self.states(self.suction)[self.at(hours=6)].state, State.SATISFIED)
+        self.close(deficiency_id)
+        self.clock.set(self.at(hours=9))
+        satisfied = self.states(self.suction)[self.at(hours=6)]
+        self.assertEqual((satisfied.state, satisfied.outcome), (State.SATISFIED, "PASSED"))
 
     def test_a_suspension_cannot_erase_an_inspection_already_missed(self):
         self.clock.set(self.at(hours=8))  # past G of the 06:00 inspection, never checked

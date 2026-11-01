@@ -253,6 +253,12 @@ class DeficiencyApiTests(DeficiencyCase):
         self.rejected(
             self.post(body(), url), 422, "ALREADY_SUSPENDED", [("items[0]", "ALREADY_SUSPENDED")]
         )
+        self.rejected(
+            self.post(body(items=[{"item_id": str(self.masks.pk)}]), url),
+            422,
+            "ITEM_NOT_IN_SCOPE",
+            [("items[0]", "ITEM_NOT_IN_SCOPE")],
+        )
         listing = self.client.get(url)
         self.assertEqual(listing.status_code, 200, listing.content)
         self.assertEqual(listing.json()["in_force"], [suspension_id])

@@ -2,8 +2,8 @@
 (https://github.com/JustApu/CheckYourAmbulance/issues/13)).
 
 suspend_checks lets a Supervisor or Administrator (the SPEC 3.3 suspend_routine_checks permission)
-name exactly which items, and physical kit instances for kit-defined items, of the vehicle's
-current checklist stop needing their routine check while the deficiency is being worked (SUS-1). It
+name exactly which items, and physical kit instances for kit-defined items, within the
+deficiency's current affected scope stop needing their routine check while the deficiency is being worked (SUS-1). It
 appends CHECKS_SUSPENDED (status unchanged) and one check_suspension START per item. A suspension
 is not a Pass, leaves every other check required and never changes operational status (SUS-2): the
 obligation reader shows the item's routine obligations as Suspended instead.
@@ -28,7 +28,12 @@ from cya.deficiencies import service
 from cya.deficiencies.commands import _authorizer, _operation_id, publish_changed
 from cya.deficiencies.effects import NO_KIT_KEY
 from cya.deficiencies.expansion import _lock, parse_items, resolve_items
-from cya.deficiencies.models import CheckSuspension, DeficiencyEvent, DeficiencyProjection
+from cya.deficiencies.models import (
+    CheckSuspension,
+    Deficiency,
+    DeficiencyEvent,
+    DeficiencyProjection,
+)
 from cya.deficiencies.service import DeficiencyError
 from cya.operations.models import MAX_TEXT
 
@@ -53,6 +58,29 @@ def _not_suspended_yet(in_force, resolved):
             f"a deficiency may suspend at most {service.MAX_SUSPENSIONS_IN_FORCE} checks at once",
             path="items",
         )
+
+
+def _within_scope(organization_id, deficiency_id, resolved, now):
+    """Refuse an item and kit outside the deficiency's current affected scope (owner decision).
+
+    The scope is the one a correction would resolve now (service.correction_scope): the report-time
+    target plus supervisor expansions, against today's checklist and kit placement. A suspension is
+    for the known defect (SUS-1), so it names only checks that defect affects.
+    """
+    deficiency = Deficiency.objects.get(organization_id=organization_id, pk=deficiency_id)
+    scope = {
+        (item_id, kit_id)
+        for item_id, _definition, kit_id in service.correction_scope(
+            organization_id, deficiency, now
+        )
+    }
+    for index, (item_id, _definition, kit_id) in enumerate(resolved):
+        if (item_id, kit_id) not in scope:
+            raise DeficiencyError(
+                "ITEM_NOT_IN_SCOPE",
+                "only an item and kit within the deficiency's affected scope can be suspended",
+                path=f"items[{index}]",
+            )
 
 
 def _start_rows(resolved, *, organization_id, deficiency_id, vehicle_id, event, ids, stamp):
@@ -90,7 +118,8 @@ def suspend_checks(
 ):
     """Suspend the routine checks of the named items for this deficiency (SUS-1, SUS-2).
 
-    items is 1 to 50 distinct {item_id, kit_instance_id?} from the vehicle's current checklist;
+    items is 1 to 50 distinct {item_id, kit_instance_id?} from the vehicle's current checklist and
+    within the deficiency's affected scope (422 ITEM_NOT_IN_SCOPE);
     explanation is optional (at most 4,000 characters, not blank). The deficiency must still be
     worked (422 DEFICIENCY_NOT_ACTIVE) and must not already suspend one of the items
     (422 ALREADY_SUSPENDED). A replay with the same operation_id returns the stored answer.
@@ -111,6 +140,7 @@ def suspend_checks(
         service.require_active(projection)
         now = timezone.now()
         resolved = resolve_items(organization_id, vehicle_id, items, now)
+        _within_scope(organization_id, deficiency_id, resolved, now)
         _not_suspended_yet(service.suspensions_in_force(organization_id, deficiency_id), resolved)
         event_id = new_id()
         suspension_ids = [new_id() for _ in resolved]

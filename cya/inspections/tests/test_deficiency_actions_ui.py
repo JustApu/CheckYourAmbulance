@@ -215,7 +215,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
             )
 
         verified = self.pending()
-        suspend(verified, self.suction, self.masks)
+        suspend(verified, self.suction)
         page = self.detail(verified)
         self.assertContains(page, "Routine checks suspended")
         self.assertNotContains(page, "Check suspensions ended")
@@ -234,7 +234,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
             },
         )
         self.assertEqual(saved.json()["result"]["verification"]["status"], "CLOSED_VERIFIED")
-        self.assertContains(self.detail(verified), "Check suspensions ended: 2", count=1)
+        self.assertContains(self.detail(verified), "Check suspensions ended: 1", count=1)
 
         closed = self.report()
         suspend(closed, self.suction)

@@ -370,8 +370,11 @@ closing commands, and the obligation and attention readers ([obligation state](o
 characters). It needs the `suspend_routine_checks` permission (Supervisor, Administrator); Crew and
 Supply Officers are refused and the denial is audited. Each item must be on the vehicle's current
 checklist (`422 ITEM_NOT_IN_CHECKLIST`); a kit-defined item names one of its active physical kit
-instances on the vehicle (`KIT_REQUIRED`) and any other item names none (`KIT_NOT_ALLOWED`). An item
-may lie outside the deficiency's own target. The deficiency must still be worked (Open, In Progress,
+instances on the vehicle (`KIT_REQUIRED`) and any other item names none (`KIT_NOT_ALLOWED`). Each
+item and kit instance must lie within the deficiency's current affected scope, the scope a
+correction would resolve now: its report-time target plus supervisor expansions, against today's
+checklist and kit placement (`422 ITEM_NOT_IN_SCOPE`, owner decision 2026-11-01 on PR #29). A
+deficiency on one kit instance therefore cannot suspend the other instance. The deficiency must still be worked (Open, In Progress,
 Awaiting External Dependency or Pending Verification; otherwise `422 DEFICIENCY_NOT_ACTIVE`), must
 not already suspend that item and kit (`422 ALREADY_SUSPENDED`), and may hold at most 200
 suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
@@ -387,7 +390,9 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   named physical instance) show `SUSPENDED`, displayed "Known Deficiency — Check Suspended". They are
   never Satisfied, a check recorded anyway does not satisfy them, and they leave Needs Attention Only
   but stay in the full checklist with the deficiency beside them (AC-18). Every other check stays
-  required. Explicit ad hoc orders (ADH-1) are not routine and are never suspended. See
+  required. An obligation already satisfied by a check recorded before the suspension started stays
+  Satisfied (owner decision 2026-11-01): a suspension never revokes completed work. Explicit ad hoc
+  orders (ADH-1) are not routine and are never suspended. See
   [obligation state](obligation-state.md#pure-evaluator-and-precedence) for the instant at which a
   suspension is judged.
 - **Ending.** Nothing ends a suspension except the deficiency leaving the active statuses: verified
@@ -426,7 +431,7 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   deficiency was reported is `404`, a malformed or naive one `400`. Any signed-in member may read it.
   The answer is bounded (`503` rather than truncated).
 - **Deficiency page.** The history lists a start as "Routine checks suspended", and an event that
-  ended suspensions shows how many ("Check suspensions ended: 2"). **Not built here:** the supervisor screen
+  ended suspensions shows how many ("Check suspensions ended: 1"). **Not built here:** the supervisor screen
   ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16)) and the fleet dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)).
 
 ## The closed transition table
