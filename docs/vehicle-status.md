@@ -3,8 +3,8 @@
 [issue #57](https://github.com/JustApu/CheckYourAmbulance-archive/issues/57) implements [SPEC §9 (OPS-1–OPS-6)](../SPEC.md#9-operational-status) and
 [§5.9](../SPEC.md#59-out-of-service-exemption-c-req-22) on the `vehicle_status_event`
 and `status_request` tables of [contracts §2](data-model-contracts.md#identity-and-fleet).
-It does not generate obligations or send notifications. Those consumers call the read
-functions below; the endpoints and screens are [described further down](#http-endpoints-and-screens).
+It does not generate obligations; that consumer calls the read functions below. The commands'
+[notifications](#commands-cyaoperationscommands) come from issue #14; the endpoints and screens are [described further down](#http-endpoints-and-screens).
 
 ## Statuses
 

@@ -742,8 +742,8 @@ malformed anyway makes the reader answer `503` rather than fail.
 
 ## Acknowledging escalation
 
-[issue #151](https://github.com/JustApu/CheckYourAmbulance-archive/issues/151) implements DEF-7 without producing notifications; escalation delivery and timing belong
-to [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14). POST /api/v1/deficiencies/{id}/escalation-acknowledgements takes operation_id,
+[issue #151](https://github.com/JustApu/CheckYourAmbulance-archive/issues/151) implements DEF-7 without producing notifications; [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)
+adds the [overdue notice](notifications.md#overdue-deadlines), which an active acknowledgement suppresses. POST /api/v1/deficiencies/{id}/escalation-acknowledgements takes operation_id,
 expected_event_id, a nonblank explanation, a nonblank action_plan, and period_days. Supervisors
 and Administrators may acknowledge; Crew and Supply Officers are denied. The command requires an
 active deficiency, uses the deficiency lock and stale-event check, and appends
