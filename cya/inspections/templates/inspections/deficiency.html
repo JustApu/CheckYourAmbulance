@@ -74,6 +74,116 @@
 </form>
 {% endif %}
 {% endif %}
+{% if suspensions %}
+<section class="panel"><h2>Check suspensions</h2>
+<p>A suspended check is never a Pass. Suspensions end automatically when the deficiency is closed or Reported in Error; there is no other way to end one.</p>
+<ul>{% for row in suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended from {{ row.started_at|date:"Y-m-d H:i" }} UTC{% if row.ended_at %}; ended {{ row.ended_at|date:"Y-m-d H:i" }} UTC ({{ row.end_label }}){% else %}; in force{% endif %}{% if row.explanation %}<p>{{ row.explanation }}</p>{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% if supervisor.shown %}
+<h2>Supervisor actions</h2>
+{% if supervisor.assignees is not None %}
+<form class="panel workflow-write" data-kind="assign" data-url="{% url 'api-deficiency-assignments' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Assign</h2>
+<label>Assignee <select name="assignee_id" required><option value="">Choose a person</option>{% for id, name in supervisor.assignees %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>
+<button type="submit" class="button primary">Assign</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if supervisor.can_set_deadline %}
+<form class="panel workflow-write" data-kind="deadline" data-url="{% url 'api-deficiency-deadlines' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Set deadline</h2>
+<p>A new deadline replaces any extension decided under the old one; earlier deadlines stay in the history.</p>
+<label>Deadline (UTC) <input name="deadline" type="datetime-local" required></label>
+<button type="submit" class="button primary">Set deadline</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if supervisor.can_start_work %}
+<form class="panel workflow-write" data-kind="start-work" data-url="{% url 'api-deficiency-work-starts' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<p>Move this deficiency from Open to In Progress.</p>
+<button type="submit" class="button primary">Start work</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% for request in supervisor.pending_extensions %}
+<form class="panel workflow-write" data-kind="extension-decision" data-url="{% url 'api-deficiency-extension-decisions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Decide extension request</h2>
+<p>Requested {{ request.requested_at|date:"Y-m-d H:i" }} UTC for {{ request.proposed_deadline|date:"Y-m-d H:i" }} UTC: {{ request.reason }}</p>
+<input type="hidden" name="request_event_id" value="{{ request.request_event_id }}">
+<label>Decision <select name="decision" required><option value="">Choose a decision</option><option value="APPROVED">Approve the proposed date</option><option value="DIFFERENT_DATE">Approve a different date</option><option value="DENIED">Deny</option></select></label>
+<label>Different date (UTC, only for a different date) <input name="deadline" type="datetime-local"></label>
+<label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
+<button type="submit" class="button primary">Record decision</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endfor %}
+{% if supervisor.acknowledgement %}
+{% if supervisor.acknowledgement.maximum_days %}
+<form class="panel workflow-write" data-kind="acknowledge" data-url="{% url 'api-deficiency-escalation-acknowledgements' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Acknowledge escalation</h2>
+{% with current=supervisor.acknowledgement.acknowledgement %}{% if current and current.active %}<p>Acknowledged until {{ current.acknowledgement_until|date:"Y-m-d H:i" }} UTC. A new acknowledgement replaces it from now.</p>{% endif %}{% endwith %}
+<p>While acknowledged, the overdue notice is held back. It never changes the deadline.</p>
+<label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
+<label>Action plan <textarea name="action_plan" required maxlength="4000"></textarea></label>
+<label>Period in days (1 to {{ supervisor.acknowledgement.maximum_days }}) <input name="period_days" type="number" min="1" max="{{ supervisor.acknowledgement.maximum_days }}" required></label>
+<button type="submit" class="button primary">Acknowledge</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% else %}
+<section class="panel"><h2>Acknowledge escalation</h2><p>An administrator must set the longest acknowledgement period first.</p></section>
+{% endif %}
+{% endif %}
+{% if supervisor.severities is not None %}
+<form class="panel workflow-write" data-kind="regrade" data-url="{% url 'api-deficiency-severity-changes' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Re-grade severity</h2>
+<p>Current: {{ severity.label }}.</p>
+{% for level in supervisor.severities %}<label class="severity-choice"><input type="radio" name="severity" value="{{ level.code }}" required> <strong>{{ level.label }}</strong>: {{ level.description }}</label>{% empty %}<p>No severity levels are available. Tell an administrator.</p>{% endfor %}
+<label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
+<button type="submit" class="button primary">Change severity</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if supervisor.verification_items is not None %}
+<form class="panel workflow-write" data-kind="{% if supervisor.expanding %}expand{% else %}add-verification{% endif %}" data-url="{% if supervisor.expanding %}{% url 'api-deficiency-scope-expansions' deficiency.pk %}{% else %}{% url 'api-deficiency-added-verifications' deficiency.pk %}{% endif %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>{% if supervisor.expanding %}Expand verification scope{% else %}Add verification after closure{% endif %}</h2>
+<p>{% if supervisor.expanding %}Each item and physical kit you add needs its own verification Pass.{% else %}This reopens the deficiency; each item and physical kit you add needs a verification Pass by the deadline.{% endif %}</p>
+<fieldset><legend>Items</legend>{% for value, label in supervisor.verification_items %}<label><input type="checkbox" name="items" value="{{ value }}"> {{ label }}</label>{% empty %}<p>No current checklist items.</p>{% endfor %}</fieldset>
+{% if not supervisor.expanding %}<label>Verification deadline (UTC) <input name="deadline" type="datetime-local" required></label>{% endif %}
+<label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
+<button type="submit" class="button primary">{% if supervisor.expanding %}Expand scope{% else %}Add verification{% endif %}</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if supervisor.suspension_items is not None %}
+<form class="panel workflow-write" data-kind="suspend" data-url="{% url 'api-deficiency-check-suspensions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Suspend routine checks</h2>
+<p>Choose exactly which checks stop being required while this deficiency is worked. A suspension is not a Pass, other checks stay required, and operational status does not change.</p>
+<fieldset><legend>Items in this deficiency's scope</legend>{% for value, label in supervisor.suspension_items %}<label><input type="checkbox" name="items" value="{{ value }}"> {{ label }}</label>{% empty %}<p>No current checklist items are in this deficiency's scope.</p>{% endfor %}</fieldset>
+<label>Explanation (optional) <textarea name="explanation" maxlength="4000"></textarea></label>
+<button type="submit" class="button primary">Suspend checks</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if supervisor.can_close %}
+<form class="panel workflow-write" data-kind="admin-close" data-url="{% url 'api-deficiency-administrator-closures' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Close without verification</h2>
+<p>Administrator only. The deficiency closes as "Closed — Administrator" and any check suspensions end.</p>
+<label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
+<button type="submit" class="button">Close deficiency</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if supervisor.can_reopen %}
+<form class="panel workflow-write" data-kind="admin-reopen" data-url="{% url 'api-deficiency-administrator-reopenings' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Reopen</h2>
+<p>Administrator only. Reopens this explicitly closed deficiency.</p>
+<label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
+<button type="submit" class="button primary">Reopen deficiency</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% endif %}
 <h2>History</h2>
 <p>Correct entry fixes an accidental check entry. It is never a repair or verification.</p>
 <ol>
@@ -85,6 +195,8 @@
 {% if event.deadline %}<p>Deadline: {{ event.deadline|date:"Y-m-d H:i" }} UTC</p>{% endif %}
 {% if event.proposed_deadline %}<p>Proposed deadline: {{ event.proposed_deadline|date:"Y-m-d H:i" }} UTC</p>{% endif %}
 {% if event.decision %}<p>Decision: {{ event.decision_label }}</p>{% endif %}
+{% if event.action_plan %}<p>Action plan: {{ event.action_plan }}</p>{% endif %}
+{% if event.acknowledgement_until %}<p>Acknowledged until: {{ event.acknowledgement_until|date:"Y-m-d H:i" }} UTC</p>{% endif %}
 {% if event.follow_up_at %}<p>Follow-up: {{ event.follow_up_at|date:"Y-m-d H:i" }} UTC</p>{% endif %}
 {% if event.suspensions_ended %}<p>Check suspensions ended: {{ event.suspensions_ended|length }}</p>{% endif %}
 </li>

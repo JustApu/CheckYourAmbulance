@@ -1,4 +1,9 @@
-"""Read-only HTML shells for issue 86 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/86); all writes use existing audited JSON endpoints."""
+"""Read-only HTML shells for issue 86 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/86); all writes use existing audited JSON endpoints.
+
+Issue 16 (https://github.com/JustApu/CheckYourAmbulance/issues/16) adds the supervisor and
+administrator forms to the deficiency page and the supervisor queue. Form visibility follows the
+permission policy and the deficiency's status; every command still rechecks both.
+"""
 
 import logging
 from functools import wraps
@@ -15,11 +20,17 @@ from cya.attention.api import _authors, _row
 from cya.attention.checklist import vehicle_checklist
 from cya.authorization.backend import canonical_id
 from cya.authorization.policy import ResourceContext, permitted
-from cya.checklists.models import KitInstance, Vehicle
-from cya.deficiencies import service
-from cya.deficiencies.models import Deficiency, DeficiencyProjection
+from cya.checklists.models import Item, KitInstance, Vehicle
+from cya.deficiencies import acknowledgement, overdue, service, suspension
+from cya.deficiencies.commands import ASSIGNEE_ROLES
+from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
 from cya.deficiencies.service import DeficiencyError, suggest_related
-from cya.deficiencies.transitions import ACTIVE_STATUSES
+from cya.deficiencies.transitions import (
+    ACTIVE_STATUSES,
+    CLOSED_ADMINISTRATOR,
+    CLOSED_UNVERIFIABLE,
+    CLOSED_VERIFIED,
+)
 from cya.inspections.views import _authorized, _status, _vehicle, reverse_socket
 from cya.inspections.workflows import (
     check_history,
@@ -27,7 +38,9 @@ from cya.inspections.workflows import (
     report_options,
     verification_scope,
 )
+from cya.notifications.enqueue import resolve_recipients
 from cya.shell.navigation import roles_for
+from cya.shell.views import deny_section
 
 logger = logging.getLogger(__name__)
 EVENT_LABELS = {
@@ -55,6 +68,7 @@ EVENT_LABELS = {
     "SCOPE_EXPANDED": "Verification scope expanded",
     "VERIFICATION_ADDED": "Reopened — verification added after closure",
     "CHECKS_SUSPENDED": "Routine checks suspended",
+    "ESCALATION_ACKNOWLEDGED": "Escalation acknowledged",
 }
 STATUS_LABELS = {
     "OPEN": "Open",
@@ -75,7 +89,8 @@ def page(view):
     def wrapped(request, *args, **kwargs):
         section = (
             "deficiencies"
-            if view.__name__ in ("deficiencies", "deficiency", "verification", "verification_items")
+            if view.__name__
+            in ("deficiencies", "deficiency", "verification", "verification_items", "queue")
             else "inspection"
         )
         user, refusal = _authorized(request, section)
@@ -128,6 +143,7 @@ def deficiencies(request, user):
         "inspections/deficiencies.html",
         {
             "title": "Deficiencies",
+            "can_view_queue": permitted("decide_extension", str(user.pk), roles_for(user)),
             "deficiencies": rows,
             "vehicles": vehicles,
         },
@@ -169,6 +185,110 @@ def report(request, user, vehicle_id):
             },
         },
     )
+
+
+MAX_CHOICES = 500  # item, kit and assignee choices one form offers
+
+
+def _item_choices(organization_id, vehicle_id, now, within=None):
+    """[(value "item_id:kit_id", label)] from the vehicle's current checklist, optionally limited
+    to the (item, kit) pairs in `within`. The server resolves the same rows again and refuses any
+    choice that no longer applies."""
+    rows = vehicle_checklist(organization_id, vehicle_id, as_of=now).rows
+    choices = {}
+    for row in rows:
+        key = (str(row.item_id), str(row.kit_id) if row.kit_id else None)
+        if within is not None and key not in within:
+            continue
+        label = row.item_label + (f" — {row.kit_label}" if row.kit_label else "")
+        choices[f"{key[0]}:{key[1] or ''}"] = label
+    return sorted(choices.items(), key=lambda p: (p[1], p[0]))[:MAX_CHOICES]
+
+
+def _suspensions(organization_id, deficiency_id):
+    rows = suspension.suspension_state(organization_id, deficiency_id)["suspensions"]
+    items = {
+        str(i.pk): i.label
+        for i in Item.objects.filter(
+            organization_id=organization_id, pk__in={r["item_id"] for r in rows}
+        )
+    }
+    kits = {
+        str(k.pk): k.label
+        for k in KitInstance.objects.filter(
+            organization_id=organization_id,
+            pk__in={r["kit_instance_id"] for r in rows if r["kit_instance_id"]},
+        )
+    }
+    for row in rows:
+        row["label"] = items.get(row["item_id"], "Item") + (
+            f" — {kits.get(row['kit_instance_id'], 'Kit')}" if row["kit_instance_id"] else ""
+        )
+        row["end_label"] = EVENT_LABELS.get(row["end_event_type"] or "", "")
+    return rows
+
+
+def _supervisor_controls(user, found, status, roles, context, deadline):
+    """What the supervisor and administrator forms need; None for a form the user cannot use.
+
+    Visibility only: each command rechecks the permission, the status and the expected event.
+    """
+    org, deficiency_id, now = str(user.organization_id), str(found.pk), timezone.now()
+    active = status.status in ACTIVE_STATUSES
+
+    def may(action):
+        return permitted(action, str(user.pk), roles, context=context)
+
+    controls = {
+        "assignees": None,
+        "can_set_deadline": False,
+        "can_start_work": False,
+        "pending_extensions": [],
+        "acknowledgement": None,
+        "severities": None,
+        "verification_items": None,
+        "expanding": False,
+        "suspension_items": None,
+        "can_close": False,
+        "can_reopen": False,
+    }
+    if active and may("assign_deficiency_deadline"):
+        controls["assignees"] = sorted(
+            (
+                (str(u.pk), u.display_name)
+                for u in resolve_recipients(org, roles=[r.value for r in ASSIGNEE_ROLES])
+            ),
+            key=lambda p: (p[1], p[0]),
+        )[:MAX_CHOICES]
+        controls["can_set_deadline"] = True
+        controls["can_start_work"] = status.status == "OPEN"
+    if active and may("decide_extension"):
+        controls["pending_extensions"] = [
+            r for r in deadline["requests"] if r["status"] == "PENDING" and not r["superseded"]
+        ]
+    if active and may("acknowledge_escalation"):
+        controls["acknowledgement"] = acknowledgement.acknowledgement_state(org, deficiency_id)
+    if active and may("regrade_deficiency_severity"):
+        controls["severities"] = report_options(user.organization_id, now)["severities"]
+    if may("expand_verification") and status.status in ("PENDING_VERIFICATION", CLOSED_VERIFIED):
+        controls["verification_items"] = _item_choices(org, str(found.vehicle_id), now)
+        controls["expanding"] = status.status == "PENDING_VERIFICATION"
+    if active and may("suspend_routine_checks"):
+        scope = {
+            (str(item), str(kit) if kit else None)
+            for item, _definition, kit in service.correction_scope(org, found, now)
+        }
+        controls["suspension_items"] = _item_choices(org, str(found.vehicle_id), now, scope)
+    if may("explicit_deficiency_close"):
+        controls["can_close"] = active
+        controls["can_reopen"] = status.status in (CLOSED_ADMINISTRATOR, CLOSED_UNVERIFIABLE)
+    # A form is offered when its value is set; an empty choice list still shows its form.
+    controls["shown"] = bool(controls["pending_extensions"]) or any(
+        value is not None and value is not False
+        for key, value in controls.items()
+        if key not in ("pending_extensions", "expanding")
+    )
+    return controls
 
 
 @page
@@ -232,10 +352,67 @@ def deficiency(request, user, deficiency_id):
             "age_days": deadline["age_seconds"] // 86400,
             "assignee": status.assignee,
             "scope": verification_scope(found) if status.status == "PENDING_VERIFICATION" else [],
+            "suspensions": _suspensions(str(user.organization_id), str(found.pk)),
+            "supervisor": _supervisor_controls(user, found, status, roles, context, deadline),
             "config": {
                 "correction_url": reverse("api-deficiency-corrections", args=[found.pk]),
                 "expected_event_id": str(status.last_applied_event_id),
             },
+        },
+    )
+
+
+QUEUE_LIMIT = 200  # rows per queue list; a longer list says it is cut short
+
+
+def _queue_rows(projections):
+    rows = list(projections[: QUEUE_LIMIT + 1])
+    for row in rows:
+        row.status_label = STATUS_LABELS[row.status]
+    return rows[:QUEUE_LIMIT], len(rows) > QUEUE_LIMIT
+
+
+@page
+def queue(request, user):
+    """Unassigned, overdue and pending-extension deficiencies (issue 16), from existing readers."""
+    roles = roles_for(user)
+    if not permitted("decide_extension", str(user.pk), roles):
+        return deny_section(request, user, roles, "VIEW_DEFICIENCY_QUEUE")
+    org, now = str(user.organization_id), timezone.now()
+    active = DeficiencyProjection.objects.filter(
+        organization_id=org, status__in=ACTIVE_STATUSES
+    ).select_related("deficiency__vehicle", "assignee")
+    unassigned, unassigned_more = _queue_rows(
+        active.filter(assignee__isnull=True).order_by("deficiency__reported_at", "deficiency_id")
+    )
+    late, late_more = _queue_rows(
+        overdue.candidates(org, now)
+        .select_related("deficiency__vehicle", "assignee")
+        .order_by("governing", "deficiency_id")
+    )
+    asked = active.filter(
+        deficiency_id__in=DeficiencyEvent.objects.filter(
+            organization_id=org, event_type="EXTENSION_REQUESTED"
+        ).values("deficiency_id")
+    ).order_by("deficiency__reported_at", "deficiency_id")
+    candidates, pending_more = _queue_rows(asked)
+    pending = []
+    for row in candidates:
+        state = service.extension_state(org, str(row.deficiency_id), now=now)
+        waiting = [r for r in state["requests"] if r["status"] == "PENDING" and not r["superseded"]]
+        if waiting:
+            row.requested_at = waiting[0]["requested_at"]
+            pending.append(row)
+    return render(
+        request,
+        "inspections/deficiency_queue.html",
+        {
+            "title": "Supervisor queue",
+            "lists": [
+                ("Unassigned", unassigned, unassigned_more),
+                ("Overdue", late, late_more),
+                ("Extension requests waiting for a decision", pending, pending_more),
+            ],
         },
     )
 

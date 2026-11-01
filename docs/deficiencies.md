@@ -431,8 +431,9 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   deficiency was reported is `404`, a malformed or naive one `400`. Any signed-in member may read it.
   The answer is bounded (`503` rather than truncated).
 - **Deficiency page.** The history lists a start as "Routine checks suspended", and an event that
-  ended suspensions shows how many ("Check suspensions ended: 1"). **Not built here:** the supervisor screen
-  ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16)) and the fleet dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)).
+  ended suspensions shows how many ("Check suspensions ended: 1"). The suspension form and the list of
+  suspensions with when and how each ended are on the same page ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16),
+  [deficiency workflows](deficiency-workflows.md#supervisor-and-administrator-actions-issue-16)). **Not built here:** the fleet dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)).
 
 ## The closed transition table
 

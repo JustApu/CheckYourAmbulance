@@ -38,7 +38,25 @@
     DEPENDENCY_ALREADY_RECORDED: "A dependency is already recorded. Refresh to update it.",
     MALFORMED_REQUEST: "Check the form values and try again.",
     INVALID_TRANSITION: "This deficiency is not in a status that allows this action.",
-    NOT_YET_SUPPORTED: "This action is not available yet. Record a fresh independent check when appropriate."
+    NOT_YET_SUPPORTED: "This action is not available yet. Record a fresh independent check when appropriate.",
+    INVALID_ASSIGNEE: "That person cannot be assigned. Choose an active Crew, Supervisor or Supply Officer.",
+    ASSIGNEE_UNCHANGED: "That person is already the assignee.",
+    INVALID_DEADLINE: "Choose a future deadline.", DEADLINE_UNCHANGED: "That is already the deadline.",
+    REQUEST_ALREADY_DECIDED: "This extension request was already decided. Refresh history.",
+    REQUEST_SUPERSEDED: "A newer deadline replaced this request. Refresh history.",
+    REQUEST_NOT_FOUND: "This extension request is no longer available. Refresh history.",
+    ACKNOWLEDGEMENT_MAXIMUM_UNCONFIGURED: "An administrator must set the longest acknowledgement period first.",
+    ACKNOWLEDGEMENT_PERIOD_TOO_LONG: "Choose a period no longer than the administrator's maximum.",
+    ACKNOWLEDGEMENT_PERIOD_OUT_OF_RANGE: "Choose a period no longer than the administrator's maximum.",
+    SEVERITY_UNCHANGED: "Choose a different severity.",
+    ALREADY_IN_SCOPE: "An item you chose is already in the verification scope.",
+    ALREADY_SUSPENDED: "An item you chose is already suspended for this deficiency.",
+    ITEM_NOT_IN_CHECKLIST: "An item you chose is no longer on the vehicle's checklist. Refresh.",
+    ITEM_NOT_IN_SCOPE: "An item you chose is outside this deficiency's affected scope.",
+    KIT_REQUIRED: "Choose the physical kit for that item. Refresh.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
+    TOO_MANY_SUSPENSIONS: "Too many suspensions at once. Choose fewer items.",
+    SCOPE_TOO_LARGE: "Too many items. Choose fewer.",
+    VEHICLE_INACTIVE: "This vehicle is inactive."
   };
   function field(form, name) { return form.querySelector('[name="' + name + '"]'); }
   function value(form, name) { var input = field(form, name); return input ? input.value.trim() : ""; }
@@ -51,7 +69,9 @@
   }
   function build(form) {
     var body = {operation_id: uuid4()}, kind = form.dataset.kind;
-    if (["repair", "extension", "note", "dependency", "dependency-exit"].indexOf(kind) !== -1) {
+    if (["repair", "extension", "note", "dependency", "dependency-exit", "assign", "deadline", "start-work",
+      "extension-decision", "acknowledge", "regrade", "expand", "add-verification", "suspend",
+      "admin-close", "admin-reopen"].indexOf(kind) !== -1) {
       body.expected_event_id = form.dataset.expectedEvent;
     }
     if (kind === "extension") {
@@ -64,6 +84,37 @@
       if (value(form, "follow_up_at")) { body.follow_up_at = utcInstant(value(form, "follow_up_at")); }
     }
     if (kind === "dependency-exit" && value(form, "return_to")) { body.return_to = value(form, "return_to"); }
+    if (kind === "assign") { body.assignee_id = required(value(form, "assignee_id"), "Choose a person."); }
+    if (kind === "deadline") { body.deadline = utcInstant(value(form, "deadline")); }
+    if (kind === "extension-decision") {
+      body.request_event_id = form.querySelector('[name="request_event_id"]').value;
+      body.decision = required(value(form, "decision"), "Choose a decision.");
+      if (body.decision === "DIFFERENT_DATE") { body.deadline = utcInstant(value(form, "deadline")); }
+      else if (value(form, "deadline")) { throw new Error("Leave the different date empty unless you approve a different date."); }
+    }
+    if (kind === "acknowledge") {
+      body.action_plan = required(value(form, "action_plan"), "An action plan is required.");
+      var days = value(form, "period_days");
+      if (!/^[1-9][0-9]{0,4}$/.test(days)) { throw new Error("Enter the period as a whole number of days."); }
+      body.period_days = parseInt(days, 10);
+    }
+    if (kind === "regrade") {
+      var level = form.querySelector('[name="severity"]:checked');
+      body.severity = required(level && level.value, "Choose a severity using its criteria.");
+    }
+    if (["expand", "add-verification", "suspend"].indexOf(kind) !== -1) {
+      body.items = Array.prototype.map.call(form.querySelectorAll('[name="items"]:checked'), function (e) {
+        var parts = e.value.split(":"), entry = {item_id: parts[0]};
+        if (parts[1]) { entry.kit_instance_id = parts[1]; }
+        return entry;
+      });
+      if (!body.items.length) { throw new Error("Choose at least one item."); }
+      if (kind === "add-verification") { body.deadline = utcInstant(value(form, "deadline")); }
+      if (kind === "suspend" && value(form, "explanation")) { body.explanation = value(form, "explanation"); }
+    }
+    if (["extension-decision", "acknowledge", "regrade", "expand", "add-verification", "admin-close", "admin-reopen"].indexOf(kind) !== -1) {
+      body.explanation = required(value(form, "explanation"), "An explanation is required.");
+    }
     if (kind === "link") { body.related_deficiency_id = required(value(form, "related_deficiency_id"), "Choose a report."); }
     if (kind === "correction") {
       body.expected_tip_check_id = form.dataset.tip;

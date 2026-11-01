@@ -1,8 +1,9 @@
 # Crew and supervisor deficiency workflows
 
 [issue #86](https://github.com/JustApu/CheckYourAmbulance-archive/issues/86) and
-[issue #15](https://github.com/JustApu/CheckYourAmbulance/issues/15). Non-normative implementation
-notes for SPEC §3.3, §5.4.1, §7.7–§7.8 and §8.3–§8.6.
+[issue #15](https://github.com/JustApu/CheckYourAmbulance/issues/15) and
+[issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16). Non-normative implementation
+notes for SPEC §3.3, §5.4.1, §7.7–§7.8 and §8.3–§8.9.
 The [crew inspection screen](crew-inspection-ui.md) remains the live shared checklist.
 All mutations use the existing audited [check](check-records.md) and
 [deficiency](deficiencies.md) command endpoints; these pages add no tables or write commands.
@@ -12,7 +13,8 @@ All mutations use the existing audited [check](check-records.md) and
 | Route | Purpose |
 |---|---|
 | `/deficiencies/` | The 100 most recent reports, including cancelled history; active vehicle links to independent reporting. |
-| `/deficiencies/{id}/` | Report details, deadlines and age, lifecycle history, crew action forms, verification scope and informational links. |
+| `/deficiencies/queue/` | Supervisor queue (Supervisors and Administrators): unassigned, overdue and waiting extension requests. |
+| `/deficiencies/{id}/` | Report details, deadlines and age, lifecycle history, crew and supervisor action forms, check suspensions, verification scope and informational links. |
 | `/deficiencies/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. |
 | `/deficiencies/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. |
 | `/inspection/vehicles/{id}/deficiencies/new/` | Independent item, compartment or selected vehicle-systems report. |
@@ -149,6 +151,55 @@ the outstanding list or the last check closes the deficiency. Retry keeps the ex
 and operation id; conflict Proceed keeps the verification purpose, deficiency, observations,
 physical kit and warned-about basis with a new operation id. Deficiency state and scope are
 rechecked by the existing command on every check; stale screens cannot force acceptance.
+
+## Supervisor and administrator actions (issue #16)
+
+The deficiency page adds a **Supervisor actions** group for the M4 commands that need a supervisor
+or administrator. Each form posts to the existing audited endpoint with the event seen at page load,
+so a concurrent change answers `DEFICIENCY_CHANGED` and asks for a refresh. The page decides only
+what to offer; the command rechecks the permission, the status and every choice.
+
+| Form | Offered when (permission, status) | Fields |
+|---|---|---|
+| Assign, Set deadline | `assign_deficiency_deadline` (Supply Officer only on supply-related deficiencies); active | Assignee from active Crew, Supervisor and Supply Officer users; deadline in UTC |
+| Start work | same; Open | none |
+| Decide extension request | `decide_extension`; active; one form per request still pending under the current deadline | Approve, approve a different date (UTC) or deny; explanation |
+| Acknowledge escalation | `acknowledge_escalation`; active | Explanation, action plan, period in days up to the administrator maximum (the form says when none is set) |
+| Re-grade severity | `regrade_deficiency_severity`; active | Current severity levels with their criteria; explanation |
+| Expand verification scope | `expand_verification`; Pending Verification | Items and physical kits from the vehicle's current checklist; explanation |
+| Add verification after closure | `expand_verification`; Closed Verified | Items and physical kits, a verification deadline (UTC) and an explanation; it reopens the deficiency |
+| Suspend routine checks | `suspend_routine_checks`; active | Items and physical kits within the deficiency's current affected scope; optional explanation |
+| Close without verification | `explicit_deficiency_close` (Administrator); active | Explanation |
+| Reopen | `explicit_deficiency_close` (Administrator); Closed by Administrator or with no current verification items | Explanation |
+
+Roles combine, so a Crew member who is also a Supervisor sees both groups. A forged request from a
+role the page hid is refused by the command (403); the tests post a forged crew extension
+decision and a forged supervisor reopening.
+
+**Check suspensions.** The page lists every suspension of the deficiency as "Known Deficiency —
+Check Suspended" with its start, explanation and, once ended, when and by which event (SUS-1,
+SUS-4). There is no "end suspension" control: SPEC §8.9 ends suspensions only automatically, when
+the deficiency is verified closed, closed by an administrator or Reported in Error (SUS-3, SUS-4),
+and the server has no other way to end one. Closing the deficiency is how a supervisor ends them.
+
+**Supervisor queue** (`/deficiencies/queue/`, linked from the index for those who may decide
+extensions). Three lists of deficiencies still being worked, 200 each at most (the heading shows
+`+` when cut short): unassigned, oldest report first; overdue by the deadline in force (the same
+governing-deadline reader the overdue notice job uses, so an approved extension that has not
+passed is not overdue), oldest deadline first; and those with an extension request still waiting
+for a decision. Others get the audited 403 of a refused section. The page is a snapshot; refresh
+to see changes. It adds no business rule.
+
+History labels now cover every event type, including "Escalation acknowledged" with its action
+plan and acknowledged-until time.
+
+`cya/inspections/tests/test_supervisor_ui.py` covers form visibility by role, role union, supply
+context and status; assignment, deadline, extension decision (including a forged crew decision),
+acknowledgement with the maximum, re-grade, suspension (scope choices, repeat refusal),
+expansion while Pending Verification (adding verification after closure is covered by the
+harness and the existing command tests), administrator close and reopen (including a forged
+supervisor reopen), escaping, and the queue's access and three lists. The Node harness covers each
+new form's payload, UTC conversion, required fields and refusal messages.
 
 ## Save feedback and verification
 

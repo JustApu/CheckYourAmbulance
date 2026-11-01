@@ -32,6 +32,7 @@ urlpatterns = [
         name="inspection-session",
     ),
     path("deficiencies/", workflow_views.deficiencies, name="deficiencies"),
+    path("deficiencies/queue/", workflow_views.queue, name="deficiency-queue"),
     path(
         "deficiencies/<str:deficiency_id>/verification/",
         workflow_views.verification,
