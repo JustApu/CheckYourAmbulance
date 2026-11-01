@@ -4,6 +4,7 @@ from django.urls import path
 
 from cya.accounts import views as accounts
 from cya.attention import api as attention_api
+from cya.attention import readiness_views
 from cya.authorization import views as authorization
 from cya.checks import api as check_api
 from cya.conditions import api as condition_api
@@ -20,6 +21,8 @@ from cya.shell import views as shell
 urlpatterns = [
     path("", shell.home, name="home"),
     path("fleet/", shell.fleet, name="fleet"),
+    path("fleet/readiness/", readiness_views.screen, name="fleet-readiness"),
+    path("fleet/readiness/panel/", readiness_views.panel, name="fleet-readiness-panel"),
     path("inspection/", inspection_views.vehicles, name="inspection"),
     path(
         "inspection/vehicles/<str:vehicle_id>/",
@@ -111,6 +114,7 @@ urlpatterns = [
         check_api.invalidations,
         name="api-check-invalidations",
     ),
+    path("api/v1/fleet-readiness", readiness_views.api, name="api-fleet-readiness"),
     path("api/v1/deficiencies", deficiency_api.deficiencies, name="api-deficiencies"),
     path(
         "api/v1/deficiency-severities",

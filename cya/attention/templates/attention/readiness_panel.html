@@ -1,0 +1,21 @@
+<p>Updated {{ picture.as_of|date:"Y-m-d H:i:s" }} UTC. Obligations due {{ picture.window_start|date:"Y-m-d H:i" }} to {{ picture.window_end|date:"Y-m-d H:i" }} UTC. Each state is counted on its own; nothing here is a single "compliant" flag.</p>
+{% if picture.truncated %}<p role="alert">Only the first {{ picture.vehicles|length }} vehicles are shown.</p>{% endif %}
+{% for vehicle in picture.vehicles %}
+<section class="panel readiness-vehicle">
+<h2>{{ vehicle.display_name }}{% if not vehicle.active %} (inactive now){% endif %}</h2>
+<p><strong>{{ vehicle.status_label }}</strong>{% if vehicle.restrictions %}: {{ vehicle.restrictions }}{% endif %}</p>
+<p>Inspection progress: {{ vehicle.progress.checked }} of {{ vehicle.progress.owed }} owed checks recorded.</p>
+<h3>Obligations by state</h3>
+<ul>{% for label, count in vehicle.states %}<li>{{ label }}: {{ count }}</li>{% empty %}<li>No obligations in this window.</li>{% endfor %}</ul>
+<h3>Deficiencies being worked</h3>
+{% if vehicle.deficiencies %}
+<p>{% for label, count in vehicle.by_severity.items %}{{ label }}: {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+<ul>{% for row in vehicle.deficiencies %}<li><a href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.summary }}</a> — {{ row.severity.label }} · {{ row.status_label }} · {{ row.age_days }} days{% if row.governing_deadline %} · deadline {{ row.governing_deadline|date:"Y-m-d H:i" }} UTC{% endif %}{% if row.overdue %} · <strong>Overdue</strong>{% endif %}{% if row.long_running %} · Long-running{% endif %}{% if row.awaiting_dependency %} · Awaiting external dependency, follow-up {{ row.follow_up_at|date:"Y-m-d H:i"|default:"not set" }}{% if row.follow_up_at %} UTC{% endif %}{% endif %}{% if row.acknowledged_until %} · Escalation acknowledged until {{ row.acknowledged_until|date:"Y-m-d H:i" }} UTC{% endif %}</li>{% endfor %}</ul>
+{% if vehicle.deficiencies_truncated %}<p role="alert">Only the first {{ vehicle.deficiencies|length }} deficiencies are shown.</p>{% endif %}
+{% else %}<p>None.</p>{% endif %}
+<h3>Check suspensions in force</h3>
+<ul>{% for row in vehicle.suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended since {{ row.started_at|date:"Y-m-d H:i" }} UTC (<a href="{% url 'deficiencies-detail' row.deficiency_id %}">deficiency</a>)</li>{% empty %}<li>None.</li>{% endfor %}</ul>
+</section>
+{% empty %}
+<p>No vehicles.</p>
+{% endfor %}

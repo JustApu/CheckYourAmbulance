@@ -1,0 +1,22 @@
+{% extends "shell/base.html" %}
+{% block head %}
+<style>
+{% include "inspections/inspection.css" %}
+</style>
+{% endblock %}
+{% block content %}
+<form class="panel" method="get" action="">
+<label>Show the picture as of a past instant (UTC, for example 2026-11-01T08:00:00+00:00) <input name="as_of" maxlength="40" value="{% if not live %}{{ picture.as_of|date:'c' }}{% endif %}"></label>
+<button type="submit" class="button">Show</button>{% if not live %} <a class="button" href="{% url 'fleet-readiness' %}">Back to now</a>{% endif %}
+</form>
+{% if live %}
+<p id="readiness-live-state" role="status">Connecting to live updates…</p>
+<p id="readiness-stale" role="alert" hidden>Could not refresh. What you see may be out of date; the page keeps trying.</p>
+{% else %}
+<p role="status">As of {{ picture.as_of|date:"Y-m-d H:i:s" }} UTC. This past picture does not update.</p>
+{% endif %}
+<div id="readiness-panel">{% include "attention/readiness_panel.html" %}</div>
+{% endblock %}
+{% block scripts %}{% if live %}{{ config|json_script:"readiness-config" }}<script>
+{% include "attention/readiness.js" %}
+</script>{% endif %}{% endblock %}
