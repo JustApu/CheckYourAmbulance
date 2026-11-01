@@ -56,8 +56,17 @@ Distinct exemption/waiver/suspension reasons take display precedence over checks
   Non-routine ad hoc orders ignore carry-over waiver evidence (ADH-1).
   Reinstatement or invalidation does not revive an older waiver. Ambiguous branches
   raise `ValueError`. This reader never re-evaluates rosters or writes determinations.
-- `SUSPENDED` is distinct from Pass (SPEC §8.9); an active suspension prevents a
-  check from claiming satisfaction. Suspension storage remains future work.
+- `SUSPENDED` is distinct from Pass (SPEC §8.9, AC-18); an active suspension prevents a
+  check from claiming satisfaction, and `display_text` is "Known Deficiency — Check Suspended".
+  Only a routine obligation is suspended (SUS-1); an explicit ad hoc order never is. A suspension
+  is judged at `min(T, G)`, as exemption is judged at `min(D, T)`: an obligation whose window
+  closed while it was suspended stays `SUSPENDED` after the suspension ends (never Overdue, never
+  Satisfied), a suspension that starts after G cannot erase an inspection already missed, and one
+  that ends while the window is open makes the check required again (Current, Due, then Overdue
+  unless checked). `evidence_id` is the suspension's `START` id; with several, the earliest start.
+  `suspension_ended_at` is set when that suspension had ended by T (`suspension_in_force` is
+  false), so a reader can tell an ended suspension kept in history from one still in force.
+  These two boundary readings are implementation assumptions of [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13), recorded on its PR.
 - An effective, explicitly linked Passed or Failed check satisfies the obligation.
   Not Applicable additionally needs applicable administrator-rule evidence.
   Unable alone does not satisfy it. A supervisor completion additionally requires an
@@ -75,11 +84,15 @@ evaluator does not decide competing-window link allocation. Lateness is preserve
 
 ## Check and suspension adapters
 
-The default projection reads stored check/link and determination-check evidence;
-the default suspension input remains empty. Optional `check_lookup` and
+The default projection reads stored check/link and determination-check evidence,
+and stored supervisor check suspensions (`stored_suspensions`, [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13)): each
+`check_suspension` `START` recorded by T covers the routine obligations of its item and physical
+kit instance whose window it can touch, ending at its `END` if that was recorded by T, so a later
+closure never changes an earlier answer. Optional `check_lookup` and
 `suspension_lookup` callables receive keyword arguments `organization_id`,
 `vehicle_id`, `obligation_ids` (a bounded tuple) and `as_of` (T). They return
-`CheckEvidence` and `SuspensionEvidence` respectively. Wrong types, unrequested
+`CheckEvidence` and `SuspensionEvidence` respectively; a supplied `suspension_lookup` replaces
+the stored suspensions. Wrong types, unrequested
 obligations and cross-organization/vehicle checks raise `ValueError`.
 Adapter exceptions propagate; a failed lookup is not treated as an empty history.
 
@@ -97,7 +110,7 @@ must exclude all its check rows; the evaluator never revives an earlier outcome.
 `load_projection_history` exports immutable evidence recorded by T; its adapter
 reads the append-only selection, obligation, requirement, determination, rule,
 check, check-event, check-link, determination-check, deficiency, deficiency-scope,
-deficiency-event and vehicle-status tables. It preserves original rows and link timestamps,
+deficiency-event, check-suspension and vehicle-status tables. It preserves original rows and link timestamps,
 rather than exporting only the effective checks at export time: a final export can therefore
 reconstruct a check before its later correction or whole-chain invalidation. Unlinked
 participation checks contribute to attention but never satisfy an obligation. Satisfaction
@@ -130,7 +143,9 @@ stored links and the existing chain reader, historical attention readers and eve
 tests run in CI through the existing full `manage.py test cya` job. Past API answers must also
 remain byte-for-field equal after all later events. Pure tests separately cover
 check outcomes, late links, correction/invalidation timestamps, waiver chains,
-supervisor completion, suspension and malformed input.
+supervisor completion, suspension and malformed input. Stored suspensions are tested end to end
+in `cya/deficiencies/tests/test_suspension.py`, which also replays the final export at every
+earlier observation with zero database queries.
 
 Run offline with the configured disposable development database:
 

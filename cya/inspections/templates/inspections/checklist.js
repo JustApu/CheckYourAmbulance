@@ -272,7 +272,7 @@
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED") { return "Inspected — failed"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED") { return "Completed by supervisor — unable to inspect"; }
     var map = {OVERDUE: "Overdue", DUE: "Due", CURRENT: "Due soon", SATISFIED: "Done for this window",
-               UPCOMING: "Not due yet", SUSPENDED: "Check suspended", EXEMPT: "Exempt", WAIVED: "Waived"};
+               UPCOMING: "Not due yet", SUSPENDED: "Known Deficiency — Check Suspended", EXEMPT: "Exempt", WAIVED: "Waived"};
     return map[row.obligation_state] || "";
   }
   function saveIndicator(entry) {

@@ -1,7 +1,7 @@
 """Deficiency HTTP endpoints, and Failed checks over POST /api/v1/checks (issue 80 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/80))."""
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest import mock
 from uuid import uuid4
 
@@ -22,6 +22,11 @@ from cya.deficiencies.tests.support import DeficiencyCase
 from cya.testing.role_http import RoleHttpHarness, real_collaborator_settings
 
 URL = "/api/v1/deficiencies"
+
+
+def datetime_of(stamp):
+    """An instant from the API's stamped form (ISO 8601 with a Z suffix)."""
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
 @override_settings(**real_collaborator_settings())
@@ -216,6 +221,51 @@ class DeficiencyApiTests(DeficiencyCase):
             (event.event_type, event.to_status), ("EMPTY_SCOPE_CLOSED", "CLOSED_UNVERIFIABLE")
         )
         self.assertEqual(event.actor_user_id, self.user.pk)
+
+    def test_check_suspension_routes_start_list_and_refuse(self):
+        deficiency_id = self.failed().body["deficiency_ids"][0]
+        url = f"{URL}/{deficiency_id}/check-suspensions"
+
+        def body(**overrides):
+            newest = DeficiencyEvent.objects.filter(deficiency_id=deficiency_id).latest("sequence")
+            return {
+                "operation_id": str(uuid4()),
+                "expected_event_id": str(newest.pk),
+                "items": [{"item_id": str(self.suction.pk)}],
+                **overrides,
+            }
+
+        self.rejected(self.post(body(), url), 403, "FORBIDDEN")  # crew may not suspend
+        self.grant(self.user, "SUPERVISOR")
+        self.rejected(
+            self.post(body(unknown=1), url), 400, "MALFORMED_REQUEST", [("$", "UNKNOWN_FIELD")]
+        )
+        request = body(explanation="Synthetic: out for repair.")
+        response = self.post(request, url)
+        self.assertEqual((response.status_code, response.json()["status"]), (201, "COMMITTED"))
+        result = response.json()["result"]
+        self.assertEqual(
+            (result["status"], result["items"]),
+            ("OPEN", [{"item_id": str(self.suction.pk), "kit_instance_id": None}]),
+        )
+        (suspension_id,) = result["suspension_ids"]
+        self.assertEqual(self.post(request, url).json(), response.json())  # replay
+        self.rejected(
+            self.post(body(), url), 422, "ALREADY_SUSPENDED", [("items[0]", "ALREADY_SUSPENDED")]
+        )
+        listing = self.client.get(url)
+        self.assertEqual(listing.status_code, 200, listing.content)
+        self.assertEqual(listing.json()["in_force"], [suspension_id])
+        self.assertEqual(
+            listing.json()["suspensions"][0]["explanation"], "Synthetic: out for repair."
+        )
+        started = listing.json()["suspensions"][0]["started_at"]
+        earlier = self.client.get(
+            url, {"as_of": (datetime_of(started) - timedelta(microseconds=1)).isoformat()}
+        )
+        self.assertEqual((earlier.status_code, earlier.json()["in_force"]), (200, []))
+        self.assertEqual(self.client.get(url, {"as_of": "not a time"}).status_code, 400)
+        self.assertEqual(self.client.get(f"{URL}/{uuid4()}/check-suspensions").status_code, 404)
 
     def test_scope_expansion_and_added_verification_routes(self):
         from cya.checks.commands import record_check

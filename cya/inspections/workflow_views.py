@@ -54,6 +54,7 @@ EVENT_LABELS = {
     "VERIFICATION_REOPENED": "Reopened — a verification check was withdrawn",
     "SCOPE_EXPANDED": "Verification scope expanded",
     "VERIFICATION_ADDED": "Reopened — verification added after closure",
+    "CHECKS_SUSPENDED": "Routine checks suspended",
 }
 STATUS_LABELS = {
     "OPEN": "Open",

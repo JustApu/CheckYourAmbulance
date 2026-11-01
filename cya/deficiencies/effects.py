@@ -12,6 +12,10 @@ revision is no longer fully satisfied by the remaining effective Passes (VERIFIC
 Pending Verification deficiency needs no event: its scope is always recomputed from effective
 checks, so the lost Pass simply stops counting.
 
+A Reported in Error cancellation ends every check suspension still in force and lists it in
+suspensions_ended (SPEC SUS-4, issue 13 (https://github.com/JustApu/CheckYourAmbulance/issues/13));
+the INV-7 reopening resumes none.
+
 Both commands call plan_* in prepare, under the item lock they already hold, which takes the
 locks of every deficiency the chain supports or verifies once, as one sorted set (the contract's
 last lock group), and then append_effect in apply. The decision is a pure function so each branch is tested on its own. Everything here
@@ -32,7 +36,13 @@ from cya.deficiencies.models import (
     DeficiencyProjection,
     VerificationScopeRow,
 )
-from cya.deficiencies.service import DeficiencyError, lock_deficiencies, stamp
+from cya.deficiencies.service import (
+    DeficiencyError,
+    end_suspensions,
+    lock_deficiencies,
+    stamp,
+    suspension_ids_in_force,
+)
 from cya.deficiencies.transitions import (
     ACTIVE_STATUSES,
     ALLOWED_TRANSITIONS,
@@ -50,7 +60,8 @@ from cya.deficiencies.transitions import (
 # pauses escalation, not performed repair (DEF-7). Any
 # other type present counts as recorded repair work and blocks a cancellation: the M4 corrective
 # action and verification events, and a progress note, whose free text may describe work done
-# (SPEC 8.1). Each later lifecycle issue states its own classification the same way.
+# (SPEC 8.1). Each later lifecycle issue states its own classification the same way. A supervisor
+# check suspension pauses routine checks for a known defect and records no repair (SPEC 8.9).
 NEUTRAL_EVENT_TYPES = frozenset(
     {
         "REPORTED",
@@ -72,6 +83,7 @@ NEUTRAL_EVENT_TYPES = frozenset(
         "EMPTY_SCOPE_CLOSED",
         # Reopening after a lost verification Pass records no repair (INV-4, issue 155 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/155)).
         "VERIFICATION_REOPENED",
+        "CHECKS_SUSPENDED",
     }
 )
 # Evidence that keeps a deficiency open (SPEC COR-4, OQ-57): a Failed check, or an Unable to
@@ -482,8 +494,15 @@ def append_effect(receipt, current, *, organization_id, effect, root_id):
         # A verification reopening names its chain by foreign key; the others by correction_ref.
         correction_ref=None if effect.verification_check_id else str(root_id),
         verification_check_id=effect.verification_check_id,
+        # Cancelling ends the suspensions in force (SUS-4); the deficiency lock is held since prepare.
+        suspensions_ended=(
+            suspension_ids_in_force(organization_id, effect.deficiency_id)
+            if effect.event_type == "REPORTED_IN_ERROR"
+            else []
+        ),
         **stamp(receipt, current),
     )
+    end_suspensions(receipt, current, organization_id=organization_id, event=event)
     DeficiencyProjection.objects.filter(
         organization_id=organization_id, deficiency_id=effect.deficiency_id
     ).update(status=effect.to_status, last_applied_event=event)

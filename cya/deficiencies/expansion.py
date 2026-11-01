@@ -107,7 +107,7 @@ def resolve_items(organization_id, vehicle_id, items, now):
     return resolved
 
 
-def _lock(actor, organization_id, actor_id, deficiency_id, expected_event_id):
+def _lock(actor, organization_id, actor_id, deficiency_id, expected_event_id, action=EXPAND_ACTION):
     """Vehicle, checklist templates, then the deficiency: the correction command's order."""
     vehicle_id = (
         Deficiency.objects.filter(organization_id=organization_id, pk=deficiency_id)
@@ -126,7 +126,7 @@ def _lock(actor, organization_id, actor_id, deficiency_id, expected_event_id):
             )
         service.lock_checklist_templates(organization_id)
     projection, last = _lock_for_change(
-        actor, EXPAND_ACTION, organization_id, actor_id, deficiency_id, expected_event_id
+        actor, action, organization_id, actor_id, deficiency_id, expected_event_id
     )
     return str(vehicle_id), projection, last
 

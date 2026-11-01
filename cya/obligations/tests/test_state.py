@@ -199,11 +199,49 @@ class StateTests(SimpleTestCase):
         )
 
     def test_suspension_is_distinct_and_ending_it_does_not_fabricate_pass(self):
-        suspension = SuspensionEvidence("obligation", self.at(6), self.at(8))
+        suspension = SuspensionEvidence("obligation", self.at(6), self.at(8), "suspension")
+        during = self.evaluate(7, suspensions=[suspension], checks=[self.check()])
+        self.assertEqual((during.state, during.evidence_id), (State.SUSPENDED, "suspension"))
+        self.assertIsNone(during.outcome)
+        self.assertEqual(during.display_text, "Known Deficiency — Check Suspended")
+        self.assertEqual((during.suspension_in_force, during.suspension_ended_at), (True, None))
+        # The window closed while suspended: still Suspended after the end, never Overdue.
+        after = self.evaluate(9, suspensions=[suspension])
+        self.assertEqual((after.state, after.suspension_ended_at), (State.SUSPENDED, self.at(8)))
+        self.assertFalse(after.suspension_in_force)
+        # Ended while the window was open: the check is required again and a check satisfies it.
+        early = replace(suspension, recorded_at=self.at(5), ended_at=self.at(6.5))
+        self.assertEqual(self.evaluate(6.25, suspensions=[early]).state, State.SUSPENDED)
+        self.assertEqual(self.evaluate(6.75, suspensions=[early]).state, State.DUE)
+        self.assertEqual(self.evaluate(8, suspensions=[early]).state, State.OVERDUE)
+        later_check = self.check(at=6.8)
         self.assertEqual(
-            self.evaluate(7, suspensions=[suspension], checks=[self.check()]).state, State.SUSPENDED
+            self.evaluate(8, suspensions=[early], checks=[later_check]).state, State.SATISFIED
         )
-        self.assertEqual(self.evaluate(8, suspensions=[suspension]).state, State.OVERDUE)
+
+    def test_suspension_needs_a_routine_obligation_known_by_t_and_starting_by_g(self):
+        known_later = SuspensionEvidence("obligation", self.at(6.5))
+        self.assertEqual(self.evaluate(6.25, suspensions=[known_later]).state, State.DUE)
+        self.assertEqual(self.evaluate(6.75, suspensions=[known_later]).state, State.SUSPENDED)
+        # Starting after G cannot erase an inspection already missed.
+        after_grace = SuspensionEvidence("obligation", self.at(7.5))
+        self.assertEqual(self.evaluate(8, suspensions=[after_grace]).state, State.OVERDUE)
+        other = SuspensionEvidence("another obligation", self.at(5))
+        self.assertEqual(self.evaluate(8, suspensions=[other]).state, State.OVERDUE)
+        ad_hoc = replace(self.obligation, routine=False, schedule_rule_id=None)
+        self.assertEqual(
+            evaluate_obligation(
+                ad_hoc, self.at(8), suspensions=[SuspensionEvidence("obligation", self.at(5))]
+            ).state,
+            State.OVERDUE,
+        )
+        first = SuspensionEvidence("obligation", self.at(5), None, "first")
+        second = SuspensionEvidence("obligation", self.at(5.5), None, "second")
+        self.assertEqual(self.evaluate(8, suspensions=[second, first]).evidence_id, "first")
+        with self.assertRaises(ValueError):
+            self.evaluate(
+                8, suspensions=[SuspensionEvidence("obligation", START.replace(tzinfo=None))]
+            )
 
     def test_malformed_time_window_and_ambiguous_determinations_raise(self):
         with self.assertRaises(ValueError):

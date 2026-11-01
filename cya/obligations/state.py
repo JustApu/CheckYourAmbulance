@@ -1,7 +1,8 @@
 """Pure obligation projections (SPEC 5.3, 5.4 and 19). No ORM or current clock.
 
-Stored checks, links and lifecycle events are replayed at the requested instant. Optional
-check and suspension adapters remain available for explicit evidence inputs. No writes occur.
+Stored checks, links, lifecycle events and supervisor check suspensions are replayed at the
+requested instant. Optional check and suspension adapters remain available for explicit evidence
+inputs. No writes occur.
 """
 
 from __future__ import annotations
@@ -121,9 +122,17 @@ class StatusEvidence:
 
 @dataclass(frozen=True)
 class SuspensionEvidence:
+    """A supervisor check suspension (SPEC 8.9) covering one routine obligation.
+
+    recorded_at is when it started and ended_at when the closing event ended it (None while in
+    force). suspension_id and deficiency_id name the stored START and its deficiency when known.
+    """
+
     obligation_id: str
     recorded_at: datetime
     ended_at: datetime | None = None
+    suspension_id: str | None = None
+    deficiency_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -159,11 +168,20 @@ class ObligationState:
     self_completed: bool = False
     attention: Attention | None = None
     deficiencies: tuple[DeficiencyFact, ...] = ()
+    # SUSPENDED only: when the suspension ended, if it ended by T (the obligation's window closed
+    # while it was in force); None while it is still in force at T.
+    suspension_ended_at: datetime | None = None
+
+    @property
+    def suspension_in_force(self):
+        return self.state == State.SUSPENDED and self.suspension_ended_at is None
 
     @property
     def display_text(self):
         if self.outcome == "SUPERVISOR_COMPLETED":
             return "Completed by supervisor — unable to inspect"
+        if self.state == State.SUSPENDED:
+            return "Known Deficiency — Check Suspended"  # SPEC SUS-1, AC-18
         return self.outcome or self.state.value
 
 
@@ -214,18 +232,34 @@ def _status_for(obligation, status_events, instant):
     return max(statuses, key=lambda e: e.sequence, default=None)
 
 
-def _suspended(obligation, suspensions, instant):
+def _suspension_for(obligation, suspensions, instant):
+    """The suspension in force for a routine obligation at min(T, G), or None (SPEC 8.9).
+
+    Only routine checks are suspended (SUS-1): an explicit ad hoc order is not. The instant is
+    capped at the grace deadline, like exemption at D: an obligation whose window closed while
+    suspended stays Suspended after the suspension ends (never Overdue, never Satisfied), and a
+    suspension that starts after G cannot erase an inspection already missed. One that ends while
+    the window is still open makes the check required again. Ties break on the earliest start.
+    """
+    basis = min(instant, obligation.grace_at)
+    found = None
     for suspension in suspensions:
         aware(suspension.recorded_at)
         if suspension.ended_at is not None:
             aware(suspension.ended_at)
         if (
-            suspension.obligation_id == obligation.id
-            and suspension.recorded_at <= instant
-            and (suspension.ended_at is None or instant < suspension.ended_at)
+            obligation.routine
+            and suspension.obligation_id == obligation.id
+            and suspension.recorded_at <= basis
+            and (suspension.ended_at is None or basis < suspension.ended_at)
+            and (
+                found is None
+                or (suspension.recorded_at, suspension.suspension_id or "")
+                < (found.recorded_at, found.suspension_id or "")
+            )
         ):
-            return True
-    return False
+            found = suspension
+    return found
 
 
 def _satisfaction(obligation, linked, determination):
@@ -293,8 +327,15 @@ def evaluate_obligation(
             instant, obligation.due_at
         ):
             return ObligationState(obligation, State.WAIVED, determination.id)
-    if _suspended(obligation, suspensions, instant):
-        return ObligationState(obligation, State.SUSPENDED)
+    suspension = _suspension_for(obligation, suspensions, instant)
+    if suspension is not None:
+        ended = suspension.ended_at
+        return ObligationState(
+            obligation,
+            State.SUSPENDED,
+            suspension.suspension_id,
+            suspension_ended_at=ended if ended is not None and ended <= instant else None,
+        )
     satisfaction = _satisfaction(
         obligation, _checks_for(obligation, checks, instant), determination
     )

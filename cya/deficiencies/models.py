@@ -42,7 +42,10 @@ from cya.operations.models import MAX_TEXT, Evidence
 # (Pending Verification, unchanged) appends a scope revision with supervisor-added items, and
 # VERIFICATION_ADDED (Closed Verified to Open, with the new deadline) records items to verify after
 # the next correction (VER-3, VER-4, SPEC 8.7, issue 156 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/156)); both explain themselves and list their
-# items in deficiency_scope_expansion.
+# items in deficiency_scope_expansion. CHECKS_SUSPENDED (status unchanged) starts a supervisor
+# suspension of the routine checks it lists in check_suspension (SPEC 8.9, issue 13
+# (https://github.com/JustApu/CheckYourAmbulance/issues/13)); a closing event lists in
+# suspensions_ended every suspension still in force, which ends with it (SUS-3, SUS-4).
 EVENT_TYPES = (
     "REPORTED",
     "REPORTED_IN_ERROR",
@@ -68,6 +71,7 @@ EVENT_TYPES = (
     "VERIFICATION_REOPENED",
     "SCOPE_EXPANDED",
     "VERIFICATION_ADDED",
+    "CHECKS_SUSPENDED",
 )
 # Types written by the assignment and work-start commands (issue 146 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/146)); each keeps the status
 # except WORK_STARTED (Open to In Progress) and none carries a check chain or an explanation rule.
@@ -87,6 +91,17 @@ EMPTY_SCOPE_CLOSURE_EVENT_TYPES = ("EMPTY_SCOPE_CLOSED",)
 VERIFICATION_EVENT_TYPES = ("VERIFICATION_CLOSED", "VERIFICATION_FAILED")
 VERIFICATION_REOPEN_EVENT_TYPES = ("VERIFICATION_REOPENED",)
 SCOPE_EVENT_TYPES = ("SCOPE_EXPANDED", "VERIFICATION_ADDED")
+SUSPENSION_EVENT_TYPES = ("CHECKS_SUSPENDED",)
+# The events that take an active deficiency to a closed or cancelled status. Each one ends every
+# check suspension still in force and lists it in suspensions_ended (SUS-3, SUS-4): a suspension
+# with no open deficiency is invalid. No other event may list one.
+CLOSING_EVENT_TYPES = (
+    "REPORTED_IN_ERROR",
+    "ADMINISTRATOR_CLOSED",
+    "EMPTY_SCOPE_CLOSED",
+    "VERIFICATION_CLOSED",
+)
+SUSPENSION_ACTIONS = ("START", "END")
 EXPLICIT_CLOSURE_EVENT_TYPES = (
     *ADMINISTRATOR_CLOSURE_EVENT_TYPES,
     *EMPTY_SCOPE_CLOSURE_EVENT_TYPES,
@@ -427,6 +442,65 @@ class DeficiencyScopeExpansion(Evidence):
         return f"DeficiencyScopeExpansion {self.deficiency_id}/{self.item_id}"
 
 
+class CheckSuspension(Evidence):
+    """Append-only START and END of a supervisor suspension of one routine check (SPEC 8.9).
+
+    A START names one item (and physical kit instance for a kit-defined item) of the deficiency's
+    vehicle and is written with the CHECKS_SUSPENDED event of the same command. Its END is written
+    by the event that closes or cancels the deficiency, which lists the START in
+    suspensions_ended; prior_suspension then names the START, once. Nothing resumes a suspension:
+    a reopened deficiency needs a new START (issue 13
+    (https://github.com/JustApu/CheckYourAmbulance/issues/13)).
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    deficiency = models.ForeignKey(Deficiency, on_delete=models.PROTECT, related_name="+")
+    vehicle = models.ForeignKey(
+        "cya_checklists.Vehicle", on_delete=models.PROTECT, related_name="+"
+    )
+    item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    definition = models.ForeignKey(
+        "cya_checklists.ChecklistItemDef", on_delete=models.PROTECT, related_name="+"
+    )
+    kit_instance = models.ForeignKey(
+        "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    instance_key = models.CharField(max_length=36, db_collation="ascii_bin")
+    action = models.CharField(max_length=5)
+    # START: the CHECKS_SUSPENDED event of this command. END: the closing event that lists it.
+    deficiency_event = models.ForeignKey(
+        "DeficiencyEvent", on_delete=models.PROTECT, related_name="+"
+    )
+    prior_suspension = models.OneToOneField(
+        "self", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        db_table = "check_suspension"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="checksusp_org_id"),
+            models.UniqueConstraint(
+                fields=["deficiency_event", "item", "instance_key"],
+                name="checksusp_event_item_instance",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(action="START", prior_suspension__isnull=True)
+                | models.Q(action="END", prior_suspension__isnull=False),
+                name="checksusp_action",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    instance_key__regex=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                ),
+                name="checksusp_instance_key",
+            ),
+        ]
+
+    def __str__(self):
+        return f"CheckSuspension {self.action} {self.deficiency_id}/{self.item_id}"
+
+
 class DeficiencyEvent(Evidence):
     """Append-only lifecycle event; status is the latest event's to_status (SPEC 8.2)."""
 
@@ -454,7 +528,7 @@ class DeficiencyEvent(Evidence):
     )
     acknowledgement_until = models.DateTimeField(null=True)
     action_plan = models.CharField(max_length=MAX_TEXT, null=True)  # noqa: DJ001
-    # Suspension rows ended by an administrator closure; empty until suspension lifecycle support.
+    # The check_suspension START ids a closing event ended (SUS-3, SUS-4), sorted; empty otherwise.
     suspensions_ended = models.JSONField(default=list)
     correction_ref = models.CharField(max_length=MAX_TEXT, null=True)  # noqa: DJ001
     # A re-grade names the level revision it leaves and the one it sets (DEF-8); no other type does.
@@ -520,6 +594,7 @@ class DeficiencyEvent(Evidence):
                         *VERIFICATION_EVENT_TYPES,
                         *VERIFICATION_REOPEN_EVENT_TYPES,
                         *SCOPE_EVENT_TYPES,
+                        *SUSPENSION_EVENT_TYPES,
                     )
                 )
                 | models.Q(
@@ -545,6 +620,7 @@ class DeficiencyEvent(Evidence):
                         *VERIFICATION_EVENT_TYPES,
                         *VERIFICATION_REOPEN_EVENT_TYPES,
                         *SCOPE_EVENT_TYPES,
+                        *SUSPENSION_EVENT_TYPES,
                     )
                 )
                 | (
@@ -777,7 +853,6 @@ class DeficiencyEvent(Evidence):
                         correction_ref__isnull=True,
                         previous_severity_version__isnull=True,
                         severity_version__isnull=True,
-                        suspensions_ended=[],
                     )
                     & non_blank("explanation")
                     & (
@@ -800,9 +875,12 @@ class DeficiencyEvent(Evidence):
                 ),
                 name="defevent_admin_close_shape",
             ),
+            # Only a closing event ends suspensions (SUS-3, SUS-4); the insert trigger requires its
+            # list to be exactly the deficiency's suspensions still in force.
             models.CheckConstraint(
-                condition=models.Q(suspensions_ended=[]),
-                name="defevent_suspensions_empty",
+                condition=models.Q(suspensions_ended=[])
+                | models.Q(event_type__in=CLOSING_EVENT_TYPES),
+                name="defevent_suspensions_closing",
             ),
             models.CheckConstraint(
                 condition=~models.Q(event_type="REPORTED")
@@ -863,7 +941,6 @@ class DeficiencyEvent(Evidence):
                         correction_ref__isnull=True,
                         previous_severity_version__isnull=True,
                         severity_version__isnull=True,
-                        suspensions_ended=[],
                     )
                     & (
                         models.Q(event_type="VERIFICATION_CLOSED", to_status=CLOSED_VERIFIED)
@@ -942,6 +1019,30 @@ class DeficiencyEvent(Evidence):
                     )
                 ),
                 name="defevent_scope_shape",
+            ),
+            # A supervisor check suspension (SPEC 8.9) keeps the status of a deficiency still being
+            # worked and may explain itself; it carries nothing else. Its items are check_suspension
+            # START rows written by the same command.
+            models.CheckConstraint(
+                condition=~models.Q(event_type__in=SUSPENSION_EVENT_TYPES)
+                | models.Q(
+                    assignee__isnull=True,
+                    deadline__isnull=True,
+                    proposed_deadline__isnull=True,
+                    follow_up_at__isnull=True,
+                    decision__isnull=True,
+                    request_event__isnull=True,
+                    acknowledgement_until__isnull=True,
+                    action_plan__isnull=True,
+                    correction_ref__isnull=True,
+                    previous_severity_version__isnull=True,
+                    severity_version__isnull=True,
+                    verification_check__isnull=True,
+                    suspensions_ended=[],
+                    from_status__in=ACTIVE_STATUSES,
+                    to_status=models.F("from_status"),
+                ),
+                name="defevent_suspension_shape",
             ),
         ]
 

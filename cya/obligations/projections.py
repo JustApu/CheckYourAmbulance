@@ -12,7 +12,12 @@ from cya.checks.models import (
 )
 from cya.checks.state import CheckDecision, CheckSnapshot
 from cya.conditions.models import ObligationDetermination
-from cya.deficiencies.models import Deficiency, DeficiencyAffectedItem, DeficiencyEvent
+from cya.deficiencies.models import (
+    CheckSuspension,
+    Deficiency,
+    DeficiencyAffectedItem,
+    DeficiencyEvent,
+)
 from cya.obligations.history import (
     RecordedCheck,
     RecordedDeficiency,
@@ -79,6 +84,62 @@ def _obligation(row):
     )
 
 
+def stored_suspensions(*, organization_id, vehicle_id, obligation_ids, as_of):
+    """Supervisor check suspensions known at as_of for the requested obligations (SPEC 8.9).
+
+    The default suspension adapter. A suspension names an item (and physical kit instance) of the
+    vehicle; it covers each routine obligation of that item and instance whose window it can
+    touch. Its end is the END row recorded by as_of, so a later closure never changes an earlier
+    answer. The evaluator decides whether it is in force at min(T, G). Bounded like every other
+    evidence collection: too much evidence raises rather than returning a partial answer.
+    """
+    wanted = _bounded(
+        Obligation.objects.filter(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            routine=True,
+            pk__in=obligation_ids,
+        )
+        .order_by("id")
+        .values_list("pk", "item_id", "kit_instance_id", "recorded_at", "grace_at")[: MAX_ROWS + 1]
+    )
+    by_key = {}
+    for pk, item_id, kit_id, recorded_at, grace_at in wanted:
+        key = (str(item_id), str(kit_id) if kit_id else NO_KIT)
+        by_key.setdefault(key, []).append((str(pk), recorded_at, grace_at))
+    if not by_key:
+        return ()
+    rows = _bounded(
+        CheckSuspension.objects.filter(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            item_id__in={key[0] for key in by_key},
+            recorded_at__lte=as_of,
+        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
+    )
+    ended = {str(r.prior_suspension_id): r.recorded_at for r in rows if r.action == "END"}
+    result = []
+    for row in rows:
+        if row.action != "START":
+            continue
+        end = ended.get(str(row.pk))
+        for obligation_id, recorded_at, grace_at in by_key.get(
+            (str(row.item_id), row.instance_key), ()
+        ):
+            # In force at some min(T, G) with T at or after the obligation was recorded.
+            if row.recorded_at <= grace_at and (end is None or end > min(recorded_at, grace_at)):
+                result.append(
+                    SuspensionEvidence(
+                        obligation_id,
+                        row.recorded_at,
+                        end,
+                        str(row.pk),
+                        str(row.deficiency_id),
+                    )
+                )
+    return tuple(result)
+
+
 def _adapter_evidence(lookup, kind, organization_id, vehicle_id, ids, instant):
     if lookup is None or not ids:
         return ()
@@ -90,8 +151,9 @@ def _adapter_evidence(lookup, kind, organization_id, vehicle_id, ids, instant):
             as_of=instant,
         )
     )
+    requested = set(ids)
     for row in result:
-        if not isinstance(row, kind) or row.obligation_id not in ids:
+        if not isinstance(row, kind) or row.obligation_id not in requested:
             raise ValueError("adapter returned unsupported or unrequested evidence")
         if isinstance(row, CheckEvidence) and (
             row.organization_id != organization_id or row.vehicle_id != vehicle_id
@@ -229,6 +291,8 @@ def load_projection_history(
 ):
     """Read evidence recorded by T. Empty adapters fail closed to unsatisfied, never Pass.
 
+    Supervisor check suspensions are read from storage (stored_suspensions) unless a
+    suspension_lookup adapter is supplied in its place.
     No mutable Vehicle.active filter is used: deactivation cannot erase historical answers.
     The caller supplies trusted organization scope and performs request authorization.
     """
@@ -330,7 +394,7 @@ def load_projection_history(
             )
         ),
         suspensions=_adapter_evidence(
-            suspension_lookup,
+            stored_suspensions if suspension_lookup is None else suspension_lookup,
             SuspensionEvidence,
             organization_id,
             vehicle_id,
