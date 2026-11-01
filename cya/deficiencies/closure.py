@@ -1,4 +1,9 @@
-"""Explicit administrator and empty-scope closure commands (SPEC 8.8, issue 152 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/152))."""
+"""Explicit administrator and empty-scope closure commands (SPEC 8.8, issue 152 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/152)).
+
+Either closure ends every check suspension still in force for the deficiency and lists it in
+suspensions_ended (SPEC SUS-4, issue 13 (https://github.com/JustApu/CheckYourAmbulance/issues/13)).
+Reopening resumes none.
+"""
 
 from django.utils import timezone
 
@@ -97,6 +102,12 @@ def _change(
                     "the deficiency has current verification items and must follow correction",
                     path="deficiency",
                 )
+        # Read under the deficiency lock, which every suspension writer holds (SUS-4).
+        ended = (
+            []
+            if event_type == "ADMINISTRATOR_REOPENED"
+            else service.suspension_ids_in_force(organization_id, deficiency_id)
+        )
         event_id = new_id()
         now = timezone.now()
 
@@ -111,9 +122,10 @@ def _change(
                 from_status=projection.status,
                 to_status=target_status,
                 explanation=explanation,
-                suspensions_ended=[],
+                suspensions_ended=ended,
                 **service.stamp(receipt, current),
             )
+            service.end_suspensions(receipt, current, organization_id=organization_id, event=event)
             DeficiencyProjection.objects.filter(
                 organization_id=organization_id, deficiency_id=deficiency_id
             ).update(status=target_status, last_applied_event=event)
@@ -129,7 +141,7 @@ def _change(
                 "deficiency_id": deficiency_id,
                 "event_id": event_id,
                 "status": target_status,
-                "suspensions_ended": [],
+                "suspensions_ended": ended,
             },
             apply=apply,
             response_status=201,
@@ -142,6 +154,7 @@ def _change(
                     "event_id": event_id,
                     "event_type": event_type,
                     "status": target_status,
+                    "suspensions_ended": ended,
                     **(
                         {"verification_scope_count": 0}
                         if event_type == "EMPTY_SCOPE_CLOSED"

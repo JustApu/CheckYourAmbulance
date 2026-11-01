@@ -167,6 +167,7 @@ class ItemVerificationTests(VerificationBase):
                 "remaining_scope_rows": 0,
                 "closure_withheld": False,
                 "status": "CLOSED_VERIFIED",
+                "suspensions_ended": [],
             },
         )
         self.assertEqual(result.body["event_ids"], [str(event.pk)])

@@ -54,6 +54,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "deficiency_acknowledgement_rule",
                     "verification_scope_row",
                     "deficiency_scope_expansion",
+                    "check_suspension",
                     "shared_satisfaction_rule_member",
                     "kit_assignment_event",
                 },

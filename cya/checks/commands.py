@@ -18,7 +18,8 @@ in that deficiency's newest scope revision. Under the deficiency lock the same t
 the effect: a Pass recorded strictly after the correction instant that satisfies the last open
 scope row closes the deficiency (VERIFICATION_CLOSED) unless an administrator invalidated its
 supporting check chain (INV-3: only an explicit closure then closes it), and a Fail adds evidence and returns it to
-In Progress (VERIFICATION_FAILED). Every other unsupported field is refused (NOT_YET_SUPPORTED)
+In Progress (VERIFICATION_FAILED). A closure ends the deficiency's check suspensions still in force
+and lists them in suspensions_ended (SPEC SUS-3). Every other unsupported field is refused (NOT_YET_SUPPORTED)
 rather than silently ignored, because accepting what is not built would fail open.
 """
 
@@ -636,10 +637,17 @@ def _verification_plan(organization_id, shape, chosen_kit):
             raise CheckError(
                 "CONFIGURATION_UNAVAILABLE", "verification transition is unavailable", status=503
             ) from None
+    # A verified closure ends every check suspension still in force (SUS-3), read under the lock.
+    ended = (
+        deficiency_service.suspension_ids_in_force(organization_id, deficiency_id)
+        if event_type == "VERIFICATION_CLOSED"
+        else []
+    )
     return SimpleNamespace(
         deficiency_id=deficiency_id,
         last=last,
         revision=revision,
+        suspensions_ended=ended,
         counts=counts,
         remaining=remaining,
         closure_withheld=withheld and counts and remaining == 0,
@@ -658,6 +666,7 @@ def _verification_body(plan):
         "remaining_scope_rows": plan.remaining,
         "closure_withheld": plan.closure_withheld,
         "status": plan.to_status or PENDING_VERIFICATION,
+        "suspensions_ended": plan.suspensions_ended,
     }
 
 
@@ -951,7 +960,11 @@ def record_check(
                     from_status=PENDING_VERIFICATION,
                     to_status=verification.to_status,
                     verification_check_id=check_id,
+                    suspensions_ended=verification.suspensions_ended,
                     **deficiency_service.stamp(receipt, current),
+                )
+                deficiency_service.end_suspensions(
+                    receipt, current, organization_id=organization_id, event=event
                 )
                 DeficiencyProjection.objects.filter(
                     organization_id=organization_id, deficiency_id=verification.deficiency_id

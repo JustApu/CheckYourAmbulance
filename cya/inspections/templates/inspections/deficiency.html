@@ -86,9 +86,7 @@
 {% if event.proposed_deadline %}<p>Proposed deadline: {{ event.proposed_deadline|date:"Y-m-d H:i" }} UTC</p>{% endif %}
 {% if event.decision %}<p>Decision: {{ event.decision_label }}</p>{% endif %}
 {% if event.follow_up_at %}<p>Follow-up: {{ event.follow_up_at|date:"Y-m-d H:i" }} UTC</p>{% endif %}
-{% if event.event_type == "ADMINISTRATOR_CLOSED" or event.event_type == "EMPTY_SCOPE_CLOSED" %}
-<p>Check suspensions ended: {{ event.suspensions_ended|default:"none" }}</p>
-{% endif %}
+{% if event.suspensions_ended %}<p>Check suspensions ended: {{ event.suspensions_ended|length }}</p>{% endif %}
 </li>
 {% endfor %}
 </ol>

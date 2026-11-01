@@ -9,7 +9,8 @@ Unable to Inspect check (`POST /api/v1/checks`), an independent report
 lifecycle handlers reuse the closed transition table and the lock protocol below; [issue #146](https://github.com/JustApu/CheckYourAmbulance-archive/issues/146)
 adds [assignment, deadlines and starting work](#assignment-deadlines-and-starting-work), [issue #149](https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)
 adds [Awaiting External Dependency and progress notes](#awaiting-external-dependency-and-progress-notes),
-[issue #153](https://github.com/JustApu/CheckYourAmbulance-archive/issues/153) adds correction and its scope, and [issue #154](https://github.com/JustApu/CheckYourAmbulance-archive/issues/154) adds verification checks and automatic closure.
+[issue #153](https://github.com/JustApu/CheckYourAmbulance-archive/issues/153) adds correction and its scope, [issue #154](https://github.com/JustApu/CheckYourAmbulance-archive/issues/154) adds verification checks and automatic closure, and
+[issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13) adds [supervisor check suspension](#supervisor-check-suspension).
 
 ## Tables
 
@@ -24,6 +25,7 @@ adds [Awaiting External Dependency and progress notes](#awaiting-external-depend
 | `deficiency_event` | A | Append-only lifecycle events; status is the latest event's `to_status` |
 | `verification_scope_row` | A | Append-only correction-time scope revision; item and checklist definition plus physical kit instance, or explicit no-kit key; required-after instant |
 | `deficiency_scope_expansion` | A | Items (definition, physical kit instance or no-kit key) a supervisor added with `SCOPE_EXPANDED` or `VERIFICATION_ADDED`; every later correction's scope includes them ([issue #156](https://github.com/JustApu/CheckYourAmbulance-archive/issues/156)) |
+| `check_suspension` | A | `START` of a supervisor suspension of one routine check (item and physical kit instance, or no-kit key) and its `END`, written by the event that closed or cancelled the deficiency ([issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13)) |
 | `deficiency_evidence` | A | What supports the deficiency: a Failed or Unable check today. Never removed |
 | `deficiency_link` | A | Informational `ADD`/`REMOVE` history of a pair, stored lower id first |
 | `deficiency_age_rule` | A | Administrator-set revisions of the age-highlight rule: thresholds in days and the long-running test; none until configured (SPEC DEF-6, [issue #150](https://github.com/JustApu/CheckYourAmbulance-archive/issues/150)) |
@@ -51,10 +53,10 @@ a deficiency was reported but before correction, correction remains refused as `
 and records no repair event. There is no fallback to report-time items. The authorized
 empty-scope closure records that
 the deficiency was closed without verification; it does not claim that a repair occurred. Its
-event and status are shown distinctly in history. Both closure types carry `suspensions_ended`,
-currently always an empty JSON array, and neither changes vehicle status. The field is part of the
-event schema now so [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13) can populate it without changing the shape; the database trigger
-rejects nonempty values until that work exists. The assignment/history read includes both closure
+event and status are shown distinctly in history. Both closure types end every
+[check suspension](#supervisor-check-suspension) still in force and list it in
+`suspensions_ended` (the response repeats the list); neither changes vehicle status, and reopening
+resumes no suspension. The assignment/history read includes both closure
 event types and administrator reopen events, including their explanation and suspension list;
 for those lifecycle entries, assignee and deadline show the values in effect at that point. These
 commands only change deficiency state and never vehicle status. An invalidated Failed check still
@@ -168,7 +170,8 @@ with `deficiency_evidence` from any row of the chain; one check may support seve
 
 - **Failed to Passed Correct-entry** (the correction command, tip outcome Failed). Each supporting
   deficiency is locked (sorted by id, after the item lock the command already holds) and then:
-  - **Reported in Error** (`REPORTED_IN_ERROR` event, status `REPORTED_IN_ERROR`) only if its
+  - **Reported in Error** (`REPORTED_IN_ERROR` event, status `REPORTED_IN_ERROR`, ending every
+    [check suspension](#supervisor-check-suspension) still in force, SPEC SUS-4) only if its
     status has that arrow in SPEC 8.2 (Open, In Progress, Pending Verification), no *other*
     effective chain still ends Failed or Unable to Inspect, and no event other than the
     creation, correction-effect and reopening events exists (any future repair, corrective
@@ -185,7 +188,7 @@ with `deficiency_evidence` from any row of the chain; one check may support seve
 - **Invalidation** never closes or cancels a deficiency (INV-3). If a supporting deficiency is
   still Reported in Error and its *last* event is this chain's `REPORTED_IN_ERROR`, a
   `REOPENED` event returns it to Open in the same transaction, attributed to the administrator,
-  with the invalidation's explanation (INV-7). A deficiency cancelled by another chain, or closed
+  with the invalidation's explanation (INV-7). The reopening resumes no ended check suspension. A deficiency cancelled by another chain, or closed
   independently, is untouched. The chain stays in the evidence list (evidence is never removed);
   its invalid state is read from the chain, so no earlier outcome revives, no repair is inferred
   and no vehicle status changes (OPS-2). The response fills `reopened_deficiency_ids`.
@@ -248,7 +251,9 @@ transaction appends one of two events, each naming the check in `verification_ch
 carrying nothing else:
 
 - `VERIFICATION_CLOSED`: Pending Verification to Closed Verified when a counting Pass leaves no
-  row of the newest scope revision unsatisfied. The projection moves in the same transaction.
+  row of the newest scope revision unsatisfied. The projection moves in the same transaction, and
+  every [check suspension](#supervisor-check-suspension) still in force ends with it and is listed
+  in `suspensions_ended` (SPEC SUS-3; the response's `verification.suspensions_ended` repeats it).
 - `VERIFICATION_FAILED`: Pending Verification to In Progress when a verification check Fails; the
   Failed check is also added as `deficiency_evidence`.
 
@@ -353,6 +358,81 @@ active physical kit instances on the vehicle (`KIT_REQUIRED`), and any other ite
   earlier revision of the same correction (an expansion never shrinks scope).
 - Both event types record no repair: they are not in the COR-4 neutral list, because a
   deficiency that has them has already had a correction recorded.
+
+## Supervisor check suspension
+
+[issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13); SPEC §8.9 SUS-1 to SUS-4, §5.4, VW-2, AC-18. Code: `cya/deficiencies/suspension.py`, the
+closing commands, and the obligation and attention readers ([obligation state](obligation-state.md#check-and-suspension-adapters),
+[attention views](attention-views.md#the-checklist-query)).
+
+`POST /api/v1/deficiencies/{id}/check-suspensions` takes `operation_id`, `expected_event_id`, 1 to 50
+`items` (`{item_id, kit_instance_id?}`) and an optional `explanation` (nonblank, at most 4,000
+characters). It needs the `suspend_routine_checks` permission (Supervisor, Administrator); Crew and
+Supply Officers are refused and the denial is audited. Each item must be on the vehicle's current
+checklist (`422 ITEM_NOT_IN_CHECKLIST`); a kit-defined item names one of its active physical kit
+instances on the vehicle (`KIT_REQUIRED`) and any other item names none (`KIT_NOT_ALLOWED`). Each
+item and kit instance must lie within the deficiency's current affected scope, the scope a
+correction would resolve now: its report-time target plus supervisor expansions, against today's
+checklist and kit placement (`422 ITEM_NOT_IN_SCOPE`, owner decision 2026-11-01 on PR #29). A
+deficiency on one kit instance therefore cannot suspend the other instance. The deficiency must still be worked (Open, In Progress,
+Awaiting External Dependency or Pending Verification; otherwise `422 DEFICIENCY_NOT_ACTIVE`), must
+not already suspend that item and kit (`422 ALREADY_SUSPENDED`), and may hold at most 200
+suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
+`409 DEFICIENCY_CHANGED`; a replay with the same `operation_id` returns the stored answer.
+
+- **Effect.** One `CHECKS_SUSPENDED` event (status unchanged, the optional explanation, nothing
+  else) and one `check_suspension` `START` row per item, in one audited transaction; the projection
+  moves only its last applied event. The response gives `event_id`, `status`, `items` and
+  `suspension_ids`. The audit snapshot holds identifiers only. Nothing else changes: no status,
+  assignee, deadline, scope or vehicle status (SUS-2, OPS-2). Another deficiency may suspend the
+  same item; the item is suspended while any suspension of it is in force.
+- **What it does to obligations.** The item's routine obligations (for a kit item, only those of the
+  named physical instance) show `SUSPENDED`, displayed "Known Deficiency — Check Suspended". They are
+  never Satisfied, a check recorded anyway does not satisfy them, and they leave Needs Attention Only
+  but stay in the full checklist with the deficiency beside them (AC-18). Every other check stays
+  required. An obligation already satisfied by a check recorded before the suspension started stays
+  Satisfied (owner decision 2026-11-01): a suspension never revokes completed work. Explicit ad hoc
+  orders (ADH-1) are not routine and are never suspended. See
+  [obligation state](obligation-state.md#pure-evaluator-and-precedence) for the instant at which a
+  suspension is judged.
+- **Ending.** Nothing ends a suspension except the deficiency leaving the active statuses: verified
+  closure (SUS-3), administrator closure, empty-scope closure and Reported in Error (SUS-4; a
+  suspension with no open deficiency is invalid). That event lists, in `suspensions_ended`, the
+  sorted ids of every `START` still in force, and the same command writes one `END` row naming each
+  (`prior_suspension_id`) and the event. Reopening (administrator, INV-7 or added verification)
+  resumes none; suspending again is a new decision with its own `START`. There is no command to end
+  a suspension by hand.
+- **Correction effects.** `CHECKS_SUSPENDED` is in `NEUTRAL_EVENT_TYPES`: it records no repair, so a
+  later qualifying author correction still marks the deficiency Reported in Error, which then ends
+  the suspensions.
+- **Locks and races.** The vehicle, checklist-template and deficiency locks are taken in the
+  correction command's order. A closure that commits first leaves a stale suspension request to fail
+  with 409 (and a fresh one with `DEFICIENCY_NOT_ACTIVE`); a suspension that commits first is ended by
+  the closure waiting behind it. Both orders are tested with two connections.
+- **Database guards** (migration `0017_check_suspension`). CHECK `defevent_suspension_shape` keeps
+  the event's closed shape; `defevent_suspensions_closing` allows a nonempty `suspensions_ended` only
+  on the four closing types (it replaces `defevent_suspensions_empty`, and the empty-list rule is
+  dropped from `defevent_admin_close_shape` and `defevent_verification_shape`). The event trigger
+  requires `CHECKS_SUSPENDED` to have its own receipt (`DEFICIENCY_CHECKS_SUSPEND`), a Supervisor or
+  Administrator role snapshot and an active, unchanged status; it requires every closing event to list
+  exactly the deficiency's `START` rows still in force (an array of distinct id strings: no missing,
+  foreign, ended, repeated or malformed entry) and every other event to list none. The
+  `check_suspension` trigger requires the receipt of the row's own command type, the deficiency's
+  vehicle, and the instance key; a `START` must belong to its command's `CHECKS_SUSPENDED` event, which
+  is the deficiency's newest and active, must not repeat a suspension in force, and its kit instance
+  must be active on the vehicle in the item's slot; an `END` must name a `START` of the same
+  deficiency, item and kit, and the closing event of its own command that lists it (and a `START` has
+  at most one `END`). Rows are append-only. Reversing the migration is refused once a suspension
+  exists.
+- **Reader.** `GET /api/v1/deficiencies/{id}/check-suspensions` returns `deficiency_status`,
+  `last_event_id`, `in_force` (the ids not yet ended) and `suspensions`: each `START` with its item,
+  kit, `started_at`, `started_by`, explanation and, once ended, `ended_at` and the ending event's id
+  and type. `?as_of=<instant>` answers for that moment (AC-26, AC-27): an instant before the
+  deficiency was reported is `404`, a malformed or naive one `400`. Any signed-in member may read it.
+  The answer is bounded (`503` rather than truncated).
+- **Deficiency page.** The history lists a start as "Routine checks suspended", and an event that
+  ended suspensions shows how many ("Check suspensions ended: 1"). **Not built here:** the supervisor screen
+  ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16)) and the fleet dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)).
 
 ## The closed transition table
 
@@ -724,6 +804,7 @@ effects or none, and the operation id makes the call idempotent. Verify with the
 - `deficiency.severity_version_id` (a reference to the level revision) replaces a literal severity column; the contract's `severity` is read through it (`code`).
 - `deficiency_event` gains `decision` and `request_event_id` ([issue #150](https://github.com/JustApu/CheckYourAmbulance-archive/issues/150)), set only on `EXTENSION_DECIDED`; the contract's `proposed_deadline` is written by `EXTENSION_REQUESTED` and `deficiency_age_rule` is new (the contract has no age table; DEF-6 requires one).
 - `deficiency_scope_expansion` is new ([issue #156](https://github.com/JustApu/CheckYourAmbulance-archive/issues/156)); the contract's `verification_scope_row` note "expansion appends, never shrinks past evidence" is implemented by the expansion revision and the closure guard.
+- `check_suspension` ([issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13)) adds `definition_id`, nullable `kit_instance_id` and the non-null `instance_key` beside `item_id`, so a suspension names one physical kit instance; one `deficiency_event_id` names the `CHECKS_SUSPENDED` event for a `START` and the closing event for an `END` (the contract's `ending_deficiency_event_id`); the contract's `starts_at` is the `START` row's `recorded_at` (a suspension starts when it is recorded). `deficiency_event` gains the type `CHECKS_SUSPENDED`, and `suspensions_ended` holds the sorted `START` ids a closing event ended.
 - `deficiency_event` gains `verification_check_id` ([issue #154](https://github.com/JustApu/CheckYourAmbulance-archive/issues/154)), set only on `VERIFICATION_CLOSED` and `VERIFICATION_FAILED`, and ([issue #155](https://github.com/JustApu/CheckYourAmbulance-archive/issues/155)) on `VERIFICATION_REOPENED`, where it names the root of the verification chain that lost its Pass.
 - `deficiency_event` gains `previous_severity_version_id` and `severity_version_id` ([issue #123](https://github.com/JustApu/CheckYourAmbulance-archive/issues/123)), set only on `SEVERITY_CHANGED`; `deficiency_projection` gains `severity_version_id`, the level revision now in force.
 

@@ -13,11 +13,15 @@ each group in Normal order.
 
 Needs Attention Only keeps a row that is red, or whose obligation still needs action: Overdue,
 Due or Current ("actionable due, overdue, incomplete"). Upcoming, Satisfied, Exempt and Waived
-rows are not actionable. EXTENSION POINT (M4): a row whose routine check a supervisor suspended
-for a known deficiency reaches this module with obligation state SUSPENDED, which is never
-actionable, so it drops out of the due/overdue/incomplete part of the filter but stays in the
-full checklist and keeps its deficiency visible. Suspension itself arrives in M4; until its
-evidence lookup is supplied through ``suspension_lookup`` no obligation is ever SUSPENDED.
+rows are not actionable. A row whose routine check a supervisor suspended for a known deficiency
+(SPEC 8.9) shows obligation state SUSPENDED ("Known Deficiency — Check Suspended"): it is never
+actionable and, while that suspension is in force, is left out of Needs Attention Only even though
+its deficiency makes it red (VW-2, AC-18), but it stays in the full checklist with its deficiency
+listed. An obligation that stays Suspended in history after its suspension ended ranks last, so the
+row shows its current obligation again. A row still shows Overdue, Due or Current, and stays in the
+filter, when another of its obligations needs action, such as one missed before the suspension
+started. Suspensions are read from storage by the obligation reader; ``suspension_lookup``
+replaces that evidence when supplied.
 """
 
 from dataclasses import dataclass, field
@@ -90,6 +94,8 @@ class ChecklistRow:
     latest_check_outcome: str | None = None
     latest_check_at: datetime | None = None
     obligation_outcome: str | None = None
+    # The shown obligation is under a supervisor check suspension still in force (SPEC 8.9).
+    check_suspended: bool = False
 
 
 @dataclass(frozen=True)
@@ -158,6 +164,13 @@ def _kits_at(organization_id, vehicle_id, reference_kit_id, as_of, slots):
     )
 
 
+def _rank(state):
+    """Urgency of one obligation state; an ended suspension is history and ranks last."""
+    if state.state == State.SUSPENDED and not state.suspension_in_force:
+        return len(STATE_RANK)
+    return STATE_RANK.index(state.state)
+
+
 def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup):
     """The most urgent obligation state per (item_id, kit_key)."""
     best = {}
@@ -169,10 +182,9 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup):
         include_all_ad_hoc=True,
     ):
         key = (state.obligation.item_id, state.obligation.kit_instance_id or NO_KIT)
-        rank = STATE_RANK.index(state.state)
         current = best.get(key)
-        if current is None or (rank, state.obligation.due_at) < (
-            STATE_RANK.index(current.state),
+        if current is None or (_rank(state), state.obligation.due_at) < (
+            _rank(current),
             current.obligation.due_at,
         ):
             best[key] = state
@@ -349,6 +361,7 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup):
                 unit=requirement.unit,
                 allowed_outcomes=tuple(requirement.allowed_outcomes),
                 obligation_outcome=state.outcome if state else None,
+                check_suspended=state is not None and state.suspension_in_force,
                 latest_check_id=last.check_id if last else None,
                 latest_check_outcome=last.outcome if last else None,
                 latest_check_at=last.recorded_at if last else None,
@@ -384,7 +397,11 @@ def vehicle_checklist(
         raise ChecklistQueryError("NOT_FOUND", "vehicle was not found", 404)
     rows = _rows(organization_id, str(vehicle_id), instant, suspension_lookup)
     if needs_attention_only:
-        rows = [row for row in rows if row.attention.red or row.needs_action]
+        rows = [
+            row
+            for row in rows
+            if not row.check_suspended and (row.attention.red or row.needs_action)
+        ]
     if view == PRIORITY:
         # sorted() is stable, so each group keeps the Normal order.
         rows = sorted(rows, key=_priority_group)

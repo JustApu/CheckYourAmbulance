@@ -19,6 +19,7 @@ from cya.checklists.overlay import (
 )
 from cya.deficiencies import deadlines
 from cya.deficiencies.models import (
+    CheckSuspension,
     Deficiency,
     DeficiencyAffectedItem,
     DeficiencyAgeRule,
@@ -51,6 +52,7 @@ MAX_ASSIGNMENT_EVENTS = 5000
 MAX_DEPENDENCY_EVENTS = 5000
 MAX_PROGRESS_NOTES = 5000
 MAX_DEADLINE_EVENTS = 5000
+MAX_SUSPENSIONS_IN_FORCE = 200  # check suspensions one deficiency may hold at once (SPEC 8.9)
 
 
 class DeficiencyError(ValueError):
@@ -653,6 +655,72 @@ def suggest_related(organization_id, vehicle_id, item_id=None):
         }
         for row in rows[:MAX_SUGGESTIONS]
     ]
+
+
+def suspensions_in_force(organization_id, deficiency_id):
+    """The deficiency's check suspension STARTs that no END names yet, oldest first.
+
+    Call under the deficiency lock, which every writer of a START or an END holds. The command that
+    starts suspensions keeps the number in force within MAX_SUSPENSIONS_IN_FORCE, so more is
+    corrupt state and refused rather than cut, because a closing event must list every one.
+    """
+    ended = CheckSuspension.objects.filter(
+        organization_id=organization_id, deficiency_id=deficiency_id, action="END"
+    ).values("prior_suspension_id")
+    rows = list(
+        CheckSuspension.objects.filter(
+            organization_id=organization_id, deficiency_id=deficiency_id, action="START"
+        )
+        .exclude(pk__in=ended)
+        .order_by("recorded_at", "id")[: MAX_SUSPENSIONS_IN_FORCE + 1]
+    )
+    if len(rows) > MAX_SUSPENSIONS_IN_FORCE:
+        raise DeficiencyError(
+            "CONFIGURATION_UNAVAILABLE", "check suspensions are unavailable", status=503
+        )
+    return rows
+
+
+def suspension_ids_in_force(organization_id, deficiency_id):
+    """What a closing event lists in suspensions_ended: the ids in force, sorted (SUS-3, SUS-4)."""
+    return sorted(str(row.pk) for row in suspensions_in_force(organization_id, deficiency_id))
+
+
+def end_suspensions(receipt, current, *, organization_id, event):
+    """Write one END per START the closing event lists, in the closing command's transaction."""
+    ids = list(event.suspensions_ended)
+    if not ids:
+        return []
+    starts = list(
+        CheckSuspension.objects.filter(
+            organization_id=organization_id,
+            deficiency_id=event.deficiency_id,
+            action="START",
+            pk__in=ids,
+        ).order_by("id")
+    )
+    if len(starts) != len(ids):
+        raise DeficiencyError(
+            "CONFIGURATION_UNAVAILABLE", "check suspensions are unavailable", status=503
+        )
+    ends = [
+        CheckSuspension(
+            organization_id=organization_id,
+            deficiency_id=start.deficiency_id,
+            vehicle_id=start.vehicle_id,
+            item_id=start.item_id,
+            definition_id=start.definition_id,
+            kit_instance_id=start.kit_instance_id,
+            instance_key=start.instance_key,
+            action="END",
+            deficiency_event=event,
+            prior_suspension=start,
+            **stamp(receipt, current),
+        )
+        for start in starts
+    ]
+    CheckSuspension.objects.bulk_create(ends)
+    return ends
 
 
 def last_event(deficiency_id):

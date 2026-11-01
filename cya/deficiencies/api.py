@@ -10,7 +10,9 @@ permission), and GET .../assignment returns the assignee, deadline and status, n
 instant. POST .../dependencies, .../dependency-revisions and .../dependency-exits enter, revise and
 leave Awaiting External Dependency (the update_external_dependency permission) and GET .../dependency
 returns the current record and its history; POST and GET .../progress-notes append and list
-timestamped progress notes (the add_progress_note permission). GET /api/v1/deficiencies/suggestions
+timestamped progress notes (the add_progress_note permission). POST .../check-suspensions suspends
+the routine checks of named items for a known deficiency (the suspend_routine_checks permission)
+and GET .../check-suspensions lists them, now or as of an instant. GET /api/v1/deficiencies/suggestions
 lists possible matches for a deficiency about to be reported; it reads only, and the crew member
 decides. Actor, organization and roles come from the signed-in user, never the body (SPEC 3.2).
 Errors use the record-check shape and codes; business rules live in cya.deficiencies.commands.
@@ -40,6 +42,7 @@ from cya.deficiencies import (
     expansion,
     extensions,
     service,
+    suspension,
 )
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.deficiencies.service import DeficiencyError
@@ -87,6 +90,7 @@ ACKNOWLEDGEMENT_MAXIMUM_FIELDS = frozenset({"operation_id", "maximum_days"})
 ADMIN_CLOSE_FIELDS = frozenset({"operation_id", "explanation", "expected_event_id"})
 EXPANSION_FIELDS = frozenset({"operation_id", "explanation", "expected_event_id", "items"})
 ADDED_VERIFICATION_FIELDS = EXPANSION_FIELDS | {"deadline"}
+SUSPENSION_FIELDS = frozenset({"operation_id", "expected_event_id", "items"})
 # Body fields copied to the command as text, and those read as instants.
 TEXT_FIELDS = (
     "explanation",
@@ -110,6 +114,7 @@ ACK_FIELDS = (
     "items",
     "scope_revision",
     "scope_count",
+    "suspension_ids",
 )
 
 
@@ -794,6 +799,36 @@ def scope_expansions(request, deficiency_id):
         "verification scope expansion",
         expansion.expand_scope,
         EXPANSION_FIELDS,
+    )
+
+
+@never_cache
+@require_http_methods(["GET", "POST"])
+def check_suspensions(request, deficiency_id):
+    """POST suspends routine checks for a known deficiency (SPEC 8.9); GET lists its suspensions.
+
+    The POST body names expected_event_id, 1 to 50 items {item_id, kit_instance_id?} and an optional
+    explanation. GET takes only as_of; any signed-in member of the organization may read it.
+    """
+    if request.method == "POST":
+        return _event_post(
+            request,
+            deficiency_id,
+            "check suspension",
+            suspension.suspend_checks,
+            SUSPENSION_FIELDS,
+            frozenset({"explanation"}),
+        )
+    answer = _history_read(
+        request, deficiency_id, "deficiency check suspensions", suspension.suspension_state
+    )
+    if isinstance(answer, JsonResponse):
+        return answer
+    view, correlation_id, deficiency_id = answer
+    for row in view["suspensions"]:
+        _stamped(row, "started_at", "ended_at")
+    return JsonResponse(
+        {"status": "OK", "correlation_id": correlation_id, "deficiency_id": deficiency_id, **view}
     )
 
 

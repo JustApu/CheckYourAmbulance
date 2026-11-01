@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from django.test import Client, override_settings
 
+from cya.deficiencies.closure import close_administrator
 from cya.deficiencies.commands import (
     assign_deficiency,
     record_correction,
@@ -15,6 +16,7 @@ from cya.deficiencies.commands import (
     start_work,
 )
 from cya.deficiencies.models import DeficiencyEvent
+from cya.deficiencies.suspension import suspend_checks
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 
 
@@ -202,6 +204,47 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertContains(closed, "Closed — Verified")
         self.assertNotContains(closed, 'data-kind="note"')
         self.assertEqual(self.client.get(config["urls"]["checklist"]).json()["items"], [])
+
+    def test_history_counts_the_check_suspensions_a_closure_ended(self):
+        def suspend(pk, *items):
+            suspend_checks(
+                deficiency_id=pk,
+                expected_event_id=self.latest(pk),
+                items=[{"item_id": str(item.pk)} for item in items],
+                **self.context(self.supervisor),
+            )
+
+        verified = self.pending()
+        suspend(verified, self.suction)
+        page = self.detail(verified)
+        self.assertContains(page, "Routine checks suspended")
+        self.assertNotContains(page, "Check suspensions ended")
+        row = self.client.get(f"/deficiencies/{verified}/verification-items/").json()["items"][0]
+        saved = self.post(
+            "/api/v1/checks",
+            {
+                "operation_id": str(uuid4()),
+                "vehicle_id": str(self.vehicle.pk),
+                "item_id": row["item_id"],
+                "checklist_version_id": row["checklist_version_id"],
+                "basis_check_id": row["latest_check_id"],
+                "outcome": "PASSED",
+                "purpose": "VERIFICATION",
+                "verification_for_deficiency_id": verified,
+            },
+        )
+        self.assertEqual(saved.json()["result"]["verification"]["status"], "CLOSED_VERIFIED")
+        self.assertContains(self.detail(verified), "Check suspensions ended: 1", count=1)
+
+        closed = self.report()
+        suspend(closed, self.suction)
+        close_administrator(
+            deficiency_id=closed,
+            expected_event_id=self.latest(closed),
+            explanation="Synthetic closure.",
+            **self.context(self.admin),
+        )
+        self.assertContains(self.detail(closed), "Check suspensions ended: 1", count=1)
 
     def test_scope_keeps_each_physical_kit_and_routine_pass_does_not_verify(self):
         pk = self.pending(self.kit_item, summary="Synthetic kit deficiency")

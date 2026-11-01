@@ -21,7 +21,7 @@ Authoritative mappings: `contracts/step-catalog.json` (`cases[*].requirements`);
 | AC-15 | [AC-15.json](scenarios/AC-15.json) | INV-1, INV-2 | Covered by direct tests in `cya/checks/tests/test_invalidation.py` (nothing modified, explanation mandatory, non-administrator changes nothing); scenario stays symbolic |
 | AC-16 | [AC-16.json](scenarios/AC-16.json) | VER-2, VER-3, VER-4 | Symbolic; unimplemented |
 | AC-17 | [AC-17.json](scenarios/AC-17.json) | §8.7 (no requirement ID) | Symbolic; unimplemented |
-| AC-18 | [AC-18.json](scenarios/AC-18.json) | SUS-1, SUS-2, SUS-3 | Symbolic; unimplemented |
+| AC-18 | [AC-18.json](scenarios/AC-18.json) | SUS-1, SUS-2, SUS-3 | Covered by direct tests in `cya/deficiencies/tests/test_suspension.py` (Known Deficiency — Check Suspended, never Satisfied, out of Needs Attention Only but in the full checklist, ended by verified closure and by every SUS-4 path, as-of replay) and `cya/attention/tests/test_checklist.py`; scenario stays symbolic |
 | AC-19 | [AC-19.json](scenarios/AC-19.json) | OPS-1, OPS-2 | Symbolic; unimplemented |
 | AC-20 | [AC-20.json](scenarios/AC-20.json) | OPS-5; §5.9 | Symbolic; unimplemented |
 | AC-21 | [AC-21.json](scenarios/AC-21.json) | ODO-1, ODO-2, ODO-3 | Part A covered by direct tests in `cya/odometer/tests` (one obligation per inspection satisfied once by any crew member, lower and over-threshold readings need confirmation, engine hours optional); correction and invalidation (Part B) pending; scenario stays symbolic |

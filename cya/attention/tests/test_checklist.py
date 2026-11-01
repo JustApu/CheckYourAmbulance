@@ -191,7 +191,7 @@ class ViewTests(AttentionCase):
         self.assertNotIn(str(self.suction.pk), only)
         self.assertIn(str(self.siren.pk), only)
 
-    def test_a_suspended_item_with_an_unresolved_deficiency_still_shows_as_red(self):
+    def test_a_suspended_item_with_an_unresolved_deficiency_is_red_but_out_of_the_filter(self):
         self.clock.set(self.at(hours=5, minutes=30))
         self.failed(self.suction)
 
@@ -202,8 +202,12 @@ class ViewTests(AttentionCase):
                 for pk in mine.values_list("pk", flat=True)
             ]
 
+        full = {r.item_id: r for r in self.rows(suspension_lookup=lookup)}
+        self.assertEqual(full[str(self.suction.pk)].obligation_state, "SUSPENDED")
+        self.assertTrue(full[str(self.suction.pk)].attention.red)  # its deficiency stays listed
+        # AC-18: a supervisor-suspended check is excluded from Needs Attention Only even while red.
         only = {r.item_id for r in self.rows(needs_attention_only=True, suspension_lookup=lookup)}
-        self.assertIn(str(self.suction.pk), only)  # unresolved items stay in the filter
+        self.assertNotIn(str(self.suction.pk), only)
 
 
 class QueryTests(AttentionCase):

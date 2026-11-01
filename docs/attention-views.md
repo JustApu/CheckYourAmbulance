@@ -6,7 +6,7 @@ filter (SPEC §6.5 VW-1, VW-2), known deficiencies and the vehicle's operational
 the items (VW-3), and a per-crew-member preference synchronized across devices (OQ-38). Code:
 `cya/attention/` (`state.py`, `facts.py`, `checklist.py`, `preferences.py`, `api.py`). The crew
 screens that call these endpoints are [issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85); the deficiency lifecycle (closing, suspension)
-is M4.
+is M4, and suspended checks are described [below](#the-checklist-query).
 
 ## Item attention state
 
@@ -55,16 +55,23 @@ reported instant). The result also has the vehicle's operational status at the i
 - **Normal**: template order, then display order, then item id.
 - **Priority**: red rows first, then rows that need action, then the rest, each in Normal order.
 - **Needs Attention Only**, in either view: keeps a row that is red, or whose obligation is
-  Overdue, Due or Current. The spec words "actionable due, overdue, incomplete" are read as
+  Overdue, Due or Current, except a row shown as Suspended (below). The spec words "actionable due, overdue, incomplete" are read as
   the three states in which an unsatisfied obligation can be checked now; Upcoming, Satisfied,
   Exempt and Waived rows are not actionable. This reading is recorded as an assumption on the
   PR.
-- **Suspension extension point (M4).** A row whose routine check is suspended arrives with
-  obligation state `SUSPENDED`, which is never actionable. It drops out of the due, overdue and
-  incomplete part of the filter but stays in the full checklist, and its unresolved deficiency
-  still makes it red and keeps it in the filter (SPEC VW-2, SUS-1). Suspension itself is M4;
-  until its evidence is supplied through the `suspension_lookup` argument no obligation is
-  ever `SUSPENDED`.
+- **Suspended checks** ([issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13), SPEC §8.9, VW-2, AC-18). A row whose routine check a
+  supervisor suspended for a known deficiency ([deficiencies](deficiencies.md#supervisor-check-suspension))
+  shows obligation state `SUSPENDED`, which the crew screen labels "Known Deficiency — Check
+  Suspended". It is never actionable and is left out of Needs Attention Only even though its
+  unresolved deficiency keeps it red; it stays in the full checklist, in either view, with the
+  deficiency listed beside it. A row still shows Overdue, Due or Current, and stays in the filter,
+  when another of its obligations in the window needs action, such as one missed before the
+  suspension started. Once the suspension ends, an obligation that stays Suspended in history
+  ranks after every other state, so the row shows its current obligation again and is no longer
+  left out of the filter. Suspensions are read from storage; the `suspension_lookup` argument replaces
+  that evidence when supplied. Reading AC-18 as excluding a suspended row even when it is red from a
+  different cause (another deficiency, or a Failed check recorded anyway) is an implementation
+  assumption recorded on the PR.
 
 Each row also carries what the crew screen needs to record a check ([issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85)): `checklist_version_id` (the version that defines the item), `expected_quantity`, `unit`, `allowed_outcomes`, and the newest effective check whatever its outcome (`latest_check_id`, `latest_check_outcome`, `latest_check_at`, `latest_check_by`, the author's display name, which the conflict warning already shows every crew member). `attention_check_id` is still set only for a red check; `latest_check_id` is the basis a client sends as `basis_check_id` (SPEC CON-3).
 
@@ -106,6 +113,7 @@ use the record-check shape.
 ## Not built here
 
 The crew screens ([issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85)), live-update wiring of the checklist (hints from [issue #84](https://github.com/JustApu/CheckYourAmbulance-archive/issues/84) prompt
-a re-read of this endpoint), supervisor suspension and the deficiency lifecycle (M4).
+a re-read of this endpoint), and the supervisor screens for the deficiency lifecycle and
+suspension ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16)).
 
 [issue #86](https://github.com/JustApu/CheckYourAmbulance-archive/issues/86) adds `obligation_outcome` to checklist rows so clients can distinguish Failed satisfaction and supervisor completion from Passed; see [deficiency workflows](deficiency-workflows.md).
