@@ -6,6 +6,8 @@ GET  /api/v1/notification-preferences       the caller's own optional switches
 POST /api/v1/notification-preferences       switch one event/channel on or off for the caller
 GET  /api/v1/notification-policy            mandatory event/channel pairs (administrator)
 POST /api/v1/notification-policy            set a pair mandatory or optional (administrator)
+GET  /api/v1/notification-recipients        each event's default and effective recipients (administrator)
+POST /api/v1/notification-recipients        turn one recipient kind on or off for an event (administrator)
 GET  /api/v1/notification-failures          email intents that failed and are not yet sent
                                             (administrator; safe error codes only)
 
@@ -27,7 +29,7 @@ from cya.authorization.policy import permitted
 from cya.checks.api import _reply
 from cya.deficiencies.api import _json_body, _run, _stamp
 from cya.deficiencies.service import DeficiencyError
-from cya.notifications import commands, delivery, inbox
+from cya.notifications import commands, delivery, inbox, recipients
 from cya.notifications.rules import NotificationError
 from cya.operations.api import _operation, _reader
 from cya.operations.commands import StatusError
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 PREF_FIELDS = frozenset({"operation_id", "event_type", "channel", "enabled"})
 POLICY_FIELDS = frozenset({"operation_id", "event_type", "channel", "mandatory"})
+RECIPIENT_FIELDS = frozenset({"operation_id", "event_type", "recipient", "enabled"})
 READ_FIELDS = frozenset({"operation_id"})
 
 
@@ -149,6 +152,23 @@ def policy(request):
     except DatabaseError:
         return _unavailable("notification policy", correlation_id)
     return JsonResponse({"status": "OK", "correlation_id": correlation_id, "policy": found})
+
+
+@never_cache
+@require_http_methods(["GET", "POST"])
+def recipient_rules(request):
+    if request.method == "POST":
+        return _post(
+            request, "notification recipients", commands.set_recipient_rule, RECIPIENT_FIELDS
+        )
+    user, refusal, correlation_id = _administrator(request)
+    if refusal is not None:
+        return refusal
+    try:
+        found = recipients.configuration(user.organization_id)
+    except DatabaseError:
+        return _unavailable("notification recipients", correlation_id)
+    return JsonResponse({"status": "OK", "correlation_id": correlation_id, "events": found})
 
 
 @never_cache

@@ -199,3 +199,48 @@ class NotificationPolicy(models.Model):
 
     def __str__(self):
         return f"NotificationPolicy {self.pk}"
+
+
+RECIPIENT_KINDS = (
+    "ASSIGNEE",
+    "REPORTER",
+    "REQUESTER",
+    "PARTICIPANTS",
+    "SUPERVISORS",
+    "ADMINISTRATORS",
+)
+
+
+class NotificationRecipientRule(models.Model):
+    """Administrator override of one default recipient row (SPEC 13 NOT-1, NOT-3; issue 14).
+
+    The defaults are documented data in default_recipients.json. A row here turns one recipient
+    kind on or off for one event type in this organization; with no row the default applies.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    event_type = models.CharField(max_length=64)
+    recipient = models.CharField(max_length=20)
+    enabled = models.BooleanField()
+
+    class Meta:
+        db_table = "notification_recipient_rule"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "event_type", "recipient"], name="notif_recipient_unique"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(recipient__in=RECIPIENT_KINDS), name="notif_recipient_kind"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(event_type__regex=EVENT_TYPE_PATTERN),
+                name="notif_recipient_event",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(enabled__in=[True, False]), name="notif_recipient_bool"
+            ),
+        ]
+
+    def __str__(self):
+        return f"NotificationRecipientRule {self.pk}"

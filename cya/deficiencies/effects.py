@@ -36,6 +36,7 @@ from cya.deficiencies.models import (
     DeficiencyProjection,
     VerificationScopeRow,
 )
+from cya.deficiencies.notices import notify_event
 from cya.deficiencies.service import (
     DeficiencyError,
     end_suspensions,
@@ -506,4 +507,6 @@ def append_effect(receipt, current, *, organization_id, effect, root_id):
     DeficiencyProjection.objects.filter(
         organization_id=organization_id, deficiency_id=effect.deficiency_id
     ).update(status=effect.to_status, last_applied_event=event)
+    # COR-4 notice, INV-4 verification reopening and INV-7 reopening notify (issue 14).
+    notify_event(receipt, event)
     return event

@@ -5,17 +5,19 @@ from threading import Barrier, BrokenBarrierError
 from unittest import mock
 from uuid import uuid4
 
-from django.db import connection
+from django.db import DatabaseError, connection
 
 from cya.accounts.models import Organization
 from cya.checklists.models import Vehicle
 from cya.core.audit_commands import CommandDenied
 from cya.core.models import AuditEvent
+from cya.notifications.models import NotificationOutbox
 from cya.operations import commands
 from cya.operations.commands import StatusError
 from cya.operations.models import StatusRequest, VehicleStatusEvent
 from cya.operations.status import current_status
 from cya.operations.tests.support import StatusCase
+from cya.testing.notifications import notified
 
 
 class SetStatusTests(StatusCase):
@@ -147,6 +149,26 @@ class RequestFlowTests(StatusCase):
             ("APPROVE", request_id, "Confirmed brake fault."),
         )
         self.assertEqual(event.actor_user_id, self.supervisor.pk)
+        # NOT-3 (issue 14), each in its causing transaction and never to the actor: the request
+        # went to supervisors, the decision to the requester, and the change to supervisors and
+        # administrators.
+        self.assertEqual(
+            notified("vehicle.status_change_requested", request_id), [self.supervisor.pk]
+        )
+        self.assertEqual(notified("vehicle.status_request_decided", decision.pk), [self.crew.pk])
+        self.assertEqual(notified("vehicle.status_changed", event.pk), [self.admin.pk])
+
+    def test_an_outbox_write_failure_rolls_back_the_status_change(self):
+        # Issue 14: the notification is written in the causing transaction or not at all.
+        with (
+            mock.patch.object(
+                NotificationOutbox.objects, "bulk_create", side_effect=DatabaseError("synthetic")
+            ),
+            self.assertRaises(DatabaseError),
+        ):
+            self.set_status("OUT_OF_SERVICE")
+        self.assertFalse(VehicleStatusEvent.objects.exists())
+        self.assertFalse(NotificationOutbox.objects.exists())
 
     def test_approving_a_limited_request_needs_restrictions(self):
         request_id = self.request("LIMITED_SERVICE").body["request_id"]

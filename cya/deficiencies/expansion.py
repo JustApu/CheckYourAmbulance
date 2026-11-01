@@ -27,7 +27,7 @@ from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
 from cya.checklists.models import Vehicle
 from cya.core.audit_commands import Plan, run_command
-from cya.deficiencies import service
+from cya.deficiencies import notices, service
 from cya.deficiencies.commands import _authorizer, _lock_for_change, _operation_id, publish_changed
 from cya.deficiencies.effects import MAX_SCOPE_ROWS, NO_KIT_KEY
 from cya.deficiencies.models import (
@@ -350,6 +350,7 @@ def _run(
             DeficiencyProjection.objects.filter(
                 organization_id=organization_id, deficiency_id=deficiency_id
             ).update(**changes)
+            notices.notify_event(receipt, event)  # VERIFICATION_ADDED: current assignee (AC-17)
             publish_changed(organization_id, deficiency_id, event_id)
 
         to_status = PENDING_VERIFICATION if expanding else OPEN

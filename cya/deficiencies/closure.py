@@ -12,7 +12,7 @@ from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
 from cya.checklists.models import Vehicle
 from cya.core.audit_commands import Plan, run_command
-from cya.deficiencies import service
+from cya.deficiencies import notices, service
 from cya.deficiencies.commands import _authorizer, _lock_for_change, _operation_id, publish_changed
 from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
 from cya.deficiencies.service import DeficiencyError
@@ -129,6 +129,7 @@ def _change(
             DeficiencyProjection.objects.filter(
                 organization_id=organization_id, deficiency_id=deficiency_id
             ).update(status=target_status, last_applied_event=event)
+            notices.notify_event(receipt, event)  # administrator close or reopen (issue 14)
             publish_changed(organization_id, deficiency_id, event_id)
 
         return Plan(

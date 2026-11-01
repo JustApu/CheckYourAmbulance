@@ -314,6 +314,7 @@ concurrent commands based on one tip yield one success and one conflict.
 | `attachment` | A | typed parent FK, object key, media type, byte size, digest, validation result; no uploaded bytes in DB; access derives from parent |
 | `notification_pref` | M | user_id ref, event/channel, enabled; unique user/event/channel; cannot override mandatory organization policy |
 | `notification_policy` | M | organization_id, event_type, channel, mandatory; unique organization/event/channel; administrator-set through an audited command; no default rows |
+| `notification_recipient_rule` | M | organization_id, event_type, recipient kind (`ASSIGNEE`, `REPORTER`, `REQUESTER`, `PARTICIPANTS`, `SUPERVISORS`, `ADMINISTRATORS`), enabled; unique organization/event/recipient; an administrator override of the documented default recipients, set through an audited command ([issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)) |
 | `item_lock`, `kit_lock`, `vehicle_lock`, `deficiency_lock` | M | organization_id and target FK unique; no business state; prepared at publication/entity creation |
 | `session_projection`, `deficiency_projection` | M | session_id/deficiency_id ref unique, cached state/activity or status/assignee/deadline/severity_version_id, last applied event ref; disposable, rebuildable, never historical authority |
 

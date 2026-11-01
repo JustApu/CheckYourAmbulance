@@ -1,9 +1,10 @@
 # Notifications: outbox, in-app inbox and email delivery
 
-Mechanism only (`SPEC.md` §13, NOT-1, NOT-4, NOT-5, AC-28). It sends no event's notification:
-the commands that cause notifications call `enqueue`, and each is a separate issue (see issue
-[issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)). Which events are mandatory, escalation timings, role-to-recipient mappings and email safety
-rules stay open (OQ-20); nothing here hard-codes them.
+The outbox, inbox and delivery mechanism (`SPEC.md` §13, NOT-1, NOT-4, NOT-5, AC-28), and since
+[issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14) the minimal notification set that the lifecycle and status commands emit
+([below](#which-events-notify-and-whom)). Which events are mandatory, escalation timings and email
+safety rules stay open (OQ-20): no event is mandatory and there is no escalation beyond the single
+overdue notice until the owner decides.
 
 ## Tables (`docs/data-model-contracts.md`)
 
@@ -14,6 +15,7 @@ rules stay open (OQ-20); nothing here hard-codes them.
 | `notification_read` | A | The recipient marked an in-app item read; at most one per item. |
 | `notification_pref` | M | A user's optional on/off switch per event type and channel. |
 | `notification_policy` | M | Administrator policy: which event/channel pairs are mandatory. |
+| `notification_recipient_rule` | M | Administrator override of one default recipient row (issue #14). |
 
 All append-only tables have database triggers: no update or delete, and each insert must match
 its command receipt. Delivery attempts must come from a worker receipt; read marks from the
@@ -37,6 +39,83 @@ off-switch, and a user cannot set an off-switch for a mandatory pair (`409 MANDA
 
 Payloads are bounded (12 keys, short strings, integers, booleans) and are for the in-app item.
 They must hold identifiers and short labels only, never patient data or free text from a record.
+
+## Which events notify, and whom
+
+SPEC NOT-3's minimal configurable set, plus the correction and chain-invalidation notices. Each
+notification is written by the command that causes it, in its transaction, through
+`cya.notifications.recipients.notify`. The default recipients are documented data in
+`cya/notifications/default_recipients.json`, approved by the owner on 2026-10-27 and 2026-11-01:
+
+| Event type | Caused by | Default recipients |
+|---|---|---|
+| `deficiency.assigned` | `ASSIGNED` (assign or reassign) | the new assignee |
+| `deficiency.reopened_verification_added` | `VERIFICATION_ADDED` | the **current** assignee only (SPEC §8.7, AC-17) |
+| `deficiency.reopened_verification_invalidated` | `VERIFICATION_REOPENED` (INV-4) | the assignee and all supervisors |
+| `deficiency.reopened_by_administrator` | `ADMINISTRATOR_REOPENED` | the assignee and the reporter |
+| `deficiency.reopened_reported_in_error` | `REOPENED` (INV-7 chain invalidation) | all supervisors |
+| `deficiency.correction_notice` | `CORRECTION_NOTICE` (COR-4) | all supervisors |
+| `deficiency.extension_requested` | `EXTENSION_REQUESTED` | all supervisors |
+| `deficiency.extension_decided` | `EXTENSION_DECIDED` | the requester and the assignee |
+| `deficiency.deadline_overdue` | the overdue job ([below](#overdue-deadlines)) | the assignee and all supervisors |
+| `deficiency.administrator_closed` | `ADMINISTRATOR_CLOSED` | the assignee and the reporter |
+| `check.supervisor_completion_voided` | chain invalidation voiding a supervisor completion | all supervisors |
+| `vehicle.status_changed` | a status set directly or by an approved request | all supervisors and administrators |
+| `vehicle.status_change_requested` | a crew status-change request | all supervisors |
+| `vehicle.status_request_decided` | the decision on a request | the requester |
+| `session.reopened` | a session reopened | the other recorded participants |
+
+Recipient kinds: `ASSIGNEE` (the deficiency's assignee after the event), `REPORTER`, `REQUESTER`
+(of the extension or status request), `PARTICIPANTS` (of the session), `SUPERVISORS` and
+`ADMINISTRATORS` (every active holder of that role). Each event lists the kinds it can name.
+
+- **Never the actor.** The person whose action caused the event is not told about it, so assigning
+  yourself or reopening your own solo session notifies nobody.
+- **Inactive people are skipped.** A named person who is no longer an active user of the
+  organization receives nothing and the command still succeeds; roles resolve to active users.
+- **De-duplicated.** One notification per recipient and channel for each source event, even when a
+  person is both requester and assignee.
+- **Both channels.** In-app and email, subject to each user's optional switches and the mandatory
+  policy (above). Email carries a fixed sentence and a deep link only (NOT-4).
+- **Payload.** Identifiers and codes only: the deficiency, vehicle, session or obligation id, the
+  event and status codes and, for decisions, the decision. Never free text from a record.
+- **Not notified.** Every other event, including empty-scope closure, scope expansion, a failed
+  verification, dependency and progress updates and the acknowledgement itself. Each is a
+  configuration addition when the owner wants it.
+
+**Failure.** Resolving recipients or writing the outbox happens inside the causing command, so a
+failure there rolls the whole command back (nothing is saved and the caller sees the error; a retry
+with the same operation id is safe). Delivery happens after commit: an email that fails is retried
+or given up as described below, and never undoes the command (NOT-5).
+
+### Administering recipients
+
+`GET /api/v1/notification-recipients` (administrator) lists every event with its available kinds,
+the default, this organization's overrides and the effective recipients. `POST` with
+`{operation_id, event_type, recipient, enabled}` turns one kind on or off for one event, overriding
+the default (`set_recipient_rule`, audited as `NOTIFICATION_RECIPIENT_SET`, permission
+`configure_schedules_thresholds_notifications`). An unknown event is `404`; a kind the event cannot
+name, a non-boolean `enabled` or an unknown field is `400`. A replay returns the stored answer.
+
+### Overdue deadlines
+
+An overdue deadline has no event, so `manage.py notify_overdue` runs a bounded pass per active
+organization (cron or a timer, like `deliver_notifications`; `--limit`, default 50 notices). A
+deficiency still being worked whose governing deadline (SPEC DEF-5) has passed is notified **once
+per governing deadline**: a later deadline revision or extension decision that also passes is a new
+notice. While an escalation acknowledgement is active (SPEC §8.4) the notice is suppressed; a later
+pass sends it once the acknowledgement has expired, if the deficiency is still overdue.
+
+Each notice is a worker command (service `worker.deficiency_overdue`, command
+`DEFICIENCY_OVERDUE_NOTICE`, job key `["<deficiency id>","<governing event id>"]`) whose operation id
+is derived from the key, so a repeat or a second worker replays without writing. It locks the
+deficiency and checks again; one that stopped being overdue or was acknowledged meanwhile is
+skipped without a receipt. One deficiency's failure is logged and counted and never blocks the
+others. Candidates are chosen by the governing deadline itself (the newest event carrying a
+deadline), not the stored base deadline, so an extended deficiency is not a candidate until its new
+date passes. The pass pages through them oldest governing deadline first, 200 per query, and
+recognizes those already notified with one receipt query per page; neither they nor suppressed
+ones count toward the limit, so a backlog cannot keep a newly overdue deficiency from being reached.
 
 ## Email delivery
 
@@ -112,5 +191,5 @@ MALFORMED_REQUEST` and writes nothing.
 
 ## Not yet built
 
-No inbox screen: the screens belong to later issues. No event sends a notification yet; the
-commands that cause them call `enqueue` in [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14).
+No inbox or recipient-administration screen: the screens belong to later issues. Mandatory events,
+escalation timings beyond the single overdue notice and email safety rules wait for OQ-20.

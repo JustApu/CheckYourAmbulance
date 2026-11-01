@@ -3,8 +3,8 @@
 [issue #57](https://github.com/JustApu/CheckYourAmbulance-archive/issues/57) implements [SPEC §9 (OPS-1–OPS-6)](../SPEC.md#9-operational-status) and
 [§5.9](../SPEC.md#59-out-of-service-exemption-c-req-22) on the `vehicle_status_event`
 and `status_request` tables of [contracts §2](data-model-contracts.md#identity-and-fleet).
-It does not generate obligations or send notifications. Those consumers call the read
-functions below; the endpoints and screens are [described further down](#http-endpoints-and-screens).
+It does not generate obligations; that consumer calls the read functions below. The commands'
+[notifications](#commands-cyaoperationscommands) come from issue #14; the endpoints and screens are [described further down](#http-endpoints-and-screens).
 
 ## Statuses
 
@@ -47,6 +47,12 @@ Authorization is the `set_vehicle_status` policy row: crew are `request_only`, s
 denied. The vehicle row is locked `FOR UPDATE`, then the newest event is read with a locking
 read, so concurrent writers on one vehicle get consecutive sequence numbers. Nothing reacts to
 deficiencies, checks or certifications (OPS-2, AC-19).
+
+**Notifications** ([issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14), OPS-1, NOT-3). In the same transaction, a status change (set directly or
+by an approved request) notifies all supervisors and administrators, a request notifies all
+supervisors, and a decision notifies the requester; the actor is never notified, and administrators
+can change the recipients ([notifications](notifications.md#which-events-notify-and-whom)). A
+failure to write a notification rolls the command back; delivery failures never do.
 
 ## Out-of-service reads (`cya.operations.status`)
 
@@ -120,7 +126,7 @@ hint, so an open checklist shows the new status banner too.
 
 ## Not in this issue
 
-Notification of status changes (OPS-1, [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)) and the supervisor dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)). The obligation generator is in
+The supervisor dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)). The obligation generator is in
 [obligation generation](obligation-generation.md): it applies the same rule as `routine_exemption` through
 `out_of_service_at`, at the due instant for one already reached and at the current status for a future one.
 

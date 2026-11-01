@@ -13,7 +13,7 @@ VERSIONED = frozenset(
     """compartment vehicle_system checklist_version checklist_item_def vehicle_override_version vehicle_override_item schedule_rule conditional_rule na_rule shared_satisfaction_rule stocking_deviation deficiency_category deficiency_severity""".split()
 )
 MUTABLE = frozenset(
-    """organization user user_preference vehicle kit_instance checklist_template item inspection_session deficiency notification_pref notification_policy item_lock kit_lock vehicle_lock deficiency_lock session_projection deficiency_projection""".split()
+    """organization user user_preference vehicle kit_instance checklist_template item inspection_session deficiency notification_pref notification_policy notification_recipient_rule item_lock kit_lock vehicle_lock deficiency_lock session_projection deficiency_projection""".split()
 )
 
 # M classification includes immutable creation headers as well as updateable rows.

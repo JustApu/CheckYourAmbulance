@@ -35,6 +35,7 @@ from cya.inspections.projections import (
     is_expired,
     rebuild_session_projection,
 )
+from cya.notifications.recipients import notify
 from tools.command_identity import worker_operation_id
 
 logger = logging.getLogger(__name__)
@@ -289,7 +290,22 @@ def reopen_session(*, session_id, **context):
         prior = SessionEvent.objects.get(pk=state.last_event_id)
 
         def apply(receipt, current):
-            _event(session, receipt, current, "REOPEN", prior)
+            event = _event(session, receipt, current, "REOPEN", prior)
+            # The other recorded participants learn that someone reopened it (NOT-3, issue 14).
+            notify(
+                receipt,
+                event_type="session.reopened",
+                source_event_type="session_event",
+                source_event_id=event.pk,
+                deep_link=f"/inspection/sessions/{session_id}/",
+                payload={"session_id": session_id, "vehicle_id": str(session.vehicle_id)},
+                actor_user_id=receipt.actor_user_id,
+                participant_ids=set(
+                    SessionParticipant.objects.filter(session=session).values_list(
+                        "user_id", flat=True
+                    )
+                ),
+            )
 
         return _plan(
             org,

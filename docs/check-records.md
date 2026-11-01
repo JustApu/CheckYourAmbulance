@@ -244,7 +244,8 @@ held, so the comparison below and the insert are atomic (CON-5).
   `affected_obligation_ids` (the obligations the chain's tip was linked to), and
   `reopened_deficiency_ids` (deficiencies whose Reported-in-Error status this chain reopens in
   the same transaction; otherwise empty) and `voided_determination_ids` (current supervisor
-  completions voided by this chain event; otherwise empty). Notification delivery is M4.
+  completions voided by this chain event; otherwise empty). Supervisors are notified of each voided
+  completion and of each reopening, in the same transaction ([notifications](notifications.md#which-events-notify-and-whom)).
 - **Serialization.** The command holds the same vehicle/item `ItemLock` as recording and
   correcting, so a correction and an invalidation of one chain cannot interleave: either the
   correction commits first and the invalidation selects the new tip, or the correction is refused.
