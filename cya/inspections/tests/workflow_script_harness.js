@@ -46,7 +46,7 @@ function environment(config, forms = []) {
   const elements = {}, requests = [], sockets = [], timers = [];
   const document = {
     getElementById(id) {
-      if (config.state && config.state !== "OPEN" && /^(odometer-form|odo-)/.test(id)) return null;
+      if (((config.state && config.state !== "OPEN") || config.verification_for_deficiency_id) && /^(odometer-form|odo-)/.test(id)) return null;
       if (!elements[id]) {
         elements[id] = new Element(id);
         if (id === "outcome-form") {
@@ -81,12 +81,13 @@ function environment(config, forms = []) {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
-function checklist(state = "OPEN") {
+function checklist(state = "OPEN", extra = {}) {
   const config = {state, view: "NORMAL", needs_attention_only: false, session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version",
     urls: {checks: "/checks", checklist: "/checklist", suggestions: "/suggestions", deficiency_detail: "/deficiencies/DEFICIENCY/", socket: "/live", odometer: "/odometer"}};
+  Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   return run;
 }
 const row = {item_id: "item", item_label: "Synthetic item", kit_id: "kit-a", kit_label: "Synthetic kit A", kind: "PRESENCE", checklist_version_id: "version", latest_check_id: "basis-a", latest_check_outcome: "PASSED", latest_check_at: "2026-06-01T00:00:00Z", deficiencies: [], allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]};
@@ -208,6 +209,89 @@ function generic(kind) {
     const run = generic("repair"); run.form.dataset.expectedEvent = "last-event"; run.form.fire("submit");
     response(run.posts()[0], 422, {status: "REJECTED", code: "EMPTY_SCOPE"}); await tick();
     assert(run.form.querySelector(".workflow-result").textContent.includes("no current checklist items"));
+  }
+  for (const [kind, fields, expected] of [
+    ["extension", {reason: "Synthetic delay", proposed_deadline: "2026-07-01T15:45"}, {reason: "Synthetic delay", proposed_deadline: "2026-07-01T15:45:00.000Z"}],
+    ["note", {note: "Synthetic note"}, {note: "Synthetic note"}],
+    ["dependency", {explanation: "Synthetic vendor", follow_up_at: "2026-07-02T12:00"}, {explanation: "Synthetic vendor", follow_up_at: "2026-07-02T12:00:00.000Z"}],
+    ["dependency-exit", {return_to: "IN_PROGRESS"}, {return_to: "IN_PROGRESS"}],
+  ]) {
+    const run = generic(kind); run.form.dataset.expectedEvent = "event-seen";
+    for (const [name, value] of Object.entries(fields)) field(run.form, name, value);
+    run.form.fire("submit");
+    assert(run.form.querySelector(".workflow-result").textContent.includes("Pending"));
+    const sent = run.posts()[0];
+    assert.equal(sent.body.expected_event_id, "event-seen");
+    for (const [name, value] of Object.entries(expected)) assert.equal(sent.body[name], value);
+    run.form.fire("submit"); assert.equal(run.posts().length, 1);
+    sent.reject(new Error("Synthetic lost response")); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.includes("Unconfirmed"));
+    for (const input of Object.values(run.form.fields)) { assert(input.disabled); input.value = "Changed DOM"; }
+    run.form.fire("submit"); assert.equal(run.posts()[1].options.body, sent.options.body);
+    response(run.posts()[1], 409, {status: "REJECTED", code: "DEFICIENCY_CHANGED"}); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.includes("Refresh history"));
+  }
+  for (const kind of ["extension", "note", "dependency"]) {
+    const run = generic(kind); run.form.fire("submit"); assert.equal(run.posts().length, 0);
+  }
+  {
+    const run = generic("dependency-exit"); run.form.dataset.expectedEvent = "event";
+    run.form.fire("submit"); assert(!("return_to" in run.posts()[0].body));
+  }
+  {
+    const run = generic("extension"); field(run.form, "reason", "Synthetic delay"); field(run.form, "proposed_deadline", "invalid");
+    run.form.fire("submit"); assert.equal(run.posts().length, 0);
+  }
+  {
+    const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency", session_id: undefined});
+    run.context.testUI.setRows([row]); run.context.testUI.startCheck(row, null, "PASSED");
+    const first = run.posts()[0];
+    assert.equal(first.body.purpose, "VERIFICATION"); assert.equal(first.body.verification_for_deficiency_id, "deficiency");
+    assert.equal(first.body.kit_id, "kit-a"); assert(!("session_id" in first.body));
+    first.reject(new Error("Synthetic lost acknowledgement")); await tick();
+    run.context.testUI.reload();
+    response(run.requests.at(-1), 200, {status: "OK", items: [], vehicle_status: {status: "IN_SERVICE"}, verification_status: "Closed — Verified", remaining_scope_rows: 0}); await tick();
+    assert(run.get("items").textContent.includes("Retry")); // retained even after automatic closure
+    run.context.testUI.retryCheck({...row, checklist_version_id: "new-version"});
+    assert.equal(run.posts()[1].options.body, first.options.body);
+    response(run.posts()[1], 409, {status: "CONFLICT", newest_check: {check_id: "new-basis", outcome: "PASSED"}}); await tick();
+    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click");
+    const proceed = run.posts()[2];
+    assert.notEqual(proceed.body.operation_id, first.body.operation_id);
+    assert.equal(proceed.body.purpose, "VERIFICATION"); assert.equal(proceed.body.verification_for_deficiency_id, "deficiency");
+    assert.equal(proceed.body.acknowledges_check_id, "new-basis"); assert.equal(proceed.body.basis_check_id, "new-basis");
+    response(proceed, 201, {status: "COMMITTED", result: {verification: {status: "CLOSED_VERIFIED", counts_toward_scope: true, remaining_scope_rows: 0}}}); await tick();
+    assert(run.get("session-message").textContent.includes("saved"));
+  }
+  for (const [kind, observation] of [["PRESENCE", undefined], ["QUANTITY", 2], ["MEASUREMENT", "12.5"]]) {
+    const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency", session_id: undefined});
+    const observedRow = {...row, kind, unit: "psi"};
+    run.context.testUI.openOutcome(observedRow, "FAILED", observation);
+    const body = run.posts()[0].body;
+    assert.equal(body.outcome, "FAILED"); assert.equal(body.verification_for_deficiency_id, "deficiency");
+    assert(!("deficiency" in body)); assert.equal(run.requests.length, 1); // no suggestions or new-report modal
+    if (kind === "QUANTITY") assert.equal(body.quantity, 2);
+    if (kind === "MEASUREMENT") assert.equal(body.measurement.value, "12.5");
+    const controls = run.context.testUI.controls(observedRow, new Element("row"));
+    assert(!controls.textContent.includes("Unable to inspect"));
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {verification: {status: "IN_PROGRESS", remaining_scope_rows: 1}}}); await tick();
+    assert(run.get("session-message").textContent.includes("back in progress"));
+  }
+  for (const [verification, expected] of [
+    [{status: "PENDING_VERIFICATION", counts_toward_scope: true, remaining_scope_rows: 2}, "2 scope rows remain"],
+    [{status: "PENDING_VERIFICATION", counts_toward_scope: false}, "does not count"],
+    [{status: "PENDING_VERIFICATION", closure_withheld: true, remaining_scope_rows: 0}, "closure withheld"],
+  ]) {
+    const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency"});
+    run.context.testUI.setRows([row]); run.context.testUI.startCheck(row, null, "PASSED");
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {verification}}); await tick();
+    assert(run.get("session-message").textContent.includes(expected));
+  }
+  {
+    const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency"});
+    const controls = run.context.testUI.controls({...row, kind: "VEHICLE_READING"}, new Element("row"));
+    assert(controls.textContent.includes("remains outstanding"));
+    assert(!controls.textContent.includes("odometer form above"));
   }
   console.log("Offline workflow script regressions passed: outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions and single-flight forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

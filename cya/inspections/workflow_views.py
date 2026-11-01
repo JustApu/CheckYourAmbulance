@@ -4,20 +4,29 @@ import logging
 from functools import wraps
 
 from django.db import DatabaseError
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from cya.attention.api import _authors, _row
 from cya.attention.checklist import vehicle_checklist
 from cya.authorization.backend import canonical_id
+from cya.authorization.policy import ResourceContext, permitted
 from cya.checklists.models import KitInstance, Vehicle
+from cya.deficiencies import service
 from cya.deficiencies.models import Deficiency, DeficiencyProjection
-from cya.deficiencies.service import suggest_related
-from cya.inspections.views import _authorized, _vehicle
-from cya.inspections.workflows import check_history, deficiency_history, report_options
+from cya.deficiencies.service import DeficiencyError, suggest_related
+from cya.deficiencies.transitions import ACTIVE_STATUSES
+from cya.inspections.views import _authorized, _status, _vehicle, reverse_socket
+from cya.inspections.workflows import (
+    check_history,
+    deficiency_history,
+    report_options,
+    verification_scope,
+)
 from cya.shell.navigation import roles_for
 
 logger = logging.getLogger(__name__)
@@ -64,14 +73,16 @@ def page(view):
     @wraps(view)
     def wrapped(request, *args, **kwargs):
         section = (
-            "deficiencies" if view.__name__ in ("deficiencies", "deficiency") else "inspection"
+            "deficiencies"
+            if view.__name__ in ("deficiencies", "deficiency", "verification", "verification_items")
+            else "inspection"
         )
         user, refusal = _authorized(request, section)
         if refusal is not None:
             return refusal
         try:
             return view(request, user, *args, **kwargs)
-        except (DatabaseError, ValueError) as error:
+        except (DatabaseError, ValueError, DeficiencyError) as error:
             logger.error("workflow page unavailable: %s (%s)", view.__name__, type(error).__name__)
             reporting = view.__name__ == "report"
             return render(
@@ -172,11 +183,28 @@ def deficiency(request, user, deficiency_id):
     for event in events:
         event.status_label = STATUS_LABELS[event.to_status]
         event.type_label = EVENT_LABELS.get(event.event_type, event.event_type)
+        event.decision_label = {
+            "APPROVED": "Approved",
+            "DENIED": "Denied",
+            "DIFFERENT_DATE": "Different date",
+        }.get(event.decision, "")
     status = DeficiencyProjection.objects.filter(
         organization_id=user.organization_id, deficiency=found
     ).first()
-    if status is None:
+    if status is None or not events or status.last_applied_event_id != events[-1].pk:
         raise ValueError("deficiency projection unavailable")
+    roles = roles_for(user)
+    context = ResourceContext(
+        assignee_id=str(status.assignee_id) if status.assignee_id else None,
+        supply_related=found.category_version.supply_related,
+    )
+    active = status.status in ACTIVE_STATUSES
+
+    def allowed(action):
+        return active and permitted(action, str(user.pk), roles, context=context)
+
+    deadline = service.extension_state(str(user.organization_id), str(found.pk))
+    dependency = service.dependency_state(str(user.organization_id), str(found.pk))["dependency"]
     return render(
         request,
         "inspections/deficiency.html",
@@ -192,7 +220,17 @@ def deficiency(request, user, deficiency_id):
                 for r in suggest_related(str(user.organization_id), str(found.vehicle_id))
                 if r["deficiency_id"] != str(found.pk)
             ],
-            "can_record_repair": status.status == "IN_PROGRESS",
+            "can_record_repair": status.status == "IN_PROGRESS"
+            and allowed("record_deficiency_correction"),
+            "can_request_extension": allowed("request_extension"),
+            "can_update_dependency": allowed("update_external_dependency"),
+            "can_add_note": allowed("add_progress_note"),
+            "can_enter_dependency": status.status in ("OPEN", "IN_PROGRESS"),
+            "dependency": dependency,
+            "deadline": deadline,
+            "age_days": deadline["age_seconds"] // 86400,
+            "assignee": status.assignee,
+            "scope": verification_scope(found) if status.status == "PENDING_VERIFICATION" else [],
             "config": {
                 "correction_url": reverse("api-deficiency-corrections", args=[found.pk]),
                 "expected_event_id": str(status.last_applied_event_id),
@@ -217,4 +255,71 @@ def checks(request, user, vehicle_id):
             "checks": check_history(user, vehicle, roles_for(user), timezone.now()),
             "config": {},
         },
+    )
+
+
+def _verification_deficiency(user, deficiency_id):
+    found = (
+        Deficiency.objects.filter(organization_id=user.organization_id, pk=_identity(deficiency_id))
+        .select_related("vehicle")
+        .first()
+    )
+    if found is None:
+        raise Http404
+    return found
+
+
+@page
+def verification(request, user, deficiency_id):
+    found = _verification_deficiency(user, deficiency_id)
+    # This is an independent check screen: no session is created or impersonated.
+    verification_scope(found)
+    config = {
+        "vehicle_id": str(found.vehicle_id),
+        "verification_for_deficiency_id": str(found.pk),
+        "state": "OPEN",
+        "view": "NORMAL",
+        "needs_attention_only": False,
+        "urls": {
+            "checklist": reverse("deficiency-verification-items", args=[found.pk]),
+            "checks": reverse("api-checks"),
+            "socket": reverse_socket(found.vehicle_id),
+            "deficiency_detail": reverse("deficiencies-detail", args=["DEFICIENCY"]),
+        },
+    }
+    return render(
+        request,
+        "inspections/session.html",
+        {
+            "title": "Verify: " + found.summary,
+            "vehicle": found.vehicle,
+            "verification": found,
+            "state": "OPEN",
+            "config": config,
+            "status": _status(user, found.vehicle, timezone.now()),
+        },
+    )
+
+
+@page
+def verification_items(request, user, deficiency_id):
+    found = _verification_deficiency(user, deficiency_id)
+    events, _ = deficiency_history(found)
+    if not events:
+        raise ValueError("deficiency history unavailable")
+    pending = events[-1].to_status == "PENDING_VERIFICATION"
+    scope = verification_scope(found) if pending else []
+    needed = {(str(r.item_id), str(r.kit_instance_id or "")) for r in scope if not r.satisfied}
+    result = vehicle_checklist(str(user.organization_id), str(found.vehicle_id))
+    rows = [r for r in result.rows if (r.item_id, r.kit_id or "") in needed]
+    authors = _authors(str(user.organization_id), rows)
+    return JsonResponse(
+        {
+            "status": "OK",
+            "vehicle_status": result.vehicle_status,
+            "items": [_row(r, authors.get(r.latest_check_id)) for r in rows],
+            "verification_status": STATUS_LABELS[events[-1].to_status],
+            "remaining_scope_rows": len(needed),
+            "unavailable_scope_rows": len(needed - {(r.item_id, r.kit_id or "") for r in rows}),
+        }
     )

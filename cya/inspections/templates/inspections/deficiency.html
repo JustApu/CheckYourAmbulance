@@ -8,7 +8,21 @@
 <p>{{ status }} · {{ severity.label }} · {{ deficiency.category_version.label }}</p>
 <p>{{ deficiency.description }}</p>
 <p>Reported by {{ deficiency.reporter.display_name }} at {{ deficiency.reported_at|date:"Y-m-d H:i" }} UTC</p>
+<dl>
+<dt>Assignee</dt><dd>{{ assignee.display_name|default:"Unassigned" }}</dd>
+<dt>Deadline</dt><dd>{{ deadline.base_deadline|date:"Y-m-d H:i"|default:"Not set" }} UTC</dd>
+<dt>Governing deadline</dt><dd>{{ deadline.governing_deadline|date:"Y-m-d H:i"|default:"Not set" }} UTC{% if deadline.overdue %} · Overdue{% endif %}</dd>
+<dt>Age since original report</dt><dd>{{ age_days }} days · {{ deadline.extension_count }} extension requests{% if deadline.long_running %} · Long-running{% endif %}</dd>
+</dl>
+{% if dependency %}<p>Current dependency: {{ dependency.explanation }}</p><p>Follow-up: {{ dependency.follow_up_at|date:"Y-m-d H:i"|default:"Not set" }} UTC. No automatic reminder.</p>{% endif %}
 </section>
+{% if scope %}
+<section class="panel"><h2>Verification scope</h2>
+<p>Each outstanding item and physical kit needs its own verification Pass. A routine Pass does not verify this repair.</p>
+<ul>{% for row in scope %}<li>{{ row.item.label }}{% if row.kit_instance %} — {{ row.kit_instance.label }}{% endif %}: {% if row.satisfied %}Verified{% else %}Outstanding{% endif %} · after {{ row.required_after|date:"Y-m-d H:i:s" }} UTC</li>{% endfor %}</ul>
+<a class="button primary" href="{% url 'deficiency-verification' deficiency.pk %}">Perform verification checks</a>
+</section>
+{% endif %}
 {% if can_record_repair %}
 <form class="panel workflow-write" data-kind="repair" data-url="{{ config.correction_url }}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}
@@ -18,6 +32,48 @@
 <a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% endif %}
+{% if can_request_extension %}
+<form class="panel workflow-write" data-kind="extension" data-url="{% url 'api-deficiency-extension-requests' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Request deadline extension</h2>
+<label>Reason <textarea name="reason" required maxlength="4000"></textarea></label>
+<label>Proposed date and time (UTC) <input name="proposed_deadline" type="datetime-local" required></label>
+<button type="submit" class="button primary">Request extension</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if can_add_note %}
+<form class="panel workflow-write" data-kind="note" data-url="{% url 'api-deficiency-progress-notes' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Add progress note</h2>
+<label>Note <textarea name="note" required maxlength="4000"></textarea></label>
+<button type="submit" class="button primary">Add note</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if can_update_dependency %}
+{% if dependency %}
+<form class="panel workflow-write" data-kind="dependency" data-url="{% url 'api-deficiency-dependency-revisions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Update dependency</h2>
+<label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
+<label>Follow-up date and time (UTC, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ dependency.follow_up_at|date:'Y-m-d\TH:i' }}"></label>
+<button type="submit" class="button primary">Update dependency</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+<form class="panel workflow-write" data-kind="dependency-exit" data-url="{% url 'api-deficiency-dependency-exits' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>End dependency</h2>
+<label>Return to <select name="return_to"><option value="">Status before waiting</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In Progress</option></select></label>
+<button type="submit" class="button primary">End dependency</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% elif can_enter_dependency %}
+<form class="panel workflow-write" data-kind="dependency" data-url="{% url 'api-deficiency-dependencies' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Awaiting External Dependency</h2>
+<label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
+<label>Follow-up date and time (UTC, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ dependency.follow_up_at|date:'Y-m-d\TH:i' }}"></label>
+<button type="submit" class="button primary">Record dependency</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% endif %}
 <h2>History</h2>
 <p>Correct entry fixes an accidental check entry. It is never a repair or verification.</p>
 <ol>
@@ -25,6 +81,11 @@
 <li>{{ event.recorded_at|date:"Y-m-d H:i" }} UTC · {{ event.actor_user.display_name }} · {{ event.type_label }} → {{ event.status_label }}{% if event.explanation %}
 <p>{{ event.explanation }}</p>
 {% endif %}
+{% if event.assignee %}<p>Assignee: {{ event.assignee.display_name }}</p>{% endif %}
+{% if event.deadline %}<p>Deadline: {{ event.deadline|date:"Y-m-d H:i" }} UTC</p>{% endif %}
+{% if event.proposed_deadline %}<p>Proposed deadline: {{ event.proposed_deadline|date:"Y-m-d H:i" }} UTC</p>{% endif %}
+{% if event.decision %}<p>Decision: {{ event.decision_label }}</p>{% endif %}
+{% if event.follow_up_at %}<p>Follow-up: {{ event.follow_up_at|date:"Y-m-d H:i" }} UTC</p>{% endif %}
 {% if event.event_type == "ADMINISTRATOR_CLOSED" or event.event_type == "EMPTY_SCOPE_CLOSED" %}
 <p>Check suspensions ended: {{ event.suspensions_ended|default:"none" }}</p>
 {% endif %}

@@ -1,6 +1,8 @@
 # Crew and supervisor deficiency workflows
 
-[issue #86](https://github.com/JustApu/CheckYourAmbulance-archive/issues/86). Non-normative implementation notes for SPEC §3.3, §5.4.1, §7.7–§7.8 and §8.3.
+[issue #86](https://github.com/JustApu/CheckYourAmbulance-archive/issues/86) and
+[issue #15](https://github.com/JustApu/CheckYourAmbulance/issues/15). Non-normative implementation
+notes for SPEC §3.3, §5.4.1, §7.7–§7.8 and §8.3–§8.6.
 The [crew inspection screen](crew-inspection-ui.md) remains the live shared checklist.
 All mutations use the existing audited [check](check-records.md) and
 [deficiency](deficiencies.md) command endpoints; these pages add no tables or write commands.
@@ -10,7 +12,9 @@ All mutations use the existing audited [check](check-records.md) and
 | Route | Purpose |
 |---|---|
 | `/deficiencies/` | The 100 most recent reports, including cancelled history; active vehicle links to independent reporting. |
-| `/deficiencies/{id}/` | Report details, lifecycle history, current informational links, explicit add/remove link forms. |
+| `/deficiencies/{id}/` | Report details, deadlines and age, lifecycle history, crew action forms, verification scope and informational links. |
+| `/deficiencies/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. |
+| `/deficiencies/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. |
 | `/inspection/vehicles/{id}/deficiencies/new/` | Independent item, compartment or selected vehicle-systems report. |
 | `/inspection/vehicles/{id}/check-history/` | Complete chains for the 200 most recent check entries recorded in the last 14 days; own corrections, administrator invalidation and supervisor Unable completion. |
 
@@ -58,13 +62,14 @@ The checklist JSON adds `obligation_outcome` so Failed satisfaction is labelled
 
 Independent reports resolve their affected scope on the server. Item reports are not tied to
 one kit instance and therefore apply across instances; use the specific kit's Fail/Unable
-flow for an instance-scoped report. Independent kit-wide reports and session-linked independent
-reports remain unsupported by the existing command. The UI does not send those fields.
+flow for an instance-scoped report. Independent kit-wide reports name a specific physical kit
+instance. Session-linked independent reports remain unsupported by the existing command; the UI does not send a session id.
 
 Related reports are explicit multi-select choices; they are never automatically linked.
 Adding or removing a link only changes that informational relationship. It does not merge,
 close, reassign or transfer responsibility for either report. This UI creates unassigned
-reports; assignment/deadline, repair, verification and closure controls remain later work.
+reports. Assignment, deadline decisions and explicit closure screens are separate work;
+crew extension requests, dependency updates, notes, repairs and verification are described below.
 
 ## Corrections, invalidation and supervisor completion
 
@@ -93,6 +98,58 @@ server-side supersession/voiding semantics. Linked-obligation determination hist
 visible after invalidation or supersession; current controls follow the supersession chain,
 not UUID ordering for events that share a timestamp.
 
+## Crew deficiency actions (issue #15)
+
+The detail page shows the assignee (or Unassigned), base deadline, governing deadline,
+overdue state, age in whole days since the original report, extension count and the configured
+long-running highlight. It reads these facts through the existing bounded deadline/dependency
+readers, and retains every assignment, date, explanation, extension decision and lifecycle event.
+Closed, reopened and Reported in Error states keep their existing readable labels. Missing
+projection/history/scope evidence fails closed with the sanitized unavailable page.
+
+The current permission policy and server-loaded category/assignee control form visibility:
+Crew, Supervisors and Administrators may request an extension, update a dependency and add
+notes; a Supply Officer alone may request an extension only when assigned, and update
+dependencies/notes only on supply-related deficiencies. Roles combine. All four roles may
+record a repair while In Progress. Closed and Reported in Error deficiencies have none of
+these mutation forms. Every existing command independently rechecks roles and state; a forged
+request cannot gain permission from the page.
+
+Extension requests require a reason and proposed date. Dependency entry/revision requires an
+explanation and optionally a future follow-up instant; omitting it on revision clears it.
+Dependency entry is offered in Open/In Progress; while waiting, revision and exit are offered.
+Exit can name Open/In Progress or return to the status before waiting. Progress notes require
+nonblank text. Date controls are explicitly labelled UTC and sent as UTC instants. Follow-up
+never schedules an automatic reminder. Each lifecycle form sends the event seen at page load;
+a concurrent change or another successful form on the same page requires refreshing before a
+new decision (`DEFICIENCY_CHANGED`). The backend's refusal is shown, including empty repair
+scope, absent deadline, invalid dates, transition changes and permission denial.
+
+Pending Verification shows each materialized item/physical-kit row, its required-after instant
+and Verified/Outstanding status, using the command layer's effective-Pass and scope-lineage
+reader. “Perform verification checks” opens the shared checklist renderer and script. Its
+read-only list refreshes on vehicle hints, reconnect and tab visibility just like the crew
+checklist. It offers the outstanding rows from every applicable current checklist version,
+without the routine Needs Attention Only filter or session/odometer controls. A scoped item
+removed from the current checklist stays outstanding and is reported as unavailable; the
+screen directs the user to a supervisor rather than claiming the scope is complete. Vehicle
+reading rows also explain that an item check cannot verify them; they remain outstanding.
+
+Each check sends `purpose=VERIFICATION` and `verification_for_deficiency_id`, with its current
+checklist version and physical `kit_id` when present. Pass and Fail use the ordinary observation
+controls, save states and conflict protocol; Unable to Inspect is not offered. A Fail directly
+adds evidence to the verified deficiency, without a new-report/match dialog. Routine Passes
+never count toward this scope. A committed verification response reports whether it counts,
+how many scope rows remain, automatic closure, a return to In Progress after Fail, or withheld
+automatic closure requiring supervisor attention. Saved means the check committed, not that
+the deficiency necessarily closed.
+
+Unconfirmed verification rows remain reachable for Retry even if a refresh removes them from
+the outstanding list or the last check closes the deficiency. Retry keeps the exact payload
+and operation id; conflict Proceed keeps the verification purpose, deficiency, observations,
+physical kit and warned-about basis with a new operation id. Deficiency state and scope are
+rechecked by the existing command on every check; stale screens cannot force acceptance.
+
 ## Save feedback and verification
 
 Workflow forms send same-origin JSON with CSRF headers. Each form permits one request at a
@@ -101,15 +158,18 @@ transport/5xx/invalid JSON is Unconfirmed. Unconfirmed forms lock their fields a
 with the identical request and operation id. After acknowledgement the form is single-use;
 a link reloads current history, avoiding stale-tip resubmissions.
 
-`cya/inspections/tests/test_workflow_ui.py` drives authenticated synthetic HTTP requests against
-real audited commands: report replay, explicit link/unlink, own correction, administrator
+`cya/inspections/tests/test_deficiency_actions_ui.py` covers the new crew forms, role/context
+visibility, stale requests, extension replay, kit scope, routine-pass isolation, verification
+closure/Fail and unavailable evidence. `cya/inspections/tests/test_workflow_ui.py` drives
+authenticated synthetic HTTP requests against real audited commands: report replay, explicit link/unlink, own correction, administrator
 invalidation, supervisor completion, denied forged requests, tenant boundaries, labels,
 escaping, unavailable evidence and configuration failures. The existing crew and attention
 suites cover the underlying shared UI contracts.
 
 `cya/inspections/tests/workflow_script_harness.js` executes the actual scripts with a synthetic
 DOM and deferred fetch. It covers explicit matches, reasons, kit payloads, frozen retries,
-full Failed/Unable conflict payloads, removed rows, state labels and single-flight forms. Run
+full Failed/Unable and verification conflict payloads, removed rows, state labels, UTC form
+payloads, closure/failure/withheld feedback, and single-flight forms. Run
 it with `node cya/inspections/tests/workflow_script_harness.js`; the Django wrapper runs it
 when Node is installed and explicitly skips it otherwise. Node is optional developer tooling,
 not a new application dependency or build step. No network or external services are used.
