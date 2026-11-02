@@ -100,7 +100,23 @@ class WebSocketClient:
         self.connection.close()
 
 
+def unit_launch_args():
+    """The uvicorn arguments in deploy/rocky9/cya.service's ExecStart (issue #6 host profile)."""
+    unit = (Path(settings.BASE_DIR) / "deploy" / "rocky9" / "cya.service").read_text()
+    unit = unit.replace("\\\n", " ")
+    lines = [line for line in unit.splitlines() if line.startswith("ExecStart=")]
+    if len(lines) != 1:
+        raise AssertionError(f"expected one ExecStart in cya.service, found {len(lines)}")
+    words = shlex.split(lines[0].removeprefix("ExecStart="))
+    if not words[0].endswith("/local/venv/bin/uvicorn"):
+        raise AssertionError(f"cya.service must run the release's uvicorn, not {words[0]}")
+    return words[1:]
+
+
 class LaunchCommandTests(StatusHttpCase):
+    def test_the_host_profile_service_runs_the_documented_command(self):
+        self.assertEqual(unit_launch_args(), documented_launch_args())
+
     def test_runbook_command_is_one_process_without_reload_or_proxy_headers(self):
         call = parsed_launch(documented_launch_args())
         self.assertEqual(call.args, ("cya.asgi:application",))

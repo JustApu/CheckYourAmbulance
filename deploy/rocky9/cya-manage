@@ -1,0 +1,19 @@
+#!/bin/bash
+# Run one manage.py command for Check Your Ambulance (issue #6 host profile).
+# Usage: cya-manage owner|runtime|dba <manage.py arguments...>
+# systemd loads the root-only environment file and runs the command as the unprivileged
+# service identity from the read-only current release; secrets never reach argv or a shell.
+set -euo pipefail
+case "${1:-}" in
+  owner) env_file=/etc/check-your-ambulance/owner.env ;;
+  runtime) env_file=/etc/check-your-ambulance/runtime.env ;;
+  # DBA channel: OS root, MariaDB root over the local socket (grant installation only).
+  dba) env_file=/etc/check-your-ambulance/dba.env; run_as=root ;;
+  *) echo "usage: cya-manage owner|runtime|dba <manage.py arguments...>" >&2; exit 2 ;;
+esac
+shift
+run_as=${run_as:-cya}
+exec systemd-run --quiet --wait --pipe --collect \
+  --uid="$run_as" --working-directory=/srv/cya/current \
+  -p EnvironmentFile="$env_file" -p ProtectSystem=strict -p PrivateTmp=yes -p RuntimeMaxSec=900 \
+  /srv/cya/current/local/venv/bin/python manage.py "$@"

@@ -1,0 +1,12 @@
+# Check Your Ambulance (issue #6 host profile): nginx (httpd_t) may connect to the uvicorn
+# Unix socket. uvicorn runs as a systemd service in unconfined_service_t; the socket directory
+# is httpd_var_run_t (semanage fcontext) and DAC limits it to the cya group (nginx only).
+module cya_nginx_socket 1.0;
+
+require {
+    type httpd_t;
+    type unconfined_service_t;
+    class unix_stream_socket connectto;
+}
+
+allow httpd_t unconfined_service_t:unix_stream_socket connectto;

@@ -15,10 +15,10 @@ changes this runbook needed are built; each still needs its host check:
 
 | Gate | Current baseline and required completion |
 |---|---|
-| Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Still to verify on the rehearsal host: process count after restart and socket permissions. |
-| HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Still to verify on the rehearsal host. |
-| Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Still to verify on the rehearsal host. |
-| Rehearsal | The Docker diagnostic subset below has run. The full host/service checklist remains pending; diagnostic overlays are not installed production configuration. |
+| Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Rehearsed on Rocky Linux 9 (2026-11-02): one process after restart and reboot, socket reachable only by the proxy. |
+| HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Rehearsed on Rocky Linux 9 (2026-11-02): HTTPS recognized behind nginx, spoofed forwarding headers overwritten, HSTS observed. |
+| Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Rehearsed on Rocky Linux 9 (2026-11-02): both layers answer 429 and spoofed client-address headers do not reset the count. |
+| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need Google sign-in, real checklists, alert delivery, named operators or approved SSH sources remain pending. |
 
 This issue's runbook scope does not include changing application files; the
 application changes above were made under their own issues. Backup jobs and restore measurements
@@ -68,17 +68,20 @@ operator actions; this draft has not performed them on the developer machine.
    behavior; the development compose file is not a production deployment.
 6. Permit inbound HTTPS (443) and SSH only from the approved administration
    sources, on both host and provider firewalls. Verify from outside the host;
-   retain console access while testing. Do not open port 80 by default: DEP-10
-   currently permits only HTTPS and restricted SSH.
-7. Use automated certificate renewal compatible with that exposure rule, e.g.
-   DNS-01 using narrowly scoped DNS credentials, protected like other secrets.
-   HTTP-01 needs port 80 and would require an approved change to this rule;
-   do not temporarily open it unnoticed. Rehearse issuance and renewal with
-   the selected client's staging service, then check its timer and failure alert.
+   retain console access while testing. DEP-10 permits only HTTPS and restricted
+   SSH; port 80 opens only for the ACME exception in step 7.
+7. Use automated certificate renewal. **Owner decision (2026-11-02, issue #6):** the
+   rehearsal host opens port 80 for Certbot's HTTP-01 challenge, and every other
+   port-80 request is redirected to HTTPS. This departs from DEP-10 as written, so
+   production use needs a SPEC DEP-10 amendment first; until then the alternative
+   is DNS-01 with narrowly scoped DNS credentials, protected like other secrets.
+   Rehearse issuance and renewal with the client's staging service, then check its
+   timer and failure alert.
 
 Use the chosen distribution's versioned installation and firewall documentation
-when making the concrete host profile. Package names, firewall commands and
-service unit names are deliberately not guessed here.
+when making a concrete host profile; do not guess package names, firewall commands or
+unit names. The [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
+below was verified on a throwaway host.
 
 ## Secrets and service configuration
 
@@ -406,36 +409,211 @@ safe. A database restore can lose accepted writes and requires owner approval
 audit history and binary logs; do not prune or recreate tables to recover.
 The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove either.
 
-## Throwaway-server verification record (pending)
+## Rocky Linux 9 host profile (rehearsed 2026-11-02)
+
+Verified on a throwaway Rocky Linux 9.8 (x86_64) host with SELinux enforcing, using
+synthetic data and release `036d45c`. The installed files are in
+[`deploy/rocky9/`](../deploy/rocky9/); replace `__HOST__` with the public host name and
+`__ORG_ID__` with the organization id. Run as root (or with sudo) unless stated. Every
+package comes from Rocky's own repositories except Certbot (EPEL).
+
+1. **Packages.** MariaDB 10.11 and nginx 1.26 are AppStream module streams. Python 3.12
+   comes from AppStream with vendor security updates; Django 6.1 and the project support
+   3.12 or later (CI uses 3.13, which Rocky 9 ships only in EPEL).
+
+   ```sh
+   dnf module enable -y mariadb:10.11 nginx:1.26
+   dnf install -y mariadb-server nginx python3.12 python3.12-devel python3.12-pip gcc \
+       mariadb-connector-c-devel pkgconf-pkg-config policycoreutils-python-utils tar certbot
+   ```
+
+2. **Firewall and logs.** Remove `cockpit` (and `http` unless the ACME exception in
+   [Host and network preparation](#host-and-network-preparation) applies), keep `https`
+   and `ssh`, then restrict SSH to the approved administration sources:
+   `firewall-cmd --permanent --remove-service=cockpit; firewall-cmd --reload`. Make the
+   journal persistent (Rocky keeps it in memory by default):
+   `install -d -m 2755 -g systemd-journal /var/log/journal; systemctl restart systemd-journald`.
+
+3. **Service identity and release.** `useradd --system --no-create-home --home-dir /srv/cya --shell /sbin/nologin cya`.
+   Unpack the reviewed release (`git archive`) into a root-owned
+   `/srv/cya/releases/<sha>/`, create `local/venv` with `python3.12 -m venv`, run
+   `local/venv/bin/pip install --require-hashes -r requirements/base.txt`, and point
+   `/srv/cya/current` at it. SELinux labels `/srv` as `var_t`, which services may not
+   execute; label the virtual environments' `bin/` directories as programs, otherwise
+   systemd fails with `203/EXEC` and no audit message (SELinux does not audit `access()` checks):
+
+   ```sh
+   semanage fcontext -a -t bin_t '/srv/cya/releases/[^/]+/local/venv/bin(/.*)?'
+   restorecon -R /srv/cya/releases
+   ```
+
+4. **MariaDB.** Install `mariadb-cya.cnf` as `/etc/my.cnf.d/cya.cnf` (loopback bind,
+   binary logging, `log_bin_trust_function_creators=1`), then `systemctl enable --now mariadb`
+   and run the read-only check in [Database setup and migrations](#database-setup-and-migrations).
+   The DBA channel is `sudo mariadb` (root over the local socket). Remove anonymous
+   accounts and the `test` database; create the `cya` database, `cya_owner@127.0.0.1`
+   with `ALL PRIVILEGES ON cya.*` only, and `cya_app@127.0.0.1` with no grants. Generate
+   passwords and the Django secret key on the host and pass the SQL on standard input,
+   never as command arguments (sudo logs full command lines).
+
+5. **Secrets.** `/etc/check-your-ambulance/` (root, `0700`) holds `owner.env`,
+   `runtime.env` and `dba.env` (root, `0600`) in systemd `EnvironmentFile=` syntax. `dba.env`
+   is `owner.env` with `CYA_DB_USER=root`, `CYA_DB_HOST=localhost` and a placeholder
+   password, because MariaDB's root authenticates over the socket as OS root; it is used
+   only for grant installation.
+
+6. **Management commands.** Install `cya-manage` as `/usr/local/sbin/cya-manage` (root,
+   `0750`) and call it by full path (Rocky's sudo `secure_path` omits `/usr/local/sbin`).
+   It runs `manage.py` through `systemd-run` with the chosen environment file, as `cya`
+   (or root for `dba`), from the read-only release, with a 15-minute limit. Run long
+   commands as a detached unit and follow the journal, so a dropped SSH connection
+   cannot leave a waiting `systemd-run --pipe` behind (in the rehearsal that stalled new
+   logins until a reboot):
+
+   ```sh
+   systemd-run --unit=cya-migrate --collect --uid=cya --working-directory=/srv/cya/current \
+       -p EnvironmentFile=/etc/check-your-ambulance/owner.env \
+       /srv/cya/current/local/venv/bin/python manage.py migrate --noinput
+   journalctl -u cya-migrate -f
+   /usr/local/sbin/cya-manage owner verify_audit_schema
+   /usr/local/sbin/cya-manage dba audit_runtime_grants --user cya_app --host 127.0.0.1 --dry-run
+   /usr/local/sbin/cya-manage dba audit_runtime_grants --user cya_app --host 127.0.0.1
+   /usr/local/sbin/cya-manage runtime verify_audit_runtime
+   /usr/local/sbin/cya-manage owner create_organization --name '<name>' --time-zone '<zone>' --dry-run
+   ```
+
+7. **Application service.** Install `cya.service` (the launch command in
+   [Proxy and application service](#proxy-and-application-service), as `cya`, with the
+   runtime file, bounded restarts and memory, and systemd sandboxing). `/run/cya` is its
+   runtime directory (`0750`, `cya:cya`); add nginx to group `cya` (`usermod -aG cya nginx`)
+   so only the proxy can reach the socket. SELinux needs the directory labelled for the web
+   server and one rule letting nginx connect to a socket owned by a systemd service:
+
+   ```sh
+   semanage fcontext -a -t httpd_var_run_t '/var/run/cya(/.*)?'   # /run is an alias of /var/run
+   checkmodule -M -m -o cya_nginx_socket.mod cya_nginx_socket.te
+   semodule_package -o cya_nginx_socket.pp -m cya_nginx_socket.mod
+   semodule -i cya_nginx_socket.pp
+   systemctl enable --now cya
+   ```
+
+   The module allows `httpd_t` to connect to Unix sockets of any `unconfined_service_t`
+   service; the directory permissions and label are what confine it to this socket. A
+   dedicated SELinux domain for the application would be narrower and is not built.
+
+8. **nginx and certificate.** Replace `/etc/nginx/nginx.conf` with `nginx.conf` (keep the
+   stock file): it logs paths without query strings and, on port 80, serves only
+   `/.well-known/acme-challenge/` from `/var/lib/cya-acme` (label `httpd_sys_content_t`)
+   and redirects everything else to `https://__HOST__`. Rehearse with Let's Encrypt
+   staging, then issue the real certificate with a reload hook and check renewal:
+
+   ```sh
+   certbot certonly --staging --webroot -w /var/lib/cya-acme -d __HOST__ -m '<operator email>' --agree-tos --cert-name cya-staging
+   certbot delete --cert-name cya-staging
+   certbot certonly --webroot -w /var/lib/cya-acme -d __HOST__ -m '<operator email>' --agree-tos --cert-name cya --deploy-hook 'systemctl reload nginx'
+   systemctl enable --now certbot-renew.timer
+   certbot renew --dry-run --cert-name cya
+   ```
+
+   Then install `nginx-cya.conf` as `/etc/nginx/conf.d/cya.conf` and
+   `cya_proxy_headers.conf` in `/etc/nginx/`, add `CYA_TRUST_PROXY_SSL_HEADER=1`,
+   `CYA_SSL_REDIRECT=1` and `CYA_HSTS_SECONDS=300` to the environment files, and restart
+   `cya`. Unknown TLS host names get no handshake (`ssl_reject_handshake`). The shared
+   headers are an include because a location-level `proxy_set_header` replaces every
+   inherited one. `/auth/` logs errors at `crit` only, because nginx error lines carry
+   the request line, including callback codes.
+
+9. **Recurring jobs.** Install the `cya-obligations` and `cya-sessions` service and timer
+   units (the obligations unit names the organization) and `systemctl enable --now` both
+   timers. A oneshot service never runs twice at once, so a late timer does not overlap.
+   Do not install a notification timer until a sender is configured: the delivery command
+   refuses to run without one.
+
+10. **Teardown.** Remove any temporary passwordless sudo rule and test credentials, and
+    destroy the throwaway host and its certificate when the rehearsal is recorded.
+
+## Throwaway-server verification record
 
 Run the procedure on a disposable host using the current source with synthetic
 data only. Record the full source SHA, tested component versions, date, tester,
 pass/fail and sanitized explanation for each row. Do not commit hostnames,
 addresses, account IDs, credentials or raw output. No row below is claimed fully
-passed by the earlier Docker subset; the evidence below distinguishes the
-exercised parts from the host work still pending.
+passed by the earlier Docker subset. The Rocky Linux 9 rehearsal on 2026-11-02
+([evidence](#rocky-linux-9-rehearsal-evidence-2026-11-02-utc)) passed, partly passed or left
+pending each row as stated.
 
 | Check | Required evidence | Status |
 |---|---|---|
-| Build and dependency installation | Hash-checked install and selected server command/unit verified against installed help; one app process after reboot | Pending |
-| SSH/firewall | Operator and deputy access survives policy reload; only HTTPS and restricted SSH exposed; DB/upstream denied externally over IPv4/IPv6 | Pending |
-| TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling with port 80 closed | Pending |
-| Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Pending |
-| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Pending |
-| MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Pending |
-| Runtime isolation | Fresh runtime verification and system/deploy checks pass; negative UPDATE/DELETE tests use synthetic disposable rows only | Pending |
-| Schedule and bindings | Agency schedule rules and checklist bindings are present; initial obligation generation succeeds and is idempotent | Pending |
-| Recurring jobs | All three jobs use runtime identity, survive reboot, report/alert failures, and notification delivery cannot overlap | Pending |
-| WebSocket proxy | ASGI serves HTTP and WebSocket in one process; proxy upgrade, origin rejection, authorization recheck and reconnect recovery are verified | Pending |
-| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Pending |
-| Rate limits | Authentication limits enforced by both layers and tested with bounded requests; exports remain gated until implemented | Pending |
-| Restart/failure | App/DB restart, interrupted migration recovery plan and prior-code compatibility examined; failure keeps traffic closed | Pending |
-| Data/log hygiene | Reviewed logs omit tokens, callback query and cookies; synthetic host artifacts/credentials destroyed at completion | Pending |
+| Build and dependency installation | Hash-checked install and selected server command/unit verified against installed help; one app process after reboot | Passed (2026-11-02) |
+| SSH/firewall | Operator and deputy access survives policy reload; only HTTPS and restricted SSH exposed; DB/upstream denied externally over IPv4/IPv6 | Partial: only 22/80/443 answer, database and upstream unreachable, no global IPv6; SSH not yet restricted to approved sources, deputy access untested |
+| TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling with port 80 closed | Partial: trusted certificate, unknown-name rejection, staging issuance, renewal dry run and timer passed with port 80 open under the owner's ACME exception; renewal-failure alert waits for issue #8 |
+| Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Partial: spoofed headers overwritten, HTTPS POST passes CSRF, missing token and `http` Origin refused, HSTS observed; secure session-cookie flags wait for Google sign-in |
+| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed; signing-key rotation and reauthentication wait for sign-in |
+| MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Passed for restart and reboot (2026-11-02); persistence after a rebuild belongs to the issue #7 restore rehearsal |
+| Runtime isolation | Fresh runtime verification and system/deploy checks pass; negative UPDATE/DELETE tests use synthetic disposable rows only | Partial: runtime and deploy checks pass, runtime refused (1142) for UPDATE, DELETE and DDL; the owner-side append-only refusal needs audit rows, which first appear with signed-in actions |
+| Schedule and bindings | Agency schedule rules and checklist bindings are present; initial obligation generation succeeds and is idempotent | Pending: synthetic organization only; agency rules and real checklists (OQ-01) not loaded |
+| Recurring jobs | All three jobs use runtime identity, survive reboot, report/alert failures, and notification delivery cannot overlap | Partial: obligation and session jobs run as the runtime identity and survive reboot; notification job not installed (no sender); failure alerts wait for issue #8 |
+| WebSocket proxy | ASGI serves HTTP and WebSocket in one process; proxy upgrade, origin rejection, authorization recheck and reconnect recovery are verified | Partial: one process serves both, upgrades reach the application through nginx and an unknown Origin is refused; authorized connection, recheck and reconnect wait for sign-in |
+| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Pending: needs a Google OAuth client for the host |
+| Rate limits | Authentication limits enforced by both layers and tested with bounded requests; exports remain gated until implemented | Passed (2026-11-02) |
+| Restart/failure | App/DB restart, interrupted migration recovery plan and prior-code compatibility examined; failure keeps traffic closed | Partial: app, database and host restarts recover unaided; interrupted-migration recovery and prior-code compatibility not exercised |
+| Data/log hygiene | Reviewed logs omit tokens, callback query and cookies; synthetic host artifacts/credentials destroyed at completion | Partial: a marked callback code and session cookie appeared in no application or nginx log; the throwaway host is not yet destroyed |
 
 [issue #6](https://github.com/JustApu/CheckYourAmbulance/issues/6) cannot close until its server checks and independent security review
 pass. DEP-12 additionally requires named operators and [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7)'s restore
 rehearsal, including chosen-timestamp recovery and realistic-size timing.
 Monitoring, paper readiness and load evidence retain their own issue gates.
+
+## Rocky Linux 9 rehearsal evidence, 2026-11-02 UTC
+
+Tester: Claude (Anthropic), as operator on an owner-provided throwaway host, with synthetic
+data and source `036d45c4c130b85ee05384a5c7973cc7ffabd300` (main after issue #19). Host
+names, addresses, accounts and raw output stay with the owner.
+
+| Component | Version |
+|---|---|
+| Operating system | Rocky Linux 9.8, x86_64, SELinux enforcing, systemd 252 |
+| MariaDB | 10.11.18 (AppStream `mariadb:10.11` stream) |
+| nginx | 1.26.3 (AppStream `nginx:1.26` stream) |
+| Python | 3.12.15 (AppStream) |
+| Application | Django 6.1.2, uvicorn 0.54.0, from a fresh `pip install --require-hashes` |
+| Certificate client | Certbot 3.1.0 (EPEL), Let's Encrypt |
+
+Results:
+
+- **Passed:** hash-checked install (mysqlclient built against Connector/C); 74 migrations
+  by a schema owner without SUPER or global privileges, with binary logging on (MIXED) and
+  `log_bin_trust_function_creators=1`; `verify_audit_schema` (40 append-only and 44
+  command-guarded tables); all 166 triggers defined by the schema owner; DBA grant preview
+  (69 statements), apply and repeat apply; `verify_audit_runtime`;
+  `check --fail-level WARNING`; `check --deploy` reports W004/W008 before the proxy settings
+  and only W005/W021 after.
+- **Passed:** one uvicorn process on the Unix socket; another local account cannot reach
+  the socket; HTTPS through nginx with a Let's Encrypt certificate; unknown TLS host
+  names refused; port 80 redirects to HTTPS; HSTS (300 s) and security headers present;
+  a client-supplied `X-Forwarded-Proto: http` is overwritten; CSRF passes with the HTTPS
+  Origin and refuses a missing token or an `http` Origin; 40 rapid sign-in requests with
+  rotating spoofed `X-Real-IP` gave 30 application answers, then the application's 429
+  with `Retry-After`, then nginx's 429; WebSocket upgrades reach the application, which
+  refuses an unknown Origin.
+- **Passed:** after a reboot every service and timer started, with one application
+  process, the socket's label and permissions, the database settings and firewall rules
+  intact, fresh runtime verification, and no SELinux denials. Database password
+  rotation for both accounts kept runtime access, the schema and all trigger definers.
+  The runtime account was refused (error 1142) for UPDATE, DELETE, CREATE TABLE and CREATE
+  TRIGGER. Certbot's staging issuance and renewal dry run passed.
+- **Found and fixed during the rehearsal** (now in the host profile): the minimal image
+  lacks `tar`; SELinux blocks executing the virtual environment's scripts until they are
+  labelled `bin_t`; nginx needs the socket directory labelled `httpd_var_run_t` and one
+  local policy rule to connect; Rocky's journal is not persistent by default; sudo's
+  `secure_path` omits `/usr/local/sbin`; a long `systemd-run --wait --pipe` cut off by an
+  SSH timeout left new logins hanging until a reboot, so long commands now run detached.
+- **Pending:** Google sign-in and everything that needs it (secure session cookies,
+  authorized WebSocket, integration, signing-key rotation, owner-side append-only
+  refusal on real audit rows); agency rules and real checklists; alert delivery
+  (issue #8); SSH source restriction and deputy access; interrupted-migration recovery
+  and prior-code compatibility; the SPEC DEP-10 amendment for the port-80 exception;
+  host teardown.
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
 

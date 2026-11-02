@@ -1,0 +1,38 @@
+[Unit]
+Description=Check Your Ambulance application (uvicorn, one process; issue #6 host profile)
+After=network-online.target mariadb.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cya
+Group=cya
+WorkingDirectory=/srv/cya/current
+EnvironmentFile=/etc/check-your-ambulance/runtime.env
+# /run/cya is the socket directory: owned by cya, mode 0750; only nginx (in group cya) can enter.
+RuntimeDirectory=cya
+RuntimeDirectoryMode=0750
+ExecStart=/srv/cya/current/local/venv/bin/uvicorn cya.asgi:application \
+    --uds /run/cya/app.sock --workers 1 --loop asyncio --http h11 --ws wsproto \
+    --lifespan off --no-proxy-headers --no-access-log --no-server-header \
+    --timeout-graceful-shutdown 10
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+MemoryMax=1G
+TasksMax=128
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
