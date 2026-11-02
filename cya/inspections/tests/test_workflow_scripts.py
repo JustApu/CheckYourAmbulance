@@ -1,5 +1,6 @@
 """Execute the offline client harness when the optional local Node tool is available."""
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 from unittest import skipUnless
 
 from django.test import SimpleTestCase
+from django.urls import reverse
 
 from cya.inspections.workflows import _determination_leaves
 
@@ -52,6 +54,17 @@ class WorkflowScriptTests(SimpleTestCase):
 
 
 class VehicleScriptTests(SimpleTestCase):
+    def test_the_scripts_session_path_is_the_servers_route(self):
+        # vehicle.js navigates with a constant path rather than text read from the page.
+        script = (
+            Path(__file__).resolve().parents[1] / "templates" / "inspections" / "vehicle.js"
+        ).read_text()
+        found = re.search(r'var SESSION_PATH = "([^"]+)";', script)
+        self.assertIsNotNone(found)
+        self.assertEqual(
+            found.group(1) + "SEGMENT/", reverse("inspection-session", args=["SEGMENT"])
+        )
+
     @skipUnless(shutil.which("node"), "optional Node client harness is unavailable")
     def test_offline_vehicle_page_navigation_regressions(self):
         script = Path(__file__).with_name("vehicle_script_harness.js")

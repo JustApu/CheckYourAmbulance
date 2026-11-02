@@ -168,7 +168,6 @@ def vehicle(request, vehicle_id):
         "config": {
             "vehicle_id": str(found.pk),
             "sessions_url": reverse("api-inspection-sessions"),
-            "session_url_template": reverse("inspection-session", args=["SESSION"]),
         },
     }
     return render(request, "inspections/vehicle.html", context)

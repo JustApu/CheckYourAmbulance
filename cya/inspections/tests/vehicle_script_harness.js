@@ -17,8 +17,7 @@ function page() {
   const message = {textContent: "", hidden: true};
   const button = {dataset: {template: "synthetic-template"}, disabled: false, listeners: {},
     addEventListener(name, fn) { this.listeners[name] = fn; }, tap() { this.listeners.click(); }};
-  const config = {sessions_url: "/api/v1/inspection-sessions", vehicle_id: "synthetic-vehicle",
-    session_url_template: SESSIONS + "SESSION/"};
+  const config = {sessions_url: "/api/v1/inspection-sessions", vehicle_id: "synthetic-vehicle"};
   const document = {
     getElementById(id) {
       if (id === "cya-config") return {textContent: JSON.stringify(config)};
