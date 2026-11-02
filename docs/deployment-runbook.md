@@ -18,7 +18,7 @@ changes this runbook needed are built; each still needs its host check:
 | Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Rehearsed on Rocky Linux 9 (2026-11-02): one process after restart and reboot, socket reachable only by the proxy. |
 | HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Rehearsed on Rocky Linux 9 (2026-11-02): HTTPS recognized behind nginx, spoofed forwarding headers overwritten, HSTS observed. |
 | Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Rehearsed on Rocky Linux 9 (2026-11-02): both layers answer 429 and spoofed client-address headers do not reset the count. |
-| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need Google sign-in, real checklists, alert delivery, named operators or approved SSH sources remain pending. |
+| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. |
 
 This issue's runbook scope does not include changing application files; the
 application changes above were made under their own issues. Backup jobs and restore measurements
@@ -545,16 +545,16 @@ pending each row as stated.
 | Check | Required evidence | Status |
 |---|---|---|
 | Build and dependency installation | Hash-checked install and selected server command/unit verified against installed help; one app process after reboot | Passed (2026-11-02) |
-| SSH/firewall | Operator and deputy access survives policy reload; only HTTPS and restricted SSH exposed; DB/upstream denied externally over IPv4/IPv6 | Partial: only 22/80/443 answer, database and upstream unreachable, no global IPv6; SSH not yet restricted to approved sources, deputy access untested |
+| SSH/firewall | Operator and deputy access survives policy reload; only HTTPS and restricted SSH exposed; DB/upstream denied externally over IPv4/IPv6 | Partial: only 22/80/443 answer, database and upstream unreachable, no global IPv6. SSH source restriction deferred by owner decision (2026-11-02; compensating controls in place); deputy access untested |
 | TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling with port 80 closed | Partial: trusted certificate, unknown-name rejection, staging issuance, renewal dry run and timer passed with port 80 open under the owner's ACME exception; renewal-failure alert waits for issue #8 |
-| Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Partial: spoofed headers overwritten, HTTPS POST passes CSRF, missing token and `http` Origin refused, HSTS observed; secure session-cookie flags wait for Google sign-in |
-| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed; signing-key rotation and reauthentication wait for sign-in |
+| Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Passed (2026-11-02): spoofed headers overwritten; a signed-in HTTPS form POST (role change) succeeded; missing token and `http` Origin refused; HSTS observed; session cookie Secure, HttpOnly and SameSite=Strict confirmed in the owner's browser |
+| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed; signing-key rotation and reauthentication not yet exercised |
 | MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Passed for restart and reboot (2026-11-02); persistence after a rebuild belongs to the issue #7 restore rehearsal |
-| Runtime isolation | Fresh runtime verification and system/deploy checks pass; negative UPDATE/DELETE tests use synthetic disposable rows only | Partial: runtime and deploy checks pass, runtime refused (1142) for UPDATE, DELETE and DDL; the owner-side append-only refusal needs audit rows, which first appear with signed-in actions |
+| Runtime isolation | Fresh runtime verification and system/deploy checks pass; negative UPDATE/DELETE tests use synthetic disposable rows only | Passed (2026-11-02): runtime and deploy checks pass; runtime refused (1142) for UPDATE, DELETE and DDL; on real sign-in rows the schema owner was refused (1644, append-only) for UPDATE and DELETE on audit, receipt and role-grant tables, each inside a rolled-back transaction |
 | Schedule and bindings | Agency schedule rules and checklist bindings are present; initial obligation generation succeeds and is idempotent | Pending: synthetic organization only; agency rules and real checklists (OQ-01) not loaded |
 | Recurring jobs | All three jobs use runtime identity, survive reboot, report/alert failures, and notification delivery cannot overlap | Partial: obligation and session jobs run as the runtime identity and survive reboot; notification job not installed (no sender); failure alerts wait for issue #8 |
 | WebSocket proxy | ASGI serves HTTP and WebSocket in one process; proxy upgrade, origin rejection, authorization recheck and reconnect recovery are verified | Partial: one process serves both, upgrades reach the application through nginx and an unknown Origin is refused; authorized connection, recheck and reconnect wait for sign-in |
-| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Pending: needs a Google OAuth client for the host |
+| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Partial: real Workspace sign-in provisioned Crew; first-administrator bootstrap (dry run writes nothing, repeat refused and audited); a Supervisor grant and revoke from the Administration page each wrote a receipt, role row and audit record; a denied sign-in was audited. Same-operation replay not exercised on the host (covered offline) |
 | Rate limits | Authentication limits enforced by both layers and tested with bounded requests; exports remain gated until implemented | Passed (2026-11-02) |
 | Restart/failure | App/DB restart, interrupted migration recovery plan and prior-code compatibility examined; failure keeps traffic closed | Partial: app, database and host restarts recover unaided; interrupted-migration recovery and prior-code compatibility not exercised |
 | Data/log hygiene | Reviewed logs omit tokens, callback query and cookies; synthetic host artifacts/credentials destroyed at completion | Partial: a marked callback code and session cookie appeared in no application or nginx log; the throwaway host is not yet destroyed |
@@ -608,12 +608,19 @@ Results:
   local policy rule to connect; Rocky's journal is not persistent by default; sudo's
   `secure_path` omits `/usr/local/sbin`; a long `systemd-run --wait --pipe` cut off by an
   SSH timeout left new logins hanging until a reboot, so long commands now run detached.
-- **Pending:** Google sign-in and everything that needs it (secure session cookies,
-  authorized WebSocket, integration, signing-key rotation, owner-side append-only
-  refusal on real audit rows); agency rules and real checklists; alert delivery
-  (issue #8); SSH source restriction and deputy access; interrupted-migration recovery
-  and prior-code compatibility; the SPEC DEP-10 amendment for the port-80 exception;
-  host teardown.
+- **Passed with real Google sign-in** (the owner's internal OAuth client; synthetic
+  organization): sign-in redirects to Google with a `Secure`, `HttpOnly`, `SameSite=Lax`
+  sign-in cookie limited to `/auth/`; the owner's session cookie is `Secure`, `HttpOnly`
+  and `SameSite=Strict`; first sign-in provisioned Crew; `bootstrap_administrator` with
+  the runtime role wrote nothing on `--dry-run`, granted Administrator, and refused and
+  audited a repeat; a Supervisor grant and revoke from the Administration page each
+  committed a receipt, role row and audit record; the schema owner was refused (1644)
+  for UPDATE and DELETE on those real rows; no server errors after sign-in was configured.
+- **Pending:** an authorized WebSocket connection, recheck and reconnect (no vehicles
+  loaded); same-operation replay on the host; signing-key rotation and reauthentication;
+  agency rules and real checklists; alert delivery (issue #8); deputy access (SSH source
+  restriction deferred by owner decision); interrupted-migration recovery and prior-code
+  compatibility; the SPEC DEP-10 amendment (issue #48); host teardown.
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
 
