@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "EX-m4-deficiency-resolution",
+  "criterion": "AC-16",
+  "requirements": ["DEF-4", "DEF-5", "VER-3", "VER-4", "INV-3", "INV-7", "SUS-1", "SUS-2", "SUS-3", "SUS-4", "OPS-2", "NOT-3", "RPT-5", "RPT-7"],
+  "fixture": "../fixtures/resolution-integration.json",
+  "synthetic": true,
+  "given": ["the M3 synthetic agency: three crew members, two supervisors and an administrator", "one ambulance with two identical kits in one compartment, daily overlapping inspection windows"],
+  "when": ["a deficiency is assigned, worked, waits on an external dependency, has an extension requested and decided, is repaired and verified", "a compartment-wide deficiency's last two items pass concurrently", "the closing verification check is invalidated, verification is added after closure, and an administrator closes and reopens", "a supervisor suspends checks and each deficiency closes by a different path", "a Critical Failed check and an overdue item are recorded, and the vehicle goes out of service"],
+  "then": ["a routine Pass never verifies and the last qualifying check closes exactly once", "notifications reach the documented recipients and email goes only through the stub", "suspended obligations are never Satisfied and every suspension ends with its deficiency", "no event changes operational status and out-of-service time is Exempt", "the dashboard shows each RPT-7 state apart", "T1/T2/T3 obligations, checklist, dashboard and deficiency states equal shuffled replay after later events"],
+  "status": "bound",
+  "database": "commit",
+  "steps": ["m4_resolution_setup", "m4_lifecycle", "m4_verification", "m4_reopenings", "m4_suspensions_and_status", "m4_dashboard_and_notifications", "m4_history"],
+  "spec_refs": ["§8", "§9", "§13", "§14", "§19"],
+  "notes": "issue 18 (https://github.com/JustApu/CheckYourAmbulance/issues/18) M4 exit integration. Exercises AC-14/16/17/18/19/20/26/27/28 without changing their symbolic catalog status. Real audited commands and database guards; only the clock and the email sender are injected."
+}
