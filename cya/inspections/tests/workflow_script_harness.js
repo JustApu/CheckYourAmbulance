@@ -216,6 +216,47 @@ function generic(kind) {
     assert(!text.includes("Refresh the report"), text);
   }
   {
+    // Issue 21: on a page that offers the empty-scope close, the repair refusal points to it.
+    const run = generic("repair"); run.form.dataset.expectedEvent = "last-event"; run.form.dataset.canCloseEmpty = "1";
+    run.form.fire("submit");
+    response(run.posts()[0], 422, {status: "REJECTED", code: "EMPTY_SCOPE"}); await tick();
+    const text = run.form.querySelector(".workflow-result").textContent;
+    assert(text.includes("Close: no current verification items"), text);
+    assert(!text.includes("Ask a supervisor"), text);
+  }
+  {
+    // Issue 21: the empty-scope close needs an explanation, sends the page's event, and a lost
+    // response is retried with the identical request and operation id.
+    const run = generic("empty-scope-close"); run.form.dataset.expectedEvent = "event-seen";
+    field(run.form, "explanation", "");
+    run.form.fire("submit"); assert.equal(run.posts().length, 0);
+    assert(run.form.querySelector(".workflow-result").textContent.includes("explanation is required"));
+    run.form.fields.explanation.value = "Synthetic: the item was retired.";
+    run.form.fire("submit");
+    const first = run.posts()[0].body;
+    assert.deepEqual(Object.keys(first).sort(), ["expected_event_id", "explanation", "operation_id"]);
+    assert.equal(first.expected_event_id, "event-seen");
+    assert.equal(first.explanation, "Synthetic: the item was retired.");
+    run.posts()[0].reject(new Error("synthetic lost response")); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.startsWith("Unconfirmed"));
+    run.form.fire("submit");
+    assert.deepEqual(run.posts()[1].body, first);
+    response(run.posts()[1], 201, {status: "COMMITTED", result: {}}); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.startsWith("Saved"));
+  }
+  for (const [code, expected] of [
+    ["SCOPE_AVAILABLE", "Current verification items exist; record the repair instead."],
+    ["DEFICIENCY_CHANGED", "This deficiency changed. Refresh history"],
+    ["INVALID_TRANSITION", "no longer Open, In Progress or Awaiting External Dependency"],
+  ]) {
+    const run = generic("empty-scope-close"); run.form.dataset.expectedEvent = "event-seen";
+    field(run.form, "explanation", "Synthetic explanation.");
+    run.form.fire("submit");
+    response(run.posts()[0], code === "DEFICIENCY_CHANGED" ? 409 : 422, {status: "REJECTED", code}); await tick();
+    const text = run.form.querySelector(".workflow-result").textContent;
+    assert(text.includes(expected), code + ": " + text);
+  }
+  {
     // Any other form keeps the shared EMPTY_SCOPE text.
     const run = generic("note"); run.form.dataset.expectedEvent = "last-event"; field(run.form, "note", "Synthetic note");
     run.form.fire("submit");
