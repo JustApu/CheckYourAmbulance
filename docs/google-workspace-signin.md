@@ -56,6 +56,8 @@ All values are environment variables (nothing is committed; SPEC §17.6). If any
 | `CYA_GOOGLE_REDIRECT_URI` | Exactly `https://<host>/auth/callback/`, registered on the OAuth client (`http://localhost:<port>/…` is allowed for development) |
 | `CYA_SESSION_MAX_AGE` | Session lifetime in seconds, i.e. the Workspace-revocation bound (default 28 800) |
 
+Behind the TLS-terminating proxy, the application must also recognize HTTPS, or Django refuses HTTPS-origin posts such as sign-out with a CSRF error. Set `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` as the [deployment runbook](deployment-runbook.md#proxy-and-application-service) describes ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)).
+
 Exactly one active organization row must exist: `python manage.py create_organization --name "<name>" --time-zone <IANA zone>`. The command is idempotent and has `--dry-run`.
 
 Sign-in collaborators are installed as dotted paths in settings:
