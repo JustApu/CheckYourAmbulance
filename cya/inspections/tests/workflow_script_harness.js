@@ -209,7 +209,19 @@ function generic(kind) {
   {
     const run = generic("repair"); run.form.dataset.expectedEvent = "last-event"; run.form.fire("submit");
     response(run.posts()[0], 422, {status: "REJECTED", code: "EMPTY_SCOPE"}); await tick();
-    assert(run.form.querySelector(".workflow-result").textContent.includes("no current checklist items"));
+    // Issue 20: the repair form has its own wording; the report form keeps the shared text.
+    const text = run.form.querySelector(".workflow-result").textContent;
+    assert(text.includes("no current checklist items left to verify"), text);
+    assert(text.includes("Ask a supervisor or administrator to close it"), text);
+    assert(!text.includes("Refresh the report"), text);
+  }
+  {
+    // Any other form keeps the shared EMPTY_SCOPE text.
+    const run = generic("note"); run.form.dataset.expectedEvent = "last-event"; field(run.form, "note", "Synthetic note");
+    run.form.fire("submit");
+    response(run.posts()[0], 422, {status: "REJECTED", code: "EMPTY_SCOPE"}); await tick();
+    const text = run.form.querySelector(".workflow-result").textContent;
+    assert(text.includes("Refresh the report or contact a supervisor"), text);
   }
   for (const [kind, fields, expected] of [
     ["extension", {reason: "Synthetic delay", proposed_deadline: "2026-07-01T15:45"}, {reason: "Synthetic delay", proposed_deadline: "2026-07-01T15:45:00.000Z"}],

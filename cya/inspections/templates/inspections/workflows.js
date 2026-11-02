@@ -58,6 +58,15 @@
     SCOPE_TOO_LARGE: "Too many items. Choose fewer.",
     VEHICLE_INACTIVE: "This vehicle is inactive."
   };
+  // Codes whose meaning depends on the form (issue 20): a repair with an empty scope has nothing
+  // left to verify, which the report form's wording does not fit.
+  var kindErrors = {
+    repair: {EMPTY_SCOPE: "There are no current checklist items left to verify for this deficiency, so a repair cannot be recorded. Ask a supervisor or administrator to close it."}
+  };
+  function errorText(kind, code) {
+    var own = kindErrors[kind];
+    return (own && own[code]) || errors[code] || ("Not accepted (" + code + ").");
+  }
   function field(form, name) { return form.querySelector('[name="' + name + '"]'); }
   function value(form, name) { var input = field(form, name); return input ? input.value.trim() : ""; }
   function required(text, message) { if (!text) { throw new Error(message); } return text; }
@@ -213,7 +222,7 @@
           button.textContent = "Saved"; form.querySelector(".workflow-refresh").hidden = false;
         } else if (answer.kind === "failed") {
           request = null; controls(form, false, false); button.textContent = original;
-          message.textContent = "Not saved. " + (errors[answer.code] || ("Not accepted (" + answer.code + ")."));
+          message.textContent = "Not saved. " + errorText(form.dataset.kind, answer.code);
         } else {
           controls(form, false, true); button.textContent = "Retry same request";
           message.textContent = "Unconfirmed: this may have been recorded. Retry sends the identical request and operation id; resolve it before editing.";

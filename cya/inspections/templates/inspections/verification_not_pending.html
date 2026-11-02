@@ -1,0 +1,5 @@
+{% extends "shell/base.html" %}
+{% block content %}
+<p role="status">This deficiency is not awaiting verification. Its status is {{ status }}, so there is nothing to verify here.</p>
+<p><a href="{% url 'deficiencies-detail' deficiency.pk %}">Open the deficiency</a></p>
+{% endblock %}

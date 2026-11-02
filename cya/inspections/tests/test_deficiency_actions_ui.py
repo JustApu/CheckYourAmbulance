@@ -59,7 +59,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
     def test_crew_forms_and_dependency_notes_round_trip_with_stale_refusal(self):
         pk = self.report()
         page = self.detail(pk)
-        self.assertContains(page, 'data-kind="extension"')
+        self.assertNotContains(page, 'data-kind="extension"')  # no deadline yet (issue 20)
         self.assertContains(page, 'data-kind="note"')
         self.assertContains(page, 'data-kind="dependency"')
         self.assertNotContains(page, 'data-kind="dependency-exit"')
@@ -97,6 +97,14 @@ class DeficiencyActionsUiTests(CrewUiCase):
 
     def test_role_union_supply_context_and_assignee_control_visibility(self):
         pk = self.report()
+        # Without a deadline the server answers NO_DEADLINE, so no role is offered the form.
+        self.assertFalse(self.detail(pk).context["can_request_extension"])
+        set_deadline(
+            deficiency_id=pk,
+            deadline=self.now + timedelta(days=2),
+            expected_event_id=self.latest(pk),
+            **self.context(self.admin),
+        )
         for roles, dependency, extension in [
             ({"CREW"}, True, True),
             ({"SUPERVISOR"}, True, True),
@@ -150,6 +158,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
             "reason": "Synthetic parts delay",
             "proposed_deadline": (self.now + timedelta(days=5)).isoformat(),
         }
+        self.assertContains(self.detail(pk), 'data-kind="extension"')
         url = f"/api/v1/deficiencies/{pk}/extension-requests"
         first = self.post(url, body)
         self.assertEqual(first.status_code, 201, first.content)
@@ -290,6 +299,67 @@ class DeficiencyActionsUiTests(CrewUiCase):
                 response = self.client.get(f"/deficiencies/{pk}/{route}/")
                 self.assertEqual(response.status_code, 503)
                 self.assertNotContains(response, "Synthetic missing evidence", status_code=503)
+
+    def test_verification_page_for_a_settled_deficiency_says_it_is_not_pending(self):
+        # Issue 20: not a 503 "temporarily unavailable" page for a permanent state.
+        pk = self.report()
+        response = self.client.get(f"/deficiencies/{pk}/verification/")
+        self.assertContains(response, "not awaiting verification", status_code=409)
+        self.assertContains(response, "Its status is Open", status_code=409)
+        self.assertContains(response, f'href="/deficiencies/{pk}/"', status_code=409)
+        self.assertNotContains(response, "temporarily unavailable", status_code=409)
+        self.assertEqual(
+            self.client.get(f"/deficiencies/{self.pending()}/verification/").status_code, 200
+        )
+
+    def test_a_passed_follow_up_is_not_prefilled_and_revision_succeeds(self):
+        # Issue 20: the server refuses a past follow-up, so the form must not resubmit one.
+        pk = self.report()
+        follow_up = self.now + timedelta(days=1)
+        entered = self.change(
+            pk, "dependencies", explanation="Synthetic vendor", follow_up_at=follow_up.isoformat()
+        )
+        self.assertEqual(entered.status_code, 201, entered.content)
+        prefilled = f'value="{follow_up:%Y-%m-%dT%H:%M}"'
+        page = self.detail(pk)
+        self.assertContains(page, prefilled)
+        self.assertNotContains(page, "has passed")
+
+        self.clock.set(self.now + timedelta(days=2))
+        page = self.detail(pk)
+        self.assertNotContains(page, prefilled)
+        self.assertContains(page, 'name="follow_up_at" type="datetime-local" value=""')
+        self.assertContains(
+            page, f"The follow-up set for {follow_up:%Y-%m-%d %H:%M} UTC has passed"
+        )
+        # What the form now sends: the new explanation and an empty follow-up.
+        revised = self.change(
+            pk, "dependency-revisions", explanation="Synthetic revised", follow_up_at=None
+        )
+        self.assertEqual(revised.status_code, 201, revised.content)
+        stale = self.change(
+            pk,
+            "dependency-revisions",
+            explanation="Synthetic again",
+            follow_up_at=follow_up.isoformat(),
+        )
+        self.assertEqual(stale.json()["code"], "INVALID_FOLLOW_UP")
+
+    def test_deadline_display_puts_utc_only_on_a_set_value(self):
+        pk = self.report()
+        page = self.detail(pk).content.decode()
+        self.assertIn("<dt>Deadline</dt><dd>Not set</dd>", page)
+        self.assertIn("<dt>Governing deadline</dt><dd>Not set</dd>", page)
+        self.assertNotIn("Not set UTC", page)
+        set_deadline(
+            deficiency_id=pk,
+            deadline=self.now + timedelta(days=2),
+            expected_event_id=self.latest(pk),
+            **self.context(self.admin),
+        )
+        page = self.detail(pk).content.decode()
+        self.assertIn("<dt>Deadline</dt><dd>2026-06-03 00:00 UTC</dd>", page)
+        self.assertNotIn("Not set", page.split("<dt>Age since")[0].split("<dt>Deadline</dt>")[1])
 
     def test_removed_current_checklist_rows_remain_outstanding(self):
         pk = self.pending()
