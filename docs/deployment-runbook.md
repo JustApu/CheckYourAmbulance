@@ -15,7 +15,7 @@ deployment gaps remain in the current application:
 
 | Gate | Current baseline and required completion |
 |---|---|
-| Production application server | `cya.asgi:application` exists, but no production ASGI server is pinned in `requirements/base.txt`. Select, pin and review one before supplying a service launch command. Do not use Django `runserver` publicly. Keep one application process (DEP-2). |
+| Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Still to verify on the rehearsal host: process count after restart and socket permissions. |
 | HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Still to verify on the rehearsal host. |
 | Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Still to verify on the rehearsal host. |
 | Rehearsal | The Docker diagnostic subset below has run. The full host/service checklist remains pending; diagnostic overlays are not installed production configuration. |
@@ -288,10 +288,44 @@ not a new product default. See [obligation generation](obligation-generation.md)
 ## Proxy and application service
 
 Keep the public listener closed until the readiness gaps above are resolved.
-The selected service launch must use the pinned server with `cya.asgi:application`,
-one application process, no reload watcher, bounded resources/restarts, the
-runtime-only environment and an unprivileged identity. Recheck process count
-after restart. No service unit or server dependency is installed by this draft.
+Run the pinned uvicorn from the release directory (so `cya` imports), with the
+runtime-only environment, under the unprivileged service identity:
+
+```sh
+venv/bin/uvicorn cya.asgi:application \
+    --uds /run/cya/app.sock --workers 1 --loop asyncio --http h11 --ws wsproto \
+    --lifespan off --no-proxy-headers --no-access-log --no-server-header \
+    --timeout-graceful-shutdown 10
+```
+
+Each flag is checked against `uvicorn --help` for 0.54.0, and
+`cya/tests/test_asgi_server.py` parses this exact block with uvicorn's own
+command line and serves HTTP and the live-update WebSocket through it:
+
+- `--workers 1` and no `--reload`: one process (DEP-2). Setting the count
+  explicitly stops a `WEB_CONCURRENCY` variable from raising it.
+- `--uds`: a Unix socket for the proxy (DEP-10). uvicorn sets the socket file
+  itself to mode 0666, so the directory controls access. Create it owned by the
+  service identity, mode 0750, with a group only the proxy's identity shares,
+  and check that other local accounts cannot connect. If loopback is used
+  instead, replace `--uds` with `--host 127.0.0.1 --port <port>`; any local
+  process can then reach the application.
+- `--loop asyncio --http h11 --ws wsproto`: the pinned pure-Python
+  implementations, so installing an optional accelerator later cannot change
+  them.
+- `--lifespan off`: the application's Channels router has no lifespan handler
+  and refuses lifespan events.
+- `--no-proxy-headers`: otherwise uvicorn trusts `X-Forwarded-For` and
+  `X-Forwarded-Proto` from loopback and rewrites the client address and scheme,
+  bypassing `CYA_TRUST_PROXY_SSL_HEADER` and the `X-Real-IP` rule below.
+- `--no-access-log`: uvicorn's access log records full request lines, including
+  OAuth codes in `/auth/callback/` query strings; keep access logging at the
+  proxy under the log rules below.
+- `--timeout-graceful-shutdown 10`: without it, a restart waits indefinitely for
+  open WebSockets to close.
+
+Bound the service's resources and restarts in its supervisor and recheck the
+process count after restart. No service unit is installed by this draft.
 
 At the proxy, terminate TLS, reject unknown hosts and forward only to the local
 upstream. Overwrite client-supplied forwarded protocol/host headers: set
@@ -329,9 +363,9 @@ routes; do not invent a current `/export/` endpoint.
 The shell currently includes its stylesheet/script inline; there is no current
 static collection step to assume. The application also exposes the authenticated
 WebSocket route `/ws/v1/vehicles/<uuid>/live/` through `cya.asgi:application`.
-Use a pinned ASGI server that supports both HTTP and WebSocket in the same
-process: the current in-memory Channels layer is process-local, and splitting
-HTTP publishing from the socket consumer loses updates. Configure the proxy to
+The launch command above serves HTTP and WebSocket in the same process: the
+current in-memory Channels layer is process-local, and splitting HTTP
+publishing from the socket consumer loses updates. Configure the proxy to
 forward WebSocket upgrade/connection headers for this route and set bounded
 handshake, read and idle timeouts using the selected proxy's documentation. The
 Origin allow-list comes from `CYA_ALLOWED_HOSTS`; the consumer also checks the
