@@ -14,6 +14,17 @@
     return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20)].join("-");
   }
   function show(text) { message.textContent = text; message.hidden = !text; }
+  // The session page's path: a constant, not text read from the page, so nothing in the DOM can
+  // shape where the browser goes. test_workflow_scripts.py pins it to the server's route.
+  var SESSION_PATH = "/inspection/sessions/";
+  // The session id fills exactly one path segment (issue 27): it is percent-encoded and never
+  // empty, "." or "..", which URL resolution would treat as a directory step. A refused id is
+  // handled like an unconfirmed answer, so the next tap replays the same operation.
+  function sessionUrl(id) {
+    var segment = typeof id === "string" ? encodeURIComponent(id) : "";
+    if (segment === "" || segment === "." || segment === "..") throw new Error("unconfirmed");
+    return SESSION_PATH + segment + "/";
+  }
   function start(template, separate, button) {
     var k = template + (separate ? "|separate" : "");
     var id = pending[k] || uuid4();
@@ -26,8 +37,9 @@
       return r.json().then(function (b) { return {ok: r.ok, status: r.status, body: b}; });
     }).then(function (a) {
       if (a.ok && a.body.status === "COMMITTED") {
+        var url = sessionUrl(a.body.result.session_id);
         delete pending[k];
-        location.assign(config.session_url_template.replace("SESSION", a.body.result.session_id));
+        location.assign(url);
         return;
       }
       if (a.body.status === "REJECTED" && a.status < 500) {
