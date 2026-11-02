@@ -96,6 +96,7 @@ class RoutingTests(unittest.TestCase):
             (False, "none", (), False),
         )
         self.assertEqual(lanes("docs/data-model-contracts.md")[1], "full")
+        self.assertEqual(lanes("docs/deployment-runbook.md")[1], "full")
 
     def test_query_failure_and_empty_results_fail_closed(self):
         self.assertEqual(lanes(query_failed=True), (True, "full", ("cya",), True))
@@ -165,6 +166,23 @@ class CoverageMapTests(unittest.TestCase):
                     continue  # a change to an app without a focused set runs the full suite
                 with self.subTest(template=str(template.relative_to(ROOT)), uses=used):
                     self.assertIn(f"cya.{app}", ci_lanes.UI_TESTS[used])
+
+    def test_every_document_a_test_reads_is_a_server_input(self):
+        # "docs" / "name.md" path joins or "docs/name.md" strings in test code.
+        joined = re.compile(r'"docs"\s*/\s*"([^"/]+\.md)"')
+        literal = re.compile(r'["\'](docs/[^"\']+\.md)["\']')
+        sources = [
+            *ROOT.glob("cya/**/tests/*.py"),
+            *ROOT.glob("cya/tests/*.py"),
+            *ROOT.glob("tests/**/*.py"),
+        ]
+        read = set()
+        for source in sources:
+            text = source.read_text(encoding="utf-8")
+            read.update(f"docs/{name}" for name in joined.findall(text))
+            read.update(literal.findall(text))
+        self.assertIn("docs/deployment-runbook.md", read)  # the scan finds what it should
+        self.assertLessEqual(read, ci_lanes.SERVER_DOCUMENTS)
 
     def test_every_harness_is_routed_to_the_client_script_lane(self):
         harnesses = sorted(ROOT.glob("cya/*/tests/*_harness.js"))

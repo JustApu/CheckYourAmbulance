@@ -57,7 +57,7 @@ docker compose down                                                 # stop; add 
 
 The `django` job in the [`checks` workflow](.github/workflows/checks.yml) runs the same lint, check, migration and test commands in the pinned Python image against a MariaDB 10.11 service container. Its stack-neutral job runs `tools/ci_lanes.py` on the PR's changed files (both names of a rename) and picks lanes in one pass:
 
-- **Server lane** (Python, migrations, dependencies, `tests/`, `tools/`, and `docs/data-model-contracts.md`): the `django` job in full mode runs the whole suite, the helper tests in `tests/` and the authorization policy tests.
+- **Server lane** (Python, migrations, dependencies, `tests/`, `tools/`, and the documents tests read: `docs/data-model-contracts.md` and `docs/deployment-runbook.md`): the `django` job in full mode runs the whole suite, the helper tests in `tests/` and the authorization policy tests.
 - **UI lane** (`cya/<app>/templates/**`, `cya/<app>/static/**` and the `*_harness.js` client-script harnesses): the `client-scripts` job runs every harness under a pinned Node 22, and the `django` job in focused mode runs only the tests covering the changed templates (`UI_TESTS` in `tools/ci_lanes.py`). A template without a focused set, such as the shell's base template, runs the full suite.
 - **Both lanes** for mixed PRs (the full suite once, plus the harnesses), for CI configuration under `.github/`, for an unclassified path, and when the changed-file query fails or returns nothing. Pushes to `main` and manual dispatches always run both lanes in full.
 

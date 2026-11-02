@@ -53,8 +53,10 @@ UI_TESTS = {
 
 # Documentation and repository metadata need neither lane.
 NEUTRAL_PATH = re.compile(r"^(?:docs/.*|.*\.md|\.gitignore|\.gitattributes)$")
-# Read by tests/test_contract_manifest.py, so it is a server input despite being Markdown.
-SERVER_DOCUMENTS = frozenset({"docs/data-model-contracts.md"})
+# Markdown read by tests, so a server input despite the extension: the contract manifest test
+# reads the contracts document; cya/tests/test_asgi_server.py parses the runbook's launch command.
+# tools/tests/test_ci_lanes.py fails if a test starts reading another document not listed here.
+SERVER_DOCUMENTS = frozenset({"docs/data-model-contracts.md", "docs/deployment-runbook.md"})
 # Paths known to affect only server checks (Python, migrations, dependencies, tests, tools).
 SERVER_PATH = re.compile(
     r"^(?:cya/.+\.py|tests/.+|tools/.+|requirements/.+|manage\.py|pyproject\.toml|compose\.ya?ml)$"

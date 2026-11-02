@@ -38,10 +38,10 @@ For committed content, obtain the ID from the repository root with `git rev-pars
 | Repository document | Content blob ID | Authority |
 |---|---|---|
 | [/docs/coordination.md](docs/coordination.md) | `98cd3e6510cd702208b58889ec2e04fc31033d95` | Normative |
-| [/docs/review.md](docs/review.md) | `2c049a7ad4a96dc4f10da7c72c6ec222203ac16f` | Normative |
+| [/docs/review.md](docs/review.md) | `4a0964ec9c600b5730e8b752ed97cc63f3ad8c98` | Normative |
 | [/docs/engineering-standards.md](docs/engineering-standards.md) | `4743f0d15876e48493ac093fd7ce01d051f05748` | Normative |
 | [/docs/model-efficiency.md](docs/model-efficiency.md) | `9abf40f5511a0c4996bfd78c5ca0c11f9900e476` | Non-normative |
-| [/CONTRIBUTING.md](CONTRIBUTING.md) | `0414d4f1e509c775df466c22f8cd329ee1585855` | Non-normative |
+| [/CONTRIBUTING.md](CONTRIBUTING.md) | `e58a287c530ed0629bd68d3275fbce6546ca4578` | Non-normative |
 | [/docs/deployment-runbook.md](docs/deployment-runbook.md) | `98b7c3c5a897cb94643b1766fdd86efdef09adcf` | Non-normative |
 
 ## Model and reasoning efficiency
