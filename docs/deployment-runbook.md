@@ -69,12 +69,12 @@ operator actions; this draft has not performed them on the developer machine.
 6. Permit inbound HTTPS (443) and SSH only from the approved administration
    sources, on both host and provider firewalls. Verify from outside the host;
    retain console access while testing. DEP-10 permits only HTTPS and restricted
-   SSH; port 80 opens only for the ACME exception in step 7.
-7. Use automated certificate renewal. **Owner decision (2026-11-02, issue #6):** the
-   rehearsal host opens port 80 for Certbot's HTTP-01 challenge, and every other
-   port-80 request is redirected to HTTPS. This departs from DEP-10 as written, so
-   production use needs a SPEC DEP-10 amendment first; until then the alternative
-   is DNS-01 with narrowly scoped DNS credentials, protected like other secrets.
+   SSH, plus port 80 only for ACME HTTP-01 challenges (step 7).
+7. Use automated certificate renewal. DEP-10 (SPEC 1.23.0, [issue #48](https://github.com/JustApu/CheckYourAmbulance/issues/48)) admits
+   port 80 solely for ACME HTTP-01: the proxy answers only
+   `/.well-known/acme-challenge/` there and permanently redirects every other request
+   to HTTPS, never serving application content over HTTP. DNS-01 with narrowly scoped
+   DNS credentials, protected like other secrets, keeps port 80 closed instead.
    Rehearse issuance and renewal with the client's staging service, then check its
    timer and failure alert.
 
@@ -427,9 +427,9 @@ package comes from Rocky's own repositories except Certbot (EPEL).
        mariadb-connector-c-devel pkgconf-pkg-config policycoreutils-python-utils tar certbot
    ```
 
-2. **Firewall and logs.** Remove `cockpit` (and `http` unless the ACME exception in
-   [Host and network preparation](#host-and-network-preparation) applies), keep `https`
-   and `ssh`, then restrict SSH to the approved administration sources:
+2. **Firewall and logs.** Remove `cockpit`, keep `https` and `ssh`, keep `http` only for
+   ACME HTTP-01 (DEP-10; remove it when using DNS-01), then restrict SSH to the approved
+   administration sources:
    `firewall-cmd --permanent --remove-service=cockpit; firewall-cmd --reload`. Make the
    journal persistent (Rocky keeps it in memory by default):
    `install -d -m 2755 -g systemd-journal /var/log/journal; systemctl restart systemd-journald`.
@@ -546,7 +546,7 @@ pending each row as stated.
 |---|---|---|
 | Build and dependency installation | Hash-checked install and selected server command/unit verified against installed help; one app process after reboot | Passed (2026-11-02) |
 | SSH/firewall | Operator and deputy access survives policy reload; only HTTPS and restricted SSH exposed; DB/upstream denied externally over IPv4/IPv6 | Partial: only 22/80/443 answer, database and upstream unreachable, no global IPv6. SSH source restriction deferred by owner decision (2026-11-02; compensating controls in place); deputy access untested |
-| TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling with port 80 closed | Partial: trusted certificate, unknown-name rejection, staging issuance, renewal dry run and timer passed with port 80 open under the owner's ACME exception; renewal-failure alert waits for issue #8 |
+| TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling; port 80 closed, or serving only ACME HTTP-01 and redirecting everything else (DEP-10) | Partial: trusted certificate, unknown-name rejection, staging issuance, renewal dry run and timer passed; port 80 serves only ACME challenges and redirects the rest; renewal-failure alert waits for issue #8 |
 | Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Passed (2026-11-02): spoofed headers overwritten; a signed-in HTTPS form POST (role change) succeeded; missing token and `http` Origin refused; HSTS observed; session cookie Secure, HttpOnly and SameSite=Strict confirmed in the owner's browser |
 | Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed; signing-key rotation and reauthentication not yet exercised |
 | MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Passed for restart and reboot (2026-11-02); persistence after a rebuild belongs to the issue #7 restore rehearsal |
@@ -620,7 +620,7 @@ Results:
   loaded); same-operation replay on the host; signing-key rotation and reauthentication;
   agency rules and real checklists; alert delivery (issue #8); deputy access (SSH source
   restriction deferred by owner decision); interrupted-migration recovery and prior-code
-  compatibility; the SPEC DEP-10 amendment (issue #48); host teardown.
+  compatibility; host teardown. The port-80 rule is now DEP-10 (SPEC 1.23.0, issue #48).
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
 
