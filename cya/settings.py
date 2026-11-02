@@ -103,6 +103,31 @@ CSRF_COOKIE_SAMESITE = "Strict"
 # JSON refusal for /api/ routes; HTML pages keep Django's default page.
 CSRF_FAILURE_VIEW = "cya.checks.api.csrf_failure"
 
+# HTTPS behind the TLS-terminating reverse proxy (SPEC DEP-10; issue 25). All off by default, so
+# development and tests are unchanged; a deployment turns them on explicitly
+# (docs/deployment-runbook.md, "Proxy and application service").
+# CYA_TRUST_PROXY_SSL_HEADER=1 trusts X-Forwarded-Proto. That is safe only when the proxy
+# overwrites the header on every request and the application is unreachable except through it
+# (loopback or a Unix socket, DEP-10); otherwise a client could claim HTTPS.
+# CYA_SSL_REDIRECT=1 and CYA_HSTS_SECONDS > 0 need that trust: behind the proxy every request
+# reaches the application as plain HTTP, so a redirect would loop and HSTS would never be sent.
+# HSTS starts short (the runbook starts at 300 seconds) and grows only after HTTPS sign-in and
+# forms are checked; subdomains and preload stay off unless the owner approves them.
+CYA_TRUST_PROXY_SSL_HEADER = env_flag("TRUST_PROXY_SSL_HEADER")
+CYA_SSL_REDIRECT = env_flag("SSL_REDIRECT")
+CYA_HSTS_SECONDS = env_int("HSTS_SECONDS", 0, 0, 63072000)
+if (CYA_SSL_REDIRECT or CYA_HSTS_SECONDS) and not CYA_TRUST_PROXY_SSL_HEADER:
+    raise ImproperlyConfigured(
+        "CYA_SSL_REDIRECT and CYA_HSTS_SECONDS need CYA_TRUST_PROXY_SSL_HEADER=1 behind the proxy."
+    )
+SECURE_PROXY_SSL_HEADER = (
+    ("HTTP_X_FORWARDED_PROTO", "https") if CYA_TRUST_PROXY_SSL_HEADER else None
+)
+SECURE_SSL_REDIRECT = CYA_SSL_REDIRECT
+SECURE_HSTS_SECONDS = CYA_HSTS_SECONDS
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+
 # Google Workspace sign-in (cya.accounts.oidc). Unset values make sign-in
 # unavailable (fail closed); the rest of the application still starts.
 CYA_GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", "")
