@@ -61,9 +61,17 @@
   // Codes whose meaning depends on the form (issue 20): a repair with an empty scope has nothing
   // left to verify, which the report form's wording does not fit.
   var kindErrors = {
-    repair: {EMPTY_SCOPE: "There are no current checklist items left to verify for this deficiency, so a repair cannot be recorded. Ask a supervisor or administrator to close it."}
+    repair: {EMPTY_SCOPE: "There are no current checklist items left to verify for this deficiency, so a repair cannot be recorded. Ask a supervisor or administrator to close it."},
+    // The repair form carries data-can-close-empty when this page offers the empty-scope close (issue 21).
+    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this deficiency, so a repair cannot be recorded. Use \u201cClose: no current verification items\u201d below."},
+    "empty-scope-close": {
+      SCOPE_AVAILABLE: "Current verification items exist; record the repair instead.",
+      INVALID_TRANSITION: "This deficiency is no longer Open, In Progress or Awaiting External Dependency. Refresh history."
+    }
   };
-  function errorText(kind, code) {
+  function errorText(form, code) {
+    var kind = form.dataset.kind;
+    if (kind === "repair" && form.dataset.canCloseEmpty === "1") { kind = "repair-closable"; }
     var own = kindErrors[kind];
     return (own && own[code]) || errors[code] || ("Not accepted (" + code + ").");
   }
@@ -80,7 +88,7 @@
     var body = {operation_id: uuid4()}, kind = form.dataset.kind;
     if (["repair", "extension", "note", "dependency", "dependency-exit", "assign", "deadline", "start-work",
       "extension-decision", "acknowledge", "regrade", "expand", "add-verification", "suspend",
-      "admin-close", "admin-reopen"].indexOf(kind) !== -1) {
+      "admin-close", "admin-reopen", "empty-scope-close"].indexOf(kind) !== -1) {
       body.expected_event_id = form.dataset.expectedEvent;
     }
     if (kind === "extension") {
@@ -121,7 +129,7 @@
       if (kind === "add-verification") { body.deadline = utcInstant(value(form, "deadline")); }
       if (kind === "suspend" && value(form, "explanation")) { body.explanation = value(form, "explanation"); }
     }
-    if (["extension-decision", "acknowledge", "regrade", "expand", "add-verification", "admin-close", "admin-reopen"].indexOf(kind) !== -1) {
+    if (["extension-decision", "acknowledge", "regrade", "expand", "add-verification", "admin-close", "admin-reopen", "empty-scope-close"].indexOf(kind) !== -1) {
       body.explanation = required(value(form, "explanation"), "An explanation is required.");
     }
     if (kind === "link") { body.related_deficiency_id = required(value(form, "related_deficiency_id"), "Choose a report."); }
@@ -222,7 +230,7 @@
           button.textContent = "Saved"; form.querySelector(".workflow-refresh").hidden = false;
         } else if (answer.kind === "failed") {
           request = null; controls(form, false, false); button.textContent = original;
-          message.textContent = "Not saved. " + errorText(form.dataset.kind, answer.code);
+          message.textContent = "Not saved. " + errorText(form, answer.code);
         } else {
           controls(form, false, true); button.textContent = "Retry same request";
           message.textContent = "Unconfirmed: this may have been recorded. Retry sends the identical request and operation id; resolve it before editing.";

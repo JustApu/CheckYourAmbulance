@@ -131,7 +131,11 @@ a concurrent change or another successful form on the same page requires refresh
 new decision (`DEFICIENCY_CHANGED`). The backend's refusal is shown, including empty repair
 scope, absent deadline, invalid dates, transition changes and permission denial. An empty scope
 on the repair form says there are no current items left to verify and to ask a supervisor or
-administrator to close the deficiency; other forms keep the shared `EMPTY_SCOPE` text.
+administrator to close the deficiency; for a Supervisor or Administrator, who see the
+"Close: no current verification items" form directly below it (issue #21), it points to that form
+instead. That form requires an explanation and answers `SCOPE_AVAILABLE` ("record the repair
+instead"), `DEFICIENCY_CHANGED` and `INVALID_TRANSITION` with their own messages. Other forms
+keep the shared `EMPTY_SCOPE` text.
 
 Pending Verification shows each materialized item/physical-kit row, its required-after instant
 and Verified/Outstanding status, using the command layer's effective-Pass and scope-lineage

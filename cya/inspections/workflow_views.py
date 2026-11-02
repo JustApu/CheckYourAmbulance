@@ -33,6 +33,7 @@ from cya.deficiencies.transitions import (
     CLOSED_ADMINISTRATOR,
     CLOSED_UNVERIFIABLE,
     CLOSED_VERIFIED,
+    EMPTY_SCOPE_CLOSURE_STATUSES,
 )
 from cya.inspections.views import _authorized, _status, _vehicle, reverse_socket
 from cya.inspections.workflows import (
@@ -370,6 +371,9 @@ def deficiency(request, user, deficiency_id):
             "can_record_repair": status.status == "IN_PROGRESS"
             and allowed("record_deficiency_correction"),
             # With no deadline the server answers NO_DEADLINE, so the form is not offered.
+            # Issue 21: Supervisors and Administrators, only while the closure is a valid move.
+            "can_close_empty_scope": status.status in EMPTY_SCOPE_CLOSURE_STATUSES
+            and allowed("close_empty_scope_deficiency"),
             "can_request_extension": allowed("request_extension")
             and deadline["governing_deadline"] is not None,
             "can_update_dependency": allowed("update_external_dependency"),
