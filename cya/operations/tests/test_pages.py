@@ -22,7 +22,15 @@ class StatusPageTests(StatusHttpCase):
         urls = ("/status/", self.url, self.url + "panel/")
         for url in urls:
             response = Client().get(url)
-            self.assertEqual((response.status_code, response["Location"]), (302, "/auth/login/"))
+            if url.endswith("panel/"):
+                # The page script re-reads the panel: signed out is 401, never a redirect that
+                # fetch would follow to /auth/login/ (issue 37).
+                self.assertEqual(response.status_code, 401, url)
+                self.assertNotIn("Location", response)
+            else:
+                self.assertEqual(
+                    (response.status_code, response["Location"]), (302, "/auth/login/")
+                )
             with override_settings(CYA_ROLE_LOOKUP=None):
                 self.assertEqual(self.client.get(url).status_code, 403, url)
 

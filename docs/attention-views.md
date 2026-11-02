@@ -164,7 +164,9 @@ a past picture and does not update.
   acknowledgement expiring.
 
 It says how many vehicles are live and shows a notice when a re-read fails. When sign-in ends it
-stops promising live updates. It adds no hint producer.
+stops promising live updates. When a re-read gets 401 (the session ended), it stops the timer,
+hints and sockets and shows "Signed out" with a link to sign in again, without requesting the
+sign-in page itself ([live updates](live-updates.md), issue #37). It adds no hint producer.
 
 **Bounds.** Owner decision (2026-11-01): start with a small fleet. At most 25 vehicles, and
 100 deficiencies and 100 suspensions in force per vehicle, each with an explicit "only the first …

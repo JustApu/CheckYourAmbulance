@@ -12,7 +12,7 @@
   var drafts = {};        // item key -> typed value, kept across re-renders
   var rows = [];
   var view = config.view, onlyAttention = config.needs_attention_only;
-  var loading = false, reloadAgain = false, reloadTimer = null;
+  var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false;
 
   function uuid4() {
     var b = new Uint8Array(16);
@@ -395,13 +395,26 @@
     badge.setAttribute("data-status", s.status);
     $("op-restrictions").textContent = s.restrictions || "";
   }
+  // Signed out (a 401 from the re-read, issue 37): stop reloading and reconnecting, keep any
+  // Unconfirmed entry's Retry, and say so; the page never requests /auth/login/ by itself.
+  function signedOut() {
+    if (signedOutNow) { return; }
+    signedOutNow = true; stopped = true; clearTimeout(reloadTimer);
+    if (socket) { socket.retired = true; if (socket.close) { socket.close(); } }
+    liveBanner.hidden = false;
+    $("live-detail").textContent = "You are signed out, so updates have stopped. Sign in again and reload. " +
+      "An item marked Unconfirmed may have been recorded: use its Retry button, not a new tap.";
+  }
   function reload() {
+    if (signedOutNow) { return; }
     if (loading) { reloadAgain = true; return; }
     loading = true;
     var q = "?view=" + encodeURIComponent(view) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
     fetch(config.urls.checklist + q, {credentials: "same-origin", cache: "no-store"}).then(function (r) {
+      if (r.status === 401) { signedOut(); return null; }
       return r.json().then(function (b) { return {ok: r.ok, body: b}; });
     }).then(function (a) {
+      if (a === null) { return; }
       if (!a.ok || a.body.status !== "OK") { throw new Error("checklist"); }
       rows = a.body.items; setStatus(a.body.vehicle_status);
       if (config.verification_for_deficiency_id) {
@@ -419,10 +432,11 @@
       $("stale").hidden = false;   // data on screen may be out of date
     }).then(function () {
       loading = false;
-      if (reloadAgain) { reloadAgain = false; scheduleReload(0); }
+      if (reloadAgain && !signedOutNow) { reloadAgain = false; scheduleReload(0); }
     });
   }
   function scheduleReload(ms) {
+    if (signedOutNow) { return; }
     clearTimeout(reloadTimer); reloadTimer = setTimeout(reload, ms);
   }
 
@@ -434,6 +448,7 @@
     socket.onopen = function () { backoff = 1000; liveBanner.hidden = true; scheduleReload(0); };  // reconcile (17.3)
     socket.onmessage = function () { scheduleReload(250); };  // a push is only a hint
     socket.onclose = function (event) {
+      if (socket && socket.retired) { return; }
       liveBanner.hidden = false;
       if (event.code === 4401 || event.code === 4403) {
         // No further attempts will be made, so do not promise any.

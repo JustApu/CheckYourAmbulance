@@ -121,8 +121,8 @@ def api(request):
     )
 
 
-def _screen(request, template):
-    user, refusal = _authorized(request, "fleet")
+def _screen(request, template, background=False):
+    user, refusal = _authorized(request, "fleet", background=background)
     if refusal is not None:
         return refusal
     roles = roles_for(user)
@@ -180,4 +180,4 @@ def screen(request):
 @never_cache
 @require_GET
 def panel(request):
-    return _screen(request, "attention/readiness_panel.html")
+    return _screen(request, "attention/readiness_panel.html", background=True)

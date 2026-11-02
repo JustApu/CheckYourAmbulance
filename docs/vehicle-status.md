@@ -116,6 +116,8 @@ result and publishes nothing again.
 - Each form shows Pending, Saved, Failed or Unconfirmed. After a lost response the retry sends the identical
   request and operation id, and no refresh, live or forced after another form's save, replaces a form that is saving or unconfirmed: the re-read waits until the last such form settles. The check is repeated when a panel response arrives, so a form submitted while a read was in flight is not replaced by that response either.
 - `/status/vehicles/{id}/panel/` is the same page's live part alone, which the open page re-reads.
+  Without a session it answers 401 instead of redirecting; the page then stops re-reading and
+  reconnecting and shows "Signed out" with a link to sign in again ([live updates](live-updates.md), issue #37).
 
 **Live hints.** After commit the three commands publish identifier-only, organization-scoped hints on the
 vehicle's group ([live updates](live-updates.md)): `status.changed` carrying the new status event id (setting a

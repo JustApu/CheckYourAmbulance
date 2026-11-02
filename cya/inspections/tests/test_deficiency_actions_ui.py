@@ -310,7 +310,9 @@ class DeficiencyActionsUiTests(CrewUiCase):
         pk = self.pending()
         for route in ("verification", "verification-items"):
             url = f"/deficiencies/{pk}/{route}/"
-            self.assertEqual(Client().get(url).status_code, 302)
+            # The script re-reads verification-items: signed out is 401, not a redirect (issue 37).
+            expected = 401 if route == "verification-items" else 302
+            self.assertEqual(Client().get(url).status_code, expected, route)
             with override_settings(CYA_ROLE_LOOKUP=None):
                 self.assertEqual(self.client.get(url).status_code, 403)
             # Exercise the reader's tenant boundary for an already-authorized other-org actor.

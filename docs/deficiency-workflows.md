@@ -16,7 +16,7 @@ All mutations use the existing audited [check](check-records.md) and
 | `/deficiencies/queue/` | Supervisor queue (Supervisors and Administrators): unassigned, overdue and waiting extension requests. |
 | `/deficiencies/{id}/` | Report details, deadlines and age, lifecycle history, crew and supervisor action forms, check suspensions, verification scope and informational links. |
 | `/deficiencies/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. |
-| `/deficiencies/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. |
+| `/deficiencies/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. Without a session it answers 401 (the verification screen then stops re-reading; issue #37). |
 | `/inspection/vehicles/{id}/deficiencies/new/` | Independent item, compartment or selected vehicle-systems report. |
 | `/inspection/vehicles/{id}/check-history/` | Complete chains for the 200 most recent check entries recorded in the last 14 days; own corrections, administrator invalidation and supervisor Unable completion. |
 

@@ -11,22 +11,24 @@ function run(config) {
   const nodes = {
     "readiness-config": {textContent: JSON.stringify(config)},
     "readiness-panel": {innerHTML: "initial"},
-    "readiness-live-state": {textContent: ""},
+    "readiness-live-state": {textContent: "", children: [], appendChild(node) { this.children.push(node); return node; }},
     "readiness-stale": {hidden: true},
   };
   const requests = [], sockets = [], timeouts = [], intervals = [], listeners = {};
   const document = {
     hidden: false,
     getElementById: id => nodes[id],
+    createElement: () => ({}),
     addEventListener(name, fn) { listeners[name] = fn; },
   };
-  class FakeSocket { constructor(url) { this.url = url; sockets.push(this); } }
+  class FakeSocket { constructor(url) { this.url = url; sockets.push(this); } close() { this.closed = true; } }
   const context = {
     document, location: {protocol: "https:", host: "example.invalid"}, JSON,
     WebSocket: FakeSocket,
     setTimeout(fn, ms) { timeouts.push({fn, ms}); return timeouts.length; },
     clearTimeout() {},
     setInterval(fn, ms) { intervals.push({fn, ms}); return intervals.length; },
+    clearInterval(id) { if (intervals[id - 1]) { intervals[id - 1].cleared = true; } },
     fetch(url) {
       const request = {url};
       requests.push(request);
@@ -91,5 +93,24 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     page.fire();
     assert.equal(page.requests.length, 2);
   }
-  console.log("Offline readiness script regressions passed: sockets, hints, timer, stale notice, sign-in end, single read.");
+  {
+    // Issue 37: a 401 means signed out. Stop the timer, hints and sockets, say so with a link,
+    // and never request /auth/login/ from the page.
+    const page = run(config);
+    page.sockets[0].onopen(); page.sockets[1].onopen(); page.fire();
+    page.requests[0].resolve({ok: false, status: 401, text: async () => ""}); await tick(); await tick();
+    const state = page.nodes["readiness-live-state"];
+    assert.equal(state.textContent, "Signed out. ");
+    assert.equal(state.children[0].href, "/auth/login/");
+    assert.equal(page.nodes["readiness-stale"].hidden, true);
+    assert.equal(page.nodes["readiness-panel"].innerHTML, "initial");
+    assert(page.sockets.every(s => s.closed));
+    const sockets = page.sockets.length;
+    assert.equal(page.intervals[0].cleared, true);  // the 60-second timer is stopped
+    page.intervals[0].fn(); page.sockets[0].onmessage({data: "{}"}); page.sockets[1].onclose({code: 1006});
+    page.listeners.visibilitychange(); page.fire();
+    assert.equal(page.requests.length, 1);  // nothing more, and no sign-in request
+    assert.equal(page.sockets.length, sockets);  // no reconnect
+  }
+  console.log("Offline readiness script regressions passed: sockets, hints, timer, stale notice, sign-in end, single read, signed-out stop.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

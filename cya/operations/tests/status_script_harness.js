@@ -14,6 +14,7 @@ class Element {
     this.fields = {}; this.hidden = false; this.disabled = false; this.textContent = ""; this.innerHTML = "";
   }
   addEventListener(name, fn) { this.listeners[name] = fn; }
+  appendChild(node) { this.children.push(node); return node; }
   fire(name) { return this.listeners[name]({preventDefault() {}}); }
   contains(other) { return other === this; }
   reset() { for (const f of Object.values(this.fields)) f.value = f.defaultValue || ""; this.wasReset = true; }
@@ -44,13 +45,13 @@ function run(forms, replies) {
   for (const id of ["status-live-banner", "status-stale", "status-update"]) ids[id].hidden = true;
   ids["status-config"] = {textContent: JSON.stringify(config)};
   const document = {
-    getElementById: (id) => ids[id], activeElement: null,
+    getElementById: (id) => ids[id], activeElement: null, createElement: () => new Element(),
     querySelectorAll: (s) => (s === ".status-write" ? forms : []),
   };
   ids["status-live"].querySelectorAll = (s) => (s === ".status-write" ? ids["status-live"].forms || [] : []);
   const context = {
     document, crypto, location: {protocol: "https:", host: "example.test"}, console, Uint8Array, JSON, Promise,
-    WebSocket: function (url) { sockets.push(this); this.url = url; },
+    WebSocket: function (url) { sockets.push(this); this.url = url; this.close = () => { this.closed = true; }; },
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {},
     fetch: (url, options = {}) => {
       calls.push({url, options});
@@ -245,6 +246,25 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
     const timers = page.timers.length;
     page.sockets[page.sockets.length - 1].onclose({code: 4401});
     assert.equal(page.timers.length, timers);   // sign-in ended: no further reconnect scheduled
+  }
+  // Issue 37: a 401 from the panel means signed out. Stop re-reading and reconnecting, say so with
+  // a link, and never request /auth/login/ from the page.
+  {
+    const page = run([], [{ok: false, status: 401, body: {status: "REJECTED", code: "AUTHENTICATION_REQUIRED"}}]);
+    page.sockets[0].onmessage({data: "{}"});
+    page.timers.pop()(); await settle(); await settle();
+    const banner = page.ids["status-live-banner"];
+    assert.equal(banner.hidden, false);
+    assert.equal(banner.textContent, "Signed out. ");
+    assert.equal(banner.children[0].href, "/auth/login/");
+    assert.equal(page.ids["status-stale"].hidden, true);
+    assert.equal(page.sockets[0].closed, true);
+    const calls = page.calls.length, timers = page.timers.length, sockets = page.sockets.length;
+    page.sockets[0].onmessage({data: "{}"});
+    page.sockets[0].onclose({code: 1006});
+    page.ids["status-update"].querySelector("button").fire("click"); await settle();
+    assert.deepEqual([page.calls.length, page.timers.length, page.sockets.length], [calls, timers, sockets]);
+    assert.equal(page.calls.some((c) => c.url.startsWith("/auth/")), false);
   }
   console.log("status script scenarios passed");
 })().catch((error) => { console.error(error); process.exit(1); });
