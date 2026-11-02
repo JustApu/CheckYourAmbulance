@@ -13,7 +13,12 @@ from cya.authorization.commands import change_role
 from cya.checklists.tests.support import ids
 from cya.core.models import AuditEvent
 from cya.deficiencies import acknowledgement
-from cya.deficiencies.commands import assign_deficiency, set_deadline
+from cya.deficiencies.commands import (
+    assign_deficiency,
+    report_deficiency,
+    set_deadline,
+    start_work,
+)
 from cya.deficiencies.extensions import decide_extension
 from cya.deficiencies.models import DeficiencyProjection
 from cya.inspections.tests import test_deficiency_actions_ui as crew_actions
@@ -300,6 +305,42 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertContains(page, "Reopened by administrator")
         self.assertContains(page, "Synthetic &lt;b&gt;reopen&lt;/b&gt;.")
         self.assertContains(page, "(Closed by administrator)")  # history keeps the ended line
+
+    def test_a_real_publication_empties_the_scope_end_to_end(self):
+        # Issue 20: no mock of the scope resolver. Removing the item from the published
+        # checklist empties the deficiency's scope, the repair is refused with EMPTY_SCOPE, a
+        # supervisor closes it, and an administrator reopens it.
+        admin = self.signed_in("admin-ui", "ADMINISTRATOR")
+        pk = report_deficiency(
+            vehicle_id=str(self.vehicle.pk),
+            target={"item_id": str(self.suction.pk)},
+            **self.new_fields(),
+            **self.context(self.user),
+        ).body["deficiency_id"]
+        start_work(deficiency_id=pk, expected_event_id=self.latest(pk), **self.context(self.admin))
+        self.published_version([s for s in self.items if s["item_id"] != str(self.suction.pk)])
+
+        repair = self.post(
+            f"/api/v1/deficiencies/{pk}/corrections",
+            {"operation_id": str(uuid4()), "expected_event_id": self.latest(pk)},
+        )
+        self.assertEqual((repair.status_code, repair.json()["code"]), (422, "EMPTY_SCOPE"))
+        closed = self.act(
+            self.sup, pk, "empty-scope-closures", explanation="Synthetic: item retired."
+        )
+        self.assertEqual(closed.status_code, 201, closed.content)
+        page = self.page(self.sup, pk)
+        self.assertEqual(page.context["status"], "Closed — No current verification items")
+        self.assertContains(page, "Closed — no current verification items")  # history label
+        self.assertNotContains(page, 'data-kind="repair"')
+
+        reopened = self.act(
+            admin, pk, "administrator-reopenings", explanation="Synthetic: item restored."
+        )
+        self.assertEqual(reopened.status_code, 201, reopened.content)
+        page = self.page(admin, pk)
+        self.assertEqual(page.context["status"], "Open")
+        self.assertContains(page, "Reopened by administrator")
 
     def test_expansion_offers_current_items_while_pending_verification(self):
         pk = self.pending()
