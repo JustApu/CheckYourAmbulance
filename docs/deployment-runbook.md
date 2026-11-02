@@ -16,7 +16,7 @@ deployment gaps remain in the current application:
 | Gate | Current baseline and required completion |
 |---|---|
 | Production application server | `cya.asgi:application` exists, but no production ASGI server is pinned in `requirements/base.txt`. Select, pin and review one before supplying a service launch command. Do not use Django `runserver` publicly. Keep one application process (DEP-2). |
-| HTTPS recognition | `cya/settings.py` has secure cookies, but no trusted-proxy SSL setting, HTTPS redirect or HSTS configuration. A reviewed deployment settings module must establish these before opening access. Invented `CYA_*` variables will not enable them. |
+| HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Still to verify on the rehearsal host. |
 | Application rate limits | No authentication limiter is installed and export routes do not exist. Proxy limiting alone does not satisfy DEP-10's application limit. Implement through separately scoped application work; reconcile exact routes before verification. |
 | Rehearsal | The Docker diagnostic subset below has run. The full host/service checklist remains pending; diagnostic overlays are not installed production configuration. |
 
@@ -120,6 +120,9 @@ does not claim a root-only source file prevents exposure by the running process.
 | `CYA_NOTIFICATION_RETRY_SECONDS` | Base retry delay, doubled per attempt; default 60 seconds, allowed 1–86400 |
 | `CYA_LIVE_MAX_CONNECTIONS_PER_USER` | WebSocket connection limit per user per process; default 4, allowed 1–32 |
 | `CYA_LIVE_AUTH_RECHECK_SECONDS` | WebSocket authorization recheck interval; default 60 seconds, allowed 10–300 |
+| `CYA_TRUST_PROXY_SSL_HEADER` | `1`, only with the proxy rule below (the proxy overwrites `X-Forwarded-Proto` and the app is reachable only through it); default `0` |
+| `CYA_SSL_REDIRECT` | `1`; needs `CYA_TRUST_PROXY_SSL_HEADER=1` (startup refuses it otherwise); default `0` |
+| `CYA_HSTS_SECONDS` | Start at `300`, raise only after HTTPS sign-in, callback and form posts are checked; allowed 0–63072000, default 0 (off); needs `CYA_TRUST_PROXY_SSL_HEADER=1`. Subdomains and preload stay off unless the owner approves them |
 
 Register the callback and verify managed-account behavior using the
 [sign-in procedure](google-workspace-signin.md#configuration) and [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25).
@@ -289,11 +292,17 @@ runtime-only environment and an unprivileged identity. Recheck process count
 after restart. No service unit or server dependency is installed by this draft.
 
 At the proxy, terminate TLS, reject unknown hosts and forward only to the local
-upstream. Overwrite client-supplied forwarded protocol/host headers. A reviewed
-Django deployment settings module can trust `X-Forwarded-Proto` only when that
-proxy strips/sets it and the app is unreachable directly. Set HTTPS recognition,
-secure redirect and HSTS consistently; check HTTPS POST/CSRF and callback
-behavior before increasing HSTS duration. Do not expose generic private files,
+upstream. Overwrite client-supplied forwarded protocol/host headers: set
+`X-Forwarded-Proto` to the real scheme on every request (with nginx,
+`proxy_set_header X-Forwarded-Proto $scheme;`) and forward the client's `Host`
+(`proxy_set_header Host $host;`), which Django compares with the HTTPS `Origin` of
+form and API posts. Only then set `CYA_TRUST_PROXY_SSL_HEADER=1`, and only while
+the app is unreachable except through the proxy (DEP-10): otherwise a client could
+claim HTTPS. Then set `CYA_SSL_REDIRECT=1` and `CYA_HSTS_SECONDS=300`; startup
+refuses either without the trust setting, because behind the proxy every request
+would look like plain HTTP. Check HTTPS POST/CSRF and the sign-in callback before
+increasing the HSTS duration. `manage.py check --deploy` then reports no
+`security.W004`/`W008`. Do not expose generic private files,
 configuration directories or database dumps through a catch-all file server.
 
 Rate-limit sign-in at the proxy and in the application. With nginx,
