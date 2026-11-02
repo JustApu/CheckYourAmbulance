@@ -86,6 +86,7 @@ def _json_vehicle(vehicle):
         "suspensions": [
             {**row, "started_at": stamp(row["started_at"])} for row in vehicle.suspensions
         ],
+        "suspensions_truncated": vehicle.suspensions_truncated,
     }
 
 

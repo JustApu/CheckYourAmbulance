@@ -166,18 +166,20 @@ a past picture and does not update.
 It says how many vehicles are live and shows a notice when a re-read fails. When sign-in ends it
 stops promising live updates. It adds no hint producer.
 
-**Bounds.** Owner decision (2026-11-01): start with a small fleet. At most 25 vehicles and
-100 deficiencies per vehicle, each with an explicit "only the first … are shown"; the database
-reads at most one row more than is shown. Per vehicle:
+**Bounds.** Owner decision (2026-11-01): start with a small fleet. At most 25 vehicles, and
+100 deficiencies and 100 suspensions in force per vehicle, each with an explicit "only the first …
+are shown"; the database reads at most one row more than is shown. Per vehicle:
 - obligation state through the existing loader (about 13 queries);
 - the status;
-- the bounded deficiency list.
+- the bounded deficiency list;
+- the bounded list of suspensions in force: a START with no END answering it by the instant,
+  selected in the database, so the append-only suspension history is never read whole.
 
 For the whole page, in one bounded read: the listed deficiencies' events, replayed in memory with
 the same rules as the per-deficiency readers (`deadlines.deadline_state`,
 `service.replay_dependency`, `acknowledgement_status`, the newest re-grade). The number of queries
 therefore does not grow with the number of deficiencies. More than 10,000 events is refused (503),
-never cut. The age rule and the suspensions are each read once.
+never cut. The age rule and the item and kit labels of the shown suspensions are each read once.
 [issue #33](https://github.com/JustApu/CheckYourAmbulance/issues/33) replaces the per-vehicle
 obligation reads with a batch loader before a larger fleet.
 
@@ -185,8 +187,9 @@ obligation reads with a batch loader before a larger fleet.
 - each state counted apart (real checks for Passed, Failed, Unable, Invalidated, Superseded,
   Suspended and Exempt; injected states for the rule-based and late ones);
 - the deficiency facts, including an acknowledgement that expires;
-- both limits (the deficiency query carries the limit), a query count that does not grow with the
-  number of deficiencies, and bulk facts equal to the per-deficiency readers;
+- the limits (the deficiency and suspension queries carry them, and the suspension query selects
+  only those in force), a query count that does not grow with the number of deficiencies, and bulk
+  facts equal to the per-deficiency readers;
 - as-of reproduction after later events;
 - refusal of future and naive instants;
 - the HTTP roles and the screen.

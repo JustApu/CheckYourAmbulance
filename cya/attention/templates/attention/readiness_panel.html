@@ -15,6 +15,7 @@
 {% else %}<p>None.</p>{% endif %}
 <h3>Check suspensions in force</h3>
 <ul>{% for row in vehicle.suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended since {{ row.started_at|date:"Y-m-d H:i" }} UTC (<a href="{% url 'deficiencies-detail' row.deficiency_id %}">deficiency</a>)</li>{% empty %}<li>None.</li>{% endfor %}</ul>
+{% if vehicle.suspensions_truncated %}<p role="alert">Only the first {{ vehicle.suspensions|length }} suspensions are shown.</p>{% endif %}
 </section>
 {% empty %}
 <p>No vehicles.</p>

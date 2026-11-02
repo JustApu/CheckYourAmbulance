@@ -14,15 +14,16 @@ determination histories, not from the checklist's one-row-per-item summary.
 
 Bounds (owner decision 2026-11-01: a small fleet first; issue 33 batches the obligation reads):
 at most VEHICLE_LIMIT vehicles and DEFICIENCY_LIMIT deficiencies per vehicle, each with an
-explicit `truncated` flag. Obligation state, the status and the bounded deficiency list are read
-per vehicle; the listed deficiencies' events, the age rule and the suspensions are read once for
-the page, so the query count does not grow with the number of deficiencies.
+explicit `truncated` flag. Obligation state, the status, the bounded deficiency list and the
+bounded list of suspensions in force are read per vehicle; the listed deficiencies' events, the age
+rule and the suspension labels are read once for the page, so the query count does not grow with
+the number of deficiencies or with the suspension history.
 """
 
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from django.db.models import OuterRef, Subquery
+from django.db.models import Exists, OuterRef, Subquery
 
 from cya.checklists.models import Item, KitInstance, Vehicle
 from cya.checks.state import effective_checks
@@ -47,6 +48,7 @@ FACT_EVENT_TYPES = (
     "ESCALATION_ACKNOWLEDGED",
 )
 DEFICIENCY_LIMIT = 100  # per vehicle
+SUSPENSION_LIMIT = 100  # suspensions in force shown per vehicle
 WINDOW_BACK = timedelta(days=7)
 WINDOW_AHEAD = timedelta(hours=48)
 
@@ -86,6 +88,7 @@ class VehicleReadiness:
     by_severity: dict = field(default_factory=dict)
     by_status: dict = field(default_factory=dict)
     suspensions: list = field(default_factory=list)
+    suspensions_truncated: bool = False
 
 
 @dataclass
@@ -254,28 +257,43 @@ def _deficiency_facts(organization_id, rows, at):
     return facts
 
 
-def _suspensions(organization_id, vehicle_ids, at):
-    """Check suspensions in force at `at` for these vehicles, with item and kit labels."""
-    rows = list(
-        CheckSuspension.objects.filter(
-            organization_id=organization_id, vehicle_id__in=vehicle_ids, recorded_at__lte=at
-        ).order_by("recorded_at", "id")
+def _suspensions_in_force(organization_id, vehicle_id, at):
+    """Up to SUSPENSION_LIMIT + 1 suspensions of this vehicle in force at `at`, oldest first.
+
+    In force: a START recorded by then with no END answering it by then (an END names its START
+    in prior_suspension). The database selects them, so the append-only history is never read
+    whole; the extra row only says the list was cut short.
+    """
+    ended = CheckSuspension.objects.filter(
+        prior_suspension_id=OuterRef("pk"), action="END", recorded_at__lte=at
     )
-    ended = {str(r.prior_suspension_id) for r in rows if r.action == "END"}
-    starts = [r for r in rows if r.action == "START" and str(r.pk) not in ended]
+    return list(
+        CheckSuspension.objects.filter(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            action="START",
+            recorded_at__lte=at,
+        )
+        .exclude(Exists(ended))
+        .order_by("recorded_at", "id")[: SUSPENSION_LIMIT + 1]
+    )
+
+
+def _suspension_rows(organization_id, rows):
+    """The shown suspensions with item and kit labels, read once for the page."""
     items = dict(
         Item.objects.filter(
-            organization_id=organization_id, pk__in={r.item_id for r in starts}
+            organization_id=organization_id, pk__in={r.item_id for r in rows}
         ).values_list("pk", "label")
     )
     kits = dict(
         KitInstance.objects.filter(
             organization_id=organization_id,
-            pk__in={r.kit_instance_id for r in starts if r.kit_instance_id},
+            pk__in={r.kit_instance_id for r in rows if r.kit_instance_id},
         ).values_list("pk", "label")
     )
     by_vehicle = {}
-    for row in starts:
+    for row in rows:
         label = items.get(row.item_id, "Item")
         if row.kit_instance_id:
             label += f" — {kits.get(row.kit_instance_id, 'Kit')}"
@@ -303,11 +321,13 @@ def fleet_readiness(organization_id, *, as_of=None, now):
     listed = list(vehicles.order_by("display_name", "id")[: VEHICLE_LIMIT + 1])
     truncated = len(listed) > VEHICLE_LIMIT
     listed = listed[:VEHICLE_LIMIT]
-    ids = [str(v.pk) for v in listed]
     listed_rows = {str(v.pk): _active_deficiencies(organization_id, str(v.pk), at) for v in listed}
     shown_rows = [row for rows in listed_rows.values() for row in rows[:DEFICIENCY_LIMIT]]
     facts = _deficiency_facts(organization_id, shown_rows, at)
-    suspensions = _suspensions(organization_id, ids, at)
+    in_force = {str(v.pk): _suspensions_in_force(organization_id, str(v.pk), at) for v in listed}
+    suspensions = _suspension_rows(
+        organization_id, [row for rows in in_force.values() for row in rows[:SUSPENSION_LIMIT]]
+    )
     result = []
     for vehicle in listed:
         vehicle_id = str(vehicle.pk)
@@ -334,6 +354,7 @@ def fleet_readiness(organization_id, *, as_of=None, now):
                 by_severity=by_severity,
                 by_status=by_status,
                 suspensions=suspensions.get(vehicle_id, []),
+                suspensions_truncated=len(in_force[vehicle_id]) > SUSPENSION_LIMIT,
             )
         )
     return FleetReadiness(at, at - WINDOW_BACK, at + WINDOW_AHEAD, result, truncated)

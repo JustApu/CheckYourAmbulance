@@ -16,6 +16,7 @@ from cya.attention import readiness
 from cya.attention.tests.support import AttentionCase
 from cya.checks.commands import correct_check, invalidate_chain
 from cya.deficiencies import acknowledgement, service
+from cya.deficiencies.closure import close_administrator
 from cya.deficiencies.commands import assign_deficiency, regrade_severity, set_deadline
 from cya.deficiencies.dependency import enter_dependency
 from cya.deficiencies.models import DeficiencyEvent
@@ -298,6 +299,52 @@ class FanOutTests(ReadinessCase):
             ),
         )
         self.assertEqual(row["severity"]["code"], "LOW")
+
+
+class SuspensionBoundTests(ReadinessCase):
+    """PR 34 follow-up review: suspensions in force are selected in the database, bounded."""
+
+    def suspend(self, item, **fields):
+        pk = self.failed(item, **fields).body["deficiency_ids"][0]
+        suspend_checks(
+            deficiency_id=pk,
+            expected_event_id=self.latest(pk),
+            items=[{"item_id": str(item.pk)}],
+            **self.context(self.supervisor),
+        )
+        return pk
+
+    def test_only_suspensions_in_force_are_read_and_the_list_is_bounded(self):
+        ended = self.suspend(self.siren)
+        before_close = self.clock.now
+        close_administrator(
+            deficiency_id=ended,
+            expected_event_id=self.latest(ended),
+            explanation="Synthetic closure.",
+            **self.context(self.admin),
+        )
+        self.suspend(self.suction)
+        self.suspend(self.masks, quantity=1)
+        labels = [row["label"] for row in self.mine().suspensions]
+        self.assertEqual(sorted(labels), sorted([self.suction.label, self.masks.label]))
+        with (
+            mock.patch.object(readiness, "SUSPENSION_LIMIT", 1),
+            CaptureQueriesContext(connection) as captured,
+        ):
+            vehicle = self.mine()
+        self.assertEqual((len(vehicle.suspensions), vehicle.suspensions_truncated), (1, True))
+        # The dashboard's own reads (the obligation loader's suspension evidence is separate and
+        # already bounded, refusing past 10,000 rows).
+        sql = [
+            q["sql"]
+            for q in captured.captured_queries
+            if "FROM `check_suspension` WHERE (`check_suspension`.`action` = 'START'" in q["sql"]
+        ]
+        self.assertEqual(len(sql), len(self.vehicles))  # one bounded read per vehicle
+        self.assertTrue(all("NOT (EXISTS" in q and q.endswith("LIMIT 2") for q in sql), sql)
+        # As of before the closure, the ended suspension was still in force.
+        past = self.mine(self.picture(as_of=before_close)).suspensions
+        self.assertEqual([row["label"] for row in past], [self.siren.label])
 
 
 class BoundsAndHistoryTests(ReadinessCase):
