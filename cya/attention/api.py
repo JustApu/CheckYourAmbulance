@@ -35,7 +35,8 @@ def _stamped(value):
     return None if value is None else _stamp(value)
 
 
-def _row(row, authors):
+def checklist_row(row, authors):
+    """The wire shape of one checklist row; shared by the checklist and workflow readers."""
     return {
         "item_id": row.item_id,
         "item_label": row.item_label,
@@ -68,7 +69,7 @@ def _row(row, authors):
     }
 
 
-def _authors(organization, rows):
+def check_authors(organization, rows):
     """check id -> author display name for each row's newest effective check.
 
     The name is what the conflict warning already shows every signed-in crew member (CON-3).
@@ -119,7 +120,7 @@ def checklist(request, vehicle_id):
         logger.error("vehicle checklist unavailable")
         return _reply(503, "RETRY_LATER", correlation_id)
     status = result.vehicle_status
-    authors = _authors(organization, result.rows)
+    authors = check_authors(organization, result.rows)
     return JsonResponse(
         {
             "status": "OK",
@@ -129,7 +130,7 @@ def checklist(request, vehicle_id):
             "view": result.view,
             "needs_attention_only": result.needs_attention_only,
             "vehicle_status": {**status, "since": _stamped(status["since"])},
-            "items": [_row(row, authors.get(row.latest_check_id)) for row in result.rows],
+            "items": [checklist_row(row, authors.get(row.latest_check_id)) for row in result.rows],
         }
     )
 

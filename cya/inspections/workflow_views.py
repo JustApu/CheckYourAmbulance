@@ -18,7 +18,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
 from cya.accounts.models import User
-from cya.attention.api import _authors, _row
+from cya.attention.api import check_authors, checklist_row
 from cya.attention.checklist import vehicle_checklist
 from cya.authorization.backend import canonical_id
 from cya.authorization.models import RoleGrant
@@ -349,6 +349,9 @@ def deficiency(request, user, deficiency_id):
 
     deadline = service.extension_state(str(user.organization_id), str(found.pk))
     dependency = service.dependency_state(str(user.organization_id), str(found.pk))["dependency"]
+    # The server refuses a past follow-up (INVALID_FOLLOW_UP), so a passed one is not prefilled.
+    follow_up = dependency.get("follow_up_at") if dependency else None
+    follow_up_passed = follow_up is not None and follow_up <= timezone.now()
     return render(
         request,
         "inspections/deficiency.html",
@@ -366,11 +369,15 @@ def deficiency(request, user, deficiency_id):
             ],
             "can_record_repair": status.status == "IN_PROGRESS"
             and allowed("record_deficiency_correction"),
-            "can_request_extension": allowed("request_extension"),
+            # With no deadline the server answers NO_DEADLINE, so the form is not offered.
+            "can_request_extension": allowed("request_extension")
+            and deadline["governing_deadline"] is not None,
             "can_update_dependency": allowed("update_external_dependency"),
             "can_add_note": allowed("add_progress_note"),
             "can_enter_dependency": status.status in ("OPEN", "IN_PROGRESS"),
             "dependency": dependency,
+            "follow_up_prefill": None if follow_up_passed else follow_up,
+            "follow_up_passed": follow_up if follow_up_passed else None,
             "deadline": deadline,
             "age_days": deadline["age_seconds"] // 86400,
             "assignee": status.assignee,
@@ -494,6 +501,25 @@ def _verification_deficiency(user, deficiency_id):
 @page
 def verification(request, user, deficiency_id):
     found = _verification_deficiency(user, deficiency_id)
+    current = (
+        DeficiencyProjection.objects.filter(organization_id=user.organization_id, deficiency=found)
+        .values_list("status", flat=True)
+        .first()
+    )
+    if current is None:
+        raise ValueError("deficiency projection unavailable")
+    if current != "PENDING_VERIFICATION":
+        # A settled state, not an outage: say so instead of the 503 "temporarily unavailable" page.
+        return render(
+            request,
+            "inspections/verification_not_pending.html",
+            {
+                "title": "Not awaiting verification",
+                "deficiency": found,
+                "status": STATUS_LABELS[current],
+            },
+            status=409,
+        )
     # This is an independent check screen: no session is created or impersonated.
     verification_scope(found)
     config = {
@@ -534,12 +560,12 @@ def verification_items(request, user, deficiency_id):
     needed = {(str(r.item_id), str(r.kit_instance_id or "")) for r in scope if not r.satisfied}
     result = vehicle_checklist(str(user.organization_id), str(found.vehicle_id))
     rows = [r for r in result.rows if (r.item_id, r.kit_id or "") in needed]
-    authors = _authors(str(user.organization_id), rows)
+    authors = check_authors(str(user.organization_id), rows)
     return JsonResponse(
         {
             "status": "OK",
             "vehicle_status": result.vehicle_status,
-            "items": [_row(r, authors.get(r.latest_check_id)) for r in rows],
+            "items": [checklist_row(r, authors.get(r.latest_check_id)) for r in rows],
             "verification_status": STATUS_LABELS[events[-1].to_status],
             "remaining_scope_rows": len(needed),
             "unavailable_scope_rows": len(needed - {(r.item_id, r.kit_id or "") for r in rows}),

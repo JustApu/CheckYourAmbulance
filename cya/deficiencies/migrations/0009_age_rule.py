@@ -22,6 +22,17 @@ MAX_AGE_DAYS = 3650  # the command's bound, fixed here so the migration never fo
 TABLE = "deficiency_age_rule"
 
 
+def refuse_reverse_with_data(apps, schema_editor):
+    """Reversal drops the append-only rule table, so it refuses while any revision exists.
+
+    Added by issue #20; forward application is unchanged (the forward step is a no-op).
+    """
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(f"SELECT COUNT(*) FROM {TABLE}")
+        if cursor.fetchone()[0]:
+            raise RuntimeError("cannot reverse age-highlight rules while revisions exist")
+
+
 def _threshold_test():
     """True when any of the (at most five) thresholds is not a whole number of days in range or
     does not exceed the one before it: the command's own rule, repeated for a direct writer.
@@ -188,4 +199,6 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.RunSQL(forward_statements(), reverse_sql=reverse_statements()),
+        # Last, so that it runs first on reversal, before the guards and the table are dropped.
+        migrations.RunPython(migrations.RunPython.noop, refuse_reverse_with_data),
     ]

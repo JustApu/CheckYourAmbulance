@@ -740,11 +740,13 @@ array CHECKs, a trigger requiring at most five strictly ascending whole numbers 
 3,650 (the command's own rule), and organization-pair foreign keys; a stored rule that is
 malformed anyway makes the reader answer `503` rather than fail.
 
-
 ## Acknowledging escalation
 
-[issue #151](https://github.com/JustApu/CheckYourAmbulance-archive/issues/151) implements DEF-7 without producing notifications; [issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)
-adds the [overdue notice](notifications.md#overdue-deadlines), which an active acknowledgement suppresses. POST /api/v1/deficiencies/{id}/escalation-acknowledgements takes operation_id,
+[issue #151](https://github.com/JustApu/CheckYourAmbulance-archive/issues/151) implements DEF-7
+without producing notifications;
+[issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14) adds the
+[overdue notice](notifications.md#overdue-deadlines), which an active acknowledgement suppresses.
+POST /api/v1/deficiencies/{id}/escalation-acknowledgements takes operation_id,
 expected_event_id, a nonblank explanation, a nonblank action_plan, and period_days. Supervisors
 and Administrators may acknowledge; Crew and Supply Officers are denied. The command requires an
 active deficiency, uses the deficiency lock and stale-event check, and appends
@@ -754,27 +756,39 @@ atomically, and the audit snapshot contains identifiers only. No notification or
 written here.
 
 An administrator must first configure the organization's maximum at
-POST /api/v1/deficiency-acknowledgement-maximum with operation_id and positive integer maximum_days.
-This appends a versioned, audited deficiency_acknowledgement_rule row using the existing
-configure_schedules_thresholds_notifications permission. There is no default. Until a maximum is
-configured the command returns 422 ACKNOWLEDGEMENT_MAXIMUM_UNCONFIGURED; a requested period above
-it returns 422 ACKNOWLEDGEMENT_PERIOD_TOO_LONG. Repeating the current maximum returns
+POST /api/v1/deficiency-acknowledgement-maximum with operation_id and maximum_days, a whole number
+from 1 to 30 (owner decision 2026-10-29,
+[issue #20](https://github.com/JustApu/CheckYourAmbulance/issues/20)); any other value is
+400 MALFORMED_REQUEST. This appends a versioned, audited deficiency_acknowledgement_rule row using
+the existing configure_schedules_thresholds_notifications permission. There is no default. Until a
+maximum is configured the command returns 422 ACKNOWLEDGEMENT_MAXIMUM_UNCONFIGURED; a requested
+period above it returns 422 ACKNOWLEDGEMENT_PERIOD_TOO_LONG. Repeating the current maximum returns
 422 ACKNOWLEDGEMENT_MAXIMUM_UNCHANGED. GET on the same route returns the current and historical
 maximum, optionally as of an instant.
 
 GET /api/v1/deficiencies/{id}/escalation-acknowledgement returns the current acknowledgement,
 history and the maximum in force now or at ?as_of=<instant>. It derives NONE, ACTIVE or EXPIRED from
-the recorded expiry and time; a later acknowledgement marks earlier history entries RENEWED.
+the recorded expiry and time. In history, an earlier entry reads RENEWED only if the next
+acknowledgement was recorded before that entry's expiry; one that had already lapsed reads
+EXPIRED, so a gap without suppression stays visible (owner decision 2026-11-02).
 Expiry is automatic and requires no write or job. The last event id is global to the deficiency so
-subsequent commands can use it as expected_event_id; the bounded reader refuses more than 5,000 acknowledgement events rather than truncating history.
+subsequent commands can use it as expected_event_id; the bounded reader refuses more than 5,000
+acknowledgement events rather than truncating history. Both GET routes are readable by any
+signed-in member of the deficiency's organization; neither checks a role.
+
+**Renewals.** The newest acknowledgement always governs, even when its period ends sooner than the
+one it renews: a supervisor can shorten suppression this way, and escalation resumes at the newer,
+earlier expiry. Each acknowledgement is still bounded by the maximum in force when it is recorded.
 
 **Correction effects.** `ESCALATION_ACKNOWLEDGED` is neutral for COR-4: it records intent and
 suspends escalation, not completed repair, so it does not block a later qualifying author
 correction from marking the deficiency Reported in Error (owner decision 2026-10-29).
 
 The database trigger repeats the command receipt, supervisor/administrator role, active-status,
-required-text, expiry and configured-maximum rules. Acknowledgement events and configuration revisions are append-only and use organization-pair
-foreign keys. Reversing the migration is
+required-text, expiry and configured-maximum rules; the rule trigger and table CHECK repeat the
+1-to-30-day bound (migration 0018, which refuses to apply if a stored maximum already exceeds 30:
+rules are append-only and cannot be corrected in place). Acknowledgement events and configuration
+revisions are append-only and use organization-pair foreign keys. Reversing the migration is
 refused once either kind of record exists.
 
 ## Locks and failure handling
@@ -783,7 +797,10 @@ Lock order is vehicles, kits, items, deficiencies (contract step 4). `record_che
 item lock and then at most one deficiency lock (a verification check locks the deficiency it
 verifies, or the one its Failed check names, never both); `report_deficiency` and the link commands lock
 deficiencies sorted by id after the identity locks. A new deficiency's lock row is created in
-the same transaction as the header. A missing lock row or projection is a
+the same transaction as the header. The acknowledgement command locks the organization row after
+the deficiency lock, and the maximum setter locks only the organization row, so the two cannot
+wait on each other in opposite orders; an acknowledgement racing a new maximum is checked against
+whichever rule committed first. A missing lock row or projection is a
 `503 CONFIGURATION_UNAVAILABLE`, never created lazily. A deadlock is retried at most twice by
 `run_command`; an ambiguous write is not retried blindly; every rejection rolls back whole and
 leaves the `operation_id` usable. These commands have no dry-run: a command either commits all

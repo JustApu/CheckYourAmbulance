@@ -138,7 +138,8 @@ class DeficiencyAcknowledgementRule(Evidence):
                 condition=models.Q(revision__gte=1), name="defackrule_revision_min"
             ),
             models.CheckConstraint(
-                condition=models.Q(maximum_days__gte=1), name="defackrule_max_days"
+                condition=models.Q(maximum_days__gte=1, maximum_days__lte=30),
+                name="defackrule_max_days",
             ),
         ]
 

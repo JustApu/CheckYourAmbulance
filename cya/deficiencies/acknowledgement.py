@@ -26,6 +26,8 @@ ACK_COMMAND = "DEFICIENCY_ESCALATION_ACKNOWLEDGE"
 RULE_COMMAND = "DEFICIENCY_ACKNOWLEDGEMENT_MAXIMUM_SET"
 MAX_RULES = 1000
 MAX_EVENTS = 5000
+# Owner decision 2026-10-29 (issue #20); the rule trigger and table CHECK repeat it (migration 0018).
+MAXIMUM_DAYS_CAP = 30
 
 
 def _positive_days(value, path):
@@ -52,6 +54,10 @@ def set_acknowledgement_maximum(
         canonical_id(value)
     _operation_id(operation_id)
     maximum_days = _positive_days(maximum_days, "maximum_days")
+    if maximum_days > MAXIMUM_DAYS_CAP:
+        raise service.malformed(
+            "maximum_days", f"maximum_days must be a whole number from 1 to {MAXIMUM_DAYS_CAP}"
+        )
 
     def build(_actor):
         Organization.objects.select_for_update().get(pk=organization_id)
@@ -275,11 +281,13 @@ def acknowledgement_state(organization_id, deficiency_id, as_of=None):
     status = acknowledgement_status(current, at)
     history = []
     for index, event in enumerate(events):
-        event_status = (
-            "RENEWED"
-            if index < len(events) - 1
-            else ("ACTIVE" if event.acknowledgement_until > at else "EXPIRED")
-        )
+        if index == len(events) - 1:
+            event_status = "ACTIVE" if event.acknowledgement_until > at else "EXPIRED"
+        else:
+            # RENEWED only if the next acknowledgement came while this one was still in force;
+            # one that lapsed first stays EXPIRED, so history shows the gap (owner, 2026-11-02).
+            renewed = events[index + 1].recorded_at < event.acknowledgement_until
+            event_status = "RENEWED" if renewed else "EXPIRED"
         history.append(
             {
                 "event_id": str(event.pk),

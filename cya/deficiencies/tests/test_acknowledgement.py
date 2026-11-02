@@ -109,8 +109,11 @@ class AcknowledgementCommandTests(AcknowledgementCase):
             ("period_days", "2"),
         ):
             self.refused("MALFORMED_REQUEST", 400, self.acknowledge, **{field: value})
-        self.set_maximum(2_147_483_647)
-        self.refused("ACKNOWLEDGEMENT_PERIOD_OUT_OF_RANGE", 422, self.acknowledge, 2_147_483_647)
+        # With the 30-day cap (issue #20) a huge period is refused as too long before any date
+        # arithmetic, so ACKNOWLEDGEMENT_PERIOD_OUT_OF_RANGE stays only as a defensive branch.
+        self.set_maximum(30)
+        self.refused("ACKNOWLEDGEMENT_PERIOD_TOO_LONG", 422, self.acknowledge, 2_147_483_647)
+        self.refused("ACKNOWLEDGEMENT_PERIOD_TOO_LONG", 422, self.acknowledge, 31)
 
     def test_operation_replay_returns_the_original_acknowledgement(self):
         self.set_maximum()
@@ -151,10 +154,28 @@ class AcknowledgementCommandTests(AcknowledgementCase):
             str(self.org.pk), self.deficiency_id, second_now
         )
         self.assertEqual(current["acknowledgement"]["status"], "ACTIVE")
-        self.assertEqual([event["state"] for event in current["history"]], ["RENEWED", "ACTIVE"])
+        # The first lapsed before the second was recorded, so it stays EXPIRED (issue #20).
+        self.assertEqual([event["state"] for event in current["history"]], ["EXPIRED", "ACTIVE"])
         third_now = second_event.recorded_at + timedelta(hours=1)
         with mock.patch("cya.deficiencies.acknowledgement.timezone.now", return_value=third_now):
-            self.assertEqual(self.acknowledge(1).status, 201)  # renewal while active
+            third = self.acknowledge(1)  # renewal while active, ending sooner than the second
+        self.assertEqual(third.status, 201)
+        third_event = DeficiencyEvent.objects.get(pk=third.body["event_id"])
+        self.assertLess(third_event.acknowledgement_until, second_event.acknowledgement_until)
+        renewed = acknowledgement.acknowledgement_state(
+            str(self.org.pk), self.deficiency_id, third_now
+        )
+        self.assertEqual(
+            [event["state"] for event in renewed["history"]], ["EXPIRED", "RENEWED", "ACTIVE"]
+        )
+        # The newest governs even though it ends sooner: once it expires, suppression is over
+        # although the renewed one's own period has not ended (owner decision, issue #20).
+        after = third_event.acknowledgement_until + timedelta(minutes=1)
+        self.assertLess(after, second_event.acknowledgement_until)
+        lapsed = acknowledgement.acknowledgement_state(str(self.org.pk), self.deficiency_id, after)
+        self.assertEqual(lapsed["acknowledgement"]["status"], "EXPIRED")
+        self.assertFalse(lapsed["acknowledgement"]["active"])
+        self.assertEqual(lapsed["acknowledgement"]["event_id"], str(third_event.pk))
         self.assertEqual(
             DeficiencyEvent.objects.filter(
                 deficiency_id=self.deficiency_id, event_type="ESCALATION_ACKNOWLEDGED"

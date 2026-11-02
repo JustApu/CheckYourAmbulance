@@ -10,11 +10,11 @@
 <p>Reported by {{ deficiency.reporter.display_name }} at {{ deficiency.reported_at|date:"Y-m-d H:i" }} UTC</p>
 <dl>
 <dt>Assignee</dt><dd>{{ assignee.display_name|default:"Unassigned" }}</dd>
-<dt>Deadline</dt><dd>{{ deadline.base_deadline|date:"Y-m-d H:i"|default:"Not set" }} UTC</dd>
-<dt>Governing deadline</dt><dd>{{ deadline.governing_deadline|date:"Y-m-d H:i"|default:"Not set" }} UTC{% if deadline.overdue %} · Overdue{% endif %}</dd>
+<dt>Deadline</dt><dd>{% if deadline.base_deadline %}{{ deadline.base_deadline|date:"Y-m-d H:i" }} UTC{% else %}Not set{% endif %}</dd>
+<dt>Governing deadline</dt><dd>{% if deadline.governing_deadline %}{{ deadline.governing_deadline|date:"Y-m-d H:i" }} UTC{% else %}Not set{% endif %}{% if deadline.overdue %} · Overdue{% endif %}</dd>
 <dt>Age since original report</dt><dd>{{ age_days }} days · {{ deadline.extension_count }} extension requests{% if deadline.long_running %} · Long-running{% endif %}</dd>
 </dl>
-{% if dependency %}<p>Current dependency: {{ dependency.explanation }}</p><p>Follow-up: {{ dependency.follow_up_at|date:"Y-m-d H:i"|default:"Not set" }} UTC. No automatic reminder.</p>{% endif %}
+{% if dependency %}<p>Current dependency: {{ dependency.explanation }}</p><p>Follow-up: {% if dependency.follow_up_at %}{{ dependency.follow_up_at|date:"Y-m-d H:i" }} UTC{% else %}Not set{% endif %}. No automatic reminder.</p>{% endif %}
 </section>
 {% if scope %}
 <section class="panel"><h2>Verification scope</h2>
@@ -54,7 +54,8 @@
 <form class="panel workflow-write" data-kind="dependency" data-url="{% url 'api-deficiency-dependency-revisions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Update dependency</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
-<label>Follow-up date and time (UTC, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ dependency.follow_up_at|date:'Y-m-d\TH:i' }}"></label>
+{% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|date:"Y-m-d H:i" }} UTC has passed; set a new one or leave it empty.</p>{% endif %}
+<label>Follow-up date and time (UTC, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
 <button type="submit" class="button primary">Update dependency</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
@@ -68,7 +69,8 @@
 <form class="panel workflow-write" data-kind="dependency" data-url="{% url 'api-deficiency-dependencies' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Awaiting External Dependency</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
-<label>Follow-up date and time (UTC, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ dependency.follow_up_at|date:'Y-m-d\TH:i' }}"></label>
+{% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|date:"Y-m-d H:i" }} UTC has passed; set a new one or leave it empty.</p>{% endif %}
+<label>Follow-up date and time (UTC, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
 <button type="submit" class="button primary">Record dependency</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
