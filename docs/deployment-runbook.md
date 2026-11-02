@@ -10,8 +10,8 @@ authorize procurement, production changes, restores or a pilot.
 [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25)'s M1 implementation and real-Workspace verification are complete.
 The Docker diagnostic evidence below is historical and does not verify the
 current source or a host deployment. Repeat applicable checks against the
-current source before treating this runbook as verified. The following
-deployment gaps remain in the current application:
+current source before treating this runbook as verified. The application
+changes this runbook needed are built; each still needs its host check:
 
 | Gate | Current baseline and required completion |
 |---|---|
@@ -20,9 +20,8 @@ deployment gaps remain in the current application:
 | Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Still to verify on the rehearsal host. |
 | Rehearsal | The Docker diagnostic subset below has run. The full host/service checklist remains pending; diagnostic overlays are not installed production configuration. |
 
-This issue's runbook scope does not include changing application files. The
-application gaps above need separately scoped implementation work before those
-behaviors can pass a deployment rehearsal. Backup jobs and restore measurements
+This issue's runbook scope does not include changing application files; the
+application changes above were made under their own issues. Backup jobs and restore measurements
 belong to [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7), alert delivery to [issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8), paper fallback to [issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9),
 and load/hot-backup/high-availability evaluation to [issue #10](https://github.com/JustApu/CheckYourAmbulance/issues/10).
 
@@ -224,9 +223,7 @@ to the runtime file. It uses the organization's configured station time zone; it
 demonstration times are not universal defaults. Otherwise publish the agency's
 own rules. Follow [the schedule setup procedure](schedule-engine.md#illustrative-schedule-seed)
 and [the obligation setup procedure](obligation-generation.md#operator-commands).
-Run the illustrative schedule seed under `CYA_DATABASE_ROLE=schema_owner`
-before switching to the runtime configuration. Then switch to the runtime
-file and fresh runtime connections. With an authorized administrator, use
+Then switch to the runtime file and fresh runtime connections. With an authorized administrator, use
 `bind_requirement` to bind each deployed vehicle to its checklist template
 and schedule slot. Run `generate_obligations` once per active organization
 under the runtime role; inspect failures and confirm the run reports all units
@@ -239,13 +236,18 @@ before starting the app:
 ```sh
 local/venv/bin/python manage.py verify_audit_runtime
 local/venv/bin/python manage.py check --fail-level WARNING
-local/venv/bin/python manage.py check --deploy --fail-level WARNING
+local/venv/bin/python manage.py check --deploy
 ```
 
 Schema inspection uses owner credentials; never grant TRIGGER to runtime to
 make it inspect guards. Resolve failed checks before enabling traffic.
-`check --deploy` can currently fail on missing deployment settings; do not
-silence warnings to claim readiness. After any grant change restart app
+`check --deploy` prints warnings without failing. Before the proxy settings in
+[Proxy and application service](#proxy-and-application-service) are enabled it
+reports `security.W004` and `security.W008`; after them, only `security.W005`
+and `security.W021` may remain. Those two remain because HSTS subdomains and
+preload stay off unless the owner approves them, so do not add
+`--fail-level WARNING` to this command. Any other warning must be
+resolved, and none may be silenced to claim readiness. After any grant change restart app
 connections and repeat runtime verification. Never run the app as schema owner.
 
 ## Scheduled application jobs
@@ -288,11 +290,13 @@ not a new product default. See [obligation generation](obligation-generation.md)
 ## Proxy and application service
 
 Keep the public listener closed until the readiness gaps above are resolved.
-Run the pinned uvicorn from the release directory (so `cya` imports), with the
-runtime-only environment, under the unprivileged service identity:
+Run the pinned uvicorn from the release directory's `local/venv` (where the
+hash-checked dependencies were installed above), with the release directory as
+working directory so `cya` imports, the runtime-only environment and the
+unprivileged service identity:
 
 ```sh
-venv/bin/uvicorn cya.asgi:application \
+local/venv/bin/uvicorn cya.asgi:application \
     --uds /run/cya/app.sock --workers 1 --loop asyncio --http h11 --ws wsproto \
     --lifespan off --no-proxy-headers --no-access-log --no-server-header \
     --timeout-graceful-shutdown 10
@@ -304,8 +308,9 @@ command line and serves HTTP and the live-update WebSocket through it:
 
 - `--workers 1` and no `--reload`: one process (DEP-2). Setting the count
   explicitly stops a `WEB_CONCURRENCY` variable from raising it.
-- `--uds`: a Unix socket for the proxy (DEP-10). uvicorn sets the socket file
-  itself to mode 0666, so the directory controls access. Create it owned by the
+- `--uds`: a Unix socket for the proxy (DEP-10). uvicorn creates a new socket
+  file with mode 0666 (0.54.0 `Server.startup`; a file already at that path
+  keeps its mode), so the directory controls access. Create it owned by the
   service identity, mode 0750, with a group only the proxy's identity shares,
   and check that other local accounts cannot connect. If loopback is used
   instead, replace `--uds` with `--host 127.0.0.1 --port <port>`; any local
@@ -337,8 +342,8 @@ the app is unreachable except through the proxy (DEP-10): otherwise a client cou
 claim HTTPS. Then set `CYA_SSL_REDIRECT=1` and `CYA_HSTS_SECONDS=300`; startup
 refuses either without the trust setting, because behind the proxy every request
 would look like plain HTTP. Check HTTPS POST/CSRF and the sign-in callback before
-increasing the HSTS duration. `manage.py check --deploy` then reports no
-`security.W004`/`W008`. Do not expose generic private files,
+increasing the HSTS duration. `manage.py check --deploy` then no longer reports
+`security.W004`/`W008`; `W005`/`W021` remain while subdomains and preload are off. Do not expose generic private files,
 configuration directories or database dumps through a catch-all file server.
 
 Rate-limit sign-in at the proxy and in the application. With nginx,
@@ -352,7 +357,9 @@ The application limit (`cya/accounts/ratelimit.py`) counts `/auth/login/` and
 Behind the proxy it keys on `X-Real-IP` only when `CYA_TRUST_PROXY_SSL_HEADER=1`,
 so the proxy must overwrite that header on every request
 (`proxy_set_header X-Real-IP $remote_addr;`). A missing or malformed value falls
-back to the proxy's own address, which every client shares. Counters live in the
+back to the connection's address, which every client shares: the proxy's
+loopback address, or an empty key over the Unix socket, where uvicorn reports
+no client address. Counters live in the
 single application process (DEP-2) and reset on restart. Pages that re-read a
 panel in the background get 401 when signed out and stop, instead of following a
 redirect to `/auth/login/` ([issue #37](https://github.com/JustApu/CheckYourAmbulance/issues/37)), so a tab left open past its
@@ -514,8 +521,9 @@ service startup and timer recovery after host reboot, SSH/host/provider firewall
 exposure (IPv4/IPv6), clock/OS patching, public ACME issuance/renewal, alerts,
 log redaction, failure/recovery handling and actual cost/capacity. A complete
 concrete host profile and the [issue #6](https://github.com/JustApu/CheckYourAmbulance/issues/6) checklist remain required
-for issue completion and production use. This PR is being handed off for
-independent security review of the current draft and its pending gates.
+for issue completion and production use. (As of 2026-11-02 the server pin,
+deployment settings and application rate limits listed here are built; see
+[Readiness and scope](#readiness-and-scope).)
 Backup/restore timing and projection rebuild remain [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) work. This
 diagnostic pass changes no approved SPEC requirement and installs no overlay
 or new dependency in the repository.
@@ -534,4 +542,6 @@ turning this draft into an executable host profile:
 - [ACME challenge types](https://letsencrypt.org/docs/challenge-types/).
 - [nginx request limiting](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html)
   and [WebSocket proxying](https://nginx.org/en/docs/http/websocket.html).
+- uvicorn 0.54.0: the installed `uvicorn --help` and package source, checked
+  2026-11-02, for every launch flag and the Unix-socket mode.
 - [systemd environment and execution](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html).
