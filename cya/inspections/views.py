@@ -8,7 +8,7 @@ not join answers exactly like one that does not exist.
 """
 
 from django.db import DatabaseError
-from django.http import Http404, HttpResponseRedirect
+from django.http import Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
@@ -37,16 +37,33 @@ STATUS_LABELS = {
 STATE_LABELS = {"OPEN": "Open", "INCOMPLETE": "Incomplete", "CLOSED": "Closed"}
 
 
-def _authorized(request, section_key="inspection"):
-    """(user, None) for a permitted user, else (None, the redirect or refusal to return)."""
+def _authorized(request, section_key="inspection", background=False):
+    """(user, None) for a permitted user, else (None, the redirect or refusal to return).
+
+    background marks a route a page script re-reads with fetch (issue 37). Without a session it
+    answers 401 instead of redirecting: fetch would follow a redirect to /auth/login/, so an open
+    tab whose session expired would start sign-in by itself and count against the sign-in rate
+    limit (issue 26). Full-page navigations keep the redirect; a role refusal stays 403.
+    """
     user = request.cya_user
     if user is None:
+        if background:
+            return None, signed_out()
         return None, HttpResponseRedirect("/auth/login/")
     section = navigation.section_by_key(section_key)
     roles = navigation.roles_for(user)
     if not section.roles & roles:
         return None, deny_section(request, user, roles, "VIEW_" + section.key.upper())
     return user, None
+
+
+def signed_out():
+    """The 401 a background re-read gets without a session, in the API's refusal shape."""
+    response = JsonResponse(
+        {"status": "REJECTED", "code": "AUTHENTICATION_REQUIRED", "field_errors": []}, status=401
+    )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def _vehicle(user, vehicle_id):

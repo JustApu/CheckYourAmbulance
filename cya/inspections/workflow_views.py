@@ -95,7 +95,10 @@ def page(view):
             in ("deficiencies", "deficiency", "verification", "verification_items", "queue")
             else "inspection"
         )
-        user, refusal = _authorized(request, section)
+        # verification_items is re-read by the checklist script (issue 37).
+        user, refusal = _authorized(
+            request, section, background=view.__name__ == "verification_items"
+        )
         if refusal is not None:
             return refusal
         try:

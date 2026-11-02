@@ -319,10 +319,10 @@ Behind the proxy it keys on `X-Real-IP` only when `CYA_TRUST_PROXY_SSL_HEADER=1`
 so the proxy must overwrite that header on every request
 (`proxy_set_header X-Real-IP $remote_addr;`). A missing or malformed value falls
 back to the proxy's own address, which every client shares. Counters live in the
-single application process (DEP-2) and reset on restart. Known gap until
-[issue #37](https://github.com/JustApu/CheckYourAmbulance/issues/37): pages that re-read a panel in the background follow
-the signed-out redirect to `/auth/login/`, so a tab left open past its session
-counts against the limit; check this on the rehearsal host. Do not trust arbitrary
+single application process (DEP-2) and reset on restart. Pages that re-read a
+panel in the background get 401 when signed out and stop, instead of following a
+redirect to `/auth/login/` ([issue #37](https://github.com/JustApu/CheckYourAmbulance/issues/37)), so a tab left open past its
+session does not count against the limit; check this on the rehearsal host. Do not trust arbitrary
 client IP headers for limiting. Protect exports at both layers before adding their
 routes; do not invent a current `/export/` endpoint.
 

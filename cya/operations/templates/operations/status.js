@@ -81,16 +81,31 @@
   }
   // Forcing a refresh (after a save, or from the update button) skips only the focus check: it
   // never replaces an unsettled form. The re-read is deferred until the last such form settles.
-  var refreshing = false, again = false, deferred = false, timer = null;
+  var refreshing = false, again = false, deferred = false, timer = null, signedOut = false;
+  // Signed out (a 401 from the panel, issue 37): stop re-reading and reconnecting and say so. The
+  // page never requests /auth/login/ by itself. Forms keep their own Retry for unconfirmed saves.
+  function signOut() {
+    if (signedOut) { return; }
+    signedOut = true; clearTimeout(timer);
+    if (socket) { socket.retired = true; if (socket.close) { socket.close(); } }
+    banner.textContent = "Signed out. ";
+    var link = document.createElement("a");
+    link.href = "/auth/login/"; link.textContent = "Sign in again";
+    banner.appendChild(link);
+    banner.hidden = false; stale.hidden = true; update.hidden = true;
+  }
   function refresh(force) {
+    if (signedOut) { return; }
     if (refreshing) { again = true; return; }
     if (unsettled()) { update.hidden = false; deferred = true; return; }
     if (!force && live.contains && live.contains(document.activeElement)) { update.hidden = false; return; }
     deferred = false;
     refreshing = true;
     fetch(config.panel_url, {credentials: "same-origin", cache: "no-store"}).then(function (r) {
+      if (r.status === 401) { signOut(); return null; }
       if (!r.ok) { throw new Error("panel"); } return r.text();
     }).then(function (html) {
+      if (html === null) { return; }
       // Re-check now: a form may have been submitted, or focused, while this read was in flight.
       if (unsettled()) { update.hidden = false; deferred = true; return; }
       if (!force && live.contains && live.contains(document.activeElement)) { update.hidden = false; return; }
@@ -99,10 +114,13 @@
       stale.hidden = false;   // what is on screen may be out of date
     }).then(function () {
       refreshing = false;
-      if (again) { again = false; schedule(0); }
+      if (again && !signedOut) { again = false; schedule(0); }
     });
   }
-  function schedule(ms) { clearTimeout(timer); timer = setTimeout(function () { refresh(false); }, ms); }
+  function schedule(ms) {
+    if (signedOut) { return; }
+    clearTimeout(timer); timer = setTimeout(function () { refresh(false); }, ms);
+  }
   function settled() { if (deferred) { refresh(true); } }
 
   function bind(root) {
@@ -143,11 +161,13 @@
 
   var socket = null, backoff = 1000;
   function connect() {
+    if (signedOut) { return; }
     var scheme = location.protocol === "https:" ? "wss://" : "ws://";
     socket = new WebSocket(scheme + location.host + config.socket);
     socket.onopen = function () { backoff = 1000; banner.hidden = true; schedule(0); };  // reconcile after a gap
     socket.onmessage = function () { schedule(250); };  // a hint only says to re-read
     socket.onclose = function (event) {
+      if (signedOut) { return; }
       banner.hidden = false;
       if (event.code === 4401 || event.code === 4403) { return; }   // sign-in ended: do not promise more
       setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000);

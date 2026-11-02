@@ -27,14 +27,17 @@ from cya.shell.navigation import roles_for
 logger = logging.getLogger(__name__)
 
 
-def _guarded(view):
-    """Sign-in and section check, then the view; a database failure is an honest 503 page."""
+def _guarded(view, background=False):
+    """Sign-in and section check, then the view; a database failure is an honest 503 page.
+
+    background: the route is re-read by the page script, so no session is 401 (issue 37).
+    """
 
     @never_cache
     @require_GET
     @wraps(view)
     def wrapped(request, *args, **kwargs):
-        user, refusal = _authorized(request, "status")
+        user, refusal = _authorized(request, "status", background=background)
         if refusal is not None:
             return refusal
         try:
@@ -155,9 +158,11 @@ def vehicle(request, user, vehicle_id):
     return render(request, "operations/vehicle.html", context)
 
 
-@_guarded
-def panel(request, user, vehicle_id):
+def _panel(request, user, vehicle_id):
     """The live part of the vehicle page alone, for an already-open page to re-read."""
     return render(
         request, "operations/panel.html", _panel_context(user, _vehicle(user, vehicle_id))
     )
+
+
+panel = _guarded(_panel, background=True)

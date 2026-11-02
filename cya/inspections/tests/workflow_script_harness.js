@@ -356,5 +356,21 @@ function generic(kind) {
     response(run.posts()[0], 403, {status: "REJECTED", code: "FORBIDDEN"}); await tick();
     assert(run.form.querySelector(".workflow-result").textContent.includes("not permitted"));
   }
+  {
+    // Issue 37: a 401 from the verification re-read means signed out. Stop reloading, keep the
+    // Retry note, and never request /auth/login/ from the page.
+    const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency", session_id: undefined});
+    run.context.testUI.reload();
+    const read = run.requests.at(-1);
+    response(read, 401, {status: "REJECTED", code: "AUTHENTICATION_REQUIRED"}); await tick(); await tick();
+    assert(run.get("live-detail").textContent.includes("signed out"));
+    assert.equal(run.get("live-banner").hidden, false);
+    const count = run.requests.length;
+    run.context.testUI.reload();
+    run.sockets[0].onmessage({data: "{}"});
+    run.timers.forEach(fn => fn());
+    assert.equal(run.requests.length, count);
+    assert.equal(run.requests.some(r => String(r.url).startsWith("/auth/")), false);
+  }
   console.log("Offline workflow script regressions passed: outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and the supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
