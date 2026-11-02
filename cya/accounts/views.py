@@ -19,6 +19,7 @@ from django.views.decorators.http import require_GET, require_POST
 from cya.accounts import signin
 from cya.accounts.middleware import SESSION_AUTH_TIME_KEY, SESSION_USER_KEY
 from cya.accounts.oidc import authorization_url, google_config
+from cya.accounts.ratelimit import limited
 from cya.integrations import (
     IdentityProviderUnavailable,
     IdentityRejected,
@@ -80,6 +81,7 @@ def _log_failure(what, exc, correlation_id):
 
 
 @never_cache
+@limited("login")
 @require_GET
 def sign_in(request):
     try:
@@ -121,6 +123,7 @@ def _read_transaction(request):
 
 
 @never_cache
+@limited("callback")
 @require_GET
 def callback(request):
     correlation_id = str(uuid.uuid4())

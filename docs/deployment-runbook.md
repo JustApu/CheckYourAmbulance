@@ -17,7 +17,7 @@ deployment gaps remain in the current application:
 |---|---|
 | Production application server | `cya.asgi:application` exists, but no production ASGI server is pinned in `requirements/base.txt`. Select, pin and review one before supplying a service launch command. Do not use Django `runserver` publicly. Keep one application process (DEP-2). |
 | HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Still to verify on the rehearsal host. |
-| Application rate limits | No authentication limiter is installed and export routes do not exist. Proxy limiting alone does not satisfy DEP-10's application limit. Implement through separately scoped application work; reconcile exact routes before verification. |
+| Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Still to verify on the rehearsal host. |
 | Rehearsal | The Docker diagnostic subset below has run. The full host/service checklist remains pending; diagnostic overlays are not installed production configuration. |
 
 This issue's runbook scope does not include changing application files. The
@@ -122,6 +122,8 @@ does not claim a root-only source file prevents exposure by the running process.
 | `CYA_LIVE_AUTH_RECHECK_SECONDS` | WebSocket authorization recheck interval; default 60 seconds, allowed 10–300 |
 | `CYA_TRUST_PROXY_SSL_HEADER` | `1`, only with the proxy rule below (the proxy overwrites `X-Forwarded-Proto` and the app is reachable only through it); default `0` |
 | `CYA_SSL_REDIRECT` | `1`; needs `CYA_TRUST_PROXY_SSL_HEADER=1` (startup refuses it otherwise); default `0` |
+| `CYA_SIGNIN_RATE_LIMIT` | Sign-in requests allowed per route and client address per window; default 30, allowed 1–1000. Size it for a whole crew signing in from one station address |
+| `CYA_SIGNIN_RATE_WINDOW_SECONDS` | The limit's window; default 60 seconds, allowed 1–3600 |
 | `CYA_HSTS_SECONDS` | Start at `300`, raise only after HTTPS sign-in, callback and form posts are checked; allowed 0–63072000, default 0 (off); needs `CYA_TRUST_PROXY_SSL_HEADER=1`. Subdomains and preload stay off unless the owner approves them |
 
 Register the callback and verify managed-account behavior using the
@@ -310,8 +312,19 @@ Rate-limit sign-in at the proxy and in the application. With nginx,
 it to locations; use a bounded burst and intentional rejection status. Configure
 all `/auth/` entry points, especially login and callback, without blocking
 legitimate shared-IP crew sign-ins. Tune and record rates on the rehearsal host.
-Do not trust arbitrary client IP headers for limiting. Protect exports at both
-layers before adding their routes; do not invent a current `/export/` endpoint.
+The application limit (`cya/accounts/ratelimit.py`) counts `/auth/login/` and
+`/auth/callback/` separately per client address and answers 429 with
+`Retry-After` before any sign-in cookie, session, audit record or call to Google.
+Behind the proxy it keys on `X-Real-IP` only when `CYA_TRUST_PROXY_SSL_HEADER=1`,
+so the proxy must overwrite that header on every request
+(`proxy_set_header X-Real-IP $remote_addr;`). A missing or malformed value falls
+back to the proxy's own address, which every client shares. Counters live in the
+single application process (DEP-2) and reset on restart. Known gap until
+[issue #37](https://github.com/JustApu/CheckYourAmbulance/issues/37): pages that re-read a panel in the background follow
+the signed-out redirect to `/auth/login/`, so a tab left open past its session
+counts against the limit; check this on the rehearsal host. Do not trust arbitrary
+client IP headers for limiting. Protect exports at both layers before adding their
+routes; do not invent a current `/export/` endpoint.
 
 The shell currently includes its stylesheet/script inline; there is no current
 static collection step to assume. The application also exposes the authenticated

@@ -87,9 +87,17 @@ _ACTIVE_GOOGLE = None
 
 
 def activate_stub_google():
-    """Create a fresh StubGoogle and make it the configured provider."""
+    """Create a fresh StubGoogle and make it the configured provider.
+
+    Every test that signs in activates one, so this also clears the process-wide sign-in rate
+    limiter (cya.accounts.ratelimit): each test starts from zero instead of inheriting counts
+    from earlier tests on the same address, in every parallel worker. The limits are unchanged.
+    """
+    from cya.accounts.ratelimit import LIMITER
+
     global _ACTIVE_GOOGLE
     _ACTIVE_GOOGLE = StubGoogle()
+    LIMITER.reset()
     return _ACTIVE_GOOGLE
 
 
