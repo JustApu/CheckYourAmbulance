@@ -1,8 +1,14 @@
 #!/bin/bash
 # Run one manage.py command for Check Your Ambulance (issue #6 host profile).
 # Usage: cya-manage owner|runtime|dba <manage.py arguments...>
+#
 # systemd loads the root-only environment file and runs the command as the unprivileged
-# service identity from the read-only current release; secrets never reach argv or a shell.
+# service identity (root for dba) from the read-only current release; secrets never reach
+# argv or a shell. The command always runs as a detached transient unit: this script only
+# follows its journal and then reports its exit status. A dropped SSH session therefore
+# stops the follower, never the command, and never leaves a client attached to the unit's
+# input or output (in the rehearsal, an interrupted `systemd-run --wait --pipe` stalled new
+# logins until a reboot). There is no interactive input; for a SQL shell use the DBA channel.
 set -euo pipefail
 case "${1:-}" in
   owner) env_file=/etc/check-your-ambulance/owner.env ;;
@@ -13,7 +19,38 @@ case "${1:-}" in
 esac
 shift
 run_as=${run_as:-cya}
-exec systemd-run --quiet --wait --pipe --collect \
+unit="cya-manage-$(date +%Y%m%d%H%M%S)-$$"
+
+systemd-run --quiet --no-block --unit="$unit" \
+  -p Type=oneshot -p RemainAfterExit=yes -p TimeoutStartSec=900 \
   --uid="$run_as" --working-directory=/srv/cya/current \
-  -p EnvironmentFile="$env_file" -p ProtectSystem=strict -p PrivateTmp=yes -p RuntimeMaxSec=900 \
+  -p EnvironmentFile="$env_file" -p ProtectSystem=strict -p PrivateTmp=yes \
   /srv/cya/current/local/venv/bin/python manage.py "$@"
+
+trap 'echo "Interrupted: the command continues as $unit; follow it with: journalctl -u $unit -f" >&2; exit 130' INT TERM HUP
+journalctl --quiet --follow --lines=all --output=cat --unit="$unit" &
+follower=$!
+state=activating
+while [ "$state" = activating ] || [ "$state" = inactive ]; do
+  sleep 1
+  state=$(systemctl show --property=ActiveState --value "$unit")
+  # inactive before the start job runs; give up only if it never starts
+  if [ "$state" = inactive ] && [ "$(systemctl show --property=ExecMainStartTimestampMonotonic --value "$unit")" != 0 ]; then
+    break
+  fi
+done
+sleep 1  # let the follower print the last lines
+kill "$follower" 2>/dev/null || true
+wait "$follower" 2>/dev/null || true
+trap - INT TERM HUP
+
+status=$(systemctl show --property=ExecMainStatus --value "$unit")
+result=$(systemctl show --property=Result --value "$unit")
+systemctl stop "$unit" 2>/dev/null || true
+systemctl reset-failed "$unit" 2>/dev/null || true
+if [ "$result" != success ]; then
+  echo "cya-manage: $unit ended with result=$result status=${status:-unknown}" >&2
+  [ "${status:-0}" != 0 ] && exit "$status"
+  exit 1
+fi
+exit "${status:-0}"

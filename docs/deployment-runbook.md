@@ -464,17 +464,17 @@ package comes from Rocky's own repositories except Certbot (EPEL).
 
 6. **Management commands.** Install `cya-manage` as `/usr/local/sbin/cya-manage` (root,
    `0750`) and call it by full path (Rocky's sudo `secure_path` omits `/usr/local/sbin`).
-   It runs `manage.py` through `systemd-run` with the chosen environment file, as `cya`
-   (or root for `dba`), from the read-only release, with a 15-minute limit. Run long
-   commands as a detached unit and follow the journal, so a dropped SSH connection
-   cannot leave a waiting `systemd-run --pipe` behind (in the rehearsal that stalled new
-   logins until a reboot):
+   It starts `manage.py` as a detached transient oneshot unit (`systemd-run --no-block`)
+   with the chosen environment file, as `cya` (or root for `dba`), from the read-only
+   release, with a 15-minute start timeout; it then follows that unit's journal and exits
+   with the command's status. Nothing is attached to the unit's input or output, so a
+   dropped SSH session ends only the follower: in the rehearsal an earlier attached
+   `systemd-run --wait --pipe` cut off by an SSH timeout stalled new logins until a reboot,
+   while this runner, killed mid-command, let the command finish with logins unaffected.
+   There is no interactive input; use `sudo mariadb` for a SQL shell.
 
    ```sh
-   systemd-run --unit=cya-migrate --collect --uid=cya --working-directory=/srv/cya/current \
-       -p EnvironmentFile=/etc/check-your-ambulance/owner.env \
-       /srv/cya/current/local/venv/bin/python manage.py migrate --noinput
-   journalctl -u cya-migrate -f
+   /usr/local/sbin/cya-manage owner migrate --noinput
    /usr/local/sbin/cya-manage owner verify_audit_schema
    /usr/local/sbin/cya-manage dba audit_runtime_grants --user cya_app --host 127.0.0.1 --dry-run
    /usr/local/sbin/cya-manage dba audit_runtime_grants --user cya_app --host 127.0.0.1
@@ -606,8 +606,10 @@ Results:
   lacks `tar`; SELinux blocks executing the virtual environment's scripts until they are
   labelled `bin_t`; nginx needs the socket directory labelled `httpd_var_run_t` and one
   local policy rule to connect; Rocky's journal is not persistent by default; sudo's
-  `secure_path` omits `/usr/local/sbin`; a long `systemd-run --wait --pipe` cut off by an
-  SSH timeout left new logins hanging until a reboot, so long commands now run detached.
+  `secure_path` omits `/usr/local/sbin`; a `systemd-run --wait --pipe` cut off by an SSH
+  timeout left new logins hanging until a reboot, so `cya-manage` now always runs the
+  command as a detached unit and only follows its journal (re-tested by killing the
+  session mid-command: the command finished and logins were unaffected).
 - **Passed with real Google sign-in** (the owner's internal OAuth client; synthetic
   organization): sign-in redirects to Google with a `Secure`, `HttpOnly`, `SameSite=Lax`
   sign-in cookie limited to `/auth/`; the owner's session cookie is `Secure`, `HttpOnly`
