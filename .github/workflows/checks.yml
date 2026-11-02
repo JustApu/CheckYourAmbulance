@@ -90,6 +90,7 @@ jobs:
           assert should_run([]), "an unavailable changed-file list must fail closed"
           assert "Failed to query changed files from GitHub API; failing closed to both lanes." in workflow
           assert "python3 tools/ci_lanes.py --query-failed" in workflow
+          assert "--changed-files" in workflow, "the 3,000-file list limit must fail closed"
           assert "  workflow_dispatch:\n" in workflow, "manual full-check dispatch is missing"
           event_expression = "$" + "{{ github.event_name }}"
           dispatch_condition = f'if [ "{event_expression}" != "pull_request" ]; then'
@@ -121,7 +122,11 @@ jobs:
           echo "$files"
           # The classifier fails closed on an empty list, unclassified paths, CI configuration
           # and templates without focused coverage; it prints only its own constants.
-          printf '%s\n' "$files" | python3 tools/ci_lanes.py --github-output "$GITHUB_OUTPUT"
+          # The files endpoint lists at most 3,000 files; the event's total count lets the
+          # classifier treat a list that may be truncated as incomplete.
+          printf '%s\n' "$files" | python3 tools/ci_lanes.py \
+            --changed-files "${{ github.event.pull_request.changed_files }}" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Unit tests for the check tools (including the lane classifier)
         run: python3 -m unittest discover -s tools/tests -v

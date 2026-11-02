@@ -25,6 +25,9 @@ import re
 import sys
 
 FULL_LABELS = ("cya",)
+# GitHub's list-pull-request-files endpoint returns at most 3,000 files; at or above that count
+# the returned list may be a prefix that misses a server path, so routing fails closed.
+FILE_LIST_LIMIT = 3000
 
 # Server-rendered template or client-asset paths: cya/<app>/templates/** or cya/<app>/static/**.
 UI_PATH = re.compile(r"^cya/([a-z_]+)/(?:templates|static)/.+")
@@ -65,9 +68,25 @@ SERVER_PATH = re.compile(
 WORKFLOW_PATH = re.compile(r"^\.github/.+")
 
 
-def classify(paths, query_failed=False):
-    """Return the lane decision for an iterable of changed paths."""
+def classify(paths, query_failed=False, changed_files=None):
+    """Return the lane decision for an iterable of changed paths.
+
+    changed_files is the PR's total changed-file count from the event; at or above the API's
+    list limit, or when it is missing or malformed, the list may be incomplete.
+    """
     paths = [p.strip() for p in paths if p.strip()]
+    if changed_files is not None:
+        try:
+            count = int(changed_files)
+        except (TypeError, ValueError):
+            count = None
+        if count is None or count < 0 or count >= FILE_LIST_LIMIT:
+            return _decision(
+                full=True,
+                client=True,
+                reason=f"the PR's changed-file count ({changed_files!r}) may exceed the "
+                f"{FILE_LIST_LIMIT}-file list limit or is unknown; running both lanes",
+            )
     if query_failed or not paths:
         reason = "the changed-file query failed" if query_failed else "no changed files"
         return _decision(full=True, client=True, reason=f"{reason}; running both lanes")
@@ -142,12 +161,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--all", action="store_true", help="not a pull request: both lanes")
     parser.add_argument("--query-failed", action="store_true")
+    parser.add_argument("--changed-files", help="the PR's total changed-file count")
     parser.add_argument("--github-output")
     args = parser.parse_args(argv)
     if args.all:
         decision = _decision(full=True, client=True, reason="not a pull request; both lanes")
     else:
-        decision = classify([] if args.query_failed else sys.stdin, args.query_failed)
+        decision = classify(
+            [] if args.query_failed else sys.stdin, args.query_failed, args.changed_files
+        )
     print(f"Lane decision: {decision['reason']}")
     lines = output_lines(decision)
     for line in lines:

@@ -103,6 +103,17 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(lanes(), (True, "full", ("cya",), True))
         self.assertEqual(lanes("", "  "), (True, "full", ("cya",), True))
 
+    def test_a_list_that_may_be_truncated_fails_closed(self):
+        # The files endpoint returns at most 3,000 files; a UI-only prefix could hide a server
+        # path, so the event's total count decides.
+        self.assertEqual(lanes(TEMPLATE, changed_files=2999)[1], "focused")
+        for count in (3000, 3001, "3000", "", "abc", "unknown", -1):
+            with self.subTest(count=count):
+                self.assertEqual(
+                    lanes(TEMPLATE, changed_files=count), (True, "full", ("cya",), True)
+                )
+        self.assertEqual(lanes(TEMPLATE)[1], "focused")  # count omitted (local use)
+
     def test_output_never_carries_text_from_a_path(self):
         hostile = "cya/inspections/templates/$(touch x)\nrun-django=false.html"
         lines = ci_lanes.output_lines(ci_lanes.classify([hostile, "cya/x/templates/`id`.js"]))
