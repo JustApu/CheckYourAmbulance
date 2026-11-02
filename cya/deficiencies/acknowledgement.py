@@ -281,11 +281,13 @@ def acknowledgement_state(organization_id, deficiency_id, as_of=None):
     status = acknowledgement_status(current, at)
     history = []
     for index, event in enumerate(events):
-        event_status = (
-            "RENEWED"
-            if index < len(events) - 1
-            else ("ACTIVE" if event.acknowledgement_until > at else "EXPIRED")
-        )
+        if index == len(events) - 1:
+            event_status = "ACTIVE" if event.acknowledgement_until > at else "EXPIRED"
+        else:
+            # RENEWED only if the next acknowledgement came while this one was still in force;
+            # one that lapsed first stays EXPIRED, so history shows the gap (owner, 2026-11-02).
+            renewed = events[index + 1].recorded_at < event.acknowledgement_until
+            event_status = "RENEWED" if renewed else "EXPIRED"
         history.append(
             {
                 "event_id": str(event.pk),

@@ -15,7 +15,7 @@ All mutations use the existing audited [check](check-records.md) and
 | `/deficiencies/` | The 100 most recent reports, including cancelled history; active vehicle links to independent reporting. |
 | `/deficiencies/queue/` | Supervisor queue (Supervisors and Administrators): unassigned, overdue and waiting extension requests. |
 | `/deficiencies/{id}/` | Report details, deadlines and age, lifecycle history, crew and supervisor action forms, check suspensions, verification scope and informational links. |
-| `/deficiencies/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. |
+| `/deficiencies/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. A deficiency that is not Pending Verification answers 409 with its current status and a link back to it, not the 503 outage page (issue #20). |
 | `/deficiencies/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. Without a session it answers 401 (the verification screen then stops re-reading; issue #37). |
 | `/inspection/vehicles/{id}/deficiencies/new/` | Independent item, compartment or selected vehicle-systems report. |
 | `/inspection/vehicles/{id}/check-history/` | Complete chains for the 200 most recent check entries recorded in the last 14 days; own corrections, administrator invalidation and supervisor Unable completion. |
@@ -117,15 +117,21 @@ record a repair while In Progress. Closed and Reported in Error deficiencies hav
 these mutation forms. Every existing command independently rechecks roles and state; a forged
 request cannot gain permission from the page.
 
-Extension requests require a reason and proposed date. Dependency entry/revision requires an
-explanation and optionally a future follow-up instant; omitting it on revision clears it.
+Extension requests require a reason and proposed date; the form is offered only when the
+deficiency has a deadline (the server answers `NO_DEADLINE` otherwise), and an unset deadline
+reads "Not set" without a UTC suffix. Dependency entry/revision requires an
+explanation and optionally a future follow-up instant; omitting it on revision clears it. A
+follow-up that has already passed is not prefilled (the server refuses a past one with
+`INVALID_FOLLOW_UP`); the form names the passed date instead.
 Dependency entry is offered in Open/In Progress; while waiting, revision and exit are offered.
 Exit can name Open/In Progress or return to the status before waiting. Progress notes require
 nonblank text. Date controls are explicitly labelled UTC and sent as UTC instants. Follow-up
 never schedules an automatic reminder. Each lifecycle form sends the event seen at page load;
 a concurrent change or another successful form on the same page requires refreshing before a
 new decision (`DEFICIENCY_CHANGED`). The backend's refusal is shown, including empty repair
-scope, absent deadline, invalid dates, transition changes and permission denial.
+scope, absent deadline, invalid dates, transition changes and permission denial. An empty scope
+on the repair form says there are no current items left to verify and to ask a supervisor or
+administrator to close the deficiency; other forms keep the shared `EMPTY_SCOPE` text.
 
 Pending Verification shows each materialized item/physical-kit row, its required-after instant
 and Verified/Outstanding status, using the command layer's effective-Pass and scope-lineage
