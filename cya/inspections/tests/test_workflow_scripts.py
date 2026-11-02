@@ -49,3 +49,17 @@ class WorkflowScriptTests(SimpleTestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class VehicleScriptTests(SimpleTestCase):
+    @skipUnless(shutil.which("node"), "optional Node client harness is unavailable")
+    def test_offline_vehicle_page_navigation_regressions(self):
+        script = Path(__file__).with_name("vehicle_script_harness.js")
+        result = subprocess.run(
+            [shutil.which("node"), str(script)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
