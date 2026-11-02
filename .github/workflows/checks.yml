@@ -1,5 +1,7 @@
 # Repository checks (issue 19 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/19)): stack-neutral checks (Part A) and the
-# Django/MariaDB lint, migration and test job (Part B).
+# Django/MariaDB lint, migration and test job (Part B). Issue #19 (this repository) routes PRs to a
+# UI lane (client-script harnesses and focused template tests) and a server lane (the full suite);
+# tools/ci_lanes.py decides, and its offline tests are in tools/tests/test_ci_lanes.py.
 # Uses no secrets; the token is read-only and is not left in the checkout.
 name: checks
 
@@ -45,6 +47,9 @@ jobs:
       contents: read
     outputs:
       run-django: ${{ steps.filter.outputs.run-django }}
+      django-mode: ${{ steps.filter.outputs.django-mode }}
+      django-labels: ${{ steps.filter.outputs.django-labels }}
+      run-client-scripts: ${{ steps.filter.outputs.run-client-scripts }}
     env:
       GITLEAKS_VERSION: 8.30.1
       # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, from the release's checksums file.
@@ -83,7 +88,9 @@ jobs:
           assert should_run(["cya/old.py", "README.md"]), "rename from code to docs must run CI"
           assert should_run(["cya/deleted.py"]), "deletion of executable path must run CI"
           assert should_run([]), "an unavailable changed-file list must fail closed"
-          assert "Failed to query changed files from GitHub API; failing closed to run django." in workflow
+          assert "Failed to query changed files from GitHub API; failing closed to both lanes." in workflow
+          assert "python3 tools/ci_lanes.py --query-failed" in workflow
+          assert "--changed-files" in workflow, "the 3,000-file list limit must fail closed"
           assert "  workflow_dispatch:\n" in workflow, "manual full-check dispatch is missing"
           event_expression = "$" + "{{ github.event_name }}"
           dispatch_condition = f'if [ "{event_expression}" != "pull_request" ]; then'
@@ -93,53 +100,35 @@ jobs:
           print("Documentation-only path policy scenarios passed.")
           PY
 
-      - name: Check changed files
+      - name: Check changed files and choose lanes
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "Non-PR event; running all checks."
-            echo "run-django=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event; running all checks in both lanes."
+            python3 tools/ci_lanes.py --all --github-output "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Include filename and previous_filename so renamed files do not escape checks.
           if ! files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
-            echo "Failed to query changed files from GitHub API; failing closed to run django."
-            echo "run-django=true" >> "$GITHUB_OUTPUT"
+            echo "Failed to query changed files from GitHub API; failing closed to both lanes."
+            python3 tools/ci_lanes.py --query-failed --github-output "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "Changed and previous files in PR:"
           echo "$files"
+          # The classifier fails closed on an empty list, unclassified paths, CI configuration
+          # and templates without focused coverage; it prints only its own constants.
+          # The files endpoint lists at most 3,000 files; the event's total count lets the
+          # classifier treat a list that may be truncated as incomplete.
+          printf '%s\n' "$files" | python3 tools/ci_lanes.py \
+            --changed-files "${{ github.event.pull_request.changed_files }}" \
+            --github-output "$GITHUB_OUTPUT"
 
-          if [ -z "$files" ]; then
-            echo "No files returned; running django."
-            echo "run-django=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Files read by tests must never skip checks:
-          # docs/data-model-contracts.md is parsed by tests/test_contract_manifest.py.
-          if echo "$files" | grep -qx "docs/data-model-contracts.md"; then
-            echo "docs/data-model-contracts.md modified (read by contract manifest test); running django."
-            echo "run-django=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Workflow definitions are validated by Actions on the PR event; they do not require Django/MariaDB.
-          # This classifier decides only whether the Django job is needed. The top-level PR path filter decides whether any workflow starts.
-          # Stack-neutral checks still run for workflow files and other non-Markdown paths outside the Django allowlist.
-          if echo "$files" | grep -qvE '^(docs/|\.github/workflows/[^/]+\.ya?ml$|\.gitignore$|\.gitattributes$|[^/]+\.md$)'; then
-            echo "Non-documentation files modified; will run django job."
-            echo "run-django=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No Django-app files modified; skipping Django while retaining stack-neutral checks."
-            echo "run-django=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Unit tests for the check tools
+      - name: Unit tests for the check tools (including the lane classifier)
         run: python3 -m unittest discover -s tools/tests -v
 
       - name: Markdown link check (relative links and anchors; no network)
@@ -161,6 +150,34 @@ jobs:
 
       - name: Secret scan of git history
         run: gitleaks git --redact --no-banner --timeout 300 .
+
+  client-scripts:
+    needs: [stack-neutral]
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'synchronize')) && needs.stack-neutral.outputs.run-client-scripts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      # The harnesses run the real page scripts against a stub DOM and fetch; no network.
+      # The Django wrappers skip them in the Python container, which has no Node.
+      - name: Offline client-script harnesses
+        run: |
+          set -euo pipefail
+          node --version
+          harnesses=$(git ls-files 'cya/*/tests/*_harness.js')
+          test -n "$harnesses"
+          for harness in $harnesses; do
+            echo "::group::$harness"
+            node "$harness"
+            echo "::endgroup::"
+          done
 
   django:
     needs: [stack-neutral]
@@ -241,12 +258,24 @@ jobs:
       - name: Apply migrations
         run: local/venv/bin/python manage.py migrate --noinput
 
-      - name: Offline tests against MariaDB 10.11
+      # Full mode runs the whole suite (label "cya"); focused mode runs only the labels covering
+      # the changed templates. The labels are the classifier's own constants.
+      - name: Offline tests against MariaDB 10.11 (${{ needs.stack-neutral.outputs.django-mode }})
+        env:
+          DJANGO_LABELS: ${{ needs.stack-neutral.outputs.django-labels }}
         run: |
           test "${CYA_DB_SECURITY_TESTS:-}" = 1
-          local/venv/bin/python manage.py test cya --noinput -v 2 --parallel 2
+          test -n "$DJANGO_LABELS"
+          # Word splitting of the label list is intended.
+          local/venv/bin/python manage.py test $DJANGO_LABELS --noinput -v 2 --parallel 2
 
       - name: Audit helper and transaction tests
+        if: needs.stack-neutral.outputs.django-mode == 'full'
         env:
           DJANGO_SETTINGS_MODULE: cya.settings
         run: local/venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
+
+      # Formerly the separate authorization-policy workflow; the server lane runs it once.
+      - name: Offline authorization policy tests
+        if: needs.stack-neutral.outputs.django-mode == 'full'
+        run: python3 -m unittest discover -s tests/authorization -v

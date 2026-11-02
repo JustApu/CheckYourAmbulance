@@ -4,7 +4,7 @@ Instructions for any coding agent or developer working in this repository (Claud
 
 ## Project in one paragraph
 
-Check Your Ambulance is an early implementation of a responsive web application for EMS organizations to manage ambulance and equipment inspections, known deficiencies, supply inventory, maintenance, and compliance. The core invariant is that individually attributed **item-level checks**, not whole-crew or whole-vehicle session completion, satisfy inspection requirements. Multiple crew members can check concurrently with auto-save and live shared status. The technology stack is approved (Python with Django, and MariaDB; SPEC §17.5), and a Django project provides Google Workspace identity, server authorization and durable audit foundations. At review handoff, PRs with any non-Markdown path run applicable CI and policy checks; recognized Markdown-only PRs skip remote workflows and use the local documentation verification and handoff evidence in [review procedures](docs/review.md). The Django/MariaDB suite runs for application, test, migration and dependency changes; the contract-manifest test that reads `docs/data-model-contracts.md` runs locally when that document changes. Draft PRs skip CI. Read [README.md](README.md) and the authoritative [SPEC.md](SPEC.md) for current project context; [REQUIREMENTS.md](REQUIREMENTS.md), [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md), and [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) are the historical discovery record.
+Check Your Ambulance is an early implementation of a responsive web application for EMS organizations to manage ambulance and equipment inspections, known deficiencies, supply inventory, maintenance, and compliance. The core invariant is that individually attributed **item-level checks**, not whole-crew or whole-vehicle session completion, satisfy inspection requirements. Multiple crew members can check concurrently with auto-save and live shared status. The technology stack is approved (Python with Django, and MariaDB; SPEC §17.5), and a Django project provides Google Workspace identity, server authorization and durable audit foundations. At review handoff, PRs with any non-Markdown path run applicable CI and policy checks; recognized Markdown-only PRs skip remote workflows and use the local documentation verification and handoff evidence in [review procedures](docs/review.md). The workflow's changed-file classifier (`tools/ci_lanes.py`) routes each PR: the server lane runs the full Django/MariaDB suite for application, test, migration, dependency and CI changes; the UI lane runs the client-script harnesses under Node and only the focused template tests for template and client-asset changes; an unclassified path runs both; the contract-manifest test that reads `docs/data-model-contracts.md` runs locally when that document changes. Draft PRs skip CI. Read [README.md](README.md) and the authoritative [SPEC.md](SPEC.md) for current project context; [REQUIREMENTS.md](REQUIREMENTS.md), [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md), and [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) are the historical discovery record.
 
 ## How to work
 
@@ -38,10 +38,10 @@ For committed content, obtain the ID from the repository root with `git rev-pars
 | Repository document | Content blob ID | Authority |
 |---|---|---|
 | [/docs/coordination.md](docs/coordination.md) | `98cd3e6510cd702208b58889ec2e04fc31033d95` | Normative |
-| [/docs/review.md](docs/review.md) | `2c049a7ad4a96dc4f10da7c72c6ec222203ac16f` | Normative |
+| [/docs/review.md](docs/review.md) | `4a0964ec9c600b5730e8b752ed97cc63f3ad8c98` | Normative |
 | [/docs/engineering-standards.md](docs/engineering-standards.md) | `4743f0d15876e48493ac093fd7ce01d051f05748` | Normative |
 | [/docs/model-efficiency.md](docs/model-efficiency.md) | `9abf40f5511a0c4996bfd78c5ca0c11f9900e476` | Non-normative |
-| [/CONTRIBUTING.md](CONTRIBUTING.md) | `f3849affb7ceb466f54a46ecdf45dfb021fcfcc8` | Non-normative |
+| [/CONTRIBUTING.md](CONTRIBUTING.md) | `1136140d385f5044f23ac5613d15b95370a86b64` | Non-normative |
 | [/docs/deployment-runbook.md](docs/deployment-runbook.md) | `98b7c3c5a897cb94643b1766fdd86efdef09adcf` | Non-normative |
 
 ## Model and reasoning efficiency

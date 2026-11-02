@@ -235,11 +235,10 @@ not a new application dependency or build step. No network or external services 
 
 [issue #141](https://github.com/JustApu/CheckYourAmbulance-archive/issues/141)'s CI assessment confirmed that the Django wrapper was skipped in the pinned Python
 container during [PR #165's handoff run](https://github.com/JustApu/CheckYourAmbulance-archive/actions/runs/40617552539)
-because Node was unavailable. The direct command above passed locally with Node 22.23.4.
-The smallest proposed CI follow-up is to provision a pinned Node runtime in the existing
-stack-neutral job and run that command as a required, non-skipping step. It needs no browser,
-npm packages or application build. That separately scoped workflow proposal is not implemented
-by this housekeeping batch; the optional Django-wrapper skip remains unchanged.
+because Node was unavailable. Since [issue #19](https://github.com/JustApu/CheckYourAmbulance/issues/19), the `checks`
+workflow's `client-scripts` job runs every `*_harness.js` directly under a pinned Node 22, without
+a browser, npm packages or a build, whenever a PR changes a template, client asset or harness
+(and on pushes to `main`); the Django wrapper still skips it in the Python container.
 
 Not browser-verified: a real DOM/browser rendering or input enforcement, a real server with
 WebSocket reconnect, devices, screen-reader/contrast tooling, and glove/low-light use. The
