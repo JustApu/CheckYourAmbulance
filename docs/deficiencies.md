@@ -768,7 +768,9 @@ maximum, optionally as of an instant.
 
 GET /api/v1/deficiencies/{id}/escalation-acknowledgement returns the current acknowledgement,
 history and the maximum in force now or at ?as_of=<instant>. It derives NONE, ACTIVE or EXPIRED from
-the recorded expiry and time; a later acknowledgement marks earlier history entries RENEWED.
+the recorded expiry and time. In history, an earlier entry reads RENEWED only if the next
+acknowledgement was recorded before that entry's expiry; one that had already lapsed reads
+EXPIRED, so a gap without suppression stays visible (owner decision 2026-11-02).
 Expiry is automatic and requires no write or job. The last event id is global to the deficiency so
 subsequent commands can use it as expected_event_id; the bounded reader refuses more than 5,000
 acknowledgement events rather than truncating history. Both GET routes are readable by any
