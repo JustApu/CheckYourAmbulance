@@ -236,3 +236,58 @@ def m3_live_delivery(context):
 @STEPS.register("m3_idle_and_history")
 def m3_idle_and_history(context):
     context["m3"].idle_and_history()
+
+
+@STEPS.register("m4_resolution_setup")
+def m4_resolution_setup(context):
+    """Install the network guard and a thread-safe clock, then build the M4 agency."""
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from cya.testing.fixtures import load_fixture
+    from cya.testing.inspections import InspectionClock
+    from cya.testing.network import NetworkGuard
+    from cya.testing.resolution import ResolutionScenario
+
+    fixture = load_fixture("resolution-integration.json")
+    if fixture.get("non_authoritative") is not True:
+        raise ScenarioError("M4 fixture must be non-authoritative")
+    guard = NetworkGuard()
+    guard.install()
+    context["cleanups"].append(guard.uninstall)
+    clock = InspectionClock(datetime.fromisoformat(fixture["start"]))
+    patcher = patch("django.utils.timezone.now", side_effect=clock)
+    patcher.start()
+    context["cleanups"].append(patcher.stop)
+    context["m4"] = scenario = ResolutionScenario(clock, fixture)
+    scenario.setup()
+
+
+@STEPS.register("m4_lifecycle")
+def m4_lifecycle(context):
+    context["m4"].lifecycle()
+
+
+@STEPS.register("m4_verification")
+def m4_verification(context):
+    context["m4"].verification()
+
+
+@STEPS.register("m4_reopenings")
+def m4_reopenings(context):
+    context["m4"].reopenings()
+
+
+@STEPS.register("m4_suspensions_and_status")
+def m4_suspensions_and_status(context):
+    context["m4"].suspensions_and_status()
+
+
+@STEPS.register("m4_dashboard_and_notifications")
+def m4_dashboard_and_notifications(context):
+    context["m4"].dashboard_and_notifications()
+
+
+@STEPS.register("m4_history")
+def m4_history(context):
+    context["m4"].history()
