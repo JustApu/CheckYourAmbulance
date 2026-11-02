@@ -7,14 +7,16 @@ from datetime import timedelta
 from pathlib import Path
 from unittest import mock, skipUnless
 
+from django.db import connection
 from django.test import SimpleTestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from cya.attention import readiness
 from cya.attention.tests.support import AttentionCase
 from cya.checks.commands import correct_check, invalidate_chain
-from cya.deficiencies import acknowledgement
-from cya.deficiencies.commands import assign_deficiency, set_deadline
+from cya.deficiencies import acknowledgement, service
+from cya.deficiencies.commands import assign_deficiency, regrade_severity, set_deadline
 from cya.deficiencies.dependency import enter_dependency
 from cya.deficiencies.models import DeficiencyEvent
 from cya.deficiencies.suspension import suspend_checks
@@ -205,6 +207,97 @@ class DeficiencyFactTests(ReadinessCase):
         # Once the acknowledgement expires it is no longer shown as active.
         self.clock.set(self.clock.now + timedelta(days=2))
         self.assertIsNone(self.mine().deficiencies[0]["acknowledged_until"])
+
+
+class FanOutTests(ReadinessCase):
+    """PR 34 review: the deficiency list is bounded in the database and facts are read in bulk."""
+
+    def queries(self):
+        with CaptureQueriesContext(connection) as captured:
+            self.picture()
+        return captured.captured_queries
+
+    def test_the_deficiency_list_query_carries_the_limit(self):
+        for item in (self.suction, self.masks, self.siren):
+            self.failed(item, **({"quantity": 1} if item == self.masks else {}))
+        with mock.patch.object(readiness, "DEFICIENCY_LIMIT", 1):
+            sql = [
+                q["sql"]
+                for q in self.queries()
+                if "`deficiency`" in q["sql"] and "status_then" in q["sql"]
+            ]
+            vehicle = self.mine()
+        self.assertTrue(sql)
+        self.assertTrue(all("LIMIT 2" in q for q in sql), sql)
+        self.assertEqual((len(vehicle.deficiencies), vehicle.deficiencies_truncated), (1, True))
+
+    def test_queries_do_not_grow_with_the_number_of_deficiencies(self):
+        self.failed(self.suction)
+        one = len(self.queries())
+        self.failed(self.masks, quantity=1)
+        self.failed(self.siren)
+        self.assertEqual(len(self.mine().deficiencies), 3)
+        self.assertEqual(len(self.queries()), one)
+
+    def test_bulk_facts_match_the_per_deficiency_readers(self):
+        pk = self.failed(self.suction).body["deficiency_ids"][0]
+        set_deadline(
+            deficiency_id=pk,
+            deadline=self.clock.now + timedelta(hours=1),
+            expected_event_id=self.latest(pk),
+            **self.context(self.supervisor),
+        )
+        enter_dependency(
+            deficiency_id=pk,
+            explanation="Synthetic vendor.",
+            follow_up_at=self.clock.now + timedelta(days=2),
+            expected_event_id=self.latest(pk),
+            **self.context(self.supervisor),
+        )
+        acknowledgement.set_acknowledgement_maximum(maximum_days=3, **self.context(self.admin))
+        acknowledgement.acknowledge_escalation(
+            deficiency_id=pk,
+            explanation="Synthetic review.",
+            action_plan="Synthetic plan.",
+            period_days=1,
+            expected_event_id=self.latest(pk),
+            **self.context(self.supervisor),
+        )
+        regrade_severity(
+            deficiency_id=pk,
+            severity="LOW",
+            explanation="Synthetic re-grade.",
+            expected_event_id=self.latest(pk),
+            **self.context(self.supervisor),
+        )
+        self.clock.set(self.clock.now + timedelta(hours=2))
+        org, at = str(self.org.pk), self.clock.now
+        row = self.mine().deficiencies[0]
+        deadline = service.extension_state(org, pk, as_of=at)
+        acknowledged = acknowledgement.acknowledgement_state(org, pk, as_of=at)["acknowledgement"]
+        self.assertEqual(
+            (
+                row["governing_deadline"],
+                row["overdue"],
+                row["age_days"],
+                row["long_running"],
+                row["extension_count"],
+                row["follow_up_at"],
+                row["acknowledged_until"],
+                row["severity"]["code"],
+            ),
+            (
+                deadline["governing_deadline"],
+                deadline["overdue"],
+                deadline["age_seconds"] // 86400,
+                deadline["long_running"],
+                deadline["extension_count"],
+                service.dependency_state(org, pk, as_of=at)["dependency"]["follow_up_at"],
+                acknowledged["acknowledgement_until"],
+                service.severity_history(org, pk)["severity"]["code"],
+            ),
+        )
+        self.assertEqual(row["severity"]["code"], "LOW")
 
 
 class BoundsAndHistoryTests(ReadinessCase):

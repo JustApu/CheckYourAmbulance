@@ -918,20 +918,20 @@ def highlight_of(rule, age_seconds, extension_count):
         ) from None
 
 
+DEADLINE_EVENT_TYPES = (
+    "REPORTED",
+    "DEADLINE_SET",
+    "VERIFICATION_ADDED",
+    "EXTENSION_REQUESTED",
+    "EXTENSION_DECIDED",
+)
+DEPENDENCY_EVENT_TYPES = ("DEPENDENCY_ENTERED", "DEPENDENCY_REVISED", "DEPENDENCY_ENDED")
+
+
 def deadline_events(organization_id, deficiency_id, as_of=None):
     """The newest event and the deadline-bearing and extension events up to as_of, oldest first."""
     return _events(
-        organization_id,
-        deficiency_id,
-        as_of,
-        MAX_DEADLINE_EVENTS,
-        types=(
-            "REPORTED",
-            "DEADLINE_SET",
-            "VERIFICATION_ADDED",
-            "EXTENSION_REQUESTED",
-            "EXTENSION_DECIDED",
-        ),
+        organization_id, deficiency_id, as_of, MAX_DEADLINE_EVENTS, types=DEADLINE_EVENT_TYPES
     )
 
 
@@ -1012,23 +1012,12 @@ def _events(organization_id, deficiency_id, as_of, cap, types=None):
     return newest, rows
 
 
-def dependency_state(organization_id, deficiency_id, as_of=None):
-    """The current Awaiting External Dependency record and its history, replayed (SPEC 8.5).
+def replay_dependency(events):
+    """(the dependency record after these events, their history), oldest first (SPEC 8.5).
 
-    The record is the entering event as revised by the later DEPENDENCY_REVISED events, and exists
-    only while the deficiency awaits: a DEPENDENCY_ENDED event clears it, as does any later event
-    that leaves the status (the final status decides), and every earlier record
-    stays in the history. The projection's status is a cache of the status this returns. as_of (an
-    aware instant) answers for that moment. Bounded: past the cap the answer is refused, never
-    truncated. last_event_id is the event a lifecycle command must name as expected.
+    events are this deficiency's DEPENDENCY_* events. The record only applies while the
+    deficiency's newest status is Awaiting External Dependency; the caller checks that.
     """
-    newest, events = _events(
-        organization_id,
-        deficiency_id,
-        as_of,
-        MAX_DEPENDENCY_EVENTS,
-        types=("DEPENDENCY_ENTERED", "DEPENDENCY_REVISED", "DEPENDENCY_ENDED"),
-    )
     record = None
     history = []
     for event in events:
@@ -1067,6 +1056,27 @@ def dependency_state(organization_id, deficiency_id, as_of=None):
                 "follow_up_at": event.follow_up_at,
             }
         )
+    return record, history
+
+
+def dependency_state(organization_id, deficiency_id, as_of=None):
+    """The current Awaiting External Dependency record and its history, replayed (SPEC 8.5).
+
+    The record is the entering event as revised by the later DEPENDENCY_REVISED events, and exists
+    only while the deficiency awaits: a DEPENDENCY_ENDED event clears it, as does any later event
+    that leaves the status (the final status decides), and every earlier record
+    stays in the history. The projection's status is a cache of the status this returns. as_of (an
+    aware instant) answers for that moment. Bounded: past the cap the answer is refused, never
+    truncated. last_event_id is the event a lifecycle command must name as expected.
+    """
+    newest, events = _events(
+        organization_id,
+        deficiency_id,
+        as_of,
+        MAX_DEPENDENCY_EVENTS,
+        types=DEPENDENCY_EVENT_TYPES,
+    )
+    record, history = replay_dependency(events)
     return {
         "deficiency_status": newest.to_status,
         "awaiting_external_dependency": newest.to_status == AWAITING_EXTERNAL_DEPENDENCY,

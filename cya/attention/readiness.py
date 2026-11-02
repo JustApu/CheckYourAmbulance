@@ -14,8 +14,9 @@ determination histories, not from the checklist's one-row-per-item summary.
 
 Bounds (owner decision 2026-11-01: a small fleet first; issue 33 batches the obligation reads):
 at most VEHICLE_LIMIT vehicles and DEFICIENCY_LIMIT deficiencies per vehicle, each with an
-explicit `truncated` flag. Obligation state is read per vehicle through the existing loader; the
-deficiency list and suspensions are read once for the listed vehicles.
+explicit `truncated` flag. Obligation state, the status and the bounded deficiency list are read
+per vehicle; the listed deficiencies' events, the age rule and the suspensions are read once for
+the page, so the query count does not grow with the number of deficiencies.
 """
 
 from dataclasses import dataclass, field
@@ -26,10 +27,11 @@ from django.db.models import OuterRef, Subquery
 from cya.checklists.models import Item, KitInstance, Vehicle
 from cya.checks.state import effective_checks
 from cya.conditions.models import ConditionalRule
-from cya.deficiencies import service
-from cya.deficiencies.acknowledgement import acknowledgement_state
+from cya.deficiencies import deadlines, service
+from cya.deficiencies.acknowledgement import acknowledgement_status
 from cya.deficiencies.models import CheckSuspension, Deficiency, DeficiencyEvent
-from cya.deficiencies.transitions import ACTIVE_STATUSES
+from cya.deficiencies.service import DeficiencyError
+from cya.deficiencies.transitions import ACTIVE_STATUSES, AWAITING_EXTERNAL_DEPENDENCY
 from cya.obligations.history import replay_checks
 from cya.obligations.projections import load_projection_history
 from cya.obligations.requirements import CARRY_OVER
@@ -37,6 +39,13 @@ from cya.obligations.state import State, aware, rebuild_vehicle_projection
 from cya.operations.status import status_at
 
 VEHICLE_LIMIT = 25
+MAX_EVENTS = 10000  # deficiency events one picture replays; more is refused, never cut
+FACT_EVENT_TYPES = (
+    *service.DEADLINE_EVENT_TYPES,
+    *service.DEPENDENCY_EVENT_TYPES,
+    "SEVERITY_CHANGED",
+    "ESCALATION_ACKNOWLEDGED",
+)
 DEFICIENCY_LIMIT = 100  # per vehicle
 WINDOW_BACK = timedelta(days=7)
 WINDOW_AHEAD = timedelta(hours=48)
@@ -161,54 +170,88 @@ def _obligations(organization_id, vehicle_id, at):
     return counts, {"checked": satisfied, "owed": owed}
 
 
-def _active_deficiencies(organization_id, vehicle_ids, at):
-    """Deficiencies of these vehicles being worked at `at`, by their status then (AC-27)."""
+def _active_deficiencies(organization_id, vehicle_id, at):
+    """Up to DEFICIENCY_LIMIT + 1 deficiencies of this vehicle being worked at `at` (AC-27).
+
+    The status is the newest event's by then; the extra row only says the list was cut short.
+    """
     newest = DeficiencyEvent.objects.filter(
         deficiency_id=OuterRef("pk"), recorded_at__lte=at
     ).order_by("-sequence")
-    rows = (
+    return list(
         Deficiency.objects.filter(
-            organization_id=organization_id, vehicle_id__in=vehicle_ids, recorded_at__lte=at
+            organization_id=organization_id, vehicle_id=vehicle_id, recorded_at__lte=at
         )
+        .select_related("severity_version")
         .annotate(status_then=Subquery(newest.values("to_status")[:1]))
         .filter(status_then__in=ACTIVE_STATUSES)
-        .order_by("vehicle_id", "recorded_at", "id")
+        .order_by("recorded_at", "id")[: DEFICIENCY_LIMIT + 1]
     )
-    by_vehicle = {}
-    for row in rows.iterator():
-        by_vehicle.setdefault(str(row.vehicle_id), []).append(row)
-    return by_vehicle
 
 
-def _deficiency(organization_id, row, at):
-    deficiency_id = str(row.pk)
-    deadline = service.extension_state(organization_id, deficiency_id, as_of=at)
-    grades = [
-        g
-        for g in service.severity_history(organization_id, deficiency_id)["history"]
-        if g["recorded_at"] <= at
-    ]
-    dependency = service.dependency_state(organization_id, deficiency_id, as_of=at)["dependency"]
-    acknowledged = acknowledgement_state(organization_id, deficiency_id, as_of=at)[
-        "acknowledgement"
-    ]
-    return {
-        "deficiency_id": deficiency_id,
-        "summary": row.summary,
-        "status": row.status_then,
-        "severity": grades[-1]["severity"],
-        "governing_deadline": deadline["governing_deadline"],
-        "overdue": deadline["overdue"],
-        "age_days": deadline["age_seconds"] // 86400,
-        "age_level": deadline["age_level"],
-        "long_running": deadline["long_running"],
-        "extension_count": deadline["extension_count"],
-        "follow_up_at": dependency["follow_up_at"] if dependency else None,
-        "awaiting_dependency": dependency is not None,
-        "acknowledged_until": acknowledged["acknowledgement_until"]
-        if acknowledged and acknowledged["active"]
-        else None,
-    }
+def _deficiency_facts(organization_id, rows, at):
+    """{deficiency id: facts} for the listed deficiencies, from one bounded read of their events.
+
+    The events are replayed with the same rules the per-deficiency readers use
+    (deadlines.deadline_state, service.replay_dependency, acknowledgement_status, the newest
+    re-grade), so the dashboard and the deficiency page agree. More than MAX_EVENTS events is
+    refused (503), never cut.
+    """
+    if not rows:
+        return {}
+    events = list(
+        DeficiencyEvent.objects.filter(
+            organization_id=organization_id,
+            deficiency_id__in=[row.pk for row in rows],
+            recorded_at__lte=at,
+            event_type__in=FACT_EVENT_TYPES,
+        )
+        .select_related("severity_version")
+        .order_by("deficiency_id", "sequence")[: MAX_EVENTS + 1]
+    )
+    if len(events) > MAX_EVENTS:
+        raise DeficiencyError(
+            "CONFIGURATION_UNAVAILABLE", "the deficiency histories are too long", status=503
+        )
+    by_deficiency = {}
+    for event in events:
+        by_deficiency.setdefault(str(event.deficiency_id), []).append(event)
+    rule = service.age_rule_at(organization_id, at)
+    facts = {}
+    for row in rows:
+        deficiency_id = str(row.pk)
+        mine = by_deficiency.get(deficiency_id, [])
+        deadline = service.replay_deadlines(
+            [e for e in mine if e.event_type in service.DEADLINE_EVENT_TYPES]
+        )
+        age = deadlines.age_seconds(row.reported_at, at)
+        highlight = service.highlight_of(rule, age, deadline["extension_count"])
+        record, _history = service.replay_dependency(
+            [e for e in mine if e.event_type in service.DEPENDENCY_EVENT_TYPES]
+        )
+        dependency = record if row.status_then == AWAITING_EXTERNAL_DEPENDENCY else None
+        acknowledged = [e for e in mine if e.event_type == "ESCALATION_ACKNOWLEDGED"]
+        current = acknowledged[-1] if acknowledged else None
+        regrades = [e for e in mine if e.event_type == "SEVERITY_CHANGED"]
+        severity = regrades[-1].severity_version if regrades else row.severity_version
+        facts[deficiency_id] = {
+            "deficiency_id": deficiency_id,
+            "summary": row.summary,
+            "status": row.status_then,
+            "severity": service.severity_level(severity),
+            "governing_deadline": deadline["governing_deadline"],
+            "overdue": deadlines.is_overdue(deadline["governing_deadline"], row.status_then, at),
+            "age_days": age // 86400,
+            "age_level": highlight["age_level"],
+            "long_running": highlight["long_running"],
+            "extension_count": deadline["extension_count"],
+            "follow_up_at": dependency["follow_up_at"] if dependency else None,
+            "awaiting_dependency": dependency is not None,
+            "acknowledged_until": current.acknowledgement_until
+            if acknowledgement_status(current, at) == "ACTIVE"
+            else None,
+        }
+    return facts
 
 
 def _suspensions(organization_id, vehicle_ids, at):
@@ -261,15 +304,17 @@ def fleet_readiness(organization_id, *, as_of=None, now):
     truncated = len(listed) > VEHICLE_LIMIT
     listed = listed[:VEHICLE_LIMIT]
     ids = [str(v.pk) for v in listed]
-    deficiencies = _active_deficiencies(organization_id, ids, at)
+    listed_rows = {str(v.pk): _active_deficiencies(organization_id, str(v.pk), at) for v in listed}
+    shown_rows = [row for rows in listed_rows.values() for row in rows[:DEFICIENCY_LIMIT]]
+    facts = _deficiency_facts(organization_id, shown_rows, at)
     suspensions = _suspensions(organization_id, ids, at)
     result = []
     for vehicle in listed:
         vehicle_id = str(vehicle.pk)
         status = status_at(organization_id, vehicle_id, at)
         counts, progress = _obligations(organization_id, vehicle_id, at)
-        rows = deficiencies.get(vehicle_id, [])
-        shown = [_deficiency(organization_id, row, at) for row in rows[:DEFICIENCY_LIMIT]]
+        rows = listed_rows[vehicle_id]
+        shown = [facts[str(row.pk)] for row in rows[:DEFICIENCY_LIMIT]]
         by_severity, by_status = {}, {}
         for item in shown:
             label = item["severity"]["label"]

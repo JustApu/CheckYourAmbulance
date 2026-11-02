@@ -255,6 +255,13 @@ def acknowledgement_maximum(organization_id, as_of=None):
     return {"maximum": history[-1] if history else None, "history": history}
 
 
+def acknowledgement_status(current, at):
+    """NONE, ACTIVE or EXPIRED for the newest acknowledgement event (or None) at an instant."""
+    if current is None:
+        return "NONE"
+    return "ACTIVE" if current.acknowledgement_until > at else "EXPIRED"
+
+
 def acknowledgement_state(organization_id, deficiency_id, as_of=None):
     at = as_of or timezone.now()
     newest, events = service._events(
@@ -265,11 +272,7 @@ def acknowledgement_state(organization_id, deficiency_id, as_of=None):
         types=ACKNOWLEDGEMENT_EVENT_TYPES,
     )
     current = events[-1] if events else None
-    status = (
-        "NONE"
-        if current is None
-        else ("ACTIVE" if current.acknowledgement_until > at else "EXPIRED")
-    )
+    status = acknowledgement_status(current, at)
     history = []
     for index, event in enumerate(events):
         event_status = (
