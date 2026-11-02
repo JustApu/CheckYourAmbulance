@@ -26,6 +26,8 @@ ACK_COMMAND = "DEFICIENCY_ESCALATION_ACKNOWLEDGE"
 RULE_COMMAND = "DEFICIENCY_ACKNOWLEDGEMENT_MAXIMUM_SET"
 MAX_RULES = 1000
 MAX_EVENTS = 5000
+# Owner decision 2026-10-29 (issue #20); the rule trigger and table CHECK repeat it (migration 0018).
+MAXIMUM_DAYS_CAP = 30
 
 
 def _positive_days(value, path):
@@ -52,6 +54,10 @@ def set_acknowledgement_maximum(
         canonical_id(value)
     _operation_id(operation_id)
     maximum_days = _positive_days(maximum_days, "maximum_days")
+    if maximum_days > MAXIMUM_DAYS_CAP:
+        raise service.malformed(
+            "maximum_days", f"maximum_days must be a whole number from 1 to {MAXIMUM_DAYS_CAP}"
+        )
 
     def build(_actor):
         Organization.objects.select_for_update().get(pk=organization_id)
