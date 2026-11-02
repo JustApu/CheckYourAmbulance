@@ -110,6 +110,93 @@ The checklist endpoint takes no `as_of`: historical reconstruction for people is
 query function is as-of capable and tested for it. Reads need a signed-in active user; errors
 use the record-check shape.
 
+## Fleet readiness (issue #17)
+
+[issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17) adds the supervisor fleet dashboard of SPEC §14 RPT-5 and RPT-7
+(`cya/attention/readiness.py`, `readiness_views.py`). It is read-only and adds no business rule:
+every fact comes from an existing reader, replayed at the instant answered for.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/v1/fleet-readiness[?as_of=]` | The picture as JSON |
+| `GET /fleet/readiness/[?as_of=]` | The screen, linked from the deficiencies index for Supervisors and Administrators |
+| `GET /fleet/readiness/panel/` | The screen's live part, which the open page re-reads |
+
+**Who.** Supervisors and Administrators. Crew and Supply Officers get 403 from the endpoint and the
+audited section refusal from the screen; roles combine. No row of the SPEC §3.3 matrix names this
+view, so the check names the two roles the issue gives.
+
+**Per vehicle:**
+- operational status and restrictions;
+- every obligation due from 7 days before to 48 hours after the instant (the checklist's
+  standard window), counted by state;
+- inspection progress, the recorded checks out of the checks owed (satisfied plus Current, Due
+  and Overdue);
+- the deficiencies being worked at the instant, each with severity, status, governing deadline,
+  Overdue, age in days, Long-running (only when an age rule is configured, issue #150), any
+  external dependency with its follow-up, and an escalation acknowledgement still in force;
+- counts by severity and status;
+- the check suspensions in force.
+
+**RPT-7.** States are counted separately and never folded into a "compliant" flag:
+- **From the obligation evaluator:** Passed, Failed, Not Applicable (rule), Carried over (a
+  waiver by a carry-over rule), Waived (another rule), Suspended, Exempt (out of service), Completed
+  by supervisor — unable to inspect, and the open states Overdue, Due, Current and Upcoming.
+- **From the check and determination histories,** following the planning review on the issue
+  rather than the checklist's one-row-per-item summary:
+  - Unable to inspect: an obligation still owed with an effective Unable check;
+  - Invalidated: a withdrawn check chain, or an invalidated determination;
+  - Superseded: each entry a correction replaced, and each superseded determination;
+  - Completed late: a satisfied obligation completed after its grace deadline, counted in addition
+    to its outcome.
+
+**As of.** `as_of` must be an offset-qualified instant not in the future (400 otherwise). The answer
+uses only what was recorded by then (AC-27): obligations, checks, statuses, deficiency events,
+suspensions and acknowledgements. A past picture lists every vehicle of the organization, including
+ones deactivated since, because a vehicle's active flag has no history. The screen then says it is
+a past picture and does not update.
+
+**Live.** The screen re-reads its panel:
+- on a vehicle hint from the existing live channel, for up to 3 vehicles (one fewer than the default
+  per-user socket limit, leaving room for another tab);
+- on reconnect and when the tab is shown again;
+- every 60 seconds, which also covers changes no event announces, such as a deadline passing or an
+  acknowledgement expiring.
+
+It says how many vehicles are live and shows a notice when a re-read fails. When sign-in ends it
+stops promising live updates. It adds no hint producer.
+
+**Bounds.** Owner decision (2026-11-01): start with a small fleet. At most 25 vehicles, and
+100 deficiencies and 100 suspensions in force per vehicle, each with an explicit "only the first …
+are shown"; the database reads at most one row more than is shown. Per vehicle:
+- obligation state through the existing loader (about 13 queries);
+- the status;
+- the bounded deficiency list;
+- the bounded list of suspensions in force: a START with no END answering it by the instant,
+  selected in the database, so the append-only suspension history is never read whole.
+
+For the whole page, in one bounded read: the listed deficiencies' events, replayed in memory with
+the same rules as the per-deficiency readers (`deadlines.deadline_state`,
+`service.replay_dependency`, `acknowledgement_status`, the newest re-grade). The number of queries
+therefore does not grow with the number of deficiencies. More than 10,000 events is refused (503),
+never cut. The age rule and the item and kit labels of the shown suspensions are each read once.
+[issue #33](https://github.com/JustApu/CheckYourAmbulance/issues/33) replaces the per-vehicle
+obligation reads with a batch loader before a larger fleet.
+
+`cya/attention/tests/test_readiness.py` covers:
+- each state counted apart (real checks for Passed, Failed, Unable, Invalidated, Superseded,
+  Suspended and Exempt; injected states for the rule-based and late ones);
+- the deficiency facts, including an acknowledgement that expires;
+- the limits (the deficiency and suspension queries carry them, and the suspension query selects
+  only those in force), a query count that does not grow with the number of deficiencies, and bulk
+  facts equal to the per-deficiency readers;
+- as-of reproduction after later events;
+- refusal of future and naive instants;
+- the HTTP roles and the screen.
+
+`readiness_script_harness.js` runs the screen script against fake sockets, timers and fetch:
+hints, reconnect, the timer, the stale notice, sign-in end and one read at a time.
+
 ## Not built here
 
 The crew screens ([issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85)), and live-update wiring of the checklist (hints from [issue #84](https://github.com/JustApu/CheckYourAmbulance-archive/issues/84) prompt
