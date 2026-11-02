@@ -56,6 +56,8 @@ All values are environment variables (nothing is committed; SPEC §17.6). If any
 | `CYA_GOOGLE_REDIRECT_URI` | Exactly `https://<host>/auth/callback/`, registered on the OAuth client (`http://localhost:<port>/…` is allowed for development) |
 | `CYA_SESSION_MAX_AGE` | Session lifetime in seconds, i.e. the Workspace-revocation bound (default 28 800) |
 
+`/auth/login/` and `/auth/callback/` are rate-limited in the application per client address ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): over `CYA_SIGNIN_RATE_LIMIT` requests in `CYA_SIGNIN_RATE_WINDOW_SECONDS` (default 30 per 60 seconds) answers 429 with `Retry-After`, before any sign-in cookie, session, audit record or call to Google. `/auth/status/` and sign-out are not limited: one only reads the session, the other only ends it. The key and the proxy rule are in the [deployment runbook](deployment-runbook.md#proxy-and-application-service).
+
 Behind the TLS-terminating proxy, the application must also recognize HTTPS, or Django refuses HTTPS-origin posts such as sign-out with a CSRF error. Set `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` as the [deployment runbook](deployment-runbook.md#proxy-and-application-service) describes ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)).
 
 Exactly one active organization row must exist: `python manage.py create_organization --name "<name>" --time-zone <IANA zone>`. The command is idempotent and has `--dry-run`.

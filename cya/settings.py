@@ -128,6 +128,12 @@ SECURE_HSTS_SECONDS = CYA_HSTS_SECONDS
 SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 SECURE_HSTS_PRELOAD = False
 
+# Application-level sign-in rate limit (SPEC 16.2, DEP-10; issue 26; cya.accounts.ratelimit):
+# requests per window per sign-in route and client address. The defaults let a crew sign in
+# from one shared station address in the same minute while bounding scripted attempts.
+CYA_SIGNIN_RATE_LIMIT = env_int("SIGNIN_RATE_LIMIT", 30, 1, 1000)
+CYA_SIGNIN_RATE_WINDOW_SECONDS = env_int("SIGNIN_RATE_WINDOW_SECONDS", 60, 1, 3600)
+
 # Google Workspace sign-in (cya.accounts.oidc). Unset values make sign-in
 # unavailable (fail closed); the rest of the application still starts.
 CYA_GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", "")
