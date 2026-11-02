@@ -37,4 +37,10 @@ Its command-backed journey covers concurrent crew checks, retry/conflict handlin
 deficiencies, corrections/invalidation, sessions, odometer and per-kit obligations,
 with local live delivery and exact historical reconstruction. See the
 [M3 verification guide](../docs/inspection-integration.md) for coverage and limits.
+
+`EX-m4-deficiency-resolution` is bound with `"database": "commit"` ([issue #18](https://github.com/JustApu/CheckYourAmbulance/issues/18)).
+It reuses the M3 agency and drives the M4 commands: assignment, dependency, extensions,
+correction and verification (including a concurrent closing race), reopenings, check suspension,
+operational status, notifications through the stub sender and the readiness dashboard, with exact
+historical reconstruction. See the [M4 verification guide](../docs/resolution-integration.md).
 The individual symbolic AC files retain their existing status.
