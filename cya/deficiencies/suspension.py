@@ -8,10 +8,13 @@ appends CHECKS_SUSPENDED (status unchanged) and one check_suspension START per i
 is not a Pass, leaves every other check required and never changes operational status (SUS-2): the
 obligation reader shows the item's routine obligations as Suspended instead.
 
-Nothing here ends a suspension. The event that closes or cancels the deficiency (verified closure,
-administrator or empty-scope closure, Reported in Error) ends every suspension in force and lists it
-in suspensions_ended (SUS-3, SUS-4; service.end_suspensions). Reopening resumes none: a new
-suspension needs this command again.
+end_suspension lets the same roles end one suspension early while the deficiency is still open
+(SUS-5, issue 32 (https://github.com/JustApu/CheckYourAmbulance/issues/32)): it appends
+SUSPENSION_ENDED (status unchanged) listing that one START in suspensions_ended, and its END. The
+event that closes or cancels the deficiency (verified closure, administrator or empty-scope closure,
+Reported in Error) ends every suspension still in force and lists it in suspensions_ended (SUS-3,
+SUS-4; service.end_suspensions). Nothing resumes an ended suspension: a new one needs
+suspend_checks again.
 
 Locks follow the correction and expansion commands (vehicle, checklist templates, deficiency), and
 expected_event_id refuses a decision made on a state that has since changed (409), so a suspension
@@ -25,7 +28,12 @@ from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
 from cya.core.audit_commands import Plan, run_command
 from cya.deficiencies import service
-from cya.deficiencies.commands import _authorizer, _operation_id, publish_changed
+from cya.deficiencies.commands import (
+    _authorizer,
+    _lock_for_change,
+    _operation_id,
+    publish_changed,
+)
 from cya.deficiencies.effects import NO_KIT_KEY
 from cya.deficiencies.expansion import _lock, parse_items, resolve_items
 from cya.deficiencies.models import (
@@ -39,6 +47,7 @@ from cya.operations.models import MAX_TEXT
 
 SUSPEND_ACTION = "suspend_routine_checks"
 SUSPEND_COMMAND = "DEFICIENCY_CHECKS_SUSPEND"
+END_COMMAND = "DEFICIENCY_CHECK_SUSPENSION_END"
 MAX_SUSPENSION_ROWS = 5000  # START and END rows one history read will return
 
 
@@ -214,6 +223,143 @@ def suspend_checks(
                 "expected_event_id": expected_event_id,
                 "explanation": explanation,
                 "items": sorted([item_id, kit or ""] for item_id, kit in items),
+            }
+        ),
+        correlation_id=correlation_id,
+        request_attempt_id=request_attempt_id,
+        authorize=_authorizer(organization_id, actor_id, SUSPEND_ACTION),
+        prepare=build,
+    )
+
+
+def end_suspension(
+    *,
+    deficiency_id,
+    expected_event_id,
+    suspension_id,
+    organization_id,
+    actor_id,
+    operation_id,
+    correlation_id,
+    request_attempt_id,
+    explanation=None,
+):
+    """End one check suspension early while the deficiency is still open (SUS-5, issue #32).
+
+    The same Supervisor or Administrator permission that starts a suspension ends it. The
+    deficiency must still be worked (422 DEFICIENCY_NOT_ACTIVE). suspension_id names a START of
+    this deficiency (422 SUSPENSION_NOT_FOUND otherwise, including one of another deficiency)
+    that is still in force (422 SUSPENSION_ALREADY_ENDED). It appends SUSPENSION_ENDED (status
+    unchanged) listing that one START in suspensions_ended, and one END row; the deficiency's other
+    suspensions are untouched and nothing is notified. explanation is optional (at most 4,000
+    characters, not blank). A replay with the same operation_id returns the stored answer.
+    """
+    for value in (organization_id, actor_id):
+        canonical_id(value)
+    _operation_id(operation_id)
+    deficiency_id = service.canonical(deficiency_id, "deficiency_id")
+    expected_event_id = service.canonical(expected_event_id, "expected_event_id")
+    suspension_id = service.canonical(suspension_id, "suspension_id")
+    if explanation is not None:
+        explanation = service.text(explanation, "explanation", MAX_TEXT)
+
+    def build(actor):
+        projection, last = _lock_for_change(
+            actor, SUSPEND_ACTION, organization_id, actor_id, deficiency_id, expected_event_id
+        )
+        service.require_active(projection)
+        in_force = {
+            str(row.pk): row for row in service.suspensions_in_force(organization_id, deficiency_id)
+        }
+        start = in_force.get(suspension_id)
+        if start is None:
+            known = CheckSuspension.objects.filter(
+                organization_id=organization_id,
+                deficiency_id=deficiency_id,
+                action="START",
+                pk=suspension_id,
+            ).exists()
+            if known:
+                raise DeficiencyError(
+                    "SUSPENSION_ALREADY_ENDED",
+                    "this check suspension has already ended",
+                    path="suspension_id",
+                )
+            raise DeficiencyError(
+                "SUSPENSION_NOT_FOUND",
+                "no check suspension with this id on this deficiency",
+                path="suspension_id",
+            )
+        now = timezone.now()
+        event_id = new_id()
+
+        def apply(receipt, current):
+            event = DeficiencyEvent.objects.create(
+                id=event_id,
+                organization_id=organization_id,
+                deficiency_id=deficiency_id,
+                sequence=last.sequence + 1,
+                predecessor_event=last,
+                event_type="SUSPENSION_ENDED",
+                from_status=projection.status,
+                to_status=projection.status,
+                explanation=explanation,
+                suspensions_ended=[suspension_id],
+                **service.stamp(receipt, current),
+            )
+            service.end_suspensions(receipt, current, organization_id=organization_id, event=event)
+            DeficiencyProjection.objects.filter(
+                organization_id=organization_id, deficiency_id=deficiency_id
+            ).update(last_applied_event=event)
+            publish_changed(organization_id, deficiency_id, event_id)
+
+        return Plan(
+            response_body={
+                "code": "DEFICIENCY_SUSPENSION_ENDED",
+                "deficiency_id": deficiency_id,
+                "event_id": event_id,
+                "status": projection.status,
+                "suspensions_ended": [suspension_id],
+                "items": [
+                    {
+                        "item_id": str(start.item_id),
+                        "kit_instance_id": None
+                        if start.kit_instance_id is None
+                        else str(start.kit_instance_id),
+                    }
+                ],
+            },
+            apply=apply,
+            response_status=201,
+            target_type="ORGANIZATION",
+            target_id=organization_id,
+            prior_snapshot={
+                "schema_version": 1,
+                "values": {"status": projection.status, "suspension_id": suspension_id},
+            },
+            new_snapshot={
+                "schema_version": 1,
+                "values": {
+                    "event_id": event_id,
+                    "event_type": "SUSPENSION_ENDED",
+                    "status": projection.status,
+                    "suspensions_ended": [suspension_id],
+                    "item_ids": [str(start.item_id)],
+                },
+            },
+            recorded_at=now,
+        )
+
+    return run_command(
+        organization_id=organization_id,
+        operation_id=operation_id,
+        command_type=END_COMMAND,
+        request_digest=digest(
+            {
+                "deficiency_id": deficiency_id,
+                "expected_event_id": expected_event_id,
+                "explanation": explanation,
+                "suspension_id": suspension_id,
             }
         ),
         correlation_id=correlation_id,

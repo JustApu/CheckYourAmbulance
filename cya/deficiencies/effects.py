@@ -62,7 +62,8 @@ from cya.deficiencies.transitions import (
 # other type present counts as recorded repair work and blocks a cancellation: the M4 corrective
 # action and verification events, and a progress note, whose free text may describe work done
 # (SPEC 8.1). Each later lifecycle issue states its own classification the same way. A supervisor
-# check suspension pauses routine checks for a known defect and records no repair (SPEC 8.9).
+# check suspension pauses routine checks for a known defect, and ending one early resumes them;
+# neither records repair (SPEC 8.9, SUS-5).
 NEUTRAL_EVENT_TYPES = frozenset(
     {
         "REPORTED",
@@ -85,6 +86,7 @@ NEUTRAL_EVENT_TYPES = frozenset(
         # Reopening after a lost verification Pass records no repair (INV-4, issue 155 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/155)).
         "VERIFICATION_REOPENED",
         "CHECKS_SUSPENDED",
+        "SUSPENSION_ENDED",
     }
 )
 # Evidence that keeps a deficiency open (SPEC COR-4, OQ-57): a Failed check, or an Unable to

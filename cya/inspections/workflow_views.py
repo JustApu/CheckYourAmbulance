@@ -71,6 +71,7 @@ EVENT_LABELS = {
     "SCOPE_EXPANDED": "Verification scope expanded",
     "VERIFICATION_ADDED": "Reopened — verification added after closure",
     "CHECKS_SUSPENDED": "Routine checks suspended",
+    "SUSPENSION_ENDED": "Check suspension ended early",
     "ESCALATION_ACKNOWLEDGED": "Escalation acknowledged",
 }
 STATUS_LABELS = {

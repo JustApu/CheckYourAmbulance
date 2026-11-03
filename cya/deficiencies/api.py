@@ -12,7 +12,8 @@ leave Awaiting External Dependency (the update_external_dependency permission) a
 returns the current record and its history; POST and GET .../progress-notes append and list
 timestamped progress notes (the add_progress_note permission). POST .../check-suspensions suspends
 the routine checks of named items for a known deficiency (the suspend_routine_checks permission)
-and GET .../check-suspensions lists them, now or as of an instant. GET /api/v1/deficiencies/suggestions
+and GET .../check-suspensions lists them, now or as of an instant; POST .../check-suspension-ends
+ends one of them early while the deficiency is open (the same permission, SUS-5). GET /api/v1/deficiencies/suggestions
 lists possible matches for a deficiency about to be reported; it reads only, and the crew member
 decides. Actor, organization and roles come from the signed-in user, never the body (SPEC 3.2).
 Errors use the record-check shape and codes; business rules live in cya.deficiencies.commands.
@@ -91,6 +92,7 @@ ADMIN_CLOSE_FIELDS = frozenset({"operation_id", "explanation", "expected_event_i
 EXPANSION_FIELDS = frozenset({"operation_id", "explanation", "expected_event_id", "items"})
 ADDED_VERIFICATION_FIELDS = EXPANSION_FIELDS | {"deadline"}
 SUSPENSION_FIELDS = frozenset({"operation_id", "expected_event_id", "items"})
+SUSPENSION_END_FIELDS = frozenset({"operation_id", "expected_event_id", "suspension_id"})
 # Body fields copied to the command as text, and those read as instants.
 TEXT_FIELDS = (
     "explanation",
@@ -100,6 +102,7 @@ TEXT_FIELDS = (
     "reason",
     "request_event_id",
     "decision",
+    "suspension_id",
 )
 INSTANT_FIELDS = ("follow_up_at", "proposed_deadline", "deadline")
 # Command-result fields an acknowledgement repeats when the command carries them.
@@ -829,6 +832,24 @@ def check_suspensions(request, deficiency_id):
         _stamped(row, "started_at", "ended_at")
     return JsonResponse(
         {"status": "OK", "correlation_id": correlation_id, "deficiency_id": deficiency_id, **view}
+    )
+
+
+@never_cache
+@require_http_methods(["POST"])
+def check_suspension_ends(request, deficiency_id):
+    """POST ends one check suspension early while the deficiency is open (SPEC SUS-5).
+
+    The body names expected_event_id, suspension_id (a suspension of this deficiency still in
+    force) and an optional explanation.
+    """
+    return _event_post(
+        request,
+        deficiency_id,
+        "check suspension end",
+        suspension.end_suspension,
+        SUSPENSION_END_FIELDS,
+        frozenset({"explanation"}),
     )
 
 

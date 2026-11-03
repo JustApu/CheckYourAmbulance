@@ -46,6 +46,9 @@ from cya.operations.models import MAX_TEXT, Evidence
 # suspension of the routine checks it lists in check_suspension (SPEC 8.9, issue 13
 # (https://github.com/JustApu/CheckYourAmbulance/issues/13)); a closing event lists in
 # suspensions_ended every suspension still in force, which ends with it (SUS-3, SUS-4).
+# SUSPENSION_ENDED (status unchanged) ends one suspension early while the deficiency is still open,
+# listing that START alone in suspensions_ended (SUS-5, issue 32
+# (https://github.com/JustApu/CheckYourAmbulance/issues/32)).
 EVENT_TYPES = (
     "REPORTED",
     "REPORTED_IN_ERROR",
@@ -72,6 +75,7 @@ EVENT_TYPES = (
     "SCOPE_EXPANDED",
     "VERIFICATION_ADDED",
     "CHECKS_SUSPENDED",
+    "SUSPENSION_ENDED",
 )
 # Types written by the assignment and work-start commands (issue 146 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/146)); each keeps the status
 # except WORK_STARTED (Open to In Progress) and none carries a check chain or an explanation rule.
@@ -92,6 +96,7 @@ VERIFICATION_EVENT_TYPES = ("VERIFICATION_CLOSED", "VERIFICATION_FAILED")
 VERIFICATION_REOPEN_EVENT_TYPES = ("VERIFICATION_REOPENED",)
 SCOPE_EVENT_TYPES = ("SCOPE_EXPANDED", "VERIFICATION_ADDED")
 SUSPENSION_EVENT_TYPES = ("CHECKS_SUSPENDED",)
+SUSPENSION_END_EVENT_TYPES = ("SUSPENSION_ENDED",)
 # The events that take an active deficiency to a closed or cancelled status. Each one ends every
 # check suspension still in force and lists it in suspensions_ended (SUS-3, SUS-4): a suspension
 # with no open deficiency is invalid. No other event may list one.
@@ -448,10 +453,11 @@ class CheckSuspension(Evidence):
 
     A START names one item (and physical kit instance for a kit-defined item) of the deficiency's
     vehicle and is written with the CHECKS_SUSPENDED event of the same command. Its END is written
-    by the event that closes or cancels the deficiency, which lists the START in
-    suspensions_ended; prior_suspension then names the START, once. Nothing resumes a suspension:
-    a reopened deficiency needs a new START (issue 13
-    (https://github.com/JustApu/CheckYourAmbulance/issues/13)).
+    by the event that closes or cancels the deficiency, or by an early SUSPENSION_ENDED (SUS-5),
+    which lists the START in suspensions_ended; prior_suspension then names the START, once.
+    Nothing resumes a suspension: a new START is needed (issue 13
+    (https://github.com/JustApu/CheckYourAmbulance/issues/13), issue 32
+    (https://github.com/JustApu/CheckYourAmbulance/issues/32)).
     """
 
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
@@ -469,7 +475,8 @@ class CheckSuspension(Evidence):
     )
     instance_key = models.CharField(max_length=36, db_collation="ascii_bin")
     action = models.CharField(max_length=5)
-    # START: the CHECKS_SUSPENDED event of this command. END: the closing event that lists it.
+    # START: the CHECKS_SUSPENDED event of this command. END: the closing or SUSPENSION_ENDED event
+    # that lists it.
     deficiency_event = models.ForeignKey(
         "DeficiencyEvent", on_delete=models.PROTECT, related_name="+"
     )
@@ -596,6 +603,7 @@ class DeficiencyEvent(Evidence):
                         *VERIFICATION_REOPEN_EVENT_TYPES,
                         *SCOPE_EVENT_TYPES,
                         *SUSPENSION_EVENT_TYPES,
+                        *SUSPENSION_END_EVENT_TYPES,
                     )
                 )
                 | models.Q(
@@ -622,6 +630,7 @@ class DeficiencyEvent(Evidence):
                         *VERIFICATION_REOPEN_EVENT_TYPES,
                         *SCOPE_EVENT_TYPES,
                         *SUSPENSION_EVENT_TYPES,
+                        *SUSPENSION_END_EVENT_TYPES,
                     )
                 )
                 | (
@@ -876,11 +885,12 @@ class DeficiencyEvent(Evidence):
                 ),
                 name="defevent_admin_close_shape",
             ),
-            # Only a closing event ends suspensions (SUS-3, SUS-4); the insert trigger requires its
-            # list to be exactly the deficiency's suspensions still in force.
+            # Only a closing event (SUS-3, SUS-4) or an early end (SUS-5) ends suspensions; the
+            # insert trigger requires a closing event to list exactly the deficiency's suspensions
+            # still in force, and an early end to list exactly one of them.
             models.CheckConstraint(
                 condition=models.Q(suspensions_ended=[])
-                | models.Q(event_type__in=CLOSING_EVENT_TYPES),
+                | models.Q(event_type__in=(*CLOSING_EVENT_TYPES, *SUSPENSION_END_EVENT_TYPES)),
                 name="defevent_suspensions_closing",
             ),
             models.CheckConstraint(
@@ -1044,6 +1054,32 @@ class DeficiencyEvent(Evidence):
                     to_status=models.F("from_status"),
                 ),
                 name="defevent_suspension_shape",
+            ),
+            # An early end (SUS-5) keeps the status of a deficiency still being worked and may
+            # explain itself; it carries nothing else but the one START it lists in
+            # suspensions_ended, whose END row the same command writes.
+            models.CheckConstraint(
+                condition=~models.Q(event_type__in=SUSPENSION_END_EVENT_TYPES)
+                | (
+                    models.Q(
+                        assignee__isnull=True,
+                        deadline__isnull=True,
+                        proposed_deadline__isnull=True,
+                        follow_up_at__isnull=True,
+                        decision__isnull=True,
+                        request_event__isnull=True,
+                        acknowledgement_until__isnull=True,
+                        action_plan__isnull=True,
+                        correction_ref__isnull=True,
+                        previous_severity_version__isnull=True,
+                        severity_version__isnull=True,
+                        verification_check__isnull=True,
+                        from_status__in=ACTIVE_STATUSES,
+                        to_status=models.F("from_status"),
+                    )
+                    & ~models.Q(suspensions_ended=[])
+                ),
+                name="defevent_suspension_end_shape",
             ),
         ]
 

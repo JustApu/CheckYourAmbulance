@@ -242,6 +242,11 @@ urlpatterns = [
         name="api-deficiency-check-suspensions",
     ),
     path(
+        "api/v1/deficiencies/<str:deficiency_id>/check-suspension-ends",
+        deficiency_api.check_suspension_ends,
+        name="api-deficiency-check-suspension-ends",
+    ),
+    path(
         "api/v1/deficiencies/<str:deficiency_id>/added-verifications",
         deficiency_api.added_verifications,
         name="api-deficiency-added-verifications",
