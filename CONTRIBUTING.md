@@ -55,6 +55,16 @@ local/venv/bin/python manage.py test cya --noinput                  # offline te
 docker compose down                                                 # stop; add -v to delete the dev database
 ```
 
+**Faster full local runs** ([issue #57](https://github.com/JustApu/CheckYourAmbulance/issues/57)). A full `manage.py test cya --parallel 8` run takes over an hour, mostly in a few migration-reversal and seeded-history classes whose schema changes are bound by the database's disk writes. For a full run you can use an opt-in test database kept in memory, which ran those classes about 30% faster in a measured comparison (starting them first instead made the run slower, so the order is unchanged):
+
+```sh
+docker compose --profile fast-tests up -d --wait db-fast           # MariaDB 10.11 in memory on 127.0.0.1:3307
+CYA_DB_PORT=3307 local/venv/bin/python manage.py test cya --noinput --parallel 8
+docker compose --profile fast-tests rm --stop --force db-fast       # removes only db-fast; its data is gone
+```
+
+It uses the same pinned image and development accounts as `db`, holds no development data and is lost when it stops; never point development work at it. Stop it with the service-targeted `rm` above: `docker compose --profile fast-tests down` would also stop and remove the `db` container, because `db` has no profile (its named volume survives without `-v`). For ordinary changes, run only the affected apps.
+
 The `django` job in the [`checks` workflow](.github/workflows/checks.yml) runs the same lint, check, migration and test commands in the pinned Python image against MariaDB service containers, once for each allowed version (10.11 and 11.8; the check names are `django (MariaDB 10.11)` and `django (MariaDB 11.8)`). Its stack-neutral job runs `tools/ci_lanes.py` on the PR's changed files (both names of a rename) and picks lanes in one pass:
 
 - **Server lane** (Python, migrations, dependencies, `tests/`, `tools/`, and the documents tests read: `docs/data-model-contracts.md` and `docs/deployment-runbook.md`): the `django` job in full mode runs the whole suite, the helper tests in `tests/` and the authorization policy tests.
