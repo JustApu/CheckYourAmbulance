@@ -8,7 +8,7 @@ neither application code nor a migration. SPEC wins if the documents disagree.
 
 ## 1. Physical conventions
 
-Use MariaDB 10.11 InnoDB tables. Every organization-owned table has a non-null
+Use MariaDB InnoDB tables (10.11 or 11.8, SPEC §17.5). Every organization-owned table has a non-null
 `organization_id`. IDs are server-generated UUIDs stored as `CHAR(36)` with
 ASCII binary collation; wire IDs use canonical lowercase UUID strings. User
 identity is unique on `(organization_id, idp_issuer, idp_subject)`, never email.
@@ -783,7 +783,7 @@ wrong variants, other versions and direct DB inserts violating human-v4 and
 service-v5 CHECKs. Verify genuine v4 replay still returns its committed result.
 Inject an internal same-key/different-identity collision and assert independent
 service-failure audit and operator alert, without receipt deletion or disclosure.
-Database tests must use MariaDB 10.11 and its real runtime grants. SQLite or
+Database tests must use MariaDB (10.11 or 11.8) and its real runtime grants. SQLite or
 mocked ORM tests cannot establish locking or privilege behavior.
 
 ## 7. Sources and remaining gates

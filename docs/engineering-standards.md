@@ -68,7 +68,7 @@ Comment **why**, unusual constraints, compatibility issues, and non-obvious edge
 
 **Python:** Prefer the standard library when sufficient, context managers for resources, argument-list `subprocess.run()` instead of `shell=True`, parameterized SQL, and appropriately scoped exception handling. Avoid bare `except:`.
 
-**SQL:** Write for MariaDB 10.11, the database engine selected for this application (SPEC §17.5), and avoid relying on behavior specific to another engine. Use parameterized values, explicit column lists, qualified names in joins, and correct NULL handling. Before consequential `UPDATE` or `DELETE` operations, inspect the target set with an equivalent `SELECT` when practical. Use transactions when they improve safety.
+**SQL:** Write for MariaDB 10.11 and 11.8, the versions allowed for this application (SPEC §17.5), and avoid relying on behavior specific to another engine. Use parameterized values, explicit column lists, qualified names in joins, and correct NULL handling. Before consequential `UPDATE` or `DELETE` operations, inspect the target set with an equivalent `SELECT` when practical. Use transactions when they improve safety.
 
 ## Code review
 

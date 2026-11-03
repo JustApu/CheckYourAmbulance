@@ -1,4 +1,4 @@
-# Local development database only: MariaDB 10.11 (SPEC 17.5), pinned by digest.
+# Local development database only: MariaDB 10.11 (SPEC 17.5 allows 10.11 or 11.8), pinned by digest.
 # All values are synthetic development defaults, never production settings.
 # Usage: CONTRIBUTING.md#python-and-django.
 name: cya-dev

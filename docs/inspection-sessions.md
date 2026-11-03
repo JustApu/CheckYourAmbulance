@@ -100,7 +100,7 @@ Participation rule for checks (an assumption this issue makes; the SPEC does not
 a recorded participant may record into a session, so a nonparticipant cannot keep someone
 else's session open. A nonparticipant joins first (all four roles may), then records.
 
-Run offline tests against a disposable MariaDB 10.11 test database with
+Run offline tests against a disposable MariaDB (10.11 or 11.8) test database with
 `python manage.py test cya.inspections --noinput`; the full CI suite includes
 them. Fixtures use synthetic people, vehicles and checklists. No external
 provider or network request is made by these tests.
