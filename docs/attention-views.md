@@ -170,8 +170,11 @@ sign-in page itself ([live updates](live-updates.md), issue #37). It adds no hin
 
 **Bounds.** Owner decision (2026-11-01): start with a small fleet. At most 25 vehicles, and
 100 deficiencies and 100 suspensions in force per vehicle, each with an explicit "only the first …
-are shown"; the database reads at most one row more than is shown. Per vehicle:
-- obligation state through the existing loader (about 13 queries);
+are shown"; the database reads at most one row more than is shown. The obligation evidence of
+every listed vehicle comes from one batch read, `load_projection_histories` ([issue #33](https://github.com/JustApu/CheckYourAmbulance/issues/33)): each query
+of the per-vehicle loader runs once for the page, so the obligation reads do not grow with the
+number of vehicles (about 13 queries per vehicle before). Past its 10,000-row bound per query the
+picture is refused (503), never cut; the 25-vehicle limit is unchanged. Still per vehicle:
 - the status;
 - the bounded deficiency list;
 - the bounded list of suspensions in force: a START with no END answering it by the instant,
@@ -182,16 +185,17 @@ the same rules as the per-deficiency readers (`deadlines.deadline_state`,
 `service.replay_dependency`, `acknowledgement_status`, the newest re-grade). The number of queries
 therefore does not grow with the number of deficiencies. More than 10,000 events is refused (503),
 never cut. The age rule and the item and kit labels of the shown suspensions are each read once.
-[issue #33](https://github.com/JustApu/CheckYourAmbulance/issues/33) replaces the per-vehicle
-obligation reads with a batch loader before a larger fleet.
 
 `cya/attention/tests/test_readiness.py` covers:
 - each state counted apart (real checks for Passed, Failed, Unable, Invalidated, Superseded,
   Suspended and Exempt; injected states for the rule-based and late ones);
 - the deficiency facts, including an acknowledgement that expires;
 - the limits (the deficiency and suspension queries carry them, and the suspension query selects
-  only those in force), a query count that does not grow with the number of deficiencies, and bulk
-  facts equal to the per-deficiency readers;
+  only those in force), a query count that does not grow with the number of deficiencies, bulk
+  facts equal to the per-deficiency readers, and the obligation evidence read once for the page
+  (one batch call; `cya/obligations/tests/test_batch_projections.py` shows each vehicle's batch
+  history equals the per-vehicle loader's and that the batch query count does not grow with the
+  number of vehicles);
 - as-of reproduction after later events;
 - refusal of future and naive instants;
 - the HTTP roles and the screen.

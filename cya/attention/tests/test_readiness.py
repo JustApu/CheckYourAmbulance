@@ -141,13 +141,12 @@ class StateTests(ReadinessCase):
             d.determination_type = "WAIVED"
             d.recorded_at = self.clock.now
         with (
-            mock.patch.object(readiness, "load_projection_history", return_value=history),
             mock.patch.object(readiness, "rebuild_vehicle_projection", return_value=states),
             mock.patch.object(readiness, "replay_checks", return_value=((), ())),
             mock.patch.object(readiness, "_carry_over_rules", return_value={"carry"}),
         ):
             counts, progress = readiness._obligations(
-                str(self.org.pk), str(self.vehicle.pk), self.clock.now
+                str(self.org.pk), str(self.vehicle.pk), self.clock.now, history
             )
         expected = {
             "NOT_APPLICABLE": 1,
@@ -239,6 +238,25 @@ class FanOutTests(ReadinessCase):
         self.failed(self.siren)
         self.assertEqual(len(self.mine().deficiencies), 3)
         self.assertEqual(len(self.queries()), one)
+
+    def test_obligation_evidence_is_read_once_for_the_page(self):
+        # Issue 33: one batch read for every listed vehicle, not about 13 queries per vehicle.
+        self.into_window()
+        self.record(self.suction)
+        self.failed(self.masks, vehicle=self.vehicles[1], quantity=1)
+        self.assertGreater(len(self.vehicles), 1)
+        sql = [q["sql"] for q in self.queries()]
+        for table in ("`obligation_selection`", "`check_obligation_link`", "`check_record`"):
+            reads = [q for q in sql if f"FROM {table}" in q]
+            self.assertEqual(len(reads), 1, table)
+        with mock.patch.object(
+            readiness, "load_projection_histories", wraps=readiness.load_projection_histories
+        ) as batch:
+            picture = self.picture()
+        batch.assert_called_once()
+        self.assertEqual(
+            sorted(batch.call_args.args[0]), sorted(v.vehicle_id for v in picture.vehicles)
+        )
 
     def test_bulk_facts_match_the_per_deficiency_readers(self):
         pk = self.failed(self.suction).body["deficiency_ids"][0]

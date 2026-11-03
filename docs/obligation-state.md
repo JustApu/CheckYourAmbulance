@@ -114,7 +114,12 @@ must exclude all its check rows; the evaluator never revives an earlier outcome.
 `load_projection_history` exports immutable evidence recorded by T; its adapter
 reads the append-only selection, obligation, requirement, determination, rule,
 check, check-event, check-link, determination-check, deficiency, deficiency-scope,
-deficiency-event, check-suspension and vehicle-status tables. It preserves original rows and link timestamps,
+deficiency-event, check-suspension and vehicle-status tables. `load_projection_histories` ([issue #33](https://github.com/JustApu/CheckYourAmbulance/issues/33))
+loads the same evidence for a page of up to 50 vehicles with one query per table, splitting the rows
+by vehicle in the same order; for each vehicle the result equals `load_projection_history` with its
+default adapters (stored checks and suspensions, ad hoc orders due in the interval), and the row
+bound applies to each page-wide query. The per-vehicle loader is unchanged and still serves the
+checklist and the obligation generator. It preserves original rows and link timestamps,
 rather than exporting only the effective checks at export time: a final export can therefore
 reconstruct a check before its later correction or whole-chain invalidation. Unlinked
 participation checks contribute to attention but never satisfy an obligation. Satisfaction
