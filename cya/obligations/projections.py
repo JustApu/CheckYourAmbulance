@@ -243,20 +243,21 @@ def _attention_roots(organization_id, keys, since, instant, limit):
     unresolved = set(keys)
     upper = lower = since
     while unresolved:
-        older = {}
-        for row in (
-            CheckRecord.objects.filter(
+        # Each vehicle item's newest older check, from the (organization, vehicle, item, time)
+        # index alone; kits of one item share it, which only costs a kit item an extra step.
+        newest_by_item = {
+            (str(row["vehicle_id"]), str(row["item_id"])): row["newest"]
+            for row in CheckRecord.objects.filter(
                 organization_id=organization_id,
                 vehicle_id__in=sorted({k[0] for k in unresolved}),
                 item_id__in=sorted({k[1] for k in unresolved}),
                 recorded_at__lte=lower,
             )
-            .values("vehicle_id", "item_id", "kit_id")
+            .order_by()
+            .values("vehicle_id", "item_id")
             .annotate(newest=Max("recorded_at"))
-        ):
-            key = _key(row["vehicle_id"], row["item_id"], row["kit_id"])
-            if key in unresolved:
-                older[key] = row["newest"]
+        }
+        older = {key: newest_by_item[key[:2]] for key in unresolved if key[:2] in newest_by_item}
         unresolved &= set(older)  # a key with nothing older has nothing more to find
         if not unresolved:
             break
@@ -307,6 +308,12 @@ def _attention_roots(organization_id, keys, since, instant, limit):
             if root not in invalidated:
                 break
     return roots
+
+
+def latest_check_roots(organization_id, keys, instant):
+    """Roots of each (vehicle, item, kit) key's chains, newest first, down to its latest check
+    still valid at `instant`: what latest effective checks need, without old history (#63)."""
+    return _attention_roots(organization_id, set(keys), instant, instant, MAX_ROWS)
 
 
 def _history(organization_id, obligations, since, instant, limit):

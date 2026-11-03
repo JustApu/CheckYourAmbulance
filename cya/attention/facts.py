@@ -29,8 +29,6 @@ from cya.deficiencies.models import (
 from cya.deficiencies.transitions import ACTIVE_STATUSES
 from cya.obligations.state import NO_KIT
 
-# Newest rows read per key, widened once when every row seen belongs to an invalidated chain.
-WINDOWS = (25, 400)
 MAX_ROWS = 10000
 
 
@@ -38,26 +36,6 @@ def _aware(value, field):
     if not isinstance(value, datetime) or value.utcoffset() is None:
         raise ValueError(f"{field} must be a timezone-aware datetime")
     return value
-
-
-def _newest_rows(organization_id, vehicle_id, item_ids, as_of, per_key):
-    rows = (
-        CheckRecord.objects.filter(
-            organization_id=organization_id,
-            vehicle_id=vehicle_id,
-            item_id__in=item_ids,
-            recorded_at__lte=as_of,
-        )
-        .annotate(
-            rn=Window(
-                RowNumber(),
-                partition_by=[F("item_id"), F("kit_id")],
-                order_by=[F("recorded_at").desc(), F("id").desc()],
-            )
-        )
-        .filter(rn__lte=per_key)
-    )
-    return list(rows)
 
 
 def _effective_by_root(organization_id, roots, as_of):
@@ -100,38 +78,32 @@ def _effective_by_root(organization_id, roots, as_of):
     return {e.root_id: (e, by_id[e.check_id]) for e in effective if not e.invalidated}
 
 
-def latest_effective_checks(organization_id, vehicle_id, item_ids, as_of):
-    """CheckFact per (item_id, kit_key) that has a non-invalidated chain recorded by as_of."""
+def latest_effective_checks(organization_id, vehicle_id, keys, as_of):
+    """CheckFact per requested (item_id, kit_key) that has a non-invalidated chain by as_of.
+
+    Reads only each key's chains from its newest down to its latest valid one, never its older
+    history (issue #63; projections.latest_check_roots).
+    """
+    from cya.obligations.projections import latest_check_roots
+
     _aware(as_of, "as_of")
-    item_ids = sorted(set(item_ids))
-    if not item_ids:
+    wanted = {(str(vehicle_id), str(item_id), str(kit_key)) for item_id, kit_key in keys}
+    if not wanted:
         return []
+    roots = latest_check_roots(organization_id, wanted, as_of)
+    effective = _effective_by_root(organization_id, sorted(roots), as_of) if roots else {}
     facts = {}
-    pending = None  # (item, kit) keys still without a candidate after a full window
-    for per_key in WINDOWS:
-        rows = _newest_rows(organization_id, vehicle_id, item_ids, as_of, per_key)
-        if len(rows) > MAX_ROWS:
-            raise ValueError("check history exceeds the row limit")
-        full = {}
-        for row in rows:
-            key = (str(row.item_id), str(row.kit_id) if row.kit_id else NO_KIT)
-            full[key] = full.get(key, 0) + 1
-        roots = {str(row.root_check_id) for row in rows}
-        effective = _effective_by_root(organization_id, roots, as_of) if roots else {}
-        facts = {}
-        for _root, (_decision, row) in effective.items():
-            key = (str(row.item_id), str(row.kit_id) if row.kit_id else NO_KIT)
-            fact = CheckFact(str(row.pk), key[0], key[1], row.recorded_at, row.outcome)
-            if key not in facts or (fact.recorded_at, fact.check_id) > (
-                facts[key].recorded_at,
-                facts[key].check_id,
-            ):
-                facts[key] = fact
-        # A key is settled once it has a candidate, or its window held every row it has.
-        pending = {key for key, count in full.items() if count >= per_key and key not in facts}
-        if not pending:
-            return list(facts.values())
-    raise ValueError("no effective check found within the history window; narrow the request")
+    for _root, (_decision, row) in effective.items():
+        key = (str(row.item_id), str(row.kit_id) if row.kit_id else NO_KIT)
+        if (str(vehicle_id), *key) not in wanted:
+            continue
+        fact = CheckFact(str(row.pk), key[0], key[1], row.recorded_at, row.outcome)
+        if key not in facts or (fact.recorded_at, fact.check_id) > (
+            facts[key].recorded_at,
+            facts[key].check_id,
+        ):
+            facts[key] = fact
+    return list(facts.values())
 
 
 def _deficiency_rows_live(organization_id, vehicle_id):
@@ -203,9 +175,7 @@ def item_attention(organization_id, vehicle_id, keys, as_of=None):
     """
     keys = list(keys)
     instant = timezone.now() if as_of is None else _aware(as_of, "as_of")
-    checks = latest_effective_checks(
-        organization_id, vehicle_id, {item_id for item_id, _kit in keys}, instant
-    )
+    checks = latest_effective_checks(organization_id, vehicle_id, keys, instant)
     return attention_states(keys, checks, deficiency_facts(organization_id, vehicle_id, as_of))
 
 

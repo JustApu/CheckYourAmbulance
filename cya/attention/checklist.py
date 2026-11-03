@@ -323,7 +323,7 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup):
     placed.sort(key=lambda p: (p[0], p[1], p[2], str(p[3] or "")))
     keys = [(p[2], str(p[3]) if p[3] else NO_KIT) for p in placed]
     facts = deficiency_facts(organization_id, vehicle_id, as_of)
-    checks = latest_effective_checks(organization_id, vehicle_id, {k[0] for k in keys}, as_of)
+    checks = latest_effective_checks(organization_id, vehicle_id, keys, as_of)
     attention = attention_states(keys, checks, facts)
     newest = latest_checks(checks)
     dtos = _deficiency_dtos(organization_id, facts, as_of)
