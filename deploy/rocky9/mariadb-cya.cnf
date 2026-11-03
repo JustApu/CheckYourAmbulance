@@ -1,0 +1,5 @@
+# Check Your Ambulance (issue #6 rehearsal): SPEC 17.8 DEP-5 and DEP-10.
+[mariadb]
+bind-address = 127.0.0.1
+log_bin = mariadb-bin
+log_bin_trust_function_creators = 1
