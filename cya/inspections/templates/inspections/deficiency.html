@@ -24,12 +24,21 @@
 </section>
 {% endif %}
 {% if can_record_repair %}
-<form class="panel workflow-write" data-kind="repair" data-url="{{ config.correction_url }}" data-expected-event="{{ config.expected_event_id }}">
+<form class="panel workflow-write" data-kind="repair" data-url="{{ config.correction_url }}" data-expected-event="{{ config.expected_event_id }}"{% if can_close_empty_scope %} data-can-close-empty="1"{% endif %}>
 {% csrf_token %}
 <p>Record that the repair is complete and request verification of the affected scope.</p>
 <button type="submit" class="button primary">Record repair</button>
 <p class="workflow-result" role="status"></p>
 <a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% endif %}
+{% if can_close_empty_scope %}
+<form class="panel workflow-write" data-kind="empty-scope-close" data-url="{% url 'api-deficiency-empty-scope-closures' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
+{% csrf_token %}<h2>Close: no current verification items</h2>
+<p>Use only when the checklist no longer has anything to verify for this deficiency. It closes as &ldquo;Closed &mdash; No current verification items&rdquo;; only an Administrator can reopen it.</p>
+<label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
+<button type="submit" class="button primary">Close deficiency</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% endif %}
 {% if can_request_extension %}

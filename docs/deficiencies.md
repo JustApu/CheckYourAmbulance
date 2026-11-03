@@ -460,6 +460,14 @@ reopen either explicit-closure status, using the existing administrator-reopenin
 event is neutral for correction effects: closure does not imply repair and does not turn a later
 check correction into repair evidence.
 
+On the deficiency page ([issue #21](https://github.com/JustApu/CheckYourAmbulance/issues/21)), Supervisors and Administrators see a
+"Close: no current verification items" form directly under Record repair while the deficiency is
+Open, In Progress or Awaiting External Dependency. It requires an explanation, states that the
+deficiency closes as Closed — No current verification items and that only an Administrator can
+reopen it, and posts with a fresh operation id and the page's expected event (a lost response
+retries the same operation). Crew and Supply Officers see no control; the Record repair refusal
+tells them to ask a Supervisor or Administrator, and points those roles to the form instead.
+
 The command locks the vehicle, checklist templates and deficiency in the same order as correction
 recording. The database requires its own command receipt, a Supervisor or Administrator role
 snapshot, an active-to-closed status transition and the event's closed field shape. Scope itself

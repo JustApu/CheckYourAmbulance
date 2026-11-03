@@ -438,3 +438,100 @@ class QueueTests(SupervisorUiCase):
         with mock.patch("cya.inspections.workflow_views.QUEUE_LIMIT", 1):
             found = self.lists(sup[0].get(self.URL))
         self.assertEqual(found["Extension requests waiting for a decision"], [waiting])
+
+
+class EmptyScopeCloseUiTests(SupervisorUiCase):
+    """Issue 21: the empty-scope close on the deficiency page."""
+
+    FORM = 'data-kind="empty-scope-close"'
+
+    def setUp(self):
+        super().setUp()
+        self.sup = self.signed_in("sup-esc", "SUPERVISOR")
+
+    def shown(self, pk, roles):
+        with mock.patch("cya.inspections.workflow_views.roles_for", return_value=roles):
+            page = self.detail(pk).content.decode()
+        return self.FORM in page, 'data-can-close-empty="1"' in page
+
+    def test_only_supervisors_and_administrators_see_it(self):
+        pk = self.report()
+        for roles, expected in [
+            ({"CREW"}, False),
+            ({"SUPPLY_OFFICER"}, False),
+            ({"CREW", "SUPPLY_OFFICER"}, False),
+            ({"SUPERVISOR"}, True),
+            ({"ADMINISTRATOR"}, True),
+            ({"CREW", "SUPERVISOR"}, True),
+        ]:
+            with self.subTest(roles=roles):
+                self.assertEqual(self.shown(pk, roles)[0], expected)
+
+    def test_it_is_offered_only_in_open_in_progress_and_awaiting_dependency(self):
+        sup = {"SUPERVISOR"}
+        pk = self.report()
+        self.assertEqual(self.shown(pk, sup), (True, False))  # Open: no repair form yet
+        start_work(deficiency_id=pk, expected_event_id=self.latest(pk), **self.context(self.admin))
+        # In Progress: the repair form says the close control is on the page.
+        self.assertEqual(self.shown(pk, sup), (True, True))
+        self.assertEqual(self.shown(pk, {"CREW"}), (False, False))
+        entered = self.change(pk, "dependencies", explanation="Synthetic vendor")
+        self.assertEqual(entered.status_code, 201, entered.content)
+        self.assertEqual(self.shown(pk, sup)[0], True)  # Awaiting External Dependency
+        self.assertEqual(self.shown(self.pending(), sup)[0], False)  # Pending Verification
+        admin = self.signed_in("admin-esc", "ADMINISTRATOR")
+        closed = self.act(admin, pk, "administrator-closures", explanation="Synthetic close.")
+        self.assertEqual(closed.status_code, 201, closed.content)
+        self.assertEqual(self.shown(pk, sup)[0], False)  # closed
+
+    def test_the_form_states_the_outcome_and_requires_an_explanation(self):
+        page = self.page(self.sup, self.report()).content.decode()
+        form = re.search(rf"<form [^>]*{self.FORM}.*?</form>", page, re.S).group(0)
+        self.assertIn("Close: no current verification items", form)
+        self.assertIn("only an Administrator can reopen it", form)
+        self.assertIn('name="explanation" required', form)
+
+    def change(self, pk, action, **fields):
+        return self.post(
+            f"/api/v1/deficiencies/{pk}/{action}",
+            {"operation_id": str(uuid4()), "expected_event_id": self.latest(pk), **fields},
+        )
+
+    def test_a_closure_posted_through_the_page_configuration(self):
+        pk = report_deficiency(
+            vehicle_id=str(self.vehicle.pk),
+            target={"item_id": str(self.suction.pk)},
+            **self.new_fields(),
+            **self.context(self.user),
+        ).body["deficiency_id"]
+        client, _user, token = self.sup
+
+        def from_page():
+            page = client.get(f"/deficiencies/{pk}/").content.decode()
+            form = re.search(rf"<form [^>]*{self.FORM}[^>]*>", page).group(0)
+            url = re.search(r'data-url="([^"]+)"', form).group(1)
+            expected = re.search(r'data-expected-event="([^"]+)"', form).group(1)
+            return url, expected
+
+        url, expected = from_page()
+        self.assertEqual(url, f"/api/v1/deficiencies/{pk}/empty-scope-closures")
+        body = {
+            "operation_id": str(uuid4()),
+            "expected_event_id": expected,
+            "explanation": "Synthetic: still on the checklist.",
+        }
+        refused = self.post(url, body, client, token)
+        self.assertEqual((refused.status_code, refused.json()["code"]), (422, "SCOPE_AVAILABLE"))
+
+        self.published_version([s for s in self.items if s["item_id"] != str(self.suction.pk)])
+        url, expected = from_page()
+        body = {
+            "operation_id": str(uuid4()),
+            "expected_event_id": expected,
+            "explanation": "Synthetic: the item was retired.",
+        }
+        closed = self.post(url, body, client, token)
+        self.assertEqual(closed.status_code, 201, closed.content)
+        page = self.page(self.sup, pk)
+        self.assertEqual(page.context["status"], "Closed — No current verification items")
+        self.assertNotContains(page, self.FORM)
