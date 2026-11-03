@@ -164,7 +164,10 @@ the runtime account must have no broad grants, roles, delegation, SUPER or DDL.
 Size `innodb_buffer_pool_size` to the host in the same configuration (`mariadb-cya.cnf`
 sets 1G for a host of about 4 GB): at least the database's size where memory allows,
 and no more than about half of memory. The 128 MiB default made the issue #7 rehearsal's
-year of history wait on disk for about half of its time.
+year of history wait on disk for about half of its time. `SET GLOBAL innodb_buffer_pool_size` grows it
+online only up to the read-only `innodb_buffer_pool_size_max`, which before MariaDB
+10.11.17 and 11.8.7 defaults to the startup size; Ubuntu 26.04's 11.8.6 needed a restart
+to grow it, Rocky's 10.11.18 grew online.
 
 Persist `log_bin_trust_function_creators=1` and binary logging in MariaDB's
 server configuration; do not set them in a migration or disable logging to get
@@ -883,6 +886,8 @@ turning this draft into an executable host profile:
 - [Django 6.1 deployment checklist](https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/)
   and [ASGI deployment](https://docs.djangoproject.com/en/6.1/howto/deployment/asgi/).
 - [Django proxy SSL trust settings](https://docs.djangoproject.com/en/6.1/ref/settings/#secure-proxy-ssl-header).
+- [MariaDB InnoDB buffer pool](https://mariadb.com/docs/server/server-usage/storage-engines/innodb/innodb-buffer-pool)
+  (consulted 2026-11-03): online resizing and `innodb_buffer_pool_size_max`.
 - [MariaDB binary logging of routines](https://mariadb.com/docs/server/server-usage/stored-routines/binary-logging-of-stored-routines)
   and [trust variable reference](https://mariadb.com/docs/server/ha-and-performance/standard-replication/replication-and-binary-log-system-variables#log_bin_trust_function_creators).
 - [MariaDB server variables](https://mariadb.com/docs/server/server-management/variables-and-modes/server-system-variables#bind_address).
