@@ -53,7 +53,11 @@ class SeededBatchTests(BatchAssertions, ObligationLinkCleanupMixin, KitCase):
         vehicle_ids = [str(v.pk) for v in self.vehicles]
         window = {"start": self.at(), "end": self.at(days=17)}
         seen = set()
-        for instant in generate_history(self, seed=seed, checks=True, kits=True):
+        for index, instant in enumerate(generate_history(self, seed=seed, checks=True, kits=True)):
+            if index == 0:
+                # Vehicle B shares the checklist once its schedule exists, so the batch must split
+                # real rows between two vehicles.
+                self.bind(vehicle=self.vehicles[1])
             batch = self.assert_batch_equals_per_vehicle(vehicle_ids, instant, **window)
             for vehicle_id, history in batch.items():
                 if history.obligations:
@@ -73,7 +77,16 @@ class SeededBatchTests(BatchAssertions, ObligationLinkCleanupMixin, KitCase):
         self.assert_seed(8702)
 
 
-class ScenarioBatchTests(BatchAssertions, AttentionCase):
+class TwoVehicleCase(AttentionCase):
+    """Vehicle B is bound to the same checklist as A, so the two share every item."""
+
+    def setUp(self):
+        super().setUp()
+        self.bind(vehicle=self.vehicles[1], reconcile=False)
+        self.assertEqual(self.generate().failures, [])
+
+
+class ScenarioBatchTests(BatchAssertions, TwoVehicleCase):
     """Every evidence kind on two vehicles that share checklist items, at several instants."""
 
     def latest(self, pk):
@@ -123,7 +136,7 @@ class ScenarioBatchTests(BatchAssertions, AttentionCase):
         )
         request_inspection(
             vehicle_id=str(b.pk),
-            items=[{"item_id": str(self.siren.pk), "kit_instance_id": None}],
+            items=[{"item_id": str(self.suction.pk), "kit_instance_id": None}],
             due_at=self.clock.now + timedelta(hours=6),
             explanation="Synthetic return inspection.",
             **self.context(self.supervisor),
@@ -164,7 +177,7 @@ class ScenarioBatchTests(BatchAssertions, AttentionCase):
         self.assertEqual(batch[str(empty.pk)].obligations, ())
 
 
-class BatchQueryTests(BatchAssertions, AttentionCase):
+class BatchQueryTests(BatchAssertions, TwoVehicleCase):
     def queries(self, vehicle_ids):
         with CaptureQueriesContext(connection) as captured:
             load_projection_histories(vehicle_ids, self.clock.now, organization_id=str(self.org.pk))
@@ -173,7 +186,10 @@ class BatchQueryTests(BatchAssertions, AttentionCase):
     def test_the_query_count_does_not_grow_with_the_number_of_vehicles(self):
         self.clock.set(self.clock.now + timedelta(hours=5))
         a, b = self.vehicles[0], self.vehicles[1]
+        # Vehicle A alone already has every evidence kind, so no query is skipped for an empty
+        # id list: only the number of vehicles changes between the three reads.
         self.record(self.suction)
+        self.failed(self.siren)
         self.failed(self.masks, vehicle=b, quantity=1)
         third = Vehicle.objects.create(organization=self.org, display_name="Synthetic third")
         one = self.queries([str(a.pk)])
