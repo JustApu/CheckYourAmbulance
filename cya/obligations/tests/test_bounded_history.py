@@ -1,0 +1,242 @@
+"""Projection reads that never read a vehicle's whole history (issue #63).
+
+The checklist and the fleet dashboard used to read every check and deficiency a vehicle ever had,
+so they failed once that passed MAX_ROWS (about 66 days of a 150-item vehicle). They now read the
+chains linked to the window's obligations and the chains attention needs; deficiencies are
+read in full as before. These tests check that:
+
+* the answers equal those of the previous whole-history reader, kept below as the reference,
+  over seeded weeks of checks, corrections, invalidations, deficiencies and kits;
+* a history past the row bound still loads, for one vehicle and for a dashboard page;
+* the hard cases of the attention search hold: a newest chain invalidated, and an item
+  unchecked for weeks.
+"""
+
+from unittest import mock
+
+from cya.attention.readiness import fleet_readiness
+from cya.attention.tests.support import AttentionCase
+from cya.checks.commands import invalidate_chain
+from cya.checks.models import CheckEvent, CheckObligationLink, CheckRecord, DeterminationCheck
+from cya.checks.tests.test_obligation_links import ObligationLinkCleanupMixin
+from cya.deficiencies.models import Deficiency, DeficiencyAffectedItem, DeficiencyEvent
+from cya.kits.tests.support import KitCase
+from cya.obligations import projections
+from cya.obligations.projections import (
+    get_vehicle_obligations_as_of,
+    load_projection_histories,
+    load_projection_history,
+)
+from cya.obligations.tests.synthetic_history import generate_history
+
+
+def reference_history(organization_id, vehicle_id, obligations, since, instant):
+    """The whole-history reader this issue replaced (the reference), with the same row bound."""
+    bounded = projections._bounded
+    ids = tuple(sorted(obligations))
+    item_ids = {o.item_id for o in obligations.values()}
+    limit = None  # MAX_ROWS, read when called
+    rows = bounded(
+        CheckRecord.objects.filter(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            item_id__in=item_ids,
+            recorded_at__lte=instant,
+        ).order_by("recorded_at", "id"),
+        limit,
+    )
+    roots = {r.root_check_id for r in rows}
+    decisions = bounded(
+        CheckEvent.objects.filter(
+            organization_id=organization_id, root_check_id__in=roots, recorded_at__lte=instant
+        ).order_by("recorded_at", "id"),
+        limit,
+    )
+    links = bounded(
+        CheckObligationLink.objects.filter(
+            organization_id=organization_id,
+            obligation_id__in=ids,
+            check_record__vehicle_id=vehicle_id,
+            recorded_at__lte=instant,
+        ).order_by("recorded_at", "id"),
+        limit,
+    )
+    supports = bounded(
+        DeterminationCheck.objects.filter(
+            organization_id=organization_id,
+            determination__obligation_id__in=ids,
+            recorded_at__lte=instant,
+        ).order_by("recorded_at", "id"),
+        limit,
+    )
+    headers = bounded(
+        Deficiency.objects.filter(
+            organization_id=organization_id, vehicle_id=vehicle_id, recorded_at__lte=instant
+        ).order_by("recorded_at", "id"),
+        limit,
+    )
+    deficiency_ids = [d.pk for d in headers]
+    items = {}
+    for row in DeficiencyAffectedItem.objects.filter(
+        organization_id=organization_id, deficiency_id__in=deficiency_ids, recorded_at__lte=instant
+    ):
+        items.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
+    events = bounded(
+        DeficiencyEvent.objects.filter(
+            organization_id=organization_id,
+            deficiency_id__in=deficiency_ids,
+            recorded_at__lte=instant,
+        ).order_by("sequence", "id"),
+        limit,
+    )
+    return projections._history_fields(rows, decisions, links, supports, headers, items, events)
+
+
+def reference_page(organization_id, obligations, since, instant):
+    return {
+        vehicle_id: reference_history(organization_id, vehicle_id, by_id, since, instant)
+        for vehicle_id, by_id in obligations.items()
+    }
+
+
+class ReferenceAssertions:
+    def states(self, vehicle, instant, **window):
+        return get_vehicle_obligations_as_of(
+            str(vehicle.pk), instant, organization_id=str(self.org.pk), **window
+        )
+
+    def assert_same_as_reference(self, instant, vehicles=None, **window):
+        """Projection states and the readiness picture equal the whole-history reader's."""
+        for vehicle in vehicles or [self.vehicle]:
+            bounded = self.states(vehicle, instant, **window)
+            with mock.patch.object(projections, "_database_history", reference_history):
+                reference = self.states(vehicle, instant, **window)
+            self.assertEqual(len(bounded), len(reference), f"instant={instant}")
+            for mine, theirs in zip(bounded, reference, strict=True):
+                if mine != theirs:
+                    fields = {
+                        name: (getattr(mine, name), getattr(theirs, name))
+                        for name in mine.__dataclass_fields__
+                        if getattr(mine, name) != getattr(theirs, name)
+                    }
+                    self.fail(f"instant={instant} obligation={mine.obligation.id}: {fields}")
+        picture = fleet_readiness(str(self.org.pk), as_of=instant, now=self.clock.now)
+        with mock.patch.object(projections, "_page_database_history", reference_page):
+            expected = fleet_readiness(str(self.org.pk), as_of=instant, now=self.clock.now)
+        self.assertEqual(picture, expected, f"readiness instant={instant}")
+
+
+class SeededReferenceTests(ReferenceAssertions, ObligationLinkCleanupMixin, KitCase):
+    """Weeks of checks, corrections, invalidations, deficiencies and kits: same answers."""
+
+    def assert_seed(self, seed):
+        window = {"start": self.at(), "end": self.at(days=17)}
+        compared = 0
+        for index, instant in enumerate(generate_history(self, seed=seed, checks=True, kits=True)):
+            if index % 3 == 0:  # every third instant keeps the run short; all kinds still occur
+                self.assert_same_as_reference(instant, **window)
+                compared += 1
+        self.assert_same_as_reference(self.clock.now, **window)
+        self.assert_same_as_reference(self.clock.now)  # the default window as well
+        self.assertGreater(compared, 10)
+        # With the default window (the last 7 days of a 14-day history) the bounded read really
+        # is smaller: settled history before the window was left out.
+        mine = load_projection_history(
+            str(self.vehicle.pk), self.clock.now, organization_id=str(self.org.pk)
+        )
+        all_checks = CheckRecord.objects.filter(vehicle=self.vehicle).count()
+        self.assertLess(len(mine.check_records), all_checks)
+
+    def test_a_seeded_history_gives_the_same_answers(self):
+        self.assert_seed(6301)
+
+    def test_another_seed_gives_the_same_answers(self):
+        self.assert_seed(6302)
+
+
+DAYS = 60  # 2 checks a day: well past the window's own evidence (about 81 rows)
+
+
+class LongHistoryTests(ReferenceAssertions, ObligationLinkCleanupMixin, AttentionCase):
+    """Weeks of daily checks: past the row bound, and the attention search's hard cases."""
+
+    def setUp(self):
+        super().setUp()
+        self.bind(vehicle=self.vehicles[1], reconcile=False)
+        self.masks_at = None
+        for day in range(DAYS):
+            self.clock.set(self.at(days=day, hours=5, minutes=30))
+            self.assertEqual(self.generate().failures, [])
+            for vehicle in self.vehicles[:2]:
+                self.record(self.suction, vehicle=vehicle)
+                self.record(self.siren, vehicle=vehicle)
+            if day == 0:  # masks are checked once, weeks before the reads
+                self.masks_at = str(self.record(self.masks, quantity=6).body["check_id"])
+
+    def test_history_past_the_row_bound_loads_for_a_vehicle_and_a_page(self):
+        org, a = str(self.org.pk), str(self.vehicle.pk)
+        history = load_projection_history(a, self.clock.now, organization_id=org)
+        # The bound is set just large enough for what the window needs, and the vehicle's whole
+        # check history is past it: the reference refuses, the bounded reader does not.
+        bound = max(len(value) for value in vars(history).values() if isinstance(value, tuple))
+        sizes = {k: len(v) for k, v in vars(history).items() if isinstance(v, tuple)}
+        self.assertGreater(CheckRecord.objects.filter(vehicle=self.vehicle).count(), bound, sizes)
+        self.assertLess(sizes["check_records"], bound)
+        obligations = {o.id: o for o in history.obligations}
+        with mock.patch.object(projections, "MAX_ROWS", bound):
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                reference_history(org, a, obligations, None, self.clock.now)
+            self.assertEqual(
+                load_projection_history(a, self.clock.now, organization_id=org), history
+            )
+            page = load_projection_histories(
+                [str(v.pk) for v in self.vehicles[:2]], self.clock.now, organization_id=org
+            )
+            self.assertEqual(page[a], history)
+        self.assert_same_as_reference(self.clock.now, vehicles=self.vehicles[:2])
+
+    def test_an_invalidated_newest_chain_falls_back_to_the_one_before(self):
+        newest = str(self.record(self.suction).body["check_id"])
+        invalidate_chain(
+            check_id=newest, explanation="Synthetic invalidation.", **self.context(self.admin)
+        )
+        failed = str(self.failed(self.siren).body["check_id"])
+        invalidate_chain(
+            check_id=failed, explanation="Synthetic invalidation.", **self.context(self.admin)
+        )
+        self.assert_same_as_reference(self.clock.now)
+        suction = self.row(self.suction)
+        self.assertNotEqual(suction.latest_check_id, newest)
+        self.assertEqual(
+            suction.latest_check_id,
+            str(
+                CheckRecord.objects.filter(vehicle=self.vehicle, item=self.suction)
+                .exclude(pk=newest)
+                .latest("recorded_at")
+                .pk
+            ),
+        )
+
+    def test_an_item_unchecked_for_weeks_still_shows_its_last_check(self):
+        self.assertEqual(self.row(self.masks).latest_check_id, self.masks_at)
+        self.assert_same_as_reference(self.clock.now)
+
+
+class PageBoundTests(ObligationLinkCleanupMixin, AttentionCase):
+    def test_the_row_bound_is_per_vehicle_on_a_page(self):
+        self.bind(vehicle=self.vehicles[1], reconcile=False)
+        self.assertEqual(self.generate().failures, [])
+        org = str(self.org.pk)
+        ids = [str(v.pk) for v in self.vehicles[:2]]
+        each = [
+            len(load_projection_history(v, self.clock.now, organization_id=org).selections)
+            for v in ids
+        ]
+        bound = max(each)
+        self.assertGreater(sum(each), bound)  # the page together is over one vehicle's bound
+        with mock.patch.object(projections, "MAX_ROWS", bound):
+            page = load_projection_histories(ids, self.clock.now, organization_id=org)
+            self.assertEqual([len(page[v].selections) for v in ids], each)
+        with mock.patch.object(projections, "MAX_ROWS", bound - 1):
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                load_projection_histories(ids, self.clock.now, organization_id=org)

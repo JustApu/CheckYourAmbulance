@@ -3,7 +3,7 @@
 from datetime import timedelta
 from itertools import islice
 
-from django.db.models import F
+from django.db.models import F, Max
 
 from cya.checklists.models import Vehicle
 from cya.checks.models import (
@@ -46,13 +46,22 @@ from cya.operations.models import VehicleStatusEvent
 MAX_ROWS = 10000
 MAX_PAGE_VEHICLES = 50  # vehicles one batch read accepts (issue #33)
 MAX_INTERVAL = timedelta(days=31)
+LATEST_SPAN = timedelta(days=2)  # the first window of the attention search (issue #63)
 
 
-def _bounded(rows):
-    result = tuple(islice(iter(rows), MAX_ROWS + 1))
-    if len(result) > MAX_ROWS:
+def _bounded(rows, limit=None):
+    limit = MAX_ROWS if limit is None else limit  # read at call time, so tests can lower it
+    result = tuple(islice(iter(rows), limit + 1))
+    if len(result) > limit:
         raise ValueError("projection evidence exceeds 10000 rows; narrow the due interval")
     return result
+
+
+def _per_vehicle(split):
+    """Refuse a page whose rows for any one vehicle exceed MAX_ROWS (the per-vehicle bound)."""
+    for found in split.values():
+        _bounded(found)
+    return split
 
 
 def _bounds(instant, start, end):
@@ -197,65 +206,249 @@ def _adapter_evidence(lookup, kind, organization_id, vehicle_id, ids, instant):
     return result
 
 
-def _database_history(organization_id, vehicle_id, obligations, ids, instant):
-    item_ids = {o.item_id for o in obligations.values()}
-    rows = _bounded(
+def _key(vehicle_id, item_id, kit_id):
+    return (str(vehicle_id), str(item_id), str(kit_id) if kit_id else NO_KIT)
+
+
+def _attention_roots(organization_id, keys, since, instant, limit):
+    """Roots of the check chains attention needs at every instant in [since, instant].
+
+    Attention uses each (vehicle, item, kit) key's latest effective check: a chain grows only by
+    corrections, so its effective check is its newest row, and attention takes the greatest of
+    those over chains not invalidated (attention.state.latest_checks). A history loaded at
+    `instant` must replay exactly, without the database, at any earlier instant of its window, so
+    this returns every chain with a row in (since, instant], and for each key the chains before
+    `since`, newest first, down to and including the first one still valid at `instant` (that
+    one is valid at every earlier instant too). The walk back reads (lower, upper] windows and
+    jumps to each unresolved key's next older check, so a key's settled history before that
+    chain is never read (issue #63). The result depends only on the evidence, never on how the
+    windows fell, so a page and a single vehicle agree.
+    """
+    since = min(since, instant)  # never read a check recorded after the instant
+    recent = _bounded(
         CheckRecord.objects.filter(
             organization_id=organization_id,
-            vehicle_id=vehicle_id,
-            item_id__in=item_ids,
+            vehicle_id__in=sorted({k[0] for k in keys}),
+            item_id__in=sorted({k[1] for k in keys}),
+            recorded_at__gt=since,
             recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
+        )
+        .order_by("recorded_at", "id")
+        .values_list("root_check_id", "vehicle_id", "item_id", "kit_id")[: limit + 1],
+        limit,
     )
-    roots = {r.root_check_id for r in rows}
-    decisions = _bounded(
-        CheckEvent.objects.filter(
+    roots = {str(root) for root, *key in recent if _key(*key) in keys}
+    older_chains = {}  # key -> {root: (newest recorded_at, newest id)}, chains before `since`
+    invalidated = set()
+    unresolved = set(keys)
+    upper = lower = since
+    while unresolved:
+        older = {}
+        for row in (
+            CheckRecord.objects.filter(
+                organization_id=organization_id,
+                vehicle_id__in=sorted({k[0] for k in unresolved}),
+                item_id__in=sorted({k[1] for k in unresolved}),
+                recorded_at__lte=lower,
+            )
+            .values("vehicle_id", "item_id", "kit_id")
+            .annotate(newest=Max("recorded_at"))
+        ):
+            key = _key(row["vehicle_id"], row["item_id"], row["kit_id"])
+            if key in unresolved:
+                older[key] = row["newest"]
+        unresolved &= set(older)  # a key with nothing older has nothing more to find
+        if not unresolved:
+            break
+        upper, lower = lower, max(older[k] for k in unresolved) - LATEST_SPAN
+        window = _bounded(
+            CheckRecord.objects.filter(
+                organization_id=organization_id,
+                vehicle_id__in=sorted({k[0] for k in unresolved}),
+                item_id__in=sorted({k[1] for k in unresolved}),
+                recorded_at__gt=lower,
+                recorded_at__lte=upper,
+            )
+            .order_by("recorded_at", "id")
+            .values_list("pk", "root_check_id", "vehicle_id", "item_id", "kit_id", "recorded_at")[
+                : limit + 1
+            ],
+            limit,
+        )
+        seen = set()
+        for pk, root, vehicle_id, item_id, kit_id, recorded_at in window:
+            key = _key(vehicle_id, item_id, kit_id)
+            if key not in unresolved:
+                continue
+            by_root = older_chains.setdefault(key, {})
+            root, newest = str(root), (recorded_at, str(pk))
+            if root not in by_root or newest > by_root[root]:
+                by_root[root] = newest
+            seen.add(root)
+        if seen:
+            invalidated.update(
+                str(root)
+                for root in _bounded(
+                    CheckEvent.objects.filter(
+                        organization_id=organization_id,
+                        root_check_id__in=sorted(seen),
+                        event_type="INVALIDATION",
+                        recorded_at__lte=instant,
+                    ).values_list("root_check_id", flat=True)[: limit + 1],
+                    limit,
+                )
+            )
+        unresolved = {
+            k for k in unresolved if all(r in invalidated for r in older_chains.get(k, {}))
+        }
+    for by_root in older_chains.values():
+        for root, _newest in sorted(by_root.items(), key=lambda item: item[1], reverse=True):
+            roots.add(root)
+            if root not in invalidated:
+                break
+    return roots
+
+
+def _history(organization_id, obligations, since, instant, limit):
+    """{vehicle id: check and deficiency evidence} for the obligations of one or more vehicles.
+
+    Reads only the checks the projection of those obligations needs at `instant` (issue #63):
+    the correction chains linked to them, the chains attention needs (_attention_roots), and the
+    decisions and determination supports of those. A vehicle's whole check history is never
+    read. Deficiencies are read in full, as before: states list resolved ones too.
+    `limit` bounds each query; every vehicle's rows are also bounded by MAX_ROWS.
+    """
+    vehicle_ids = list(obligations)
+    owner = {oid: vehicle_id for vehicle_id, by_id in obligations.items() for oid in by_id}
+    keys = {
+        _key(vehicle_id, o.item_id, o.kit_instance_id)
+        for vehicle_id, by_id in obligations.items()
+        for o in by_id.values()
+    }
+    links = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                CheckObligationLink.objects.filter(
+                    organization_id=organization_id,
+                    obligation_id__in=sorted(owner),
+                    check_record__vehicle_id__in=vehicle_ids,
+                    recorded_at__lte=instant,
+                )
+                .annotate(record_vehicle_id=F("check_record__vehicle_id"))
+                .order_by("recorded_at", "id")[: limit + 1],
+                limit,
+            ),
+            # The obligation and the check must be on the same vehicle.
+            lambda link: (
+                owner[str(link.obligation_id)]
+                if owner.get(str(link.obligation_id)) == str(link.record_vehicle_id)
+                else None
+            ),
+            vehicle_ids,
+        )
+    )
+    linked = sorted({str(link.check_record_id) for found in links.values() for link in found})
+    roots = {
+        str(root)
+        for root in _bounded(
+            CheckRecord.objects.filter(organization_id=organization_id, pk__in=linked).values_list(
+                "root_check_id", flat=True
+            )[: limit + 1],
+            limit,
+        )
+    }
+    roots |= _attention_roots(organization_id, keys, since, instant, limit)
+    records = _bounded(
+        CheckRecord.objects.filter(
             organization_id=organization_id,
-            root_check_id__in=roots,
+            vehicle_id__in=vehicle_ids,
+            root_check_id__in=sorted(roots),
             recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
+        ).order_by("recorded_at", "id")[: limit + 1],
+        limit,
     )
-    links = _bounded(
-        CheckObligationLink.objects.filter(
-            organization_id=organization_id,
-            obligation_id__in=ids,
-            check_record__vehicle_id=vehicle_id,
-            recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
+    rows = _per_vehicle(_by_vehicle(records, lambda r: str(r.vehicle_id), vehicle_ids))
+    root_owner = {str(r.root_check_id): str(r.vehicle_id) for r in records}
+    decisions = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                CheckEvent.objects.filter(
+                    organization_id=organization_id,
+                    root_check_id__in=sorted(root_owner),
+                    recorded_at__lte=instant,
+                ).order_by("recorded_at", "id")[: limit + 1],
+                limit,
+            ),
+            lambda e: root_owner.get(str(e.root_check_id)),
+            vehicle_ids,
+        )
     )
-    supports = _bounded(
-        DeterminationCheck.objects.filter(
-            organization_id=organization_id,
-            determination__obligation_id__in=ids,
-            recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
+    supports = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                DeterminationCheck.objects.filter(
+                    organization_id=organization_id,
+                    determination__obligation_id__in=sorted(owner),
+                    recorded_at__lte=instant,
+                )
+                .annotate(for_obligation_id=F("determination__obligation_id"))
+                .order_by("recorded_at", "id")[: limit + 1],
+                limit,
+            ),
+            lambda s: owner.get(str(s.for_obligation_id)),
+            vehicle_ids,
+        )
     )
-    headers = _bounded(
+    # Every deficiency of the vehicle by the instant: projection states list each one that
+    # applies to their item, resolved ones too. Deficiencies are rare next to checks, so this
+    # stays far below the bound for years (issue #63 bounds the check reads).
+    header_rows = _bounded(
         Deficiency.objects.filter(
             organization_id=organization_id,
-            vehicle_id=vehicle_id,
+            vehicle_id__in=vehicle_ids,
             recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
+        ).order_by("recorded_at", "id")[: limit + 1],
+        limit,
     )
-    deficiency_ids = [d.pk for d in headers]
+    headers = _per_vehicle(_by_vehicle(header_rows, lambda d: str(d.vehicle_id), vehicle_ids))
+    deficiency_owner = {str(d.pk): str(d.vehicle_id) for d in header_rows}
     scope = _bounded(
         DeficiencyAffectedItem.objects.filter(
             organization_id=organization_id,
-            deficiency_id__in=deficiency_ids,
+            deficiency_id__in=sorted(deficiency_owner),
             recorded_at__lte=instant,
-        ).order_by("id")[: MAX_ROWS + 1]
+        ).order_by("id")[: limit + 1],
+        limit,
     )
-    items = {}
+    affected = {}
     for row in scope:
-        items.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
-    events = _bounded(
-        DeficiencyEvent.objects.filter(
-            organization_id=organization_id,
-            deficiency_id__in=deficiency_ids,
-            recorded_at__lte=instant,
-        ).order_by("sequence", "id")[: MAX_ROWS + 1]
+        affected.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
+    events = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                DeficiencyEvent.objects.filter(
+                    organization_id=organization_id,
+                    deficiency_id__in=sorted(deficiency_owner),
+                    recorded_at__lte=instant,
+                ).order_by("sequence", "id")[: limit + 1],
+                limit,
+            ),
+            lambda e: deficiency_owner.get(str(e.deficiency_id)),
+            vehicle_ids,
+        )
     )
-    return _history_fields(rows, decisions, links, supports, headers, items, events)
+    return {
+        v: _history_fields(
+            rows[v], decisions[v], links[v], supports[v], headers[v], affected, events[v]
+        )
+        for v in vehicle_ids
+    }
+
+
+def _database_history(organization_id, vehicle_id, obligations, since, instant):
+    return _history(organization_id, {vehicle_id: obligations}, since, instant, MAX_ROWS)[
+        vehicle_id
+    ]
 
 
 def _history_fields(rows, decisions, links, supports, headers, items, events):
@@ -386,7 +579,7 @@ def load_projection_history(
         ).order_by("sequence")[: MAX_ROWS + 1]
     )
     return ProjectionHistory(
-        **_database_history(organization_id, vehicle_id, obligations, ids, instant_T),
+        **_database_history(organization_id, vehicle_id, obligations, start, instant_T),
         organization_id=organization_id,
         use_stored_checks=check_lookup is None,
         obligations=tuple(obligations.values()),
@@ -432,6 +625,7 @@ def _page_suspensions(organization_id, obligations, instant):
     result = {vehicle_id: [] for vehicle_id in vehicle_ids}
     if not owner:
         return {vehicle_id: () for vehicle_id in vehicle_ids}
+    page = MAX_ROWS * len(vehicle_ids)
     wanted = _bounded(
         Obligation.objects.filter(
             organization_id=organization_id,
@@ -441,8 +635,9 @@ def _page_suspensions(organization_id, obligations, instant):
         )
         .order_by("id")
         .values_list("pk", "vehicle_id", "item_id", "kit_instance_id", "recorded_at", "grace_at")[
-            : MAX_ROWS + 1
-        ]
+            : page + 1
+        ],
+        page,
     )
     by_key = {}
     for pk, vehicle_id, item_id, kit_id, recorded_at, grace_at in wanted:
@@ -456,7 +651,8 @@ def _page_suspensions(organization_id, obligations, instant):
             vehicle_id__in=vehicle_ids,
             item_id__in={key[1] for key in by_key},
             recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
+        ).order_by("recorded_at", "id")[: page + 1],
+        page,
     )
     ended = {str(r.prior_suspension_id): r.recorded_at for r in rows if r.action == "END"}
     for row in rows:
@@ -477,107 +673,10 @@ def _page_suspensions(organization_id, obligations, instant):
     return {vehicle_id: _bounded(found) for vehicle_id, found in result.items()}
 
 
-def _page_database_history(organization_id, obligations, instant):
+def _page_database_history(organization_id, obligations, since, instant):
     """_database_history for every vehicle of a page, from one query per evidence kind."""
-    vehicle_ids = list(obligations)
-    owner = {oid: vehicle_id for vehicle_id, by_id in obligations.items() for oid in by_id}
-    items = {
-        vehicle_id: {o.item_id for o in by_id.values()} for vehicle_id, by_id in obligations.items()
-    }
-    records = _bounded(
-        CheckRecord.objects.filter(
-            organization_id=organization_id,
-            vehicle_id__in=vehicle_ids,
-            item_id__in=set().union(*items.values()),
-            recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
-    )
-    # Vehicles share checklist items: keep a record only for an item of its own vehicle's window.
-    rows = _by_vehicle(
-        records,
-        lambda r: str(r.vehicle_id) if str(r.item_id) in items[str(r.vehicle_id)] else None,
-        vehicle_ids,
-    )
-    root_owner = {str(r.root_check_id): v for v, found in rows.items() for r in found}
-    decisions = _by_vehicle(
-        _bounded(
-            CheckEvent.objects.filter(
-                organization_id=organization_id,
-                root_check_id__in=sorted(root_owner),
-                recorded_at__lte=instant,
-            ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
-        ),
-        lambda e: root_owner.get(str(e.root_check_id)),
-        vehicle_ids,
-    )
-    links = _by_vehicle(
-        _bounded(
-            CheckObligationLink.objects.filter(
-                organization_id=organization_id,
-                obligation_id__in=sorted(owner),
-                check_record__vehicle_id__in=vehicle_ids,
-                recorded_at__lte=instant,
-            )
-            .annotate(record_vehicle_id=F("check_record__vehicle_id"))
-            .order_by("recorded_at", "id")[: MAX_ROWS + 1]
-        ),
-        # The per-vehicle query needs the obligation and the check on the same vehicle.
-        lambda link: (
-            owner[str(link.obligation_id)]
-            if owner.get(str(link.obligation_id)) == str(link.record_vehicle_id)
-            else None
-        ),
-        vehicle_ids,
-    )
-    supports = _by_vehicle(
-        _bounded(
-            DeterminationCheck.objects.filter(
-                organization_id=organization_id,
-                determination__obligation_id__in=sorted(owner),
-                recorded_at__lte=instant,
-            )
-            .annotate(for_obligation_id=F("determination__obligation_id"))
-            .order_by("recorded_at", "id")[: MAX_ROWS + 1]
-        ),
-        lambda s: owner.get(str(s.for_obligation_id)),
-        vehicle_ids,
-    )
-    header_rows = _bounded(
-        Deficiency.objects.filter(
-            organization_id=organization_id,
-            vehicle_id__in=vehicle_ids,
-            recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
-    )
-    headers = _by_vehicle(header_rows, lambda d: str(d.vehicle_id), vehicle_ids)
-    deficiency_owner = {str(d.pk): str(d.vehicle_id) for d in header_rows}
-    scope = _bounded(
-        DeficiencyAffectedItem.objects.filter(
-            organization_id=organization_id,
-            deficiency_id__in=sorted(deficiency_owner),
-            recorded_at__lte=instant,
-        ).order_by("id")[: MAX_ROWS + 1]
-    )
-    affected = {}
-    for row in scope:
-        affected.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
-    events = _by_vehicle(
-        _bounded(
-            DeficiencyEvent.objects.filter(
-                organization_id=organization_id,
-                deficiency_id__in=sorted(deficiency_owner),
-                recorded_at__lte=instant,
-            ).order_by("sequence", "id")[: MAX_ROWS + 1]
-        ),
-        lambda e: deficiency_owner.get(str(e.deficiency_id)),
-        vehicle_ids,
-    )
-    return {
-        v: _history_fields(
-            rows[v], decisions[v], links[v], supports[v], headers[v], affected, events[v]
-        )
-        for v in vehicle_ids
-    }
+    limit = MAX_ROWS * max(1, len(obligations))
+    return _history(organization_id, obligations, since, instant, limit)
 
 
 def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=None, end=None):
@@ -586,9 +685,10 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
     Each query of the per-vehicle loader runs once for the page (vehicle_id__in, or the page's
     obligation, check and deficiency ids) and its rows are split by vehicle in the same order, so
     each vehicle's ProjectionHistory equals the per-vehicle loader's with its default adapters
-    (stored checks and suspensions, ad hoc orders due in the interval). The row bound applies to
-    each page-wide query: more than MAX_ROWS rows is refused, never cut, and a caller that hits
-    it reads fewer vehicles at a time. At most MAX_PAGE_VEHICLES distinct vehicles; an unknown or
+    (stored checks and suspensions, ad hoc orders due in the interval). The row bound is per
+    vehicle, as for the per-vehicle loader: a page-wide query reads at most MAX_ROWS rows for each
+    vehicle of the page, and more than MAX_ROWS rows for any one vehicle is refused, never cut
+    (issue #63; before, one bound for the whole page refused pages of large vehicles). At most MAX_PAGE_VEHICLES distinct vehicles; an unknown or
     other organization's vehicle raises Vehicle.DoesNotExist, as the per-vehicle loader does. The
     caller supplies trusted organization scope and performs request authorization.
     """
@@ -602,36 +702,43 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
     known = Vehicle.objects.filter(organization_id=organization_id, pk__in=vehicle_ids)
     if {str(pk) for pk in known.values_list("pk", flat=True)} != set(vehicle_ids):
         raise Vehicle.DoesNotExist("a requested vehicle does not exist in this organization")
-    selections = _by_vehicle(
-        _bounded(
-            ObligationSelection.objects.filter(
-                organization_id=organization_id,
-                vehicle_id__in=vehicle_ids,
-                due_at__gte=start,
-                due_at__lte=end,
-                recorded_at__lte=instant_T,
-            )
-            .select_related("selected_obligation__requirement_version")
-            .order_by("sequence", "id")[: MAX_ROWS + 1]
-        ),
-        lambda e: str(e.vehicle_id),
-        vehicle_ids,
+    page = MAX_ROWS * len(vehicle_ids)
+    selections = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                ObligationSelection.objects.filter(
+                    organization_id=organization_id,
+                    vehicle_id__in=vehicle_ids,
+                    due_at__gte=start,
+                    due_at__lte=end,
+                    recorded_at__lte=instant_T,
+                )
+                .select_related("selected_obligation__requirement_version")
+                .order_by("sequence", "id")[: page + 1],
+                page,
+            ),
+            lambda e: str(e.vehicle_id),
+            vehicle_ids,
+        )
     )
-    adhoc = _by_vehicle(
-        _bounded(
-            Obligation.objects.filter(
-                organization_id=organization_id,
-                vehicle_id__in=vehicle_ids,
-                routine=False,
-                recorded_at__lte=instant_T,
-                due_at__gte=start,
-                due_at__lte=end,
-            )
-            .select_related("requirement_version")
-            .order_by("id")[: MAX_ROWS + 1]
-        ),
-        lambda o: str(o.vehicle_id),
-        vehicle_ids,
+    adhoc = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                Obligation.objects.filter(
+                    organization_id=organization_id,
+                    vehicle_id__in=vehicle_ids,
+                    routine=False,
+                    recorded_at__lte=instant_T,
+                    due_at__gte=start,
+                    due_at__lte=end,
+                )
+                .select_related("requirement_version")
+                .order_by("id")[: page + 1],
+                page,
+            ),
+            lambda o: str(o.vehicle_id),
+            vehicle_ids,
+        )
     )
     obligations = {}
     for vehicle_id in vehicle_ids:
@@ -645,31 +752,37 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
         _bounded(by_id.values())
         obligations[vehicle_id] = by_id
     owner = {oid: vehicle_id for vehicle_id, by_id in obligations.items() for oid in by_id}
-    determinations = _by_vehicle(
-        _bounded(
-            ObligationDetermination.objects.filter(
-                organization_id=organization_id,
-                obligation_id__in=sorted(owner),
-                recorded_at__lte=instant_T,
-            )
-            .select_related("rule")
-            .order_by("recorded_at", "id")[: MAX_ROWS + 1]
-        ),
-        lambda d: owner.get(str(d.obligation_id)),
-        vehicle_ids,
+    determinations = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                ObligationDetermination.objects.filter(
+                    organization_id=organization_id,
+                    obligation_id__in=sorted(owner),
+                    recorded_at__lte=instant_T,
+                )
+                .select_related("rule")
+                .order_by("recorded_at", "id")[: page + 1],
+                page,
+            ),
+            lambda d: owner.get(str(d.obligation_id)),
+            vehicle_ids,
+        )
     )
-    statuses = _by_vehicle(
-        _bounded(
-            VehicleStatusEvent.objects.filter(
-                organization_id=organization_id,
-                vehicle_id__in=vehicle_ids,
-                recorded_at__lte=instant_T,
-            ).order_by("sequence", "id")[: MAX_ROWS + 1]
-        ),
-        lambda s: str(s.vehicle_id),
-        vehicle_ids,
+    statuses = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                VehicleStatusEvent.objects.filter(
+                    organization_id=organization_id,
+                    vehicle_id__in=vehicle_ids,
+                    recorded_at__lte=instant_T,
+                ).order_by("sequence", "id")[: page + 1],
+                page,
+            ),
+            lambda s: str(s.vehicle_id),
+            vehicle_ids,
+        )
     )
-    database = _page_database_history(organization_id, obligations, instant_T)
+    database = _page_database_history(organization_id, obligations, start, instant_T)
     suspensions = _page_suspensions(organization_id, obligations, instant_T)
     return {
         vehicle_id: ProjectionHistory(
