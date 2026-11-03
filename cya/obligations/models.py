@@ -344,6 +344,12 @@ class Obligation(Evidence):
             ),
             actor_kind("obligation_actor_kind"),
         ]
+        indexes = [
+            # Window reads by due instant, without the vehicle's older rows (issue #63).
+            models.Index(
+                fields=["organization", "vehicle", "due_at"], name="obligation_vehicle_due"
+            ),
+        ]
 
     def __str__(self):
         return f"Obligation {self.pk}"
@@ -425,6 +431,12 @@ class ObligationSelection(Evidence):
                     )
                 ),
                 name="selection_shape",
+            ),
+        ]
+        indexes = [
+            # Window reads by due instant, without the vehicle's older rows (issue #63).
+            models.Index(
+                fields=["organization", "vehicle", "due_at"], name="selection_vehicle_due"
             ),
         ]
 

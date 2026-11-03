@@ -448,13 +448,19 @@ def rebuild_vehicle_projection(
                     suspensions=history.suspensions,
                 )
             )
+    # Each item's deficiencies, in their original order: checking every deficiency against every
+    # obligation grew with the vehicle's whole history (issue #63).
+    by_item = {}
+    for d in deficiencies:
+        for item_id in d.item_ids:
+            by_item.setdefault(item_id, []).append(d)
     result = [
         replace(
             r,
             attention=attention[(r.obligation.item_id, r.obligation.kit_instance_id or NO_KIT)],
             deficiencies=tuple(
                 d
-                for d in deficiencies
+                for d in by_item.get(r.obligation.item_id, ())
                 if applies(d, r.obligation.item_id, r.obligation.kit_instance_id or NO_KIT)
             ),
         )
