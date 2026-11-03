@@ -618,7 +618,7 @@ listed there, with the same results.
 | SSH/firewall | Operator and deputy access survives policy reload; only HTTPS and restricted SSH exposed; DB/upstream denied externally over IPv4/IPv6 | Partial: only 22/80/443 answer, database and upstream unreachable, no global IPv6. SSH source restriction deferred by owner decision (2026-11-02; compensating controls in place); deputy access untested |
 | TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling; port 80 closed, or serving only ACME HTTP-01 and redirecting everything else (DEP-10) | Partial: trusted certificate, unknown-name rejection, staging issuance, renewal dry run and timer passed; port 80 serves only ACME challenges and redirects the rest; renewal-failure alert waits for issue #8 |
 | Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Passed (2026-11-02): spoofed headers overwritten; a signed-in HTTPS form POST (role change) succeeded; missing token and `http` Origin refused; HSTS observed; session cookie Secure, HttpOnly and SameSite=Strict confirmed in the owner's browser |
-| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed; signing-key rotation and reauthentication not yet exercised |
+| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed (Rocky). Signing-key rotation and reauthentication passed on Ubuntu (2026-11-03): the new key was generated on the host and written to the three root-only files, the application restarted, the existing session was refused at once and a new Google sign-in succeeded and was audited. Google's silent re-sign-in made it invisible to the user, so do not rely on users noticing a rotation. Rocky's key was not rotated |
 | MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Passed for restart and reboot (2026-11-02); persistence after a rebuild belongs to the issue #7 restore rehearsal |
 | Runtime isolation | Fresh runtime verification and system/deploy checks pass; negative UPDATE/DELETE tests use synthetic disposable rows only | Passed (2026-11-02): runtime and deploy checks pass; runtime refused (1142) for UPDATE, DELETE and DDL; on real sign-in rows the schema owner was refused (1644, append-only) for UPDATE and DELETE on audit, receipt and role-grant tables, each inside a rolled-back transaction |
 | Schedule and bindings | Agency schedule rules and checklist bindings are present; initial obligation generation succeeds and is idempotent | Pending: synthetic organization only; agency rules and real checklists (OQ-01) not loaded |
@@ -689,7 +689,7 @@ Results:
   committed a receipt, role row and audit record; the schema owner was refused (1644)
   for UPDATE and DELETE on those real rows; no server errors after sign-in was configured.
 - **Pending:** an authorized WebSocket connection, recheck and reconnect (no vehicles
-  loaded); signing-key rotation and reauthentication;
+  loaded); signing-key rotation and reauthentication (done on Ubuntu instead);
   agency rules and real checklists; alert delivery (issue #8); deputy access (SSH source
   restriction deferred by owner decision); interrupted-migration recovery and prior-code
   compatibility; host teardown. The port-80 rule is now DEP-10 (SPEC 1.23.0, issue #48).
@@ -749,7 +749,11 @@ Results:
   application's 429 with `Retry-After`, then nginx's 429. Same-operation replay through
   `cya-manage` on both hosts: a repeated command returned the stored answer and wrote nothing;
   a changed body under the same operation ID got the original answer flagged as reused (409 at
-  the API) and wrote nothing.
+  the API) and wrote nothing. Signing-key rotation: a new key generated on the host replaced
+  the shared key in the three root-only files and the application restarted; the owner's
+  existing session cookie was refused at once (302 to sign-in) and Google signed the owner in
+  again within a second without showing a page, so the rotation was not visible to the user;
+  the new sign-in was audited and no key value appeared in any output or log.
 - **Found during the rehearsal** (now in the profile): no firewall tool in the image;
   MariaDB 11's default collation; the nginx worker user and modules path; the
   redirect-address setting.
