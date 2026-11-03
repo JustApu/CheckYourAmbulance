@@ -1,0 +1,47 @@
+#!/bin/bash
+# Restore the newest full backup into a new database and replay the shipped binary logs up to a
+# chosen instant (SPEC DEP-6, DEP-9; issue #7). Run as root by authorized personnel on the
+# throwaway restore host, which holds the custodian's private key; never on the database host.
+#
+#   cya-restore <store directory> <GnuPG home> <source database> <target database> '<stop UTC>'
+#
+# The stop instant is UTC ('YYYY-MM-DD HH:MM:SS'): events at or after it are not applied. The
+# target must not exist. Restored writes are not binary-logged. Timings are reported per step.
+set -euo pipefail
+[ $# -eq 5 ] || { echo "usage: cya-restore <store dir> <gnupg home> <source db> <target db> '<stop UTC>'" >&2; exit 2; }
+store=$1 gnupg=$2 source_db=$3 target=$4 stop=$5
+[[ "$target" =~ ^[a-z][a-z0-9_]{0,63}$ && "$source_db" =~ ^[a-z][a-z0-9_]{0,63}$ ]] || { echo "cya-restore: bad database name" >&2; exit 2; }
+[[ "$stop" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]] || { echo "cya-restore: stop must be 'YYYY-MM-DD HH:MM:SS' UTC" >&2; exit 2; }
+if [ -n "$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$target'")" ]; then
+  echo "cya-restore: database $target already exists" >&2; exit 1
+fi
+# No match is not an error here: the check below reports it.
+full=$(ls "$store"/full-"$source_db"-*.sql.gz.gpg 2>/dev/null | sort | tail -1 || true)
+[ -n "$full" ] || { echo "cya-restore: no full backup of $source_db in $store" >&2; exit 1; }
+work=$(mktemp -d "${CYA_RESTORE_TMP:-/var/tmp}/cya-restore.XXXXXX")  # override: tests only
+trap 'rm -rf "$work"' EXIT
+decrypt() { gpg --homedir "$gnupg" --batch --quiet --decrypt "$1"; }
+t0=$(date +%s)
+# The dump's binary-log position: CHANGE MASTER TO MASTER_LOG_FILE='...', MASTER_LOG_POS=...;
+position=$(decrypt "$full" | gunzip | head -n 60 | grep -m1 "CHANGE MASTER TO" || true)
+log_file=$(sed -nE "s/.*MASTER_LOG_FILE='([^']+)'.*/\1/p" <<<"$position")
+log_pos=$(sed -nE "s/.*MASTER_LOG_POS=([0-9]+).*/\1/p" <<<"$position")
+[ -n "$log_file" ] && [ -n "$log_pos" ] || { echo "cya-restore: no binary-log position in $full" >&2; exit 1; }
+mariadb -e "CREATE DATABASE \`$target\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+{ echo "SET SESSION sql_log_bin=0;"; decrypt "$full" | gunzip; } | mariadb "$target"
+t1=$(date +%s)
+echo "cya-restore: full $(basename "$full") loaded seconds=$((t1 - t0)) position=$log_file:$log_pos"
+files=()
+for encrypted in $(ls "$store"/binlog-*.gz.gpg 2>/dev/null | sort || true); do
+  name=$(basename "$encrypted" .gz.gpg); name=${name#binlog-}
+  [[ "$name" < "$log_file" ]] && continue
+  decrypt "$encrypted" | gunzip >"$work/$name"
+  files+=("$work/$name")
+done
+[ "${files[0]:-}" = "$work/$log_file" ] || { echo "cya-restore: binary log $log_file was not shipped" >&2; exit 1; }
+# --database names the source: mariadb-binlog filters before it rewrites (checked on 11.8).
+{ echo "SET SESSION sql_log_bin=0;"
+  TZ=UTC mariadb-binlog --rewrite-db="$source_db->$target" --database="$source_db" \
+    --start-position="$log_pos" --stop-datetime="$stop" "${files[@]}"; } | mariadb "$target"
+t2=$(date +%s)
+echo "cya-restore: replayed ${#files[@]} binary logs to '$stop' UTC seconds=$((t2 - t1)) total_seconds=$((t2 - t0))"
