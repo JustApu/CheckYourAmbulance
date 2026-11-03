@@ -760,9 +760,9 @@ Results:
 - **Full test suite (2026-11-03, source `05cb656`)**, run on each rehearsal host as a detached
   unit under an unprivileged test identity with a temporary DBA-level test account (dropped
   afterwards), `--parallel 8`, durability relaxed as in CI and restored afterwards:
-  - Rocky Linux 9 (MariaDB 10.11.18, Python 3.12): 1,825 tests passed (59 skipped); the
+  - Rocky Linux 9 (MariaDB 10.11.18, Python 3.12): 1,825 tests ran: 1,766 passed and 59 skipped; the
     helper and authorization-policy tests passed; 77 minutes in all, 74 for the suite.
-  - Ubuntu 26.04 (MariaDB 11.8.6, Python 3.14): 1,820 passed, 59 skipped; 101 minutes in all,
+  - Ubuntu 26.04 (MariaDB 11.8.6, Python 3.14): of 1,825, 1,761 passed and 59 skipped; 101 minutes in all,
     98.5 for the suite. Failures: the deliberate `test_server_is_mariadb_10_11` version check,
     and four network-guard tests, because on Python 3.14 parallel workers start by
     `forkserver` and do not install the test network guard
