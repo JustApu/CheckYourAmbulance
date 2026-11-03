@@ -87,8 +87,13 @@
 {% endif %}
 {% if suspensions %}
 <section class="panel"><h2>Check suspensions</h2>
-<p>A suspended check is never a Pass. Suspensions end automatically when the deficiency is closed or Reported in Error; there is no other way to end one.</p>
-<ul>{% for row in suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended from {{ row.started_at|date:"Y-m-d H:i" }} UTC{% if row.ended_at %}; ended {{ row.ended_at|date:"Y-m-d H:i" }} UTC ({{ row.end_label }}){% else %}; in force{% endif %}{% if row.explanation %}<p>{{ row.explanation }}</p>{% endif %}</li>{% endfor %}</ul>
+<p>A suspended check is never a Pass. Suspensions end automatically when the deficiency is closed or Reported in Error. A supervisor or administrator may also end one early while the deficiency is open; the check is then required again on its normal schedule.</p>
+<ul>{% for row in suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended from {{ row.started_at|date:"Y-m-d H:i" }} UTC{% if row.ended_at %}; ended {{ row.ended_at|date:"Y-m-d H:i" }} UTC ({{ row.end_label }}){% else %}; in force{% endif %}{% if row.explanation %}<p>{{ row.explanation }}</p>{% endif %}{% if not row.ended_at and supervisor.can_end_suspensions %}
+<form class="workflow-write" data-kind="end-suspension" data-url="{% url 'api-deficiency-check-suspension-ends' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}" data-suspension="{{ row.suspension_id }}">
+{% csrf_token %}<label>Why end it now (optional) <textarea name="explanation" maxlength="4000"></textarea></label>
+<button type="submit" class="button">End suspension</button>
+<p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>{% endif %}</li>{% endfor %}</ul>
 </section>
 {% endif %}
 {% if supervisor.shown %}

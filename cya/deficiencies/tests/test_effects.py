@@ -69,6 +69,7 @@ class DecisionTests(TestCase):
                 "EMPTY_SCOPE_CLOSED",
                 "VERIFICATION_REOPENED",
                 "CHECKS_SUSPENDED",
+                "SUSPENSION_ENDED",
             },
         )
         self.assertNotIn("PROGRESS_NOTE", effects.NEUTRAL_EVENT_TYPES)  # a note may describe repair

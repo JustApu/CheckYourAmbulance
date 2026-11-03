@@ -25,7 +25,7 @@ adds [Awaiting External Dependency and progress notes](#awaiting-external-depend
 | `deficiency_event` | A | Append-only lifecycle events; status is the latest event's `to_status` |
 | `verification_scope_row` | A | Append-only correction-time scope revision; item and checklist definition plus physical kit instance, or explicit no-kit key; required-after instant |
 | `deficiency_scope_expansion` | A | Items (definition, physical kit instance or no-kit key) a supervisor added with `SCOPE_EXPANDED` or `VERIFICATION_ADDED`; every later correction's scope includes them ([issue #156](https://github.com/JustApu/CheckYourAmbulance-archive/issues/156)) |
-| `check_suspension` | A | `START` of a supervisor suspension of one routine check (item and physical kit instance, or no-kit key) and its `END`, written by the event that closed or cancelled the deficiency ([issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13)) |
+| `check_suspension` | A | `START` of a supervisor suspension of one routine check (item and physical kit instance, or no-kit key) and its `END`, written by the event that closed or cancelled the deficiency ([issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13)) or by an early `SUSPENSION_ENDED` ([issue #32](https://github.com/JustApu/CheckYourAmbulance/issues/32)) |
 | `deficiency_evidence` | A | What supports the deficiency: a Failed or Unable check today. Never removed |
 | `deficiency_link` | A | Informational `ADD`/`REMOVE` history of a pair, stored lower id first |
 | `deficiency_age_rule` | A | Administrator-set revisions of the age-highlight rule: thresholds in days and the long-running test; none until configured (SPEC DEF-6, [issue #150](https://github.com/JustApu/CheckYourAmbulance-archive/issues/150)) |
@@ -361,7 +361,7 @@ active physical kit instances on the vehicle (`KIT_REQUIRED`), and any other ite
 
 ## Supervisor check suspension
 
-[issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13); SPEC §8.9 SUS-1 to SUS-4, §5.4, VW-2, AC-18. Code: `cya/deficiencies/suspension.py`, the
+[issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13) and [issue #32](https://github.com/JustApu/CheckYourAmbulance/issues/32); SPEC §8.9 SUS-1 to SUS-5, §5.4, VW-2, AC-18. Code: `cya/deficiencies/suspension.py`, the
 closing commands, and the obligation and attention readers ([obligation state](obligation-state.md#check-and-suspension-adapters),
 [attention views](attention-views.md#the-checklist-query)).
 
@@ -395,14 +395,31 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   orders (ADH-1) are not routine and are never suspended. See
   [obligation state](obligation-state.md#pure-evaluator-and-precedence) for the instant at which a
   suspension is judged.
-- **Ending.** Nothing ends a suspension except the deficiency leaving the active statuses: verified
-  closure (SUS-3), administrator closure, empty-scope closure and Reported in Error (SUS-4; a
-  suspension with no open deficiency is invalid). That event lists, in `suspensions_ended`, the
-  sorted ids of every `START` still in force, and the same command writes one `END` row naming each
-  (`prior_suspension_id`) and the event. Reopening (administrator, INV-7 or added verification)
-  resumes none; suspending again is a new decision with its own `START`. There is no command to end
-  a suspension by hand.
-- **Correction effects.** `CHECKS_SUSPENDED` is in `NEUTRAL_EVENT_TYPES`: it records no repair, so a
+- **Ending on closure.** The deficiency leaving the active statuses ends every suspension still in
+  force: verified closure (SUS-3), administrator closure, empty-scope closure and Reported in Error
+  (SUS-4; a suspension with no open deficiency is invalid). That event lists, in
+  `suspensions_ended`, the sorted ids of every `START` still in force, and the same command writes
+  one `END` row naming each (`prior_suspension_id`) and the event. Reopening (administrator, INV-7
+  or added verification) resumes none; suspending again is a new decision with its own `START`.
+- **Ending one early** (SUS-5, [issue #32](https://github.com/JustApu/CheckYourAmbulance/issues/32)). `POST /api/v1/deficiencies/{id}/check-suspension-ends`
+  takes `operation_id`, `expected_event_id`, `suspension_id` and an optional `explanation`
+  (nonblank, at most 4,000 characters), with the same `suspend_routine_checks` permission. The
+  deficiency must still be worked (`422 DEFICIENCY_NOT_ACTIVE`); `suspension_id` must name a
+  suspension of this deficiency (`422 SUSPENSION_NOT_FOUND`, also for another deficiency's) that is
+  still in force (`422 SUSPENSION_ALREADY_ENDED`). It appends one `SUSPENSION_ENDED` event (status
+  unchanged, the optional explanation, `suspensions_ended` listing that one id) and its `END` row,
+  in one audited transaction; the response repeats `suspensions_ended` and the item. The
+  deficiency's other suspensions, its status and the vehicle's status are unchanged, and nobody is
+  notified (owner decision 2026-11-02). One suspension per request; ending it resumes nothing later,
+  and suspending the check again is a new `START`. On obligations: one whose window is still open
+  is required again with its normal due time, and one whose window closed while suspended stays
+  `SUSPENDED` (no backfill); no extra inspection is created (a supervisor may still order one,
+  ADH-1). Replay and the stale-event 409 are as for a suspension. It takes only the deficiency
+  lock, which every writer of a `START` or `END` holds, so an early end and a closure serialize and
+  the later of the two meets a changed newest event (409): a closure never lists a suspension that
+  was ended early. Both orders are tested with two connections.
+- **Correction effects.** `CHECKS_SUSPENDED` and `SUSPENSION_ENDED` are in `NEUTRAL_EVENT_TYPES`:
+  neither records repair, so a
   later qualifying author correction still marks the deficiency Reported in Error, which then ends
   the suspensions.
 - **Locks and races.** The vehicle, checklist-template and deficiency locks are taken in the
@@ -423,6 +440,12 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   must be active on the vehicle in the item's slot; an `END` must name a `START` of the same
   deficiency, item and kit, and the closing event of its own command that lists it (and a `START` has
   at most one `END`). Rows are append-only. Reversing the migration is refused once a suspension
+  exists. Migration `0019_check_suspension_end` lets `SUSPENSION_ENDED` list one id
+  (`defevent_suspensions_closing`, and `defevent_suspension_end_shape` for its shape): the event
+  trigger requires its own receipt (`DEFICIENCY_CHECK_SUSPENSION_END`), a Supervisor or
+  Administrator role snapshot, an active, unchanged status and exactly one listed id that is a
+  `START` of the deficiency still in force; the `check_suspension` trigger lets that command write
+  the `END`, which must name the `START` its event lists. Reversing it is refused once an early end
   exists.
 - **Reader.** `GET /api/v1/deficiencies/{id}/check-suspensions` returns `deficiency_status`,
   `last_event_id`, `in_force` (the ids not yet ended) and `suspensions`: each `START` with its item,
@@ -430,9 +453,11 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   and type. `?as_of=<instant>` answers for that moment (AC-26, AC-27): an instant before the
   deficiency was reported is `404`, a malformed or naive one `400`. Any signed-in member may read it.
   The answer is bounded (`503` rather than truncated).
-- **Deficiency page.** The history lists a start as "Routine checks suspended", and an event that
-  ended suspensions shows how many ("Check suspensions ended: 1"). The suspension form and the list of
-  suspensions with when and how each ended are on the same page ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16),
+- **Deficiency page.** The history lists a start as "Routine checks suspended" and an early end
+  as "Check suspension ended early", and an event that ended suspensions shows how many ("Check
+  suspensions ended: 1"). The suspension form and the list of suspensions with when and how each
+  ended are on the same page; each suspension in force has an "End suspension" form, with an
+  optional reason, for the roles that may end it ([issue #16](https://github.com/JustApu/CheckYourAmbulance/issues/16),
   [deficiency workflows](deficiency-workflows.md#supervisor-and-administrator-actions-issue-16)). **Not built here:** the fleet dashboard ([issue #17](https://github.com/JustApu/CheckYourAmbulance/issues/17)).
 
 ## The closed transition table

@@ -273,6 +273,50 @@ class SupervisorActionTests(SupervisorUiCase):
         )
         self.assertEqual(repeat.json()["code"], "ALREADY_SUSPENDED")
 
+    def test_an_in_force_suspension_offers_an_early_end_to_supervisors_only(self):
+        # SUS-5 (issue 32): an End suspension form beside each suspension in force, for the
+        # roles that may suspend; crew see the suspension without it, and an ended one has none.
+        pk = self.report()
+        suspended = self.act(
+            self.sup, pk, "check-suspensions", items=[{"item_id": str(self.suction.pk)}]
+        )
+        self.assertEqual(suspended.status_code, 201, suspended.content)
+        (suspension_id,) = suspended.json()["result"]["suspension_ids"]
+        marker = f'data-suspension="{suspension_id}"'
+        page = self.page(self.sup, pk).content.decode()
+        self.assertIn(marker, page)
+        self.assertIn('data-kind="end-suspension"', page)
+        self.assert_every_form_can_submit(page)
+        crew_page = self.page(self.crew, pk).content.decode()
+        self.assertIn("Known Deficiency — Check Suspended", crew_page)
+        self.assertNotIn('data-kind="end-suspension"', crew_page)
+        denied = self.act(self.crew, pk, "check-suspension-ends", suspension_id=suspension_id)
+        self.assertEqual(denied.status_code, 403, denied.content)
+
+        ended = self.act(
+            self.sup,
+            pk,
+            "check-suspension-ends",
+            suspension_id=suspension_id,
+            explanation="Synthetic <b>back</b>.",
+        )
+        self.assertEqual(ended.status_code, 201, ended.content)
+        self.assertEqual(ended.json()["result"]["suspensions_ended"], [suspension_id])
+        page = self.page(self.sup, pk)
+        self.assertContains(page, "(Check suspension ended early)")  # the row's end label
+        self.assertContains(page, "Check suspension ended early")  # the history entry
+        self.assertContains(page, "Synthetic &lt;b&gt;back&lt;/b&gt;.")
+        self.assertNotContains(page, marker)
+        self.assertNotContains(page, "in force")
+        again = self.act(self.sup, pk, "check-suspension-ends", suspension_id=suspension_id)
+        self.assertEqual(
+            (again.status_code, again.json()["code"]), (422, "SUSPENSION_ALREADY_ENDED")
+        )
+        missing = self.act(self.sup, pk, "check-suspension-ends", suspension_id=str(uuid4()))
+        self.assertEqual(missing.json()["code"], "SUSPENSION_NOT_FOUND")
+        malformed = self.act(self.sup, pk, "check-suspension-ends")
+        self.assertEqual(malformed.status_code, 400, malformed.content)
+
     def test_administrator_close_and_reopen_render_labels_status_and_ended_suspension(self):
         # Issue 20: the administrator labels, the closed status and the suspension that the
         # closure ended all render, with the explanations escaped.
