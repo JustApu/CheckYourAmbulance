@@ -3,3 +3,7 @@
 bind-address = 127.0.0.1
 log_bin = mariadb-bin
 log_bin_trust_function_creators = 1
+# InnoDB's row cache. The 128 MiB default left a year of synthetic history I/O-bound in the
+# issue #7 rehearsal. Size it to the host: at least the database's size where memory allows, and
+# no more than about half of memory (1G suits the ~4 GB rehearsal hosts).
+innodb_buffer_pool_size = 1G

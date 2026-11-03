@@ -161,6 +161,11 @@ Do not use development passwords or CI's root account. The schema owner needs
 schema migration privileges and the authorized grant-installation capability;
 the runtime account must have no broad grants, roles, delegation, SUPER or DDL.
 
+Size `innodb_buffer_pool_size` to the host in the same configuration (`mariadb-cya.cnf`
+sets 1G for a host of about 4 GB): at least the database's size where memory allows,
+and no more than about half of memory. The 128 MiB default made the issue #7 rehearsal's
+year of history wait on disk for about half of its time.
+
 Persist `log_bin_trust_function_creators=1` and binary logging in MariaDB's
 server configuration; do not set them in a migration or disable logging to get
 past error 1419. Persist `bind-address=127.0.0.1`. Determine the actual loaded
