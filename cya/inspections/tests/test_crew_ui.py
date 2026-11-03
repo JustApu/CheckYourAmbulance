@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from django.test import Client, override_settings
 
+from cya.accounts.returns import sign_in_location
 from cya.attention.tests.support import AttentionCase
 from cya.checklists.models import Vehicle
 from cya.inspections.models import InspectionSession
@@ -199,7 +200,7 @@ class PageTests(CrewUiCase):
             with self.subTest(url=url):
                 response = anonymous.get(url)
                 self.assertEqual(
-                    (response.status_code, response["Location"]), (302, "/auth/login/")
+                    (response.status_code, response["Location"]), (302, sign_in_location(url))
                 )
 
     def test_the_vehicle_list_shows_active_vehicles_and_escapes_names(self):

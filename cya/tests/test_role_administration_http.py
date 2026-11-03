@@ -12,6 +12,7 @@ from django.core.management import call_command
 from django.test import Client, TransactionTestCase, override_settings
 
 from cya.accounts.models import Organization, User
+from cya.accounts.returns import sign_in_location
 from cya.authorization.models import RoleGrant
 from cya.authorization.persistence import current_role_codes
 from cya.core.models import AuditEvent, CommandReceipt
@@ -152,7 +153,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
     def test_signed_out_requests_are_redirected_and_change_nothing(self):
         before = self.counts()
         client = Client(enforce_csrf_checks=True)
-        self.assertEqual(client.get(URL)["Location"], "/auth/login/")
+        self.assertEqual(client.get(URL)["Location"], sign_in_location(URL))
         # CSRF is checked first, so a token-less signed-out POST is refused outright.
         self.assertEqual(client.post(URL, {}).status_code, 403)
         self.assertEqual(self.counts(), before)

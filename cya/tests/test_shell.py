@@ -9,6 +9,7 @@ from django.test import Client, TestCase, override_settings
 
 from cya.accounts.middleware import SESSION_AUTH_TIME_KEY, SESSION_USER_KEY
 from cya.accounts.models import Organization, User
+from cya.accounts.returns import sign_in_location
 from cya.authorization.tests.stubs import configure_backend
 from cya.shell import navigation
 
@@ -111,7 +112,7 @@ class NavigationTests(ShellTestCase):
             with self.subTest(path=path):
                 response = client.get(path)
                 self.assertEqual(response.status_code, 302)
-                self.assertEqual(response["Location"], "/auth/login/")
+                self.assertEqual(response["Location"], sign_in_location(path))
 
     def test_responses_are_not_cached(self):
         client = self.client_for(self.make_user(roles=["CREW"]))

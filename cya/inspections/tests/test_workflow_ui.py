@@ -9,6 +9,7 @@ from django.test import Client, override_settings
 from django.utils import timezone
 
 from cya.accounts.models import Organization
+from cya.accounts.returns import sign_in_location
 from cya.checklists.models import Vehicle
 from cya.checks.commands import invalidate_chain
 from cya.checks.models import CheckRecord
@@ -57,7 +58,9 @@ class WorkflowUiTests(CrewUiCase):
         )
         for url in urls:
             response = Client().get(url)
-            self.assertEqual((response.status_code, response["Location"]), (302, "/auth/login/"))
+            self.assertEqual(
+                (response.status_code, response["Location"]), (302, sign_in_location(url))
+            )
             with override_settings(CYA_ROLE_LOOKUP=None):
                 self.assertEqual(self.client.get(url).status_code, 403)
 

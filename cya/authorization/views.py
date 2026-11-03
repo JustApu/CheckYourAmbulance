@@ -18,6 +18,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
 from cya.accounts.models import User
+from cya.accounts.returns import sign_in_redirect
 from cya.authorization.backend import AuthorizationUnavailable, canonical_id
 from cya.authorization.commands import change_role
 from cya.authorization.lifecycle import InvalidRoleHistory, LastAdministrator
@@ -154,7 +155,7 @@ def _change(request, user):
 def roles(request):
     user = request.cya_user
     if user is None:
-        return HttpResponseRedirect("/auth/login/")
+        return sign_in_redirect(request)
     if request.method == "POST":
         return _change(request, user)
     current = navigation.roles_for(user)
