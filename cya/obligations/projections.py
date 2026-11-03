@@ -419,17 +419,24 @@ def _history(organization_id, obligations, since, instant, limit):
     )
     headers = _per_vehicle(_by_vehicle(header_rows, lambda d: str(d.vehicle_id), vehicle_ids))
     deficiency_owner = {str(d.pk): str(d.vehicle_id) for d in header_rows}
-    scope = _bounded(
-        DeficiencyAffectedItem.objects.filter(
-            organization_id=organization_id,
-            deficiency_id__in=sorted(deficiency_owner),
-            recorded_at__lte=instant,
-        ).order_by("id")[: limit + 1],
-        limit,
+    scope = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                DeficiencyAffectedItem.objects.filter(
+                    organization_id=organization_id,
+                    deficiency_id__in=sorted(deficiency_owner),
+                    recorded_at__lte=instant,
+                ).order_by("id")[: limit + 1],
+                limit,
+            ),
+            lambda r: deficiency_owner.get(str(r.deficiency_id)),
+            vehicle_ids,
+        )
     )
     affected = {}
-    for row in scope:
-        affected.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
+    for found in scope.values():
+        for row in found:
+            affected.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
     events = _per_vehicle(
         _by_vehicle(
             _bounded(
