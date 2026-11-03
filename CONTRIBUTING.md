@@ -60,10 +60,10 @@ docker compose down                                                 # stop; add 
 ```sh
 docker compose --profile fast-tests up -d --wait db-fast           # MariaDB 10.11 in memory on 127.0.0.1:3307
 CYA_DB_PORT=3307 local/venv/bin/python manage.py test cya --noinput --parallel 8
-docker compose --profile fast-tests down                            # its data is gone; db is untouched
+docker compose --profile fast-tests rm --stop --force db-fast       # removes only db-fast; its data is gone
 ```
 
-It uses the same pinned image and development accounts as `db`, holds no development data and is lost when it stops; never point development work at it. For ordinary changes, run only the affected apps.
+It uses the same pinned image and development accounts as `db`, holds no development data and is lost when it stops; never point development work at it. Stop it with the service-targeted `rm` above: `docker compose --profile fast-tests down` would also stop and remove the `db` container, because `db` has no profile (its named volume survives without `-v`). For ordinary changes, run only the affected apps.
 
 The `django` job in the [`checks` workflow](.github/workflows/checks.yml) runs the same lint, check, migration and test commands in the pinned Python image against a MariaDB 10.11 service container. Its stack-neutral job runs `tools/ci_lanes.py` on the PR's changed files (both names of a rename) and picks lanes in one pass:
 
