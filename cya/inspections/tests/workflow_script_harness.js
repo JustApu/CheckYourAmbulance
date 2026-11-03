@@ -394,6 +394,17 @@ function generic(kind) {
     assert(run.form.querySelector(".workflow-result").textContent.includes("outside this deficiency's affected scope"));
   }
   {
+    // SUS-5: one suspension per form; the explanation is optional and sent only when given.
+    const run = supervisorForm("end-suspension", {explanation: ""}); run.form.dataset.suspension = "suspension-7";
+    run.form.fire("submit");
+    assert.deepEqual({...run.posts()[0].body, operation_id: "x"}, {operation_id: "x", expected_event_id: "event-seen", suspension_id: "suspension-7"});
+    response(run.posts()[0], 422, {status: "REJECTED", code: "SUSPENSION_ALREADY_ENDED"}); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.includes("already ended"));
+    const explained = supervisorForm("end-suspension", {explanation: " Synthetic reason. "}); explained.form.dataset.suspension = "suspension-8";
+    explained.form.fire("submit");
+    assert.equal(explained.posts()[0].body.explanation, "Synthetic reason.");
+  }
+  {
     const run = supervisorForm("add-verification", {explanation: "Synthetic added.", deadline: ""});
     run.form.items = [Object.assign(new Element("", "checkbox"), {value: "item-1:", checked: true})];
     run.form.fire("submit"); assert.equal(run.posts().length, 0); // the deadline is required

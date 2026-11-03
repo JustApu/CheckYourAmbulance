@@ -179,6 +179,7 @@ what to offer; the command rechecks the permission, the status and every choice.
 | Expand verification scope | `expand_verification`; Pending Verification | Items and physical kits from the vehicle's current checklist; explanation |
 | Add verification after closure | `expand_verification`; Closed Verified | Items and physical kits, a verification deadline (UTC) and an explanation; it reopens the deficiency |
 | Suspend routine checks | `suspend_routine_checks`; active | Items and physical kits within the deficiency's current affected scope; optional explanation |
+| End a suspension early | `suspend_routine_checks`; active; one form beside each suspension in force (SUS-5, [issue #32](https://github.com/JustApu/CheckYourAmbulance/issues/32)) | Optional explanation |
 | Close without verification | `explicit_deficiency_close` (Administrator); active | Explanation |
 | Reopen | `explicit_deficiency_close` (Administrator); Closed by Administrator or with no current verification items | Explanation |
 

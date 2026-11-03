@@ -279,6 +279,7 @@ def _supervisor_controls(user, found, status, roles, context, deadline, assignee
         "verification_items": None,
         "expanding": False,
         "suspension_items": None,
+        "can_end_suspensions": False,
         "can_close": False,
         "can_reopen": False,
     }
@@ -304,6 +305,7 @@ def _supervisor_controls(user, found, status, roles, context, deadline, assignee
             for item_id, _definition, kit_id in service.correction_scope(org, found, now)
         }
         controls["suspension_items"] = _item_choices(org, str(found.vehicle_id), now, scope)
+        controls["can_end_suspensions"] = True  # one at a time, beside each in force (SUS-5)
     if may("explicit_deficiency_close"):
         controls["can_close"] = active
         controls["can_reopen"] = status.status in (CLOSED_ADMINISTRATOR, CLOSED_UNVERIFIABLE)

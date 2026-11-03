@@ -55,6 +55,8 @@
     ITEM_NOT_IN_SCOPE: "An item you chose is outside this deficiency's affected scope.",
     KIT_REQUIRED: "Choose the physical kit for that item. Refresh.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
     TOO_MANY_SUSPENSIONS: "Too many suspensions at once. Choose fewer items.",
+    SUSPENSION_ALREADY_ENDED: "This suspension has already ended. Refresh history.",
+    SUSPENSION_NOT_FOUND: "This suspension is no longer available. Refresh history.",
     SCOPE_TOO_LARGE: "Too many items. Choose fewer.",
     VEHICLE_INACTIVE: "This vehicle is inactive."
   };
@@ -88,7 +90,7 @@
     var body = {operation_id: uuid4()}, kind = form.dataset.kind;
     if (["repair", "extension", "note", "dependency", "dependency-exit", "assign", "deadline", "start-work",
       "extension-decision", "acknowledge", "regrade", "expand", "add-verification", "suspend",
-      "admin-close", "admin-reopen", "empty-scope-close"].indexOf(kind) !== -1) {
+      "end-suspension", "admin-close", "admin-reopen", "empty-scope-close"].indexOf(kind) !== -1) {
       body.expected_event_id = form.dataset.expectedEvent;
     }
     if (kind === "extension") {
@@ -131,6 +133,10 @@
     }
     if (["extension-decision", "acknowledge", "regrade", "expand", "add-verification", "admin-close", "admin-reopen", "empty-scope-close"].indexOf(kind) !== -1) {
       body.explanation = required(value(form, "explanation"), "An explanation is required.");
+    }
+    if (kind === "end-suspension") {
+      body.suspension_id = form.dataset.suspension;
+      if (value(form, "explanation")) { body.explanation = value(form, "explanation"); }
     }
     if (kind === "link") { body.related_deficiency_id = required(value(form, "related_deficiency_id"), "Choose a report."); }
     if (kind === "correction") {
