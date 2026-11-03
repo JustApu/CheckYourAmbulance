@@ -609,8 +609,8 @@ passed by the earlier Docker subset. The Rocky Linux 9 rehearsal on 2026-11-02
 pending each row as stated. The statuses below are Rocky's. The Ubuntu 26.04 rehearsal
 ([evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)), on MariaDB 11.8 (not the
 approved version), repeated the build, firewall, TLS, MariaDB, runtime-isolation,
-recurring-job, restart and sign-in checks listed there; it did not repeat the CSRF,
-spoofed-header, rate-limit or WebSocket checks.
+recurring-job, restart, sign-in, proxy-trust/CSRF, rate-limit and WebSocket-origin checks
+listed there, with the same results.
 
 | Check | Required evidence | Status |
 |---|---|---|
@@ -624,7 +624,7 @@ spoofed-header, rate-limit or WebSocket checks.
 | Schedule and bindings | Agency schedule rules and checklist bindings are present; initial obligation generation succeeds and is idempotent | Pending: synthetic organization only; agency rules and real checklists (OQ-01) not loaded |
 | Recurring jobs | All three jobs use runtime identity, survive reboot, report/alert failures, and notification delivery cannot overlap | Partial: obligation and session jobs run as the runtime identity and survive reboot; notification job not installed (no sender); failure alerts wait for issue #8 |
 | WebSocket proxy | ASGI serves HTTP and WebSocket in one process; proxy upgrade, origin rejection, authorization recheck and reconnect recovery are verified | Partial: one process serves both, upgrades reach the application through nginx and an unknown Origin is refused; authorized connection, recheck and reconnect wait for sign-in |
-| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Partial: real Workspace sign-in provisioned Crew; first-administrator bootstrap (dry run writes nothing, repeat refused and audited); a Supervisor grant and revoke from the Administration page each wrote a receipt, role row and audit record; a denied sign-in was audited. Same-operation replay not exercised on the host (covered offline) |
+| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Partial: real Workspace sign-in provisioned Crew; first-administrator bootstrap (dry run writes nothing, repeat refused and audited); a Supervisor grant and revoke from the Administration page each wrote a receipt, role row and audit record; a denied sign-in was audited. Same-operation replay passed on both rehearsal hosts (2026-11-03): a repeated command with the same operation ID returned the stored answer and wrote nothing, and a changed body under it got the original answer flagged as reused (the API's `409 OPERATION_REUSED`) |
 | Rate limits | Authentication limits enforced by both layers and tested with bounded requests; exports remain gated until implemented | Passed (2026-11-02) |
 | Restart/failure | App/DB restart, interrupted migration recovery plan and prior-code compatibility examined; failure keeps traffic closed | Partial: app, database and host restarts recover unaided; interrupted-migration recovery and prior-code compatibility not exercised |
 | Data/log hygiene | Reviewed logs omit tokens, callback query and cookies; synthetic host artifacts/credentials destroyed at completion | Partial: a marked callback code and session cookie appeared in no application or nginx log; the throwaway host is not yet destroyed |
@@ -689,7 +689,7 @@ Results:
   committed a receipt, role row and audit record; the schema owner was refused (1644)
   for UPDATE and DELETE on those real rows; no server errors after sign-in was configured.
 - **Pending:** an authorized WebSocket connection, recheck and reconnect (no vehicles
-  loaded); same-operation replay on the host; signing-key rotation and reauthentication;
+  loaded); signing-key rotation and reauthentication;
   agency rules and real checklists; alert delivery (issue #8); deputy access (SSH source
   restriction deferred by owner decision); interrupted-migration recovery and prior-code
   compatibility; host teardown. The port-80 rule is now DEP-10 (SPEC 1.23.0, issue #48).
@@ -739,6 +739,17 @@ Results:
   real audit rows and on deficiency severities, inside rolled-back transactions; no
   application or nginx errors and no callback codes in nginx logs. One earlier sign-in
   attempt was refused and audited as expired.
+- **Passed (2026-11-03, from outside the host):** client-supplied `X-Forwarded-Proto: http`,
+  `X-Forwarded-Host` and `X-Forwarded-Port` changed nothing (the normal redirect to sign-in);
+  a `Host` other than the TLS name got nginx's 421; an unauthenticated API POST with the HTTPS
+  Origin and a CSRF token reached the application (401), while a missing token or an `http`
+  Origin was refused (403 `CSRF_REJECTED`); WebSocket upgrades reached the application, which
+  refused an unknown Origin (and an unauthenticated one) with 403; 40 rapid sign-in requests with
+  rotating spoofed `X-Real-IP` and `X-Forwarded-For` gave 30 application answers, then the
+  application's 429 with `Retry-After`, then nginx's 429. Same-operation replay through
+  `cya-manage` on both hosts: a repeated command returned the stored answer and wrote nothing;
+  a changed body under the same operation ID got the original answer flagged as reused (409 at
+  the API) and wrote nothing.
 - **Found during the rehearsal** (now in the profile): no firewall tool in the image;
   MariaDB 11's default collation; the nginx worker user and modules path; the
   redirect-address setting.
