@@ -33,7 +33,7 @@ Each check exits 0 on success, 1 when it finds problems (listed as `file:line: m
 
 ## Python and Django
 
-The approved stack is Python with Django and MariaDB 10.11 on Linux ([SPEC §17.5](SPEC.md#175-hosting-database-engine-backup-oq-24)). The Django project lives in `manage.py` and package `cya/`; its incremental backend foundations are summarized in [README.md](README.md). The inherited Perl, Mojolicious and SQLite examples in older guidance do not apply.
+The approved stack is Python with Django and MariaDB 10.11 or 11.8 on Linux ([SPEC §17.5](SPEC.md#175-hosting-database-engine-backup-oq-24); CI tests both, and the development container uses 10.11). The Django project lives in `manage.py` and package `cya/`; its incremental backend foundations are summarized in [README.md](README.md). The inherited Perl, Mojolicious and SQLite examples in older guidance do not apply.
 
 **Prerequisites.** Python 3.12 or later (CI uses 3.13; the suite has been run on 3.12 and 3.13). Building the `mysqlclient` driver needs a C compiler, `pkg-config` and the MariaDB Connector/C headers (on Debian/Ubuntu: `build-essential pkg-config libmariadb-dev`). Those are host/system packages, so agents need owner approval to install them; the alternative is to run the commands inside the same pinned `python:3.13-bookworm` image CI uses, which already contains them. The development database runs in Docker with Compose v2.
 
@@ -55,7 +55,17 @@ local/venv/bin/python manage.py test cya --noinput                  # offline te
 docker compose down                                                 # stop; add -v to delete the dev database
 ```
 
-The `django` job in the [`checks` workflow](.github/workflows/checks.yml) runs the same lint, check, migration and test commands in the pinned Python image against a MariaDB 10.11 service container. Its stack-neutral job runs `tools/ci_lanes.py` on the PR's changed files (both names of a rename) and picks lanes in one pass:
+**Faster full local runs** ([issue #57](https://github.com/JustApu/CheckYourAmbulance/issues/57)). A full `manage.py test cya --parallel 8` run takes over an hour, mostly in a few migration-reversal and seeded-history classes whose schema changes are bound by the database's disk writes. For a full run you can use an opt-in test database kept in memory, which ran those classes about 30% faster in a measured comparison (starting them first instead made the run slower, so the order is unchanged):
+
+```sh
+docker compose --profile fast-tests up -d --wait db-fast           # MariaDB 10.11 in memory on 127.0.0.1:3307
+CYA_DB_PORT=3307 local/venv/bin/python manage.py test cya --noinput --parallel 8
+docker compose --profile fast-tests rm --stop --force db-fast       # removes only db-fast; its data is gone
+```
+
+It uses the same pinned image and development accounts as `db`, holds no development data and is lost when it stops; never point development work at it. Stop it with the service-targeted `rm` above: `docker compose --profile fast-tests down` would also stop and remove the `db` container, because `db` has no profile (its named volume survives without `-v`). For ordinary changes, run only the affected apps.
+
+The `django` job in the [`checks` workflow](.github/workflows/checks.yml) runs the same lint, check, migration and test commands in the pinned Python image against MariaDB service containers, once for each allowed version (10.11 and 11.8; the check names are `django (MariaDB 10.11)` and `django (MariaDB 11.8)`). Its stack-neutral job runs `tools/ci_lanes.py` on the PR's changed files (both names of a rename) and picks lanes in one pass:
 
 - **Server lane** (Python, migrations, dependencies, `tests/`, `tools/`, and the documents tests read: `docs/data-model-contracts.md` and `docs/deployment-runbook.md`): the `django` job in full mode runs the whole suite, the helper tests in `tests/` and the authorization policy tests.
 - **UI lane** (`cya/<app>/templates/**`, `cya/<app>/static/**` and the `*_harness.js` client-script harnesses): the `client-scripts` job runs every harness under a pinned Node 22, and the `django` job in focused mode runs only the tests covering the changed templates (`UI_TESTS` in `tools/ci_lanes.py`). A template without a focused set, such as the shell's base template, runs the full suite.

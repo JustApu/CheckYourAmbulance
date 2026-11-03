@@ -180,20 +180,32 @@ jobs:
           done
 
   django:
+    name: django (MariaDB ${{ matrix.mariadb.version }})
     needs: [stack-neutral]
     if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'synchronize')) && needs.stack-neutral.outputs.run-django == 'true'
     runs-on: ubuntu-24.04
     # The serial suite reached the old 15-minute cap (PR 186 (https://github.com/JustApu/CheckYourAmbulance-archive/pull/186)); tests now run in two processes
-    # and the cap keeps a margin.
-    timeout-minutes: 20
+    # and the cap keeps a margin. MariaDB 11.8 ran about 30% slower on the rehearsal hosts (issue
+    # 56), so the cap is 30 minutes.
+    timeout-minutes: 30
+    # SPEC 17.5 (1.25.0, issue 56): both allowed MariaDB versions run the same job.
+    strategy:
+      fail-fast: false
+      matrix:
+        mariadb:
+          # mariadb:10.11; same digest as compose.yaml.
+          - version: "10.11"
+            image: mariadb:10.11@sha256:0d0945c57f75b3a3b9ebe71aedaaad005fa5305054e8fca3d2e42a8c92b43b5e
+          # mariadb:11.8, multi-platform index digest recorded 2026-11-03.
+          - version: "11.8"
+            image: mariadb:11.8@sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd
     # python:3.13-bookworm includes a C compiler and the MariaDB Connector/C
     # headers that mysqlclient needs. Index digest recorded 2026-10-20.
     container:
       image: python:3.13-bookworm@sha256:073ffebb96ae4d0ed73ccad59f08c47bd84af8a79f5258130f8458ac50ad9ff4
     services:
       mariadb:
-        # mariadb:10.11 (SPEC 17.5); same digest as compose.yaml.
-        image: mariadb:10.11@sha256:0d0945c57f75b3a3b9ebe71aedaaad005fa5305054e8fca3d2e42a8c92b43b5e
+        image: ${{ matrix.mariadb.image }}
         env:
           # Throwaway CI-only database; the value is not a secret.
           MARIADB_ROOT_PASSWORD: ci-only-root-password
@@ -260,7 +272,7 @@ jobs:
 
       # Full mode runs the whole suite (label "cya"); focused mode runs only the labels covering
       # the changed templates. The labels are the classifier's own constants.
-      - name: Offline tests against MariaDB 10.11 (${{ needs.stack-neutral.outputs.django-mode }})
+      - name: Offline tests against MariaDB ${{ matrix.mariadb.version }} (${{ needs.stack-neutral.outputs.django-mode }})
         env:
           DJANGO_LABELS: ${{ needs.stack-neutral.outputs.django-labels }}
         run: |
@@ -276,6 +288,7 @@ jobs:
         run: local/venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
 
       # Formerly the separate authorization-policy workflow; the server lane runs it once.
+      # No database is involved, so one matrix entry runs it.
       - name: Offline authorization policy tests
-        if: needs.stack-neutral.outputs.django-mode == 'full'
+        if: needs.stack-neutral.outputs.django-mode == 'full' && matrix.mariadb.version == '10.11'
         run: python3 -m unittest discover -s tests/authorization -v
