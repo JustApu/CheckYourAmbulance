@@ -55,7 +55,7 @@ local/venv/bin/python manage.py test cya --noinput                  # offline te
 docker compose down                                                 # stop; add -v to delete the dev database
 ```
 
-**Faster full local runs** ([issue #57](https://github.com/JustApu/CheckYourAmbulance/issues/57)). A full `manage.py test cya --parallel 8` run takes over an hour, mostly in a few migration-reversal and seeded-history classes; the runner starts those first (see **Tests** below). For a full run you can also use an opt-in test database kept in memory, which ran those classes about 30% faster in a measured comparison:
+**Faster full local runs** ([issue #57](https://github.com/JustApu/CheckYourAmbulance/issues/57)). A full `manage.py test cya --parallel 8` run takes over an hour, mostly in a few migration-reversal and seeded-history classes whose schema changes are bound by the database's disk writes. For a full run you can use an opt-in test database kept in memory, which ran those classes about 30% faster in a measured comparison (starting them first instead made the run slower, so the order is unchanged):
 
 ```sh
 docker compose --profile fast-tests up -d --wait db-fast           # MariaDB 10.11 in memory on 127.0.0.1:3307
@@ -104,7 +104,7 @@ logging for recovery.
 
 The [authorization operator procedure](docs/authorization-implementation.md#sign-in-and-first-administrator-operator-procedure) documents the installed role/audit collaborators and the first-administrator bootstrap command, including its read-only `--dry-run`.
 
-**Tests** run with `cya.testing.runner.OfflineTestRunner`. It blocks Python-level network access for the whole run (connections, UDP sends and name lookups to anything but loopback or Unix sockets raise `NetworkAccessBlocked`). With `--parallel`, every worker installs the guard before it runs a test, whether it was started by `fork`, `forkserver` (Python 3.14's default on Linux) or `spawn` (macOS); a worker that cannot install it stops the run ([issue #53](https://github.com/JustApu/CheckYourAmbulance/issues/53)). The known long-running test classes (migration reversals and seeded histories, listed in `SLOW_FIRST` in `cya/testing/runner.py`) are handed to workers first within Django's ordering groups, so they overlap the rest of a `--parallel` run instead of finishing it; add a class there when `--durations` shows it taking minutes ([issue #57](https://github.com/JustApu/CheckYourAmbulance/issues/57)). The database driver is a C extension and is not intercepted, so tests reach only the configured MariaDB. Database tests need MariaDB 10.11; SQLite is not a substitute (locking and privileges differ).
+**Tests** run with `cya.testing.runner.OfflineTestRunner`. It blocks Python-level network access for the whole run (connections, UDP sends and name lookups to anything but loopback or Unix sockets raise `NetworkAccessBlocked`). With `--parallel`, every worker installs the guard before it runs a test, whether it was started by `fork`, `forkserver` (Python 3.14's default on Linux) or `spawn` (macOS); a worker that cannot install it stops the run ([issue #53](https://github.com/JustApu/CheckYourAmbulance/issues/53)). The database driver is a C extension and is not intercepted, so tests reach only the configured MariaDB. Database tests need MariaDB 10.11; SQLite is not a substitute (locking and privileges differ).
 
 - **Targeted test execution:** Rather than running the entire `cya` test suite during focused development, run specific application suites to save time and compute:
   ```sh
