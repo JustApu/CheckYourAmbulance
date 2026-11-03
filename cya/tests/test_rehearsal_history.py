@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from unittest import mock
 
+from django.core.management import call_command
 from django.test import TransactionTestCase
 
 from cya.accounts.models import Organization, User
@@ -16,6 +17,12 @@ END = datetime(2026, 6, 20, 12, tzinfo=UTC)
 
 
 class RehearsalHistoryTests(TransactionTestCase):
+    def tearDown(self):
+        # The commands commit for real. Truncate (reset_sequences) because the append-only
+        # triggers refuse the DELETE of a plain flush.
+        call_command("flush", verbosity=0, interactive=False, reset_sequences=True)
+        super().tearDown()
+
     def generate(self, **kw):
         lines = []
         options = {"vehicles": 2, "items": 3, "days": 8, "crew": 2, "seed": 3, "end": END}
