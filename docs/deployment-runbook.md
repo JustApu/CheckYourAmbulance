@@ -152,6 +152,11 @@ first and involve the owner; do not retain a compromised signing key for comfort
 Use the [audit operator procedure](audit-implementation-notes.md#operator-procedure)
 for the exact grants and guard contract. A DBA creates the database and separate
 password-authenticated owner and runtime accounts using a secure local channel.
+Create the database explicitly with `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+(SPEC §17.5), as development and CI do, on either MariaDB version; never rely on the
+server default, which differs between 10.11 and 11.8. Confirm it before migrating:
+`SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA
+WHERE SCHEMA_NAME = 'cya'` must return `utf8mb4` and `utf8mb4_unicode_ci`.
 Do not use development passwords or CI's root account. The schema owner needs
 schema migration privileges and the authorized grant-installation capability;
 the runtime account must have no broad grants, roles, delegation, SUPER or DDL.
@@ -452,7 +457,8 @@ package comes from Rocky's own repositories except Certbot (EPEL).
    binary logging, `log_bin_trust_function_creators=1`), then `systemctl enable --now mariadb`
    and run the read-only check in [Database setup and migrations](#database-setup-and-migrations).
    The DBA channel is `sudo mariadb` (root over the local socket). Remove anonymous
-   accounts and the `test` database; create the `cya` database, `cya_owner@127.0.0.1`
+   accounts and the `test` database; create the `cya` database with the character set and
+   collation in [Database setup and migrations](#database-setup-and-migrations), `cya_owner@127.0.0.1`
    with `ALL PRIVILEGES ON cya.*` only, and `cya_app@127.0.0.1` with no grants. Generate
    passwords and the Django secret key on the host and pass the SQL on standard input,
    never as command arguments (sudo logs full command lines).
@@ -572,8 +578,8 @@ CI tests both. The application suite's version check accepts exactly those two v
 
 4. **MariaDB.** Install `mariadb-cya.cnf` as `/etc/mysql/mariadb.conf.d/60-cya.cnf`. The
    stock server already binds to `127.0.0.1`. MariaDB 11's default collation for
-   `utf8mb4` is `utf8mb4_uca1400_ai_ci`; create the database with
-   `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`, as development and CI do. The DBA
+   `utf8mb4` is `utf8mb4_uca1400_ai_ci`, so the explicit character set and collation in
+   [Database setup and migrations](#database-setup-and-migrations) matter here. The DBA
    channel is `sudo mariadb`, as on Rocky.
 
 5. **Secrets and management commands.** As on Rocky. sudo's `secure_path` includes
