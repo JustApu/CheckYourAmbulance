@@ -20,5 +20,29 @@ services:
       timeout: 5s
       retries: 30
 
+  # Opt-in test database kept in memory (issue #57): `docker compose --profile fast-tests up -d
+  # --wait db-fast`, then run the tests with CYA_DB_PORT=3307. Same pinned image and accounts as
+  # db; its data is lost when the container stops, so use it for test runs only, never for the
+  # development data in db.
+  db-fast:
+    profiles: ["fast-tests"]
+    # mariadb:10.11, the same digest as db.
+    image: mariadb:10.11@sha256:0d0945c57f75b3a3b9ebe71aedaaad005fa5305054e8fca3d2e42a8c92b43b5e
+    environment:
+      MARIADB_ROOT_PASSWORD: dev-only-root-password
+    ports:
+      - "127.0.0.1:${CYA_DB_FAST_PORT:-3307}:3306"
+    volumes:
+      - ./tools/dev-db/accounts.sql:/docker-entrypoint-initdb.d/10-accounts.sql:ro
+      - type: tmpfs
+        target: /var/lib/mysql
+        tmpfs:
+          size: 4294967296
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
 volumes:
   cya-dev-db:

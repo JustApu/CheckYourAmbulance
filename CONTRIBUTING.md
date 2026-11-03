@@ -55,6 +55,16 @@ local/venv/bin/python manage.py test cya --noinput                  # offline te
 docker compose down                                                 # stop; add -v to delete the dev database
 ```
 
+**Faster full local runs** ([issue #57](https://github.com/JustApu/CheckYourAmbulance/issues/57)). A full `manage.py test cya --parallel 8` run takes over an hour, mostly in a few migration-reversal and seeded-history classes; the runner starts those first (see **Tests** below). For a full run you can also use an opt-in test database kept in memory, which ran those classes about 30% faster in a measured comparison:
+
+```sh
+docker compose --profile fast-tests up -d --wait db-fast           # MariaDB 10.11 in memory on 127.0.0.1:3307
+CYA_DB_PORT=3307 local/venv/bin/python manage.py test cya --noinput --parallel 8
+docker compose --profile fast-tests down                            # its data is gone; db is untouched
+```
+
+It uses the same pinned image and development accounts as `db`, holds no development data and is lost when it stops; never point development work at it. For ordinary changes, run only the affected apps.
+
 The `django` job in the [`checks` workflow](.github/workflows/checks.yml) runs the same lint, check, migration and test commands in the pinned Python image against a MariaDB 10.11 service container. Its stack-neutral job runs `tools/ci_lanes.py` on the PR's changed files (both names of a rename) and picks lanes in one pass:
 
 - **Server lane** (Python, migrations, dependencies, `tests/`, `tools/`, and the documents tests read: `docs/data-model-contracts.md` and `docs/deployment-runbook.md`): the `django` job in full mode runs the whole suite, the helper tests in `tests/` and the authorization policy tests.
