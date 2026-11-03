@@ -27,6 +27,10 @@ RESOLVER_FUNCTIONS = (
 )
 
 
+# Set on every function the guard installs, so a process can tell whether it is guarded.
+GUARD_MARKER = "_cya_network_guard"
+
+
 class NetworkAccessBlocked(RuntimeError):
     """A test tried to reach the network. Not an OSError, so it is not retried."""
 
@@ -77,6 +81,7 @@ class NetworkGuard:
                     raise NetworkAccessBlocked(f"test tried {name} to {address!r}")
                 return originals[name](sock, *args)
 
+            setattr(guarded, GUARD_MARKER, True)
             return guarded
 
         def guard_resolver(name):
@@ -87,6 +92,7 @@ class NetworkGuard:
                     raise NetworkAccessBlocked(f"test tried {name} for {host!r}")
                 return originals[name](target, *args, **kwargs)
 
+            setattr(guarded, GUARD_MARKER, True)
             return guarded
 
         for name in SOCKET_METHODS:
@@ -103,3 +109,10 @@ class NetworkGuard:
         for name in RESOLVER_FUNCTIONS:
             setattr(socket, name, self._originals[name])
         self._originals = None
+
+
+def guard_active():
+    """True when every patched socket function in this process is a guard's."""
+    patched = [getattr(socket.socket, name) for name in SOCKET_METHODS]
+    patched += [getattr(socket, name) for name in RESOLVER_FUNCTIONS]
+    return all(getattr(function, GUARD_MARKER, False) for function in patched)
