@@ -138,6 +138,31 @@ class FullBackupTests(BackupScriptCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse((self.dir / "store").exists())
 
+    def test_a_failed_backup_keeps_the_previous_shipping_start(self):
+        # The last good backup started at 000003; 000004 is closed but not shipped yet.
+        self.state.mkdir()
+        (self.state / "binlog-from").write_text("mariadb-bin.000003\n")
+        for name in ("mariadb-bin.000003", "mariadb-bin.000004", "mariadb-bin.000005"):
+            self.binlog(name, f"log {name}")
+        (self.state / "shipped").write_text("mariadb-bin.000003\n")
+        for failure in ({"DUMP_FAIL": 1}, {"RSYNC_FAIL": 1}):
+            with self.subTest(failure=failure):
+                result = self.run_script("cya-backup-full", **failure)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((self.state / "binlog-from").read_text(), "mariadb-bin.000003\n")
+                self.assertFalse((self.state / "binlog-from.new").exists())
+        # Shipping still continues the previous backup's chain: 000004 goes out.
+        (self.dir / "current").write_text("mariadb-bin.000006\n")
+        shipped = self.run_script("cya-backup-binlog")
+        self.assertEqual(shipped.returncode, 0, shipped.stderr)
+        self.assertEqual(
+            self.lines("state/shipped"),
+            ["mariadb-bin.000003", "mariadb-bin.000004", "mariadb-bin.000005"],
+        )
+        # A successful backup then moves the start.
+        self.assertEqual(self.run_script("cya-backup-full").returncode, 0)
+        self.assertEqual((self.state / "binlog-from").read_text(), "mariadb-bin.000006\n")
+
     def test_a_missing_setting_stops_before_anything_runs(self):
         (self.conf / "backup.conf").write_text("DATABASE=cya_synthetic\n")
         result = self.run_script("cya-backup-full")
@@ -252,3 +277,20 @@ class RestoreTests(BackupScriptCase):
         result = self.restore(missing_log)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("mariadb-bin.000004 was not shipped", result.stderr)
+        self.assertEqual(self.lines("created"), [])  # checked before anything is created
+
+    def test_a_gap_in_the_log_chain_stops_the_restore_before_anything_is_created(self):
+        gap = self.store("mariadb-bin.000004", "mariadb-bin.000006", name="gap-in-middle")
+        result = self.restore(gap)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "mariadb-bin.000005 was not shipped (gap before mariadb-bin.000006)", result.stderr
+        )
+        self.assertEqual(self.lines("created"), [])
+        self.assertFalse((self.dir / "binlog-args").exists())
+        unbroken = self.store(
+            "mariadb-bin.000004", "mariadb-bin.000005", "mariadb-bin.000006", name="unbroken"
+        )
+        result = self.restore(unbroken)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("(mariadb-bin.000004 to mariadb-bin.000006)", result.stdout)

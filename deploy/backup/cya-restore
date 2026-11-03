@@ -6,7 +6,9 @@
 #   cya-restore <store directory> <GnuPG home> <source database> <target database> '<stop UTC>'
 #
 # The stop instant is UTC ('YYYY-MM-DD HH:MM:SS'): events at or after it are not applied. The
-# target must not exist. Restored writes are not binary-logged. Timings are reported per step.
+# target must not exist, and the shipped logs from the dump's log on must be consecutive; both are
+# checked before anything is created. Restored writes are not binary-logged. Timings are reported
+# per step, with the last log replayed (the replay cannot reach past it).
 set -euo pipefail
 [ $# -eq 5 ] || { echo "usage: cya-restore <store dir> <gnupg home> <source db> <target db> '<stop UTC>'" >&2; exit 2; }
 store=$1 gnupg=$2 source_db=$3 target=$4 stop=$5
@@ -29,21 +31,38 @@ position=$({ decrypt "$full" | gunzip | head -n 60; } 2>/dev/null | grep -m1 "CH
 log_file=$(sed -nE "s/.*MASTER_LOG_FILE='([^']+)'.*/\1/p" <<<"$position")
 log_pos=$(sed -nE "s/.*MASTER_LOG_POS=([0-9]+).*/\1/p" <<<"$position")
 [ -n "$log_file" ] && [ -n "$log_pos" ] || { echo "cya-restore: no binary-log position in $full" >&2; exit 1; }
+# The shipped logs from the dump's log on must form an unbroken chain, checked before anything is
+# created: a missing log would silently drop its transactions from the replay.
+names=()
+for encrypted in $(ls "$store"/binlog-*.gz.gpg 2>/dev/null | sort || true); do
+  name=$(basename "$encrypted" .gz.gpg); name=${name#binlog-}
+  [[ "$name" < "$log_file" ]] || names+=("$name")
+done
+[ "${names[0]:-}" = "$log_file" ] || { echo "cya-restore: binary log $log_file was not shipped" >&2; exit 1; }
+[[ "$log_file" =~ ^(.+)\.([0-9]+)$ ]] || { echo "cya-restore: unexpected binary log name $log_file" >&2; exit 1; }
+prefix=${BASH_REMATCH[1]} width=${#BASH_REMATCH[2]} expected=$((10#${BASH_REMATCH[2]}))
+for name in "${names[@]}"; do
+  if [[ ! "$name" =~ ^(.+)\.([0-9]+)$ || "${BASH_REMATCH[1]}" != "$prefix" ]]; then
+    echo "cya-restore: unexpected binary log name $name" >&2; exit 1
+  fi
+  if [ "$((10#${BASH_REMATCH[2]}))" -ne "$expected" ]; then
+    printf -v missing '%s.%0*d' "$prefix" "$width" "$expected"
+    echo "cya-restore: binary log $missing was not shipped (gap before $name)" >&2; exit 1
+  fi
+  expected=$((expected + 1))
+done
 mariadb -e "CREATE DATABASE \`$target\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
 { echo "SET SESSION sql_log_bin=0;"; decrypt "$full" | gunzip; } | mariadb "$target"
 t1=$(date +%s)
 echo "cya-restore: full $(basename "$full") loaded seconds=$((t1 - t0)) position=$log_file:$log_pos"
 files=()
-for encrypted in $(ls "$store"/binlog-*.gz.gpg 2>/dev/null | sort || true); do
-  name=$(basename "$encrypted" .gz.gpg); name=${name#binlog-}
-  [[ "$name" < "$log_file" ]] && continue
-  decrypt "$encrypted" | gunzip >"$work/$name"
+for name in "${names[@]}"; do
+  decrypt "$store/binlog-$name.gz.gpg" | gunzip >"$work/$name"
   files+=("$work/$name")
 done
-[ "${files[0]:-}" = "$work/$log_file" ] || { echo "cya-restore: binary log $log_file was not shipped" >&2; exit 1; }
 # --database names the source: mariadb-binlog filters before it rewrites (checked on 11.8).
 { echo "SET SESSION sql_log_bin=0;"
   TZ=UTC mariadb-binlog --rewrite-db="$source_db->$target" --database="$source_db" \
     --start-position="$log_pos" --stop-datetime="$stop" "${files[@]}"; } | mariadb "$target"
 t2=$(date +%s)
-echo "cya-restore: replayed ${#files[@]} binary logs to '$stop' UTC seconds=$((t2 - t1)) total_seconds=$((t2 - t0))"
+echo "cya-restore: replayed ${#files[@]} binary logs (${names[0]} to ${names[-1]}) to '$stop' UTC seconds=$((t2 - t1)) total_seconds=$((t2 - t0))"

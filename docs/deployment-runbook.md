@@ -444,7 +444,7 @@ The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove eithe
 3. **Binary logging:** must already be on (DEP-5). Keep the host's binary logs at least until they are shipped. Shipping state is in `/var/lib/cya-backup` (root, `0700`).
 
 **Schedule:**
-- **Full backup:** `cya-backup-full` runs nightly at 02:30. It starts a new binary log and records it as where shipping begins. It then streams `mariadb-dump --single-transaction --master-data=2 --routines --triggers --events --hex-blob` through gzip and GnuPG to the store.
+- **Full backup:** `cya-backup-full` runs nightly at 02:30. It starts a new binary log and streams `mariadb-dump --single-transaction --master-data=2 --routines --triggers --events --hex-blob` through gzip and GnuPG to the store. Only after the upload succeeds does it record that log as where shipping begins, so a failed backup leaves shipping on the previous backup's complete log chain.
 - **Log shipping:** `cya-backup-binlog` runs every five minutes. It closes the current binary log and ships, encrypted, each closed log from that point on that has not yet been shipped. A failed upload is retried on the next run.
 - **Worst-case loss:** about one shipping interval plus upload time if the host is lost, inside the 15-minute RPO. Stale backups or shipping must alert ([issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8)).
 
@@ -456,10 +456,11 @@ The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove eithe
    cya-restore <store dir> <gnupg home> <source db> <new db> 'YYYY-MM-DD HH:MM:SS'
    ```
 
+   - **Chain check:** before creating anything, it checks that the shipped logs from the backup's starting log on are consecutive, and stops naming the first missing log.
    - **Load:** it loads the newest full backup into a new database (`utf8mb4_unicode_ci`).
    - **Replay:** it replays the shipped logs from the backup's recorded position, applying nothing at or after the stop instant (UTC).
    - **Logging:** restored writes are not binary-logged.
-   - **Timings:** it reports the load and replay times.
+   - **Timings:** it reports the load and replay times and the last log replayed. The replay cannot reach past that log: compare its time with the stop instant.
 3. **Verify** before anything uses the restored database:
    - **Definers and setting:** every trigger's DEFINER exists, and `log_bin_trust_function_creators=1` is set.
    - **Schema owner:** run `migrate --check` and `verify_audit_schema`.
