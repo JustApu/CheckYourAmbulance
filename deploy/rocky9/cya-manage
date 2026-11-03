@@ -9,7 +9,44 @@
 # stops the follower, never the command, and never leaves a client attached to the unit's
 # input or output (in the rehearsal, an interrupted `systemd-run --wait --pipe` stalled new
 # logins until a reboot). There is no interactive input; for a SQL shell use the DBA channel.
+#
+# The unit keeps its result after the command ends (RemainAfterExit) so it can be read; this
+# script then stops and resets it. If interrupted (Ctrl+C, hang-up), it stops its journal
+# follower and hands that cleanup to a detached helper unit, `<unit>-cleanup`, which waits for
+# the command to end, logs its result and then stops and resets the unit.
 set -euo pipefail
+
+wait_for_end() {  # wait_for_end <unit> <seconds>: until the unit has run and ended, or is gone
+  local state
+  while :; do
+    [ "$(systemctl show --property=LoadState --value "$1")" = not-found ] && return 0
+    state=$(systemctl show --property=ActiveState --value "$1")
+    case "$state" in
+      activating | deactivating) ;;
+      # inactive before the start job runs; it has ended only once it has started
+      inactive) [ "$(systemctl show --property=ExecMainStartTimestampMonotonic --value "$1")" != 0 ] && return 0 ;;
+      *) return 0 ;;
+    esac
+    sleep "$2"
+  done
+}
+
+finish() {  # finish <unit>: record the unit's result, then stop and reset it
+  status=$(systemctl show --property=ExecMainStatus --value "$1")
+  result=$(systemctl show --property=Result --value "$1")
+  systemctl stop "$1" 2>/dev/null || true
+  systemctl reset-failed "$1" 2>/dev/null || true
+}
+
+if [ "${1:-}" = --cleanup-after ]; then
+  # Helper started by an interrupted run; bounded by its own unit's start timeout.
+  [[ "${2:-}" =~ ^cya-manage-[0-9]{14}-[0-9]+$ ]] || { echo "cya-manage: bad unit name" >&2; exit 2; }
+  wait_for_end "$2" 5
+  finish "$2"
+  echo "cya-manage: $2 ended with result=$result status=${status:-unknown}; unit stopped and reset"
+  exit 0
+fi
+
 case "${1:-}" in
   owner) env_file=/etc/check-your-ambulance/owner.env ;;
   runtime) env_file=/etc/check-your-ambulance/runtime.env ;;
@@ -20,6 +57,7 @@ esac
 shift
 run_as=${run_as:-cya}
 unit="cya-manage-$(date +%Y%m%d%H%M%S)-$$"
+self=$(readlink -f "$0")
 
 systemd-run --quiet --no-block --unit="$unit" \
   -p Type=oneshot -p RemainAfterExit=yes -p TimeoutStartSec=900 \
@@ -27,27 +65,31 @@ systemd-run --quiet --no-block --unit="$unit" \
   -p EnvironmentFile="$env_file" -p ProtectSystem=strict -p PrivateTmp=yes \
   /srv/cya/current/local/venv/bin/python manage.py "$@"
 
-trap 'echo "Interrupted: the command continues as $unit; follow it with: journalctl -u $unit -f" >&2; exit 130' INT TERM HUP
+follower=
+interrupted() {
+  trap '' INT TERM HUP
+  if [ -n "$follower" ]; then
+    kill "$follower" 2>/dev/null || true
+    wait "$follower" 2>/dev/null || true
+  fi
+  # The start timeout (900 s) bounds the command, so the helper's 1000 s bounds the helper.
+  systemd-run --quiet --no-block --unit="$unit-cleanup" -p Type=oneshot -p TimeoutStartSec=1000 \
+    "$self" --cleanup-after "$unit" || true
+  echo "Interrupted: the command continues as $unit and is cleaned up when it ends." >&2
+  echo "Follow it with: journalctl -u $unit -f; its result: journalctl -u $unit-cleanup" >&2
+  exit 130
+}
+trap interrupted INT TERM HUP
 journalctl --quiet --follow --lines=all --output=cat --unit="$unit" &
 follower=$!
-state=activating
-while [ "$state" = activating ] || [ "$state" = inactive ]; do
-  sleep 1
-  state=$(systemctl show --property=ActiveState --value "$unit")
-  # inactive before the start job runs; give up only if it never starts
-  if [ "$state" = inactive ] && [ "$(systemctl show --property=ExecMainStartTimestampMonotonic --value "$unit")" != 0 ]; then
-    break
-  fi
-done
+wait_for_end "$unit" 1
 sleep 1  # let the follower print the last lines
 kill "$follower" 2>/dev/null || true
 wait "$follower" 2>/dev/null || true
+follower=
+finish "$unit"
 trap - INT TERM HUP
 
-status=$(systemctl show --property=ExecMainStatus --value "$unit")
-result=$(systemctl show --property=Result --value "$unit")
-systemctl stop "$unit" 2>/dev/null || true
-systemctl reset-failed "$unit" 2>/dev/null || true
 if [ "$result" != success ]; then
   echo "cya-manage: $unit ended with result=$result status=${status:-unknown}" >&2
   [ "${status:-0}" != 0 ] && exit "$status"

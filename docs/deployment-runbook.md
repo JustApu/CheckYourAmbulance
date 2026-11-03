@@ -471,6 +471,10 @@ package comes from Rocky's own repositories except Certbot (EPEL).
    dropped SSH session ends only the follower: in the rehearsal an earlier attached
    `systemd-run --wait --pipe` cut off by an SSH timeout stalled new logins until a reboot,
    while this runner, killed mid-command, let the command finish with logins unaffected.
+   The unit keeps its result until the runner reads it and then stops and resets the unit.
+   If the runner is interrupted (Ctrl+C or a dropped session), it stops its journal follower
+   and starts a detached helper unit, `<unit>-cleanup`, that waits for the command to end,
+   logs its result (`journalctl -u <unit>-cleanup`) and then stops and resets the unit.
    There is no interactive input; use `sudo mariadb` for a SQL shell.
 
    ```sh
