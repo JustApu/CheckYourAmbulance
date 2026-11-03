@@ -23,7 +23,9 @@ trap 'rm -rf "$work"' EXIT
 decrypt() { gpg --homedir "$gnupg" --batch --quiet --decrypt "$1"; }
 t0=$(date +%s)
 # The dump's binary-log position: CHANGE MASTER TO MASTER_LOG_FILE='...', MASTER_LOG_POS=...;
-position=$(decrypt "$full" | gunzip | head -n 60 | grep -m1 "CHANGE MASTER TO" || true)
+# Only the head is read, so gpg and gunzip see a closed pipe; that is expected and silenced. A
+# real decryption failure leaves no position, which the check below reports.
+position=$({ decrypt "$full" | gunzip | head -n 60; } 2>/dev/null | grep -m1 "CHANGE MASTER TO" || true)
 log_file=$(sed -nE "s/.*MASTER_LOG_FILE='([^']+)'.*/\1/p" <<<"$position")
 log_pos=$(sed -nE "s/.*MASTER_LOG_POS=([0-9]+).*/\1/p" <<<"$position")
 [ -n "$log_file" ] && [ -n "$log_pos" ] || { echo "cya-restore: no binary-log position in $full" >&2; exit 1; }
