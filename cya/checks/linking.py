@@ -1,5 +1,8 @@
 """Choose and record links from a check to selected, unsatisfied obligations (SPEC §5.3–§5.5)."""
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.db.models import Exists, F, OuterRef, Q, Subquery
 
 from cya.accounts.fields import new_id
@@ -12,6 +15,11 @@ from cya.obligations.models import (
 )
 
 MAX_LINK_CANDIDATES = 10_000
+
+
+def late_window():
+    """w_late (SPEC SCH-3): how long after its grace deadline an obligation is late-linkable."""
+    return timedelta(hours=settings.CYA_LATE_COMPLETION_HOURS)
 
 
 class LinkScopeTooLarge(ValueError):
@@ -68,7 +76,11 @@ def _eligible(
         recorded_at__lte=recorded_at,
     ).annotate(selected_id=Subquery(selected))
     if late:
-        candidates = candidates.filter(grace_at__lt=recorded_at)
+        # SCH-2 (1.26.0): only within w_late after the grace deadline; older ones stay missed.
+        # Bounding grace_at keeps the read off the item's settled history (issue #61).
+        candidates = candidates.filter(
+            grace_at__lt=recorded_at, grace_at__gte=recorded_at - late_window()
+        )
     else:
         candidates = candidates.filter(early_at__lte=recorded_at, grace_at__gte=recorded_at)
     candidates = candidates.filter(Q(routine=False) | Q(pk=F("selected_id")))

@@ -30,6 +30,7 @@ from cya.authorization.locking import locked_identities
 from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import Role
 from cya.checks.commands import CheckError, _explanation, _id, _operation_id, _vehicle
+from cya.checks.linking import late_window
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
 from cya.obligations.queries import odometer_obligations
 from cya.odometer.models import (
@@ -49,7 +50,7 @@ RECORD_ACTION = "record_check"
 CONFIGURE_ACTION = "configure_schedules_thresholds_notifications"
 RECORD_COMMAND = "ODOMETER_RECORD"
 THRESHOLD_COMMAND = "ODOMETER_THRESHOLD_SET"
-LOOKBACK = timedelta(days=31)  # how far back a late reading may satisfy an overdue obligation
+LOOKBACK = timedelta(days=31)  # due instants read for a reading; late ones then need w_late
 LOOKAHEAD = timedelta(hours=48)  # due instants whose early window may already have opened
 READING = re.compile(r"\d{1,7}(\.\d)?")
 
@@ -209,8 +210,9 @@ def _obligation_to_satisfy(organization_id, vehicle_id, now):
     """The unsatisfied odometer obligation this reading satisfies, or None (ODO-2).
 
     The earliest-due one whose window contains the instant (SCH-6). Only when none does, the
-    earliest-due one already past grace (a late completion, SCH-2). An obligation whose early
-    window has not opened is never eligible.
+    earliest-due one past grace by at most w_late (a late completion, SCH-2, amendment 1.26.0);
+    one further past stays missed. An obligation whose early window has not opened is never
+    eligible.
     """
     candidates = [
         o
@@ -233,7 +235,8 @@ def _obligation_to_satisfy(organization_id, vehicle_id, now):
     )
     open_ = [o for o in candidates if o.pk not in satisfied]
     on_time = [o for o in open_ if now <= o.grace_at]
-    chosen = on_time or open_
+    late = [o for o in open_ if now - late_window() <= o.grace_at < now]
+    chosen = on_time or late
     return chosen[0] if chosen else None
 
 

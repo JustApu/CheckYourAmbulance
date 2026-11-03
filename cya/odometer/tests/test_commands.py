@@ -220,12 +220,20 @@ class LinkingTests(OdometerCase):
         result = self.record(100)
         self.assertEqual(result.body["obligation_links"], [str(self.first.pk)])
 
-    def test_an_on_time_window_wins_over_an_older_overdue_obligation(self):
+    def test_an_on_time_window_wins_and_an_obligation_past_w_late_stays_missed(self):
         self.clock.set(self.at(days=1, hours=6))  # the first is overdue; the second is in window
         self.assertEqual(self.record(100).body["obligation_links"], [str(self.second.pk)])
-        # Nothing is left in window, so the next reading completes the overdue one late (SCH-2).
-        self.assertEqual(self.record(110).body["obligation_links"], [str(self.first.pk)])
-        self.assertEqual(self.record(120).body["obligation_links"], [])
+        # The first passed grace 23 h ago, beyond w_late (12 h, SCH-2 1.26.0): it stays missed.
+        self.assertEqual(self.record(110).body["obligation_links"], [])
+
+    def test_a_late_reading_completes_only_within_w_late(self):
+        self.clock.set(self.at(hours=18, minutes=59))  # grace was 07:00; 12 h later is 19:00
+        self.assertEqual(self.record(100).body["obligation_links"], [str(self.first.pk)])
+
+    def test_a_reading_past_w_late_links_nothing(self):
+        self.clock.set(self.at(hours=19, minutes=1))
+        result = self.record(100)
+        self.assertEqual(result.body["obligation_links"], [])
 
     def test_another_vehicles_obligation_is_never_linked(self):
         other = self.vehicles[1]
