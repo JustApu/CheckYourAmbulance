@@ -12,12 +12,14 @@ supervisor-completed Unable and the open states come from the obligation evaluat
 open), Invalidated, Superseded and Completed late come from the underlying check, correction and
 determination histories, not from the checklist's one-row-per-item summary.
 
-Bounds (owner decision 2026-11-01: a small fleet first; issue 33 batches the obligation reads):
-at most VEHICLE_LIMIT vehicles and DEFICIENCY_LIMIT deficiencies per vehicle, each with an
-explicit `truncated` flag. Obligation state, the status, the bounded deficiency list and the
-bounded list of suspensions in force are read per vehicle; the listed deficiencies' events, the age
-rule and the suspension labels are read once for the page, so the query count does not grow with
-the number of deficiencies or with the suspension history.
+Bounds (owner decision 2026-11-01: a small fleet first): at most VEHICLE_LIMIT vehicles and
+DEFICIENCY_LIMIT deficiencies per vehicle, each with an explicit `truncated` flag. The obligation
+evidence of every listed vehicle comes from one batch read (load_projection_histories, issue 33),
+whose query count does not depend on the number of vehicles; past its row bound the picture is
+refused rather than cut. The status, the bounded deficiency list and the bounded list of
+suspensions in force are still read per vehicle (a few queries each); the listed deficiencies'
+events, the age rule and the suspension labels are read once for the page, so the query count does
+not grow with the number of deficiencies or with the suspension history.
 """
 
 from dataclasses import dataclass, field
@@ -34,7 +36,7 @@ from cya.deficiencies.models import CheckSuspension, Deficiency, DeficiencyEvent
 from cya.deficiencies.service import DeficiencyError
 from cya.deficiencies.transitions import ACTIVE_STATUSES, AWAITING_EXTERNAL_DEPENDENCY
 from cya.obligations.history import replay_checks
-from cya.obligations.projections import load_projection_history
+from cya.obligations.projections import load_projection_histories
 from cya.obligations.requirements import CARRY_OVER
 from cya.obligations.state import State, aware, rebuild_vehicle_projection
 from cya.operations.status import status_at
@@ -112,12 +114,9 @@ def _carry_over_rules(organization_id, rule_ids):
     }
 
 
-def _obligations(organization_id, vehicle_id, at):
-    """RPT-7 counts and inspection progress for one vehicle's window, from the histories."""
+def _obligations(organization_id, vehicle_id, at, history):
+    """RPT-7 counts and inspection progress for one vehicle's window, from its history."""
     start, end = at - WINDOW_BACK, at + WINDOW_AHEAD
-    history = load_projection_history(
-        vehicle_id, at, organization_id=organization_id, start=start, end=end
-    )
     states = rebuild_vehicle_projection(history, vehicle_id, at, start, end)
     counts = dict.fromkeys((key for key, _label in CATEGORIES), 0)
     window = {s.obligation.id for s in states}
@@ -328,11 +327,18 @@ def fleet_readiness(organization_id, *, as_of=None, now):
     suspensions = _suspension_rows(
         organization_id, [row for rows in in_force.values() for row in rows[:SUSPENSION_LIMIT]]
     )
+    histories = load_projection_histories(
+        [str(v.pk) for v in listed],
+        at,
+        organization_id=organization_id,
+        start=at - WINDOW_BACK,
+        end=at + WINDOW_AHEAD,
+    )
     result = []
     for vehicle in listed:
         vehicle_id = str(vehicle.pk)
         status = status_at(organization_id, vehicle_id, at)
-        counts, progress = _obligations(organization_id, vehicle_id, at)
+        counts, progress = _obligations(organization_id, vehicle_id, at, histories[vehicle_id])
         rows = listed_rows[vehicle_id]
         shown = [facts[str(row.pk)] for row in rows[:DEFICIENCY_LIMIT]]
         by_severity, by_status = {}, {}
