@@ -18,11 +18,11 @@ changes this runbook needed are built; each still needs its host check:
 | Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Rehearsed on Rocky Linux 9 (2026-11-02): one process after restart and reboot, socket reachable only by the proxy. |
 | HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Rehearsed on Rocky Linux 9 (2026-11-02): HTTPS recognized behind nginx, spoofed forwarding headers overwritten, HSTS observed. |
 | Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Rehearsed on Rocky Linux 9 (2026-11-02): both layers answer 429 and spoofed client-address headers do not reset the count. |
-| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. An Ubuntu 26.04 rehearsal with MariaDB 11.8 (outside the SPEC §17.5 pin; compatibility test only) followed on 2026-11-03 ([host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03), [evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)). |
+| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. An Ubuntu 26.04 rehearsal with MariaDB 11.8 followed on 2026-11-03 (11.8 is allowed since SPEC 1.25.0, issue #56) ([host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03), [evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)). |
 
 This issue's runbook scope does not include changing application files; the
 application changes above were made under their own issues. Backup jobs and restore measurements
-belong to [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7), alert delivery to [issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8), paper fallback to [issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9),
+belong to [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) ([backup and point-in-time recovery](#backup-and-point-in-time-recovery)), alert delivery to [issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8), paper fallback to [issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9),
 and load/hot-backup/high-availability evaluation to [issue #10](https://github.com/JustApu/CheckYourAmbulance/issues/10).
 
 ## Operator preparation and cost envelope
@@ -82,7 +82,7 @@ Use the chosen distribution's versioned installation and firewall documentation
 when making a concrete host profile; do not guess package names, firewall commands or
 unit names. The [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
 below was verified on a throwaway host, and the [Ubuntu 26.04 host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03)
-on another (with MariaDB 11.8, outside the SPEC §17.5 pin).
+on another (with MariaDB 11.8, allowed by SPEC §17.5 since 1.25.0).
 
 ## Secrets and service configuration
 
@@ -161,6 +161,14 @@ WHERE SCHEMA_NAME = 'cya'` must return `utf8mb4` and `utf8mb4_unicode_ci`.
 Do not use development passwords or CI's root account. The schema owner needs
 schema migration privileges and the authorized grant-installation capability;
 the runtime account must have no broad grants, roles, delegation, SUPER or DDL.
+
+Size `innodb_buffer_pool_size` to the host in the same configuration (`mariadb-cya.cnf`
+sets 1G for a host of about 4 GB): at least the database's size where memory allows,
+and no more than about half of memory. The 128 MiB default made the issue #7 rehearsal's
+year of history wait on disk for about half of its time. `SET GLOBAL innodb_buffer_pool_size` grows it
+online only up to the read-only `innodb_buffer_pool_size_max`, which before MariaDB
+10.11.17 and 11.8.7 defaults to the startup size; Ubuntu 26.04's 11.8.6 needed a restart
+to grow it, Rocky's 10.11.18 grew online.
 
 Persist `log_bin_trust_function_creators=1` and binary logging in MariaDB's
 server configuration; do not set them in a migration or disable logging to get
@@ -412,9 +420,56 @@ reopening. Restart after OS patches when required and repeat network checks.
 If app startup or verification fails, keep traffic closed. Revert code only when
 it is compatible with the current schema; do not assume a schema downgrade is
 safe. A database restore can lose accepted writes and requires owner approval
-(DEP-7), followed by the [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) recovery procedure and verification. Preserve
+(DEP-7), followed by the [backup and point-in-time recovery](#backup-and-point-in-time-recovery) procedure and verification. Preserve
 audit history and binary logs; do not prune or recreate tables to recover.
 The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove either.
+
+## Backup and point-in-time recovery
+
+[issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) Part A; SPEC DEP-6–DEP-9. Rehearsed on 2026-11-03
+([evidence](#backup-and-restore-rehearsal-evidence-2026-11-03-utc)). The scripts and units are in
+[`deploy/backup/`](../deploy/backup/).
+
+**Roles and keys.**
+- **Recovery custodian** (authorized agency personnel, DEP-7): holds the off-host store account and the GnuPG private key that decrypts backups. The private key never goes on the database host.
+- **Operator:** the database host holds only the custodian's public key, so it can encrypt but never read a backup. Its SSH key is write-only on the store: the store account runs `rrsync -wo -no-del -no-overwrite` for that key, so the host can add files but cannot read, delete, overwrite or open a shell.
+- **Retention (DEP-8):** the custodian applies it on the store: 30 daily and 12 monthly full backups, plus binary logs back to the oldest retained full backup. The host cannot prune, and no store-side pruning job exists yet; record how the custodian does it.
+
+**Setup on the database host** (root):
+1. **Programs:** install `cya-backup-full` and `cya-backup-binlog` into `/usr/local/sbin`. Install their `.service` and `.timer` units, then `systemctl enable --now cya-backup-full.timer cya-backup-binlog.timer`.
+2. **Configuration:** `/etc/check-your-ambulance/backup/` (root, `0700`) holds:
+   - `backup.conf` (`0600`): `DATABASE=`, `STORE=<user>@<host>:` and `RECIPIENT=<key id>`;
+   - `id_ed25519`, the write-only store key;
+   - `known_hosts`, with the store's host key recorded after checking it out of band;
+   - `gnupg/`, holding only the custodian's public key.
+3. **Binary logging:** must already be on (DEP-5). Keep the host's binary logs at least until they are shipped. Shipping state is in `/var/lib/cya-backup` (root, `0700`).
+
+**Schedule:**
+- **Full backup:** `cya-backup-full` runs nightly at 02:30. It starts a new binary log and streams `mariadb-dump --single-transaction --master-data=2 --routines --triggers --events --hex-blob` through gzip and GnuPG to the store. Only after the upload succeeds does it record that log as where shipping begins, so a failed backup leaves shipping on the previous backup's complete log chain.
+- **Log shipping:** `cya-backup-binlog` runs every five minutes. It closes the current binary log and ships, encrypted, each closed log from that point on that has not yet been shipped. A failed upload is retried on the next run.
+- **Worst-case loss:** about one shipping interval plus upload time if the host is lost, inside the 15-minute RPO. Stale backups or shipping must alert ([issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8)).
+
+**Restore** (custodian, on a separate host that holds the private key; production restores need the owner's authorization, DEP-7):
+1. **Server:** prepare MariaDB with the same version family and configuration (`mariadb-cya.cnf`: binary logging, `log_bin_trust_function_creators=1`, buffer pool). Create the schema-owner account with the **same name and host** as on the source, because restored triggers keep it as their DEFINER (error 1449 otherwise).
+2. **Data:** copy the store's files to the restore host and run:
+
+   ```sh
+   cya-restore <store dir> <gnupg home> <source db> <new db> 'YYYY-MM-DD HH:MM:SS'
+   ```
+
+   - **Chain check:** before creating anything, it checks that the shipped logs from the backup's starting log on are consecutive, and stops naming the first missing log.
+   - **Load:** it loads the newest full backup into a new database (`utf8mb4_unicode_ci`).
+   - **Replay:** it replays the shipped logs from the backup's recorded position, applying nothing at or after the stop instant (UTC).
+   - **Logging:** restored writes are not binary-logged.
+   - **Timings:** it reports the load and replay times and the last log replayed. The replay cannot reach past that log: compare its time with the stop instant.
+3. **Verify** before anything uses the restored database:
+   - **Definers and setting:** every trigger's DEFINER exists, and `log_bin_trust_function_creators=1` is set.
+   - **Schema owner:** run `migrate --check` and `verify_audit_schema`.
+   - **Runtime:** install runtime grants for a distinct runtime account, then run `verify_audit_runtime` and `check --fail-level WARNING`.
+   - **Guards:** the runtime account is refused (1142), and the schema owner is refused (1644, append-only), for UPDATE and DELETE on audit and check tables.
+   - **Writes:** a new application write succeeds.
+   - **Cutoff:** the last changes before the stop instant are present and none after it.
+4. **Rehearsal copies** are destroyed afterwards under production rules (DEP-9), never on a developer machine or in CI.
 
 ## Rocky Linux 9 host profile (rehearsed 2026-11-02)
 
@@ -612,8 +667,8 @@ addresses, account IDs, credentials or raw output. No row below is claimed fully
 passed by the earlier Docker subset. The Rocky Linux 9 rehearsal on 2026-11-02
 ([evidence](#rocky-linux-9-rehearsal-evidence-2026-11-02-utc)) passed, partly passed or left
 pending each row as stated. The statuses below are Rocky's. The Ubuntu 26.04 rehearsal
-([evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)), on MariaDB 11.8 (not the
-approved version), repeated the build, firewall, TLS, MariaDB, runtime-isolation,
+([evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)), on MariaDB 11.8 (approved
+afterwards, SPEC 1.25.0), repeated the build, firewall, TLS, MariaDB, runtime-isolation,
 recurring-job, restart, sign-in, proxy-trust/CSRF, rate-limit and WebSocket-origin checks
 listed there, with the same results.
 
@@ -624,7 +679,7 @@ listed there, with the same results.
 | TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling; port 80 closed, or serving only ACME HTTP-01 and redirecting everything else (DEP-10) | Partial: trusted certificate, unknown-name rejection, staging issuance, renewal dry run and timer passed; port 80 serves only ACME challenges and redirects the rest; renewal-failure alert waits for issue #8 |
 | Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Passed (2026-11-02): spoofed headers overwritten; a signed-in HTTPS form POST (role change) succeeded; missing token and `http` Origin refused; HSTS observed; session cookie Secure, HttpOnly and SameSite=Strict confirmed in the owner's browser |
 | Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed (Rocky). Signing-key rotation and reauthentication passed on Ubuntu (2026-11-03): the new key was generated on the host and written to the three root-only files, the application restarted, the existing session was refused at once and a new Google sign-in succeeded and was audited. Google's silent re-sign-in made it invisible to the user, so do not rely on users noticing a rotation. Rocky's key was not rotated |
-| MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Passed for restart and reboot (2026-11-02); persistence after a rebuild belongs to the issue #7 restore rehearsal |
+| MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Passed for restart and reboot (2026-11-02). Passed after a rebuild (2026-11-03, [restore rehearsal](#backup-and-restore-rehearsal-evidence-2026-11-03-utc)): the separately built restore server (MariaDB 11.8) carried binary logging and trust=1 from its configuration file; all 166 restored triggers kept the schema-owner definer, and migration, schema and runtime checks and the guards passed on the restored database. DEP-12 still requires confirming the setting on the production host |
 | Runtime isolation | Fresh runtime verification and system/deploy checks pass; negative UPDATE/DELETE tests use synthetic disposable rows only | Passed (2026-11-02): runtime and deploy checks pass; runtime refused (1142) for UPDATE, DELETE and DDL; on real sign-in rows the schema owner was refused (1644, append-only) for UPDATE and DELETE on audit, receipt and role-grant tables, each inside a rolled-back transaction |
 | Schedule and bindings | Agency schedule rules and checklist bindings are present; initial obligation generation succeeds and is idempotent | Pending: synthetic organization only; agency rules and real checklists (OQ-01) not loaded |
 | Recurring jobs | All three jobs use runtime identity, survive reboot, report/alert failures, and notification delivery cannot overlap | Partial: obligation and session jobs run as the runtime identity and survive reboot; notification job not installed (no sender); failure alerts wait for issue #8 |
@@ -709,7 +764,7 @@ interrupt cleanup. Host names, addresses, accounts and raw output stay with the 
 | Component | Version |
 |---|---|
 | Operating system | Ubuntu 26.04.1 LTS, x86_64, AppArmor enabled, systemd 259, sudo-rs 0.2.13 |
-| MariaDB | 11.8.6 (Ubuntu package; outside the SPEC §17.5 pin) |
+| MariaDB | 11.8.6 (Ubuntu package; outside the SPEC §17.5 pin at the time, allowed since 1.25.0) |
 | nginx | 1.28.3 (Ubuntu package) |
 | Python | 3.14.4 (Ubuntu package) |
 | Application | Django 6.1.2, uvicorn 0.54.0, from a fresh `pip install --require-hashes` |
@@ -779,6 +834,70 @@ Results:
   - The slowest tests on both hosts are migration reversals (the kit migration test took 923 s
     on Rocky and 1,116 s on Ubuntu).
 - **Pending:** as for Rocky, plus the SPEC decision on MariaDB 11.8.
+
+## Backup and restore rehearsal evidence, 2026-11-03 UTC
+
+Tester: Claude (Anthropic), as operator and as stand-in custodian, on the two owner-provided throwaway hosts, with synthetic data only. The Rocky host was the database host and the Ubuntu host was the off-host store and restore host. The scripts are from the [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) branch, with the application at release `2c7012f`. Host names, addresses, accounts, keys and raw output stay with the owner.
+
+| Component | Database host | Store and restore host |
+|---|---|---|
+| Operating system | Rocky Linux 9.8, 2 vCPU, 3.6 GB | Ubuntu 26.04.1 LTS, 2 vCPU, 3.4 GB |
+| MariaDB | 10.11.18, buffer pool 1.5 GiB (raised at run time) | 11.8.6, buffer pool 1 GiB |
+| Tools | GnuPG 2.3.3, rsync 3.2.7 | GnuPG 2.4.8, rsync 3.4.1 with `rrsync` |
+
+**Data.** `tools/rehearsal_history.py` built a synthetic agency of 5 vehicles × 150 items with 15 crew. It recorded daily inspections through the real audited commands, about 750 checks a day, 1.2% failed and 0.3% unable to inspect, with deficiencies closed weekly. The year was stopped at 149 days by owner decision, because each check reads the whole history ([issue #61](https://github.com/JustApu/CheckYourAmbulance/issues/61)). Result: 111,951 checks, 113,250 obligations, 114,360 audit events and 1,687 deficiencies; 1.9 GB in InnoDB.
+
+**Store isolation** (checked first, with a probe):
+- **Allowed:** the database host's key could upload.
+- **Refused:** reading, deleting and opening a shell.
+- **Silently ignored:** an overwrite.
+- **Decryption:** a file encrypted on the database host decrypted on the restore host; the database host holds only the public key.
+
+**Timeline (UTC):**
+
+| Time | Event |
+|---|---|
+| 15:17:29 | `cya-backup-full` started; shipping to begin at log `000006` |
+| 15:19:05 | full backup uploaded: 95.0 MB encrypted, 99 s |
+| 15:19:35–15:20:15 | **phase A:** 150 checks on vehicle 1, through the application's command |
+| 15:21:00 | **chosen stop instant** |
+| 15:21:32–15:22:04 | **phase B:** 150 checks on vehicle 2 |
+| 15:22:07 | log `000006` (phases A and B) shipped |
+| 15:22:33–15:25:51 | restore to 15:21:00: load 180 s, replay 18 s, **total 198 s** |
+| 15:29:36–15:39:52 | three more copies restored into the same server: 204, 207 and 205 s |
+| 15:45:08, 15:50:08 | `cya-backup-binlog.timer` ran on schedule; checks recorded at 15:46:03–15:46:35 were off-host at 15:50:07 |
+
+**Restored data.**
+- **Counts:** the restored database holds 112,101 checks, every generated check plus all of phase A and nothing of phase B.
+- **Row hashes:** for `check_record`, `audit_event`, `obligation` and `deficiency_event`, the count and a SHA-256 over every row's ID and key fields recorded before the stop instant match the source exactly.
+
+**Verification on the restored database** (MariaDB 11.8):
+- **Definers:** all 166 triggers have the schema-owner DEFINER, which exists on the restore host.
+- **Settings:** binary logging and `log_bin_trust_function_creators=1` are on from the configuration file, and the collation is `utf8mb4_unicode_ci`.
+- **Schema owner:** `migrate --check` passes (75 migrations), and `verify_audit_schema` passes (40 append-only and 44 command-guarded tables).
+- **Runtime:** grants were installed for a distinct runtime account; `verify_audit_runtime` and `check --fail-level WARNING` pass.
+- **Guards:** UPDATE and DELETE on `check_record` and `audit_event`, and TRUNCATE on `audit_event`, were refused for the runtime account (1142). UPDATE and DELETE were refused for the schema owner (1644, append-only).
+- **Writes:** three new checks recorded through the application succeeded, so the restored triggers execute.
+
+**Results against the objectives.**
+- **RTO 24 hours: met with a wide margin.** 198 s for 149 days of a 5-vehicle agency (1.9 GB). Restore time stayed flat while the server held up to four copies (7.5 GB against a 1 GiB buffer pool), so time per database scales about linearly. Extrapolating:
+  - a full year of this agency: about 4.7 GB, about 8 minutes;
+  - four times the agency for a year: about 32 minutes.
+
+  This scaling is an estimate, not a measured single 4× database. Logical restore is enough, so hot or physical backup tools were not evaluated.
+- **RPO 15 minutes: met.** The restore lost nothing before the chosen instant. On schedule, the newest write was off-host within 3.5 minutes. If the host is lost, the worst case is one shipping interval (5 minutes) plus upload time.
+- **Found and fixed:**
+  - the default 128 MiB buffer pool made the generator wait on disk about half the time; [Database setup](#database-setup-and-migrations) now sizes it;
+  - `mariadb-binlog --database` filters on the **source** name before `--rewrite-db` renames it, so the first probe replayed nothing; `cya-restore` passes the source name;
+  - `cya-restore` stopped silently on an empty store under `pipefail`, and printed a harmless broken-pipe message while reading the backup's position. Both are fixed.
+- **Not done here:**
+  - projection rebuild comparison (Part B, AC-26);
+  - the nightly full-backup timer firing at 02:30 (the same script ran on demand);
+  - custodian-side retention pruning (DEP-8);
+  - stale-backup alerts ([issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8));
+  - real custodian and operator roles.
+
+**Teardown.** See the PR for issue #7: the restored databases, store files, rehearsal keys and accounts are destroyed. The synthetic source database is kept on the Rocky host for the [issue #10](https://github.com/JustApu/CheckYourAmbulance/issues/10) load test and destroyed after it.
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
 
@@ -879,6 +998,8 @@ turning this draft into an executable host profile:
 - [Django 6.1 deployment checklist](https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/)
   and [ASGI deployment](https://docs.djangoproject.com/en/6.1/howto/deployment/asgi/).
 - [Django proxy SSL trust settings](https://docs.djangoproject.com/en/6.1/ref/settings/#secure-proxy-ssl-header).
+- [MariaDB InnoDB buffer pool](https://mariadb.com/docs/server/server-usage/storage-engines/innodb/innodb-buffer-pool)
+  (consulted 2026-11-03): online resizing and `innodb_buffer_pool_size_max`.
 - [MariaDB binary logging of routines](https://mariadb.com/docs/server/server-usage/stored-routines/binary-logging-of-stored-routines)
   and [trust variable reference](https://mariadb.com/docs/server/ha-and-performance/standard-replication/replication-and-binary-log-system-variables#log_bin_trust_function_creators).
 - [MariaDB server variables](https://mariadb.com/docs/server/server-management/variables-and-modes/server-system-variables#bind_address).

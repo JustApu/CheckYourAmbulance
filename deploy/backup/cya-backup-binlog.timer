@@ -1,0 +1,10 @@
+[Unit]
+Description=Ship closed binary logs every five minutes (SPEC DEP-6, RPO 15 minutes)
+
+[Timer]
+OnCalendar=*:0/5
+AccuracySec=10s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

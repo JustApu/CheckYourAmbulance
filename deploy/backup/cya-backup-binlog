@@ -1,0 +1,40 @@
+#!/bin/bash
+# Ship closed binary logs, encrypted, to the off-host store (SPEC DEP-6 RPO; issue #7). Run as
+# root every five minutes by cya-backup-binlog.timer.
+#
+# Closes the current binary log, then ships every closed log from the one the last full backup
+# started (state/binlog-from) that is not yet recorded in state/shipped. A failed upload is not
+# recorded, so the next run retries it. Shares the full backup's lock. Configuration as for
+# cya-backup-full.
+set -euo pipefail
+# CYA_BACKUP_CONF and CYA_BACKUP_STATE exist only for the offline tests.
+conf=${CYA_BACKUP_CONF:-/etc/check-your-ambulance/backup}
+state=${CYA_BACKUP_STATE:-/var/lib/cya-backup}
+# shellcheck source=/dev/null
+. "$conf/backup.conf"
+: "${STORE:?}" "${RECIPIENT:?}"
+ssh_cmd="ssh -i $conf/id_ed25519 -o IdentitiesOnly=yes -o UserKnownHostsFile=$conf/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes"
+exec 9>"$state/lock"
+flock 9
+[ -s "$state/binlog-from" ] || { echo "cya-backup-binlog: no full backup yet" >&2; exit 1; }
+from=$(cat "$state/binlog-from")
+touch "$state/shipped"
+spool=$(mktemp -d "$state/binlog.XXXXXX")
+trap 'rm -rf "$spool"' EXIT
+mariadb -e "FLUSH BINARY LOGS"
+current=$(mariadb -N -e "SHOW MASTER STATUS" | awk '{print $1}')
+dir=$(dirname "$(mariadb -N -e "SELECT @@log_bin_basename")")
+shipped=0
+for file in $(mariadb -N -e "SHOW BINARY LOGS" | awk '{print $1}'); do
+  # Binary log names share a prefix and a zero-padded number, so they sort as text.
+  [[ "$file" < "$from" || "$file" == "$current" ]] && continue
+  grep -qxF "$file" "$state/shipped" && continue
+  gzip -c "$dir/$file" |
+    gpg --homedir "$conf/gnupg" --batch --trust-model always --encrypt --recipient "$RECIPIENT" \
+      -o "$spool/binlog-$file.gz.gpg"
+  rsync -a -e "$ssh_cmd" "$spool/binlog-$file.gz.gpg" "$STORE"
+  echo "$file" >>"$state/shipped"
+  rm -f "$spool/binlog-$file.gz.gpg"
+  shipped=$((shipped + 1))
+done
+echo "cya-backup-binlog: shipped=$shipped current=$current"

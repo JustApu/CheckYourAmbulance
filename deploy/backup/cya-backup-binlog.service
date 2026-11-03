@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Your Ambulance binary-log shipping to the off-host store (issue #7)
+After=mariadb.service
+Requires=mariadb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cya-backup-binlog
+TimeoutStartSec=30min

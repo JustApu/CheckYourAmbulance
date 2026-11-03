@@ -1,0 +1,38 @@
+#!/bin/bash
+# Encrypted full backup of the application database to the off-host store (SPEC DEP-6, DEP-7;
+# issue #7). Run as root on the database host, nightly by cya-backup-full.timer.
+#
+# Starts a fresh binary log, streams a consistent single-transaction dump, carrying its
+# binary-log position as a comment, through gzip and GnuPG to the store, and only once that
+# upload succeeds records the fresh log as where shipping begins (cya-backup-binlog). The host holds only the recovery custodian's public key,
+# so it can encrypt but never read a backup, and its store key can only add files.
+# Configuration: /etc/check-your-ambulance/backup/backup.conf (root, 0600):
+#   DATABASE=<database>  STORE=<user>@<host>:  RECIPIENT=<GnuPG key id>
+set -euo pipefail
+# CYA_BACKUP_CONF and CYA_BACKUP_STATE exist only for the offline tests.
+conf=${CYA_BACKUP_CONF:-/etc/check-your-ambulance/backup}
+state=${CYA_BACKUP_STATE:-/var/lib/cya-backup}
+# shellcheck source=/dev/null
+. "$conf/backup.conf"
+: "${DATABASE:?}" "${STORE:?}" "${RECIPIENT:?}"
+ssh_cmd="ssh -i $conf/id_ed25519 -o IdentitiesOnly=yes -o UserKnownHostsFile=$conf/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes"
+install -d -m 0700 "$state"
+exec 9>"$state/lock"
+flock 9
+spool=$(mktemp -d "$state/full.XXXXXX")
+trap 'rm -rf "$spool"' EXIT
+mariadb -e "FLUSH BINARY LOGS"
+from=$(mariadb -N -e "SHOW MASTER STATUS" | awk '{print $1}')
+[ -n "$from" ] || { echo "cya-backup-full: no current binary log" >&2; exit 1; }
+name="full-$DATABASE-$(date -u +%Y%m%dT%H%M%SZ).sql.gz.gpg"
+start=$(date +%s)
+mariadb-dump --single-transaction --master-data=2 --routines --triggers --events --hex-blob \
+  "$DATABASE" | gzip -6 |
+  gpg --homedir "$conf/gnupg" --batch --trust-model always --encrypt --recipient "$RECIPIENT" \
+    -o "$spool/$name"
+rsync -a -e "$ssh_cmd" "$spool/$name" "$STORE"
+# Only an uploaded backup moves the shipping start: after a failure, shipping keeps the previous
+# backup's log chain complete. Written atomically, so a crash leaves the old or the new value.
+printf '%s\n' "$from" >"$state/binlog-from.new"
+mv "$state/binlog-from.new" "$state/binlog-from"
+echo "cya-backup-full: uploaded $name bytes=$(stat -c %s "$spool/$name") seconds=$(($(date +%s) - start)) binlog-from=$from"
