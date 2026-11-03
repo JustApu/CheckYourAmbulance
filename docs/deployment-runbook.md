@@ -757,8 +757,22 @@ Results:
 - **Found during the rehearsal** (now in the profile): no firewall tool in the image;
   MariaDB 11's default collation; the nginx worker user and modules path; the
   redirect-address setting.
-- **Full test suite on MariaDB 11.8:** pending; the run and its timings are recorded on the
-  host and will be added here.
+- **Full test suite (2026-11-03, source `05cb656`)**, run on each rehearsal host as a detached
+  unit under an unprivileged test identity with a temporary DBA-level test account (dropped
+  afterwards), `--parallel 8`, durability relaxed as in CI and restored afterwards:
+  - Rocky Linux 9 (MariaDB 10.11.18, Python 3.12): 1,825 tests passed (59 skipped); the
+    helper and authorization-policy tests passed; 77 minutes in all, 74 for the suite.
+  - Ubuntu 26.04 (MariaDB 11.8.6, Python 3.14): 1,820 passed, 59 skipped; 101 minutes in all,
+    98.5 for the suite. Failures: the deliberate `test_server_is_mariadb_10_11` version check,
+    and four network-guard tests, because on Python 3.14 parallel workers start by
+    `forkserver` and do not install the test network guard
+    ([issue #53](https://github.com/JustApu/CheckYourAmbulance/issues/53); CI's Python 3.13
+    forks and is unaffected). Every database test, including the migration-reversal,
+    trigger and database-security tests, passed on 11.8. A first attempt stopped at the
+    version check because a parallel worker could not report it; `tblib` was added to that
+    throwaway test environment only.
+  - The slowest tests on both hosts are migration reversals (the kit migration test took 923 s
+    on Rocky and 1,116 s on Ubuntu).
 - **Pending:** as for Rocky, plus the SPEC decision on MariaDB 11.8.
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
