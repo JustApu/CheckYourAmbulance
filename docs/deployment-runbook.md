@@ -18,7 +18,7 @@ changes this runbook needed are built; each still needs its host check:
 | Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Rehearsed on Rocky Linux 9 (2026-11-02): one process after restart and reboot, socket reachable only by the proxy. |
 | HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Rehearsed on Rocky Linux 9 (2026-11-02): HTTPS recognized behind nginx, spoofed forwarding headers overwritten, HSTS observed. |
 | Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Rehearsed on Rocky Linux 9 (2026-11-02): both layers answer 429 and spoofed client-address headers do not reset the count. |
-| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. |
+| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. An Ubuntu 26.04 rehearsal with MariaDB 11.8 (outside the SPEC §17.5 pin; compatibility test only) followed on 2026-11-03 ([host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03), [evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)). |
 
 This issue's runbook scope does not include changing application files; the
 application changes above were made under their own issues. Backup jobs and restore measurements
@@ -81,7 +81,8 @@ operator actions; this draft has not performed them on the developer machine.
 Use the chosen distribution's versioned installation and firewall documentation
 when making a concrete host profile; do not guess package names, firewall commands or
 unit names. The [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
-below was verified on a throwaway host.
+below was verified on a throwaway host, and the [Ubuntu 26.04 host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03)
+on another (with MariaDB 11.8, outside the SPEC §17.5 pin).
 
 ## Secrets and service configuration
 
@@ -536,6 +537,67 @@ package comes from Rocky's own repositories except Certbot (EPEL).
 10. **Teardown.** Remove any temporary passwordless sudo rule and test credentials, and
     destroy the throwaway host and its certificate when the rehearsal is recorded.
 
+## Ubuntu 26.04 host profile (rehearsed 2026-11-03)
+
+Verified on a throwaway Ubuntu 26.04.1 LTS (x86_64) host with AppArmor enabled, using
+synthetic data and release `05cb656`. It follows the [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
+step by step and reuses its files from [`deploy/rocky9/`](../deploy/rocky9/), except
+[`deploy/ubuntu2604/nginx.conf`](../deploy/ubuntu2604/nginx.conf). Every package comes from
+Ubuntu's own repositories. Only the differences are listed here.
+
+**MariaDB version.** Ubuntu 26.04 ships MariaDB 11.8, not the 10.11 that SPEC §17.5 pins.
+This profile was rehearsed as a compatibility test at the owner's request (2026-11-03); it
+does not amend the SPEC. Do not use it in production until the owner amends §17.5 or 10.11
+is installed from another source. The application suite has one deliberate version check
+(`cya.tests.test_db_session`, `test_server_is_mariadb_10_11`) that fails on 11.8.
+
+1. **Firewall first.** The image has no firewall tool. Install `ufw`, then, with console
+   access or a scheduled rollback (`systemd-run --on-active=300 /usr/sbin/ufw disable`) in
+   case SSH is cut off: `ufw default deny incoming`, `ufw default allow outgoing`,
+   `ufw allow OpenSSH`, `ufw allow 443/tcp`, `ufw allow 80/tcp` (ACME HTTP-01 only, DEP-10;
+   omit with DNS-01) and `ufw --force enable`. Confirm a fresh SSH login, then stop the
+   rollback timer. Rules apply to IPv4 and IPv6. Restrict SSH sources as on Rocky when the
+   owner lifts the deferral.
+
+2. **Packages.** No module streams or EPEL:
+
+   ```sh
+   apt-get install -y mariadb-server nginx python3-venv python3-dev build-essential \
+       libmariadb-dev pkg-config certbot
+   ```
+
+   Python is 3.14 (the project supports 3.12 or later; CI uses 3.13). The journal is
+   already persistent, and Certbot's `certbot.timer` is enabled by the package.
+
+3. **Service identity and release.** As on Rocky, with `--shell /usr/sbin/nologin` and
+   `python3 -m venv`. No SELinux labels are needed.
+
+4. **MariaDB.** Install `mariadb-cya.cnf` as `/etc/mysql/mariadb.conf.d/60-cya.cnf`. The
+   stock server already binds to `127.0.0.1`. MariaDB 11's default collation for
+   `utf8mb4` is `utf8mb4_uca1400_ai_ci`; create the database with
+   `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`, as development and CI do. The DBA
+   channel is `sudo mariadb`, as on Rocky.
+
+5. **Secrets and management commands.** As on Rocky. sudo's `secure_path` includes
+   `/usr/local/sbin`; the rehearsal still called `cya-manage` by full path.
+
+6. **Application service.** Install `cya.service` unchanged. nginx runs as `www-data`, so
+   `usermod -aG cya www-data`. No AppArmor profile confines nginx or Python, so no socket
+   rule is needed.
+
+7. **nginx and certificate.** Keep a copy of the stock `/etc/nginx/nginx.conf` and install
+   `deploy/ubuntu2604/nginx.conf` in its place (worker user `www-data`, modules from
+   `/etc/nginx/modules-enabled/`); it no longer includes `sites-enabled/`, so the default
+   site is not served. Certificate steps are as on Rocky, except the renewal timer is
+   `certbot.timer` (already enabled). Then install `nginx-cya.conf` and
+   `cya_proxy_headers.conf` and set the HTTPS variables as on Rocky.
+
+8. **Google sign-in.** Besides the client ID, secret and hosted domain, `runtime.env` needs
+   `CYA_GOOGLE_REDIRECT_URI=https://__HOST__/auth/callback/`, and the OAuth client must list
+   that address; without it, sign-in stays unavailable (503).
+
+9. **Recurring jobs and teardown.** As on Rocky.
+
 ## Throwaway-server verification record
 
 Run the procedure on a disposable host using the current source with synthetic
@@ -544,7 +606,11 @@ pass/fail and sanitized explanation for each row. Do not commit hostnames,
 addresses, account IDs, credentials or raw output. No row below is claimed fully
 passed by the earlier Docker subset. The Rocky Linux 9 rehearsal on 2026-11-02
 ([evidence](#rocky-linux-9-rehearsal-evidence-2026-11-02-utc)) passed, partly passed or left
-pending each row as stated.
+pending each row as stated. The statuses below are Rocky's. The Ubuntu 26.04 rehearsal
+([evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)), on MariaDB 11.8 (not the
+approved version), repeated the build, firewall, TLS, MariaDB, runtime-isolation,
+recurring-job, restart, sign-in, proxy-trust/CSRF, rate-limit and WebSocket-origin checks
+listed there, with the same results.
 
 | Check | Required evidence | Status |
 |---|---|---|
@@ -552,13 +618,13 @@ pending each row as stated.
 | SSH/firewall | Operator and deputy access survives policy reload; only HTTPS and restricted SSH exposed; DB/upstream denied externally over IPv4/IPv6 | Partial: only 22/80/443 answer, database and upstream unreachable, no global IPv6. SSH source restriction deferred by owner decision (2026-11-02; compensating controls in place); deputy access untested |
 | TLS/renewal | Trusted certificate, host rejection, staging renewal and timer/failure handling; port 80 closed, or serving only ACME HTTP-01 and redirecting everything else (DEP-10) | Partial: trusted certificate, unknown-name rejection, staging issuance, renewal dry run and timer passed; port 80 serves only ACME challenges and redirects the rest; renewal-failure alert waits for issue #8 |
 | Proxy trust/CSRF | Spoofed forwarding headers do not change trust; HTTPS POST works, missing/invalid CSRF refused; secure cookie flags and HSTS observed | Passed (2026-11-02): spoofed headers overwritten; a signed-in HTTPS form POST (role change) succeeded; missing token and `http` Origin refused; HSTS observed; session cookie Secure, HttpOnly and SameSite=Strict confirmed in the owner's browser |
-| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed; signing-key rotation and reauthentication not yet exercised |
+| Secrets/rotation | Root-only files, runtime identity cannot read owner file, no secret-bearing logs; rotation/restart/reauthentication tested | Partial: root-only files, no secrets in logs, database password rotation with restart passed (Rocky). Signing-key rotation and reauthentication passed on Ubuntu (2026-11-03): the new key was generated on the host and written to the three root-only files, the application restarted, the existing session was refused at once and a new Google sign-in succeeded and was audited. Google's silent re-sign-in made it invisible to the user, so do not rely on users noticing a rotation. Rocky's key was not rotated |
 | MariaDB/DEP-5 | 10.11 binary logging on, trust=1 persistent after rebuild; owner has no SUPER; migration/guard checks pass and definers preserved | Passed for restart and reboot (2026-11-02); persistence after a rebuild belongs to the issue #7 restore rehearsal |
 | Runtime isolation | Fresh runtime verification and system/deploy checks pass; negative UPDATE/DELETE tests use synthetic disposable rows only | Passed (2026-11-02): runtime and deploy checks pass; runtime refused (1142) for UPDATE, DELETE and DDL; on real sign-in rows the schema owner was refused (1644, append-only) for UPDATE and DELETE on audit, receipt and role-grant tables, each inside a rolled-back transaction |
 | Schedule and bindings | Agency schedule rules and checklist bindings are present; initial obligation generation succeeds and is idempotent | Pending: synthetic organization only; agency rules and real checklists (OQ-01) not loaded |
 | Recurring jobs | All three jobs use runtime identity, survive reboot, report/alert failures, and notification delivery cannot overlap | Partial: obligation and session jobs run as the runtime identity and survive reboot; notification job not installed (no sender); failure alerts wait for issue #8 |
 | WebSocket proxy | ASGI serves HTTP and WebSocket in one process; proxy upgrade, origin rejection, authorization recheck and reconnect recovery are verified | Partial: one process serves both, upgrades reach the application through nginx and an unknown Origin is refused; authorized connection, recheck and reconnect wait for sign-in |
-| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Partial: real Workspace sign-in provisioned Crew; first-administrator bootstrap (dry run writes nothing, repeat refused and audited); a Supervisor grant and revoke from the Administration page each wrote a receipt, role row and audit record; a denied sign-in was audited. Same-operation replay not exercised on the host (covered offline) |
+| Integration | [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) authorized action persists and appears in history/audit; denial recorded; same operation ID produces one result | Partial: real Workspace sign-in provisioned Crew; first-administrator bootstrap (dry run writes nothing, repeat refused and audited); a Supervisor grant and revoke from the Administration page each wrote a receipt, role row and audit record; a denied sign-in was audited. Same-operation replay passed on both rehearsal hosts (2026-11-03): a repeated command with the same operation ID returned the stored answer and wrote nothing, and a changed body under it got the original answer flagged as reused (the API's `409 OPERATION_REUSED`) |
 | Rate limits | Authentication limits enforced by both layers and tested with bounded requests; exports remain gated until implemented | Passed (2026-11-02) |
 | Restart/failure | App/DB restart, interrupted migration recovery plan and prior-code compatibility examined; failure keeps traffic closed | Partial: app, database and host restarts recover unaided; interrupted-migration recovery and prior-code compatibility not exercised |
 | Data/log hygiene | Reviewed logs omit tokens, callback query and cookies; synthetic host artifacts/credentials destroyed at completion | Partial: a marked callback code and session cookie appeared in no application or nginx log; the throwaway host is not yet destroyed |
@@ -623,10 +689,91 @@ Results:
   committed a receipt, role row and audit record; the schema owner was refused (1644)
   for UPDATE and DELETE on those real rows; no server errors after sign-in was configured.
 - **Pending:** an authorized WebSocket connection, recheck and reconnect (no vehicles
-  loaded); same-operation replay on the host; signing-key rotation and reauthentication;
+  loaded); signing-key rotation and reauthentication (done on Ubuntu instead);
   agency rules and real checklists; alert delivery (issue #8); deputy access (SSH source
   restriction deferred by owner decision); interrupted-migration recovery and prior-code
   compatibility; host teardown. The port-80 rule is now DEP-10 (SPEC 1.23.0, issue #48).
+
+## Ubuntu 26.04 rehearsal evidence, 2026-11-03 UTC
+
+Tester: Claude (Anthropic), as operator on an owner-provided throwaway host, with synthetic
+data and source `05cb656051dee42df56d42672f3180564152831d` (PR #47 at the time) for the
+deployment and the full suite; `cya-manage` was later replaced by the PR #47 version with
+interrupt cleanup. Host names, addresses, accounts and raw output stay with the owner.
+
+| Component | Version |
+|---|---|
+| Operating system | Ubuntu 26.04.1 LTS, x86_64, AppArmor enabled, systemd 259, sudo-rs 0.2.13 |
+| MariaDB | 11.8.6 (Ubuntu package; outside the SPEC §17.5 pin) |
+| nginx | 1.28.3 (Ubuntu package) |
+| Python | 3.14.4 (Ubuntu package) |
+| Application | Django 6.1.2, uvicorn 0.54.0, from a fresh `pip install --require-hashes` |
+| Certificate client | Certbot 4.0.0 (Ubuntu package), Let's Encrypt |
+| Firewall | ufw 0.36.2 |
+
+Results:
+
+- **Passed:** firewall admits only 22, 80 and 443 over IPv4 and IPv6, with database, DNS
+  and other ports dropped from outside; hash-checked install (mysqlclient built against the
+  11.8 client library); 74 migrations in 141 s by a schema owner without SUPER, with
+  binary logging on and `log_bin_trust_function_creators=1`; `verify_audit_schema` (40
+  append-only and 44 command-guarded tables); all 166 triggers defined by the schema owner;
+  DBA grant preview, apply and `verify_audit_runtime`; `check --deploy` reports only
+  W005/W021 with the proxy settings.
+- **Passed:** one uvicorn process on the Unix socket, reachable by nginx and refused to
+  another local account; HTTPS with a Let's Encrypt certificate (staging first, then
+  production, then a renewal dry run); unknown TLS names and requests by address get no
+  handshake; port 80 serves only ACME challenges and redirects the rest; HSTS (300 s) and
+  security headers present; obligation and session jobs run and their timers are set.
+- **Passed:** after a reboot the firewall, MariaDB (same settings), nginx, the application
+  and all three timers started with no failed units; the database and upstream ports stayed
+  closed from outside.
+- **Passed with real Google sign-in** (the owner's internal OAuth client; synthetic
+  organization): the sign-in redirect uses PKCE (S256), the hosted-domain hint and the
+  configured redirect address, with a `Secure`, `HttpOnly`, `SameSite=Lax` sign-in cookie
+  limited to `/auth/`; first sign-in provisioned Crew; `bootstrap_administrator` wrote
+  nothing on `--dry-run`, granted Administrator and refused and audited a repeat; a
+  Supervisor grant and revoke each committed a receipt, role row and audit record; the
+  owner confirmed the session cookie is `Secure`, `HttpOnly` and `SameSite=Strict`; the
+  runtime account was refused (1142) and the schema owner (1644) for UPDATE and DELETE on
+  real audit rows and on deficiency severities, inside rolled-back transactions; no
+  application or nginx errors and no callback codes in nginx logs. One earlier sign-in
+  attempt was refused and audited as expired.
+- **Passed (2026-11-03, from outside the host):** client-supplied `X-Forwarded-Proto: http`,
+  `X-Forwarded-Host` and `X-Forwarded-Port` changed nothing (the normal redirect to sign-in);
+  a `Host` other than the TLS name got nginx's 421; an unauthenticated API POST with the HTTPS
+  Origin and a CSRF token reached the application (401), while a missing token or an `http`
+  Origin was refused (403 `CSRF_REJECTED`); WebSocket upgrades reached the application, which
+  refused an unknown Origin (and an unauthenticated one) with 403; 40 rapid sign-in requests with
+  rotating spoofed `X-Real-IP` and `X-Forwarded-For` gave 30 application answers, then the
+  application's 429 with `Retry-After`, then nginx's 429. Same-operation replay through
+  `cya-manage` on both hosts: a repeated command returned the stored answer and wrote nothing;
+  a changed body under the same operation ID got the original answer flagged as reused (409 at
+  the API) and wrote nothing. Signing-key rotation: a new key generated on the host replaced
+  the shared key in the three root-only files and the application restarted; the owner's
+  existing session cookie was refused at once (302 to sign-in) and Google signed the owner in
+  again within a second without showing a page, so the rotation was not visible to the user;
+  the new sign-in was audited and no key value appeared in any output or log.
+- **Found during the rehearsal** (now in the profile): no firewall tool in the image;
+  MariaDB 11's default collation; the nginx worker user and modules path; the
+  redirect-address setting.
+- **Full test suite (2026-11-03, source `05cb656`)**, run on each rehearsal host as a detached
+  unit under an unprivileged test identity with a temporary DBA-level test account (dropped
+  afterwards), `--parallel 8`, durability relaxed as in CI and restored afterwards:
+  - Rocky Linux 9 (MariaDB 10.11.18, Python 3.12): 1,825 tests ran: 1,766 passed and 59 skipped; the
+    helper and authorization-policy tests passed; 77 minutes in all, 74 for the suite.
+  - Ubuntu 26.04 (MariaDB 11.8.6, Python 3.14): of 1,825, 1,761 passed and 59 skipped; 101 minutes in all,
+    98.5 for the suite. Failures: the deliberate `test_server_is_mariadb_10_11` version check,
+    and four network-guard tests, because on Python 3.14 parallel workers start by
+    `forkserver` and do not install the test network guard
+    ([issue #53](https://github.com/JustApu/CheckYourAmbulance/issues/53); CI's Python 3.13
+    forks and is unaffected). Every database test, including the migration-reversal,
+    trigger and database-security tests, passed on 11.8. A first attempt stopped at the
+    version check because a parallel worker could not report it; `tblib` was added to that
+    throwaway test environment only.
+  - The slowest tests on both hosts are migration reversals (the kit migration test took 923 s
+    on Rocky and 1,116 s on Ubuntu).
+- **Pending:** as for Rocky, plus the SPEC decision on MariaDB 11.8.
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
 
