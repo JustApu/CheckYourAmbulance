@@ -16,7 +16,7 @@ from django.utils.safestring import mark_safe
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
-from cya.accounts import signin
+from cya.accounts import returns, signin
 from cya.accounts.middleware import SESSION_AUTH_TIME_KEY, SESSION_USER_KEY
 from cya.accounts.oidc import authorization_url, google_config
 from cya.accounts.ratelimit import limited
@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 # The sign-in transaction cookie must reach the callback, which arrives as a
 # cross-site top-level navigation from Google, so it is SameSite=Lax (the
 # session cookie itself is Strict). It is signed, HttpOnly, Secure, limited to
-# /auth/, expires after 10 minutes, and is deleted when the callback runs.
+# /auth/, expires after 10 minutes, and is deleted when the callback runs. It also
+# carries the page to return to after sign-in, when that page is safe (issue 52).
 SIGNIN_COOKIE = "cya_signin"
 SIGNIN_COOKIE_SALT = "cya.accounts.signin"
 SIGNIN_COOKIE_MAX_AGE = 600
@@ -90,6 +91,10 @@ def sign_in(request):
     except IntegrationNotConfigured:
         return _unavailable(request)
     transaction = signin.start_transaction()
+    stored = transaction.as_dict()
+    return_to = returns.safe_return_path(request.GET.get("next"))
+    if return_to is not None:
+        stored["return_to"] = return_to
     response = HttpResponseRedirect(
         authorization_url(
             config,
@@ -100,7 +105,7 @@ def sign_in(request):
     )
     response.set_signed_cookie(
         SIGNIN_COOKIE,
-        json.dumps(transaction.as_dict()),
+        json.dumps(stored),
         salt=SIGNIN_COOKIE_SALT,
         max_age=SIGNIN_COOKIE_MAX_AGE,
         path=SIGNIN_COOKIE_PATH,
@@ -111,15 +116,21 @@ def sign_in(request):
     return response
 
 
-def _read_transaction(request):
+def _stored_transaction(request):
+    """The signed transaction cookie's contents, or None if it is missing, expired or altered."""
     raw = request.get_signed_cookie(
         SIGNIN_COOKIE, default=None, salt=SIGNIN_COOKIE_SALT, max_age=SIGNIN_COOKIE_MAX_AGE
     )
     try:
-        data = json.loads(raw) if raw else None
+        return json.loads(raw) if raw else None
     except json.JSONDecodeError:
-        data = None
-    return signin.SignInTransaction.from_dict(data)
+        return None
+
+
+def _return_path(stored):
+    """Where to go after this transaction's sign-in; checked again, never trusted as stored."""
+    value = stored.get("return_to") if isinstance(stored, dict) else None
+    return returns.safe_return_path(value) or STATUS_PATH
 
 
 @never_cache
@@ -136,8 +147,9 @@ def callback(request):
 
 def _callback_response(request, correlation_id, now):
     """Run the sign-in command and map every outcome to a safe page; never raises."""
+    stored = _stored_transaction(request)
     try:
-        transaction = _read_transaction(request)
+        transaction = signin.SignInTransaction.from_dict(stored)
         config = google_config()
         user = signin.complete_sign_in(
             request.GET,
@@ -182,12 +194,14 @@ def _callback_response(request, correlation_id, now):
     request.session[SESSION_AUTH_TIME_KEY] = int(now.timestamp())
     # A redirect would inherit the cross-site context of Google's redirect,
     # and the SameSite=Strict session cookie would not be sent with it.
-    # A page that refreshes to our own URL starts a same-site navigation.
+    # A page that refreshes to our own URL starts a same-site navigation: to the
+    # page that asked for sign-in when it is safe, otherwise the status page.
+    target = _return_path(stored)
     return _page(
         request,
         "Signed in",
-        format_html('<p><a href="{}">Continue</a></p>', STATUS_PATH),
-        refresh_to=STATUS_PATH,
+        format_html('<p><a href="{}">Continue</a></p>', target),
+        refresh_to=target,
     )
 
 

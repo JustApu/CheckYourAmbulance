@@ -23,6 +23,7 @@ import wsproto
 from django.conf import settings
 from wsproto.events import AcceptConnection, CloseConnection, Request, TextMessage
 
+from cya.accounts.returns import sign_in_location
 from cya.operations.tests.test_api import StatusHttpCase
 
 RUNBOOK = Path(settings.BASE_DIR) / "docs" / "deployment-runbook.md"
@@ -161,7 +162,9 @@ class LaunchCommandTests(StatusHttpCase):
         status, headers, _ = http(
             path, b"GET /fleet/readiness/ HTTP/1.1\r\nHost: testserver\r\nConnection: close\r\n\r\n"
         )
-        self.assertEqual((status, headers["location"]), (302, "/auth/login/"))
+        self.assertEqual(
+            (status, headers["location"]), (302, sign_in_location("/fleet/readiness/"))
+        )
 
         cookies = "; ".join(
             f"{name}={morsel.value}" for name, morsel in self.client.cookies.items()

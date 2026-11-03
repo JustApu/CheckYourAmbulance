@@ -8,13 +8,14 @@ not join answers exactly like one that does not exist.
 """
 
 from django.db import DatabaseError
-from django.http import Http404, HttpResponseRedirect, JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from cya.accounts.returns import sign_in_redirect
 from cya.attention import preferences
 from cya.authorization.backend import canonical_id
 from cya.checklists.models import ChecklistTemplate, Vehicle
@@ -49,7 +50,7 @@ def _authorized(request, section_key="inspection", background=False):
     if user is None:
         if background:
             return None, signed_out()
-        return None, HttpResponseRedirect("/auth/login/")
+        return None, sign_in_redirect(request)
     section = navigation.section_by_key(section_key)
     roles = navigation.roles_for(user)
     if not section.roles & roles:

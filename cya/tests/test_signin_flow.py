@@ -2,15 +2,18 @@
 
 import json
 import logging
+import re
 import time
+from html import unescape
 from unittest import mock
 
 from django.conf import settings
 from django.db import IntegrityError
+from django.http import HttpResponse
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import Resolver404, resolve
 
-from cya.accounts import signin
+from cya.accounts import returns, signin
 from cya.accounts.models import Organization, User
 from cya.accounts.views import SIGNIN_COOKIE, SIGNIN_COOKIE_SALT
 from cya.testing.stubs import (
@@ -40,9 +43,10 @@ class SignInFlowTests(TestCase):
 
     # Helpers -----------------------------------------------------------------
 
-    def start(self, client=None):
+    def start(self, client=None, next_path=None):
         client = client or self.client
-        response = client.get("/auth/login/")
+        query = {} if next_path is None else {"next": next_path}
+        response = client.get("/auth/login/", query)
         self.assertEqual(response.status_code, 302)
         # Read the signed cookie the way the callback does (public Django API).
         request = RequestFactory().get("/")
@@ -51,9 +55,9 @@ class SignInFlowTests(TestCase):
             request.get_signed_cookie(SIGNIN_COOKIE, salt=SIGNIN_COOKIE_SALT)
         )
 
-    def sign_in(self, sub="1001", client=None, state=None, **claims):
+    def sign_in(self, sub="1001", client=None, state=None, next_path=None, **claims):
         client = client or self.client
-        _, transaction = self.start(client)
+        _, transaction = self.start(client, next_path)
         code = self.google.issue_code(
             self.google.id_token(sub=sub, nonce=transaction["nonce"], **claims)
         )
@@ -131,6 +135,89 @@ class SignInFlowTests(TestCase):
         )
         self.assertEqual(response.cookies[SIGNIN_COOKIE].value, "")  # transaction cookie removed
         self.assertIn(f"1001@{STUB_HOSTED_DOMAIN}", self.status_text())
+
+    # Returning to the requested page (issue 52) ----------------------------------
+
+    def landing(self, response):
+        """The page the signed-in page refreshes to, and the Continue link's target."""
+        html = response.content.decode()
+        refresh = re.search(r'<meta http-equiv="refresh" content="0;url=([^"]*)">', html)
+        link = re.search(r'<a href="([^"]*)">Continue</a>', html)
+        return unescape(refresh.group(1)), unescape(link.group(1))
+
+    def test_a_page_redirect_names_itself_and_sign_in_returns_there(self):
+        redirect = self.client.get("/fleet/")
+        self.assertEqual(redirect["Location"], "/auth/login/?next=%2Ffleet%2F")
+        response = self.sign_in(next_path="/fleet/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.landing(response), ("/fleet/", "/fleet/"))
+        page = "/deficiencies/?status=OPEN&vehicle=a%20b"
+        self.assertEqual(self.landing(self.sign_in(next_path=page)), (page, page))
+
+    def test_unsafe_return_paths_fall_back_to_the_status_page(self):
+        for unsafe in (
+            "https://evil.example/",
+            "//evil.example/",
+            "/\\evil.example/",
+            "/\tevil",
+            "javascript:alert(1)",
+            "fleet/",
+            "/auth/status/",
+            "/auth/login/?next=%2Ffleet%2F",
+            "/api/v1/deficiencies",
+            "/ws/v1/vehicles/x/live/",
+            "/" + "a" * 600,
+            "",
+        ):
+            with self.subTest(unsafe=unsafe):
+                _, stored = self.start(next_path=unsafe)
+                self.assertNotIn("return_to", stored)
+                response = self.sign_in(next_path=unsafe)
+                self.assertEqual(self.landing(response), ("/auth/status/", "/auth/status/"))
+
+    def test_a_forged_stored_return_path_is_checked_again(self):
+        # Even a correctly signed cookie carrying an unsafe path cannot redirect elsewhere.
+        _, stored = self.start(next_path="/fleet/")
+        forged = HttpResponse()
+        forged.set_signed_cookie(
+            SIGNIN_COOKIE,
+            json.dumps({**stored, "return_to": "//evil.example/"}),
+            salt=SIGNIN_COOKIE_SALT,
+        )
+        self.client.cookies[SIGNIN_COOKIE] = forged.cookies[SIGNIN_COOKIE].value
+        code = self.google.issue_code(self.google.id_token(sub="1001", nonce=stored["nonce"]))
+        response = self.client.get("/auth/callback/", {"state": stored["state"], "code": code})
+        self.assertEqual(self.landing(response), ("/auth/status/", "/auth/status/"))
+
+    def test_a_later_sign_in_never_sends_an_earlier_tab_to_its_page(self):
+        # One transaction at a time: a second tab's sign-in replaces the first, whose callback
+        # is then refused instead of landing on the second tab's page.
+        _, first = self.start(next_path="/fleet/")
+        _, second = self.start(next_path="/deficiencies/")
+        stale = self.google.issue_code(self.google.id_token(sub="1001", nonce=first["nonce"]))
+        refused = self.client.get("/auth/callback/", {"state": first["state"], "code": stale})
+        self.assertEqual(refused.status_code, 403)
+        self.assertNotIn("/deficiencies/", refused.content.decode())
+        self.client.cookies.pop(SIGNIN_COOKIE, None)
+        self.assertEqual(
+            self.landing(self.sign_in(next_path="/deficiencies/")), ("/deficiencies/",) * 2
+        )
+
+    def test_only_a_get_page_is_returned_to(self):
+        factory = RequestFactory()
+        self.assertEqual(
+            returns.sign_in_redirect(factory.get("/fleet/?as_of=x"))["Location"],
+            "/auth/login/?next=%2Ffleet%2F%3Fas_of%3Dx",
+        )
+        self.assertEqual(
+            returns.sign_in_redirect(factory.post("/administration/roles/"))["Location"],
+            "/auth/login/",
+        )
+        self.assertEqual(returns.sign_in_location("/api/v1/x"), "/auth/login/")
+
+    def test_the_return_path_is_not_audited(self):
+        self.sign_in(next_path="/deficiencies/?vehicle=marker-52")
+        self.assertNotIn("marker-52", repr(AUDIT.events))
 
     def test_code_exchange_uses_configured_redirect_and_pkce_verifier(self):
         _, transaction = self.start()

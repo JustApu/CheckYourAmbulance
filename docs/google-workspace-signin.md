@@ -16,7 +16,13 @@ Sign-in uses the OpenID Connect **authorization code flow with PKCE** against Go
    - `email_verified` is true;
    - **`hd` equals the configured Workspace domain**.
 3. The user is found by **issuer + subject** (`sub`), never by email. A new user is created and granted **Crew only**, in one transaction (AUTH-6). An existing user's email and name are refreshed. An inactive user is refused.
-4. A new session starts. The session cookie is signed, Secure, HttpOnly and `SameSite=Strict`, so the callback answers with a page that refreshes to `/auth/status/` (a redirect would not carry the Strict cookie).
+4. A new session starts. The session cookie is signed, Secure, HttpOnly and `SameSite=Strict`, so the callback answers with a page that refreshes to the page that asked for sign-in, or to `/auth/status/` (a redirect would not carry the Strict cookie).
+
+**Returning to the requested page** ([issue #52](https://github.com/JustApu/CheckYourAmbulance/issues/52), `cya/accounts/returns.py`). A page that needs a session redirects to `/auth/login/?next=<its path and query>` (only for `GET`; a form submission starts sign-in plainly, and a background re-read still answers 401, issue #37).
+- **Storage:** the sign-in view keeps the path in the signed sign-in transaction cookie (10 minutes, `/auth/` only). The callback checks it again and refreshes to it; otherwise it refreshes to `/auth/status/`.
+- **Accepted:** only a path of this application. It must start with a single `/`, with no scheme, host, backslash, whitespace or control character, at most 512 characters, and not under `/auth/`, `/api/` or `/ws/`. Anything else falls back to the status page, so sign-in cannot send anyone to another site.
+- **Not recorded:** the path is not logged or audited.
+- **One sign-in at a time:** a second tab's sign-in replaces the first tab's transaction, so the first tab's callback is refused rather than landing on the second tab's page.
 
 These rules were checked on 2026-10-20 against Google's [OpenID Connect documentation](https://developers.google.com/identity/openid-connect/openid-connect) (page last updated 2026-06-15) and its [discovery document](https://accounts.google.com/.well-known/openid-configuration). The documentation states that `hd` is "the domain associated with the Google Workspace or Cloud organization of the user", that "you must check this claim when restricting access … to only members of certain domains", and that its absence "indicates that the account does not belong to a Google hosted domain". It also says to "always use the `sub` field" as the identifier, never email. This is the verified organization claim that AUTH-3 and OQ-13 require. Personal accounts, and accounts that only use an address in the domain, have no matching `hd` and are refused (AC-22).
 

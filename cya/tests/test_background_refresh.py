@@ -11,6 +11,7 @@ from unittest import mock
 from django.test import Client, override_settings
 
 from cya.accounts.ratelimit import LIMITER
+from cya.accounts.returns import sign_in_location
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 
 
@@ -44,7 +45,7 @@ class BackgroundRefreshTests(CrewUiCase):
             with self.subTest(url=url):
                 response = anonymous.get(url)
                 self.assertEqual(
-                    (response.status_code, response["Location"]), (302, "/auth/login/")
+                    (response.status_code, response["Location"]), (302, sign_in_location(url))
                 )
 
     def test_an_expired_session_gets_401_too(self):

@@ -9,6 +9,7 @@ from django.db import DatabaseError
 from django.test import Client, override_settings
 
 from cya.accounts.models import Organization
+from cya.accounts.returns import sign_in_location
 from cya.checklists.models import Vehicle
 from cya.operations.tests.test_api import StatusHttpCase
 
@@ -29,7 +30,7 @@ class StatusPageTests(StatusHttpCase):
                 self.assertNotIn("Location", response)
             else:
                 self.assertEqual(
-                    (response.status_code, response["Location"]), (302, "/auth/login/")
+                    (response.status_code, response["Location"]), (302, sign_in_location(url))
                 )
             with override_settings(CYA_ROLE_LOOKUP=None):
                 self.assertEqual(self.client.get(url).status_code, 403, url)
