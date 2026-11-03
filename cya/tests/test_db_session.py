@@ -47,11 +47,11 @@ class SessionProblemsTests(SimpleTestCase):
 
 
 class LiveSessionTests(TestCase):
-    """Run against the real MariaDB 10.11 test database."""
+    """Run against the real MariaDB test database (10.11 or 11.8, SPEC 17.5)."""
 
-    def test_server_is_mariadb_10_11(self):
+    def test_server_is_an_allowed_mariadb_version(self):
         self.assertTrue(connection.mysql_is_mariadb)
-        self.assertEqual(connection.mysql_version[:2], (10, 11))
+        self.assertIn(connection.mysql_version[:2], {(10, 11), (11, 8)})
 
     def test_new_connections_have_the_required_settings(self):
         with connection.cursor() as cursor:

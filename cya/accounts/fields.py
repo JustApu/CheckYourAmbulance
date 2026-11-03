@@ -34,5 +34,5 @@ class IdentityIDField(models.CharField):
 
     def db_type(self, connection):
         if connection.vendor != "mysql":
-            raise NotImplementedError("Identity schema requires MariaDB 10.11.")
+            raise NotImplementedError("Identity schema requires MariaDB (10.11 or 11.8).")
         return "char(36) CHARACTER SET ascii"

@@ -31,7 +31,7 @@ The owner chooses the provider and privately names the accountable operator
 and deputy. Their roles may be filled by volunteers, paid staff, or a mix. Both
 need tested administrative recovery access; hold names, hosts, keys and account
 identifiers outside GitHub. Use a supported Linux release
-with security updates, MariaDB 10.11, Python compatible with the pinned Django
+with security updates, MariaDB 10.11 or 11.8 (SPEC §17.5), Python compatible with the pinned Django
 release, a reverse proxy and a service manager. Record exact versions privately
 and sanitized version/build evidence in the rehearsal result.
 
@@ -545,11 +545,9 @@ step by step and reuses its files from [`deploy/rocky9/`](../deploy/rocky9/), ex
 [`deploy/ubuntu2604/nginx.conf`](../deploy/ubuntu2604/nginx.conf). Every package comes from
 Ubuntu's own repositories. Only the differences are listed here.
 
-**MariaDB version.** Ubuntu 26.04 ships MariaDB 11.8, not the 10.11 that SPEC §17.5 pins.
-This profile was rehearsed as a compatibility test at the owner's request (2026-11-03); it
-does not amend the SPEC. Do not use it in production until the owner amends §17.5 or 10.11
-is installed from another source. The application suite has one deliberate version check
-(`cya.tests.test_db_session`, `test_server_is_mariadb_10_11`) that fails on 11.8.
+**MariaDB version.** Ubuntu 26.04 ships MariaDB 11.8. This profile was first rehearsed as a
+compatibility test (2026-11-03); SPEC 1.25.0 ([issue #56](https://github.com/JustApu/CheckYourAmbulance/issues/56)) then allowed 11.8 alongside 10.11, and
+CI tests both. The application suite's version check accepts exactly those two versions.
 
 1. **Firewall first.** The image has no firewall tool. Install `ufw`, then, with console
    access or a scheduled rollback (`systemd-run --on-active=300 /usr/sbin/ufw disable`) in

@@ -1,4 +1,4 @@
-"""Fail-closed runtime privilege inspection for MariaDB 10.11.
+"""Fail-closed runtime privilege inspection for MariaDB (10.11 or 11.8, SPEC 17.5).
 
 The check runs as the *runtime* account: SHOW GRANTS FOR CURRENT_USER
 reports direct global/schema/table grants and assigned roles. Roles are not
