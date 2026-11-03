@@ -23,7 +23,8 @@ EXPECTED = {
     "time_zone": "+00:00",
     "foreign_key_checks": 1,
     "check_constraint_checks": 1,
-    # MariaDB 10.11 names this tx_isolation (transaction_isolation is MySQL's).
+    # MariaDB 10.11 names this tx_isolation (transaction_isolation is MySQL's); 11.8 still answers
+    # tx_isolation (the full suite passed on the 11.8 rehearsal host, issue #56).
     "tx_isolation": "READ-COMMITTED",
 }
 SETTINGS_QUERY = (

@@ -42,7 +42,7 @@ The roadmap is tracked in GitHub as `milestone`-labeled tracking issues (M0 onwa
 4. Create narrowly scoped GitHub implementation issues, following [AGENTS.md](AGENTS.md) and the [coordination rules](docs/coordination.md).
 5. Prototype the inspection experience using **synthetic** data, then implement in reviewable increments.
 
-**Stack:** Python with Django and MariaDB 10.11 on Linux, decided by the owner on 2026-10-20 ([SPEC §17.5](SPEC.md#175-hosting-database-engine-backup-oq-24); evidence in [the architecture spike report](docs/spikes/oq24-architecture-spike.md)). Hosting, secrets and recovery are decided in [SPEC §17.8](SPEC.md#178-deployment-secrets-and-recovery-oq-24-issue-16) (one organization-operated Linux VPS, RPO 15 minutes and RTO 24 hours, an off-host encrypted backup held by an authorized operator, and a paper outage fallback). **Still pending:** the provider choice, production setup and the pilot gates in DEP-12, verification of the spike's remaining gaps, actual checklists and external API credentials.
+**Stack:** Python with Django and MariaDB (10.11 or 11.8) on Linux, decided by the owner on 2026-10-20 ([SPEC §17.5](SPEC.md#175-hosting-database-engine-backup-oq-24); evidence in [the architecture spike report](docs/spikes/oq24-architecture-spike.md)). Hosting, secrets and recovery are decided in [SPEC §17.8](SPEC.md#178-deployment-secrets-and-recovery-oq-24-issue-16) (one organization-operated Linux VPS, RPO 15 minutes and RTO 24 hours, an off-host encrypted backup held by an authorized operator, and a paper outage fallback). **Still pending:** the provider choice, production setup and the pilot gates in DEP-12, verification of the spike's remaining gaps, actual checklists and external API credentials.
 
 ## Development
 

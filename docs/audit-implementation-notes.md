@@ -163,7 +163,7 @@ the management commands below.
 
 1. With separate schema-owner credentials, explicitly set
    `CYA_DATABASE_ROLE=schema_owner`. **Before migrating a binary-log-enabled
-   MariaDB 10.11 server**, the DBA sets `log_bin_trust_function_creators=1` in
+   MariaDB server (10.11 or 11.8)**, the DBA sets `log_bin_trust_function_creators=1` in
    the production server configuration (SPEC §17.8 DEP-5; owner decision on
    [issue #16](https://github.com/JustApu/CheckYourAmbulance-archive/issues/16),
    2026-10-21). Schema-level privileges alone are insufficient: without it,
@@ -241,7 +241,7 @@ compromised application.
 ## Verification
 
 Pinned dependencies are installed with `--require-hashes`; CI uses Python 3.13,
-Django 6.1.2, Ruff 0.17.1 and MariaDB 10.11. The regular CI job runs the full
+Django 6.1.2, Ruff 0.17.1 and MariaDB 10.11 and 11.8. The regular CI job runs the full
 Django suite plus offline audit helpers and schema/manifest tests.
 
 For the account/role tests use a disposable DBA-controlled server only:
