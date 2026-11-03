@@ -13,6 +13,7 @@ read in full as before. These tests check that:
 """
 
 from unittest import mock
+from uuid import uuid4
 
 from cya.attention.readiness import fleet_readiness
 from cya.attention.tests.support import AttentionCase
@@ -240,3 +241,40 @@ class PageBoundTests(ObligationLinkCleanupMixin, AttentionCase):
         with mock.patch.object(projections, "MAX_ROWS", bound - 1):
             with self.assertRaisesRegex(ValueError, "exceeds"):
                 load_projection_histories(ids, self.clock.now, organization_id=org)
+
+    def test_deficiency_scope_rows_are_bounded_per_vehicle_in_a_page(self):
+        # Vehicle A's deficiencies cover one more item row than the per-vehicle bound; vehicle B
+        # has none. The page must refuse A, as A alone does, though the page-wide total fits.
+        a, b = str(self.vehicles[0].pk), str(self.vehicles[1].pk)
+        deficiency_id = str(self.failed(self.siren).body["deficiency_ids"][0])
+        # The bound must admit A's other deficiency evidence; only the item rows exceed it.
+        bound = max(
+            2,
+            Deficiency.objects.filter(vehicle_id=a).count(),
+            DeficiencyEvent.objects.filter(deficiency__vehicle_id=a).count(),
+        )
+        rows = [
+            mock.Mock(deficiency_id=deficiency_id, item_id=str(uuid4())) for _ in range(bound + 1)
+        ]
+
+        class Scope(list):
+            def order_by(self, *fields):
+                return self
+
+        org, now = str(self.org.pk), self.clock.now
+        with (
+            mock.patch.object(projections, "MAX_ROWS", bound),
+            mock.patch.object(
+                projections.DeficiencyAffectedItem.objects,
+                "filter",
+                side_effect=lambda *args, **kwargs: Scope(rows),  # the current rows each call
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                projections._history(org, {a: {}, b: {}}, now, now, bound * 2)
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                projections._history(org, {a: {}}, now, now, bound)
+            del rows[bound]  # exactly the bound fits, in the page and alone
+            page = projections._history(org, {a: {}, b: {}}, now, now, bound * 2)
+            self.assertEqual(page[b]["deficiency_headers"], ())
+            self.assertEqual(page[a], projections._history(org, {a: {}}, now, now, bound)[a])

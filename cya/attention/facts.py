@@ -1,10 +1,10 @@
 """Load the evidence behind item attention (SPEC 19.3, 19.4); nothing here writes.
 
-Checks: the latest effective check per (item, kit key) as of an instant. The newest rows of each
-key are read with a window query, their whole correction chains and decisions are replayed by
-cya.checks.state.effective_checks (which fails closed on a malformed chain), and invalidated
-chains are dropped. Reading more rows per key than WINDOWS allows without finding a
-non-invalidated chain raises rather than guessing.
+Checks: the latest effective check per (item, kit key) as of an instant. Each key's chains are
+found newest first, down to its latest one not invalidated, without reading its older history
+(cya.obligations.projections.latest_check_roots, issue #63); their whole correction chains and
+decisions are replayed by cya.checks.state.effective_checks (which fails closed on a malformed
+chain), and invalidated chains are dropped. More rows than the bound raises rather than guessing.
 
 Deficiencies: with no instant, the live deficiency_projection (disposable cache, fast); with an
 instant, the append-only events up to it (authoritative). verify_attention compares the two
