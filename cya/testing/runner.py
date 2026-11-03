@@ -23,8 +23,8 @@ def _init_guarded_worker(counter, *args, **kwargs):
     ParallelTestSuite.init_worker(counter, *args, **kwargs)
 
 
-# Test classes that take minutes, longest first (issue #57; --durations of the full suite on
-# 2026-11-03). Django hands parallel workers one class at a time, in suite order, so a long
+# Test classes that take minutes, longest first (issue #57; --durations 40 of the full local suite
+# on main eb3a0ca, 2026-11-03). Django hands parallel workers one class at a time, in suite order, so a long
 # class near the end of its group finishes the run on its own. Starting these first within their
 # group lets them overlap the rest. Maintained by hand: add a class here when --durations shows it
 # taking minutes. A name no longer in the suite is ignored; a test checks every name still exists.
@@ -33,13 +33,14 @@ SLOW_FIRST = (
     "cya.deficiencies.tests.test_correction.CorrectionScopeMigrationTests",
     "cya.deficiencies.tests.test_migration_reversal.EmptyReversalTests",
     "cya.tests.test_audit_integrity_db.AuditSchemaLifecycleTests",
-    "cya.obligations.tests.test_projections.CheckHistoryTests",
-    "cya.deficiencies.tests.test_verification.VerificationMigrationTests",
-    "cya.deficiencies.tests.test_verification_invalidation.MigrationTests",
     "cya.deficiencies.tests.test_scope_expansion.MigrationTests",
-    "cya.obligations.tests.test_kits.KitHistoryTests",
+    "cya.deficiencies.tests.test_verification_invalidation.MigrationTests",
+    "cya.deficiencies.tests.test_verification.VerificationMigrationTests",
     "cya.deficiencies.tests.test_suspension.MigrationTests",
-    "cya.obligations.tests.test_projections.RandomizedHistoryTests",
+    "cya.obligations.tests.test_batch_projections.SeededBatchTests",
+    "cya.checks.tests.test_obligation_links.CheckObligationLinkTests",
+    "cya.obligations.tests.test_projections.CheckHistoryTests",
+    "cya.obligations.tests.test_kits.KitHistoryTests",
 )
 
 
