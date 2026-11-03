@@ -5,11 +5,12 @@ sign-in, and a signed-in user without a permitted role gets 403 (SPEC 3.2),
 whatever the navigation shows.
 """
 
-from django.http import HttpResponseRedirect, JsonResponse
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from cya.accounts.returns import sign_in_redirect
 from cya.authorization.backend import AuthorizationUnavailable, get_backend
 from cya.authorization.guard import AuditUnavailable, Denial, PermissionDenied, record_denial
 from cya.shell import navigation
@@ -38,7 +39,7 @@ def deny_section(request, user, roles, action):
 def _section_page(request, key, template="shell/placeholder.html"):
     user = request.cya_user
     if user is None:
-        return HttpResponseRedirect("/auth/login/")
+        return sign_in_redirect(request)
     section = navigation.section_by_key(key)
     roles = navigation.roles_for(user)
     if not section.roles & roles:
@@ -66,5 +67,5 @@ administration = _make_view("administration", "shell/administration.html")
 @require_GET
 def home(request):
     if request.cya_user is None:
-        return HttpResponseRedirect("/auth/login/")
+        return sign_in_redirect(request)
     return render(request, "shell/home.html", {"title": "Check Your Ambulance"})
