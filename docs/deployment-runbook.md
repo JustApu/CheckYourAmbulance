@@ -18,7 +18,7 @@ changes this runbook needed are built; each still needs its host check:
 | Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Rehearsed on Rocky Linux 9 (2026-11-02): one process after restart and reboot, socket reachable only by the proxy. |
 | HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Rehearsed on Rocky Linux 9 (2026-11-02): HTTPS recognized behind nginx, spoofed forwarding headers overwritten, HSTS observed. |
 | Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Rehearsed on Rocky Linux 9 (2026-11-02): both layers answer 429 and spoofed client-address headers do not reset the count. |
-| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. |
+| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. An Ubuntu 26.04 rehearsal with MariaDB 11.8 (outside the SPEC §17.5 pin; compatibility test only) followed on 2026-11-03 ([host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03), [evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)). |
 
 This issue's runbook scope does not include changing application files; the
 application changes above were made under their own issues. Backup jobs and restore measurements
@@ -81,7 +81,8 @@ operator actions; this draft has not performed them on the developer machine.
 Use the chosen distribution's versioned installation and firewall documentation
 when making a concrete host profile; do not guess package names, firewall commands or
 unit names. The [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
-below was verified on a throwaway host.
+below was verified on a throwaway host, and the [Ubuntu 26.04 host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03)
+on another (with MariaDB 11.8, outside the SPEC §17.5 pin).
 
 ## Secrets and service configuration
 
@@ -536,6 +537,67 @@ package comes from Rocky's own repositories except Certbot (EPEL).
 10. **Teardown.** Remove any temporary passwordless sudo rule and test credentials, and
     destroy the throwaway host and its certificate when the rehearsal is recorded.
 
+## Ubuntu 26.04 host profile (rehearsed 2026-11-03)
+
+Verified on a throwaway Ubuntu 26.04.1 LTS (x86_64) host with AppArmor enabled, using
+synthetic data and release `05cb656`. It follows the [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
+step by step and reuses its files from [`deploy/rocky9/`](../deploy/rocky9/), except
+[`deploy/ubuntu2604/nginx.conf`](../deploy/ubuntu2604/nginx.conf). Every package comes from
+Ubuntu's own repositories. Only the differences are listed here.
+
+**MariaDB version.** Ubuntu 26.04 ships MariaDB 11.8, not the 10.11 that SPEC §17.5 pins.
+This profile was rehearsed as a compatibility test at the owner's request (2026-11-03); it
+does not amend the SPEC. Do not use it in production until the owner amends §17.5 or 10.11
+is installed from another source. The application suite has one deliberate version check
+(`cya.tests.test_db_session`, `test_server_is_mariadb_10_11`) that fails on 11.8.
+
+1. **Firewall first.** The image has no firewall tool. Install `ufw`, then, with console
+   access or a scheduled rollback (`systemd-run --on-active=300 /usr/sbin/ufw disable`) in
+   case SSH is cut off: `ufw default deny incoming`, `ufw default allow outgoing`,
+   `ufw allow OpenSSH`, `ufw allow 443/tcp`, `ufw allow 80/tcp` (ACME HTTP-01 only, DEP-10;
+   omit with DNS-01) and `ufw --force enable`. Confirm a fresh SSH login, then stop the
+   rollback timer. Rules apply to IPv4 and IPv6. Restrict SSH sources as on Rocky when the
+   owner lifts the deferral.
+
+2. **Packages.** No module streams or EPEL:
+
+   ```sh
+   apt-get install -y mariadb-server nginx python3-venv python3-dev build-essential \
+       libmariadb-dev pkg-config certbot
+   ```
+
+   Python is 3.14 (the project supports 3.12 or later; CI uses 3.13). The journal is
+   already persistent, and Certbot's `certbot.timer` is enabled by the package.
+
+3. **Service identity and release.** As on Rocky, with `--shell /usr/sbin/nologin` and
+   `python3 -m venv`. No SELinux labels are needed.
+
+4. **MariaDB.** Install `mariadb-cya.cnf` as `/etc/mysql/mariadb.conf.d/60-cya.cnf`. The
+   stock server already binds to `127.0.0.1`. MariaDB 11's default collation for
+   `utf8mb4` is `utf8mb4_uca1400_ai_ci`; create the database with
+   `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`, as development and CI do. The DBA
+   channel is `sudo mariadb`, as on Rocky.
+
+5. **Secrets and management commands.** As on Rocky. sudo's `secure_path` includes
+   `/usr/local/sbin`; the rehearsal still called `cya-manage` by full path.
+
+6. **Application service.** Install `cya.service` unchanged. nginx runs as `www-data`, so
+   `usermod -aG cya www-data`. No AppArmor profile confines nginx or Python, so no socket
+   rule is needed.
+
+7. **nginx and certificate.** Keep a copy of the stock `/etc/nginx/nginx.conf` and install
+   `deploy/ubuntu2604/nginx.conf` in its place (worker user `www-data`, modules from
+   `/etc/nginx/modules-enabled/`); it no longer includes `sites-enabled/`, so the default
+   site is not served. Certificate steps are as on Rocky, except the renewal timer is
+   `certbot.timer` (already enabled). Then install `nginx-cya.conf` and
+   `cya_proxy_headers.conf` and set the HTTPS variables as on Rocky.
+
+8. **Google sign-in.** Besides the client ID, secret and hosted domain, `runtime.env` needs
+   `CYA_GOOGLE_REDIRECT_URI=https://__HOST__/auth/callback/`, and the OAuth client must list
+   that address; without it, sign-in stays unavailable (503).
+
+9. **Recurring jobs and teardown.** As on Rocky.
+
 ## Throwaway-server verification record
 
 Run the procedure on a disposable host using the current source with synthetic
@@ -544,7 +606,11 @@ pass/fail and sanitized explanation for each row. Do not commit hostnames,
 addresses, account IDs, credentials or raw output. No row below is claimed fully
 passed by the earlier Docker subset. The Rocky Linux 9 rehearsal on 2026-11-02
 ([evidence](#rocky-linux-9-rehearsal-evidence-2026-11-02-utc)) passed, partly passed or left
-pending each row as stated.
+pending each row as stated. The statuses below are Rocky's. The Ubuntu 26.04 rehearsal
+([evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)), on MariaDB 11.8 (not the
+approved version), repeated the build, firewall, TLS, MariaDB, runtime-isolation,
+recurring-job, restart and sign-in checks listed there; it did not repeat the CSRF,
+spoofed-header, rate-limit or WebSocket checks.
 
 | Check | Required evidence | Status |
 |---|---|---|
@@ -627,6 +693,58 @@ Results:
   agency rules and real checklists; alert delivery (issue #8); deputy access (SSH source
   restriction deferred by owner decision); interrupted-migration recovery and prior-code
   compatibility; host teardown. The port-80 rule is now DEP-10 (SPEC 1.23.0, issue #48).
+
+## Ubuntu 26.04 rehearsal evidence, 2026-11-03 UTC
+
+Tester: Claude (Anthropic), as operator on an owner-provided throwaway host, with synthetic
+data and source `05cb656051dee42df56d42672f3180564152831d` (PR #47 at the time) for the
+deployment and the full suite; `cya-manage` was later replaced by the PR #47 version with
+interrupt cleanup. Host names, addresses, accounts and raw output stay with the owner.
+
+| Component | Version |
+|---|---|
+| Operating system | Ubuntu 26.04.1 LTS, x86_64, AppArmor enabled, systemd 259, sudo-rs 0.2.13 |
+| MariaDB | 11.8.6 (Ubuntu package; outside the SPEC §17.5 pin) |
+| nginx | 1.28.3 (Ubuntu package) |
+| Python | 3.14.4 (Ubuntu package) |
+| Application | Django 6.1.2, uvicorn 0.54.0, from a fresh `pip install --require-hashes` |
+| Certificate client | Certbot 4.0.0 (Ubuntu package), Let's Encrypt |
+| Firewall | ufw 0.36.2 |
+
+Results:
+
+- **Passed:** firewall admits only 22, 80 and 443 over IPv4 and IPv6, with database, DNS
+  and other ports dropped from outside; hash-checked install (mysqlclient built against the
+  11.8 client library); 74 migrations in 141 s by a schema owner without SUPER, with
+  binary logging on and `log_bin_trust_function_creators=1`; `verify_audit_schema` (40
+  append-only and 44 command-guarded tables); all 166 triggers defined by the schema owner;
+  DBA grant preview, apply and `verify_audit_runtime`; `check --deploy` reports only
+  W005/W021 with the proxy settings.
+- **Passed:** one uvicorn process on the Unix socket, reachable by nginx and refused to
+  another local account; HTTPS with a Let's Encrypt certificate (staging first, then
+  production, then a renewal dry run); unknown TLS names and requests by address get no
+  handshake; port 80 serves only ACME challenges and redirects the rest; HSTS (300 s) and
+  security headers present; obligation and session jobs run and their timers are set.
+- **Passed:** after a reboot the firewall, MariaDB (same settings), nginx, the application
+  and all three timers started with no failed units; the database and upstream ports stayed
+  closed from outside.
+- **Passed with real Google sign-in** (the owner's internal OAuth client; synthetic
+  organization): the sign-in redirect uses PKCE (S256), the hosted-domain hint and the
+  configured redirect address, with a `Secure`, `HttpOnly`, `SameSite=Lax` sign-in cookie
+  limited to `/auth/`; first sign-in provisioned Crew; `bootstrap_administrator` wrote
+  nothing on `--dry-run`, granted Administrator and refused and audited a repeat; a
+  Supervisor grant and revoke each committed a receipt, role row and audit record; the
+  owner confirmed the session cookie is `Secure`, `HttpOnly` and `SameSite=Strict`; the
+  runtime account was refused (1142) and the schema owner (1644) for UPDATE and DELETE on
+  real audit rows and on deficiency severities, inside rolled-back transactions; no
+  application or nginx errors and no callback codes in nginx logs. One earlier sign-in
+  attempt was refused and audited as expired.
+- **Found during the rehearsal** (now in the profile): no firewall tool in the image;
+  MariaDB 11's default collation; the nginx worker user and modules path; the
+  redirect-address setting.
+- **Full test suite on MariaDB 11.8:** pending; the run and its timings are recorded on the
+  host and will be added here.
+- **Pending:** as for Rocky, plus the SPEC decision on MariaDB 11.8.
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
 
