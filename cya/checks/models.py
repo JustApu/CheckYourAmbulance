@@ -132,6 +132,13 @@ class CheckRecord(Evidence):
                 name="check_root_shape",
             ),
         ]
+        indexes = [
+            # The checklist and dashboard read only recent checks of each vehicle item (issue #63).
+            models.Index(
+                fields=["organization", "vehicle", "item", "kit", "recorded_at"],
+                name="check_vehicle_item_time",
+            ),
+        ]
 
     def __str__(self):
         return f"CheckRecord {self.pk}"
