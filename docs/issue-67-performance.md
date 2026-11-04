@@ -57,11 +57,26 @@ time; these samples predate that change, and its rehearsal-host latency has not 
 measured. Checklist and readiness remained above the 1-second target in these
 isolated samples.
 
-The reviewer also reported an in-progress rebuild rate of about 22 obligations per
-second after 29,000 of 129,000 rows, projecting roughly 1.5 hours for a full rebuild.
-The rebuild and subsequent `--verify` had not completed at the time of that report.
-Treat the duration as a preliminary estimate, not a completed recovery measurement;
-the final completion result is still pending.
+The follow-up reviewer completed the full rebuild on the same 129,000-obligation
+synthetic history under the runtime role in 4,872 seconds (about 26 obligations per
+second). It wrote 113,258 projection rows and verified all 129,000 obligations,
+with no evidence-cap errors. This is the observed duration operators should budget
+for a comparable history before reopening traffic. It is a one-host measurement,
+not a general throughput guarantee. The separate `--verify`-only pass was still
+running when the reviewer reported these results; its completion has not yet been
+confirmed.
+
+The read-time status join adds one bounded `VehicleStatusEvent` query per current
+page read: one query for a checklist vehicle and one page-wide query for readiness,
+independent of the number of obligations. Relative to the recorded 27-query
+checklist / 22-query readiness samples above, this implies 28 and 23 queries if
+the remaining query paths are unchanged. Its wall-time effect has not been measured
+against the same year-long rehearsal data because the local MariaDB service was
+unavailable; the follow-up reviewer will measure it on the new head. In a separate
+in-memory microbenchmark, the empty-evidence evaluator path ran 3,000 synthetic
+obligations in a median 0.0141 seconds versus 0.0154 seconds for the previous
+conversion path (1.09× faster). This excludes database access and JSON decoding,
+so it does not establish full read latency. No issue #10 target is claimed.
 
 ## Local verification
 

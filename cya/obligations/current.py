@@ -68,6 +68,8 @@ def evaluate_facts(facts, instant):
     """Use the SAME pure evaluator as historical replay, without replaying check chains."""
     if facts.get("version") != 1:
         raise ValueError("unsupported obligation projection; rebuild required")
+    if not any(facts[key] for key in ("checks", "determinations", "statuses", "suspensions")):
+        return evaluate_obligation(_restore(ObligationEvidence, facts["obligation"]), instant)
     return evaluate_obligation(
         _restore(ObligationEvidence, facts["obligation"]),
         instant,

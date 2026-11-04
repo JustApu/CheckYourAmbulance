@@ -315,6 +315,16 @@ def evaluate_obligation(
     aware(instant)
     if obligation.recorded_at > instant:
         raise ValueError("obligation did not exist at instant")
+    if not determinations and not checks and not status_events and not suspensions:
+        if instant < obligation.early_at:
+            state = State.UPCOMING
+        elif instant < obligation.due_at:
+            state = State.CURRENT
+        elif instant <= obligation.grace_at:
+            state = State.DUE
+        else:
+            state = State.OVERDUE
+        return ObligationState(obligation, state)
     status = _status_for(obligation, status_events, instant)
     if obligation.routine and status is not None and status.status == "OUT_OF_SERVICE":
         return ObligationState(obligation, State.EXEMPT, status.id)

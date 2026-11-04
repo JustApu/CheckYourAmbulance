@@ -295,6 +295,17 @@ fall back to replay for a missing/partial cache; historical reads always replay.
 No projection timer is required for clock transitions. See [projection design,
 writer coverage and recovery](current-obligation-projection.md).
 
+Plan a pre-reopen maintenance window from the history size and a rehearsal on the
+chosen host. A cross-family rehearsal of 129,000 synthetic obligations on Rocky 9
+with MariaDB 10.11 and 2 vCPUs completed the full runtime-role rebuild in 4,872
+seconds (about 26 obligations per second), wrote 113,258 projection rows, and
+verified 129,000 obligations without evidence-cap errors. This is a measured
+planning reference, not a throughput guarantee; database size, hardware and
+contention can change the duration. The separate verify-only pass had not
+completed when this result was recorded. Keep traffic closed until the actual
+rebuild and `--verify` both complete successfully; if either fails, inspect the
+reported group and rerun the command after resolving the cause.
+
 If application code is rolled back to a version that does not refresh this
 projection, the event records may advance while cached facts remain stale. On a
 later forward deployment, rebuild each organization and complete `--verify`
