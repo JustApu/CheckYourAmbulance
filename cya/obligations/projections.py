@@ -3,7 +3,7 @@
 from datetime import timedelta
 from itertools import islice
 
-from django.db.models import F, Max
+from django.db.models import F, Max, Q
 
 from cya.checklists.models import Vehicle
 from cya.checks.models import (
@@ -210,6 +210,18 @@ def _key(vehicle_id, item_id, kit_id):
     return (str(vehicle_id), str(item_id), str(kit_id) if kit_id else NO_KIT)
 
 
+def _exact_keys(keys):
+    """Rows of exactly these (vehicle, item, kit) keys; each is one range of the check index."""
+    condition = Q(pk__in=())
+    for vehicle_id, item_id, kit_key in sorted(keys):
+        condition |= Q(
+            vehicle_id=vehicle_id,
+            item_id=item_id,
+            kit_id=None if kit_key == NO_KIT else kit_key,
+        )
+    return condition
+
+
 def _attention_roots(organization_id, keys, since, instant, limit):
     """Roots of the check chains attention needs at every instant in [since, instant].
 
@@ -249,10 +261,7 @@ def _attention_roots(organization_id, keys, since, instant, limit):
         newest_by_key = {
             _key(row["vehicle_id"], row["item_id"], row["kit_id"]): row["newest"]
             for row in CheckRecord.objects.filter(
-                organization_id=organization_id,
-                vehicle_id__in=sorted({k[0] for k in unresolved}),
-                item_id__in=sorted({k[1] for k in unresolved}),
-                recorded_at__lte=lower,
+                _exact_keys(unresolved), organization_id=organization_id, recorded_at__lte=lower
             )
             .order_by()
             .values("vehicle_id", "item_id", "kit_id")
@@ -264,10 +273,11 @@ def _attention_roots(organization_id, keys, since, instant, limit):
             break
         upper, lower = lower, max(older[k] for k in unresolved) - LATEST_SPAN
         window = _bounded(
+            # Only the unresolved keys' own rows: a resolved sibling kit or another item can
+            # have any amount of settled history inside a wide gap.
             CheckRecord.objects.filter(
+                _exact_keys(unresolved),
                 organization_id=organization_id,
-                vehicle_id__in=sorted({k[0] for k in unresolved}),
-                item_id__in=sorted({k[1] for k in unresolved}),
                 recorded_at__gt=lower,
                 recorded_at__lte=upper,
             )
