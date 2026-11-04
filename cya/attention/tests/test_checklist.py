@@ -3,6 +3,8 @@
 from datetime import timedelta
 from unittest import mock
 
+from django.test import override_settings
+
 from cya.attention.checklist import ChecklistQueryError, vehicle_checklist
 from cya.attention.facts import item_attention, verify_attention
 from cya.attention.tests.support import AttentionCase
@@ -208,6 +210,90 @@ class ViewTests(AttentionCase):
         # AC-18: a supervisor-suspended check is excluded from Needs Attention Only even while red.
         only = {r.item_id for r in self.rows(needs_attention_only=True, suspension_lookup=lookup)}
         self.assertNotIn(str(self.suction.pk), only)
+
+
+class MissedObligationTests(AttentionCase):
+    """An obligation unsatisfied after L = G + w_late no longer decides the row (SCH-2, #66).
+
+    Day 0's suction obligation is due 06:00 with G = 07:00, so L = 19:00 by default (w_late
+    12 h); day 1's is due 06:00 the next morning and its window opens at 05:00. The test clock
+    advances a microsecond on every read, so exact boundaries are read with an explicit as_of.
+    """
+
+    TICK = timedelta(microseconds=1)
+
+    def test_until_the_late_limit_the_row_stays_overdue_and_actionable(self):
+        self.clock.set(self.at(days=1))
+        for instant in (self.at(hours=7) + self.TICK, self.at(hours=19)):  # just after G, at L
+            with self.subTest(instant=instant):
+                row = self.row(self.suction, needs_attention_only=True, as_of=instant)
+                self.assertEqual((row.obligation_state, row.due_at), ("OVERDUE", self.at(hours=6)))
+                self.assertTrue(row.needs_action)
+
+    def test_after_the_late_limit_the_row_shows_the_next_obligation(self):
+        self.clock.set(self.at(days=1))
+        instant = self.at(hours=19) + self.TICK
+        row = self.row(self.suction, as_of=instant)
+        self.assertEqual((row.obligation_state, row.due_at), ("UPCOMING", self.at(days=1, hours=6)))
+        self.assertFalse(row.needs_action)
+        ids = {r.item_id for r in self.rows(needs_attention_only=True, as_of=instant)}
+        self.assertNotIn(str(self.suction.pk), ids)
+
+    def test_a_missed_check_does_not_hide_todays_open_window(self):
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        row = self.row(self.suction, needs_attention_only=True)
+        self.assertEqual((row.obligation_state, row.due_at), ("CURRENT", self.at(days=1, hours=6)))
+
+    def test_a_missed_check_does_not_hide_todays_completed_one(self):
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        self.record(self.suction)
+        row = self.row(self.suction)
+        self.assertEqual(row.obligation_state, "SATISFIED")
+        self.assertEqual(row.due_at, self.at(days=1, hours=6))
+        self.assertFalse(row.needs_action)
+
+    def test_an_earlier_as_of_applies_the_limit_at_that_instant(self):
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        row = self.row(self.suction, as_of=self.at(hours=9))
+        self.assertEqual((row.obligation_state, row.due_at), ("OVERDUE", self.at(hours=6)))
+        self.assertEqual(self.row(self.suction).obligation_state, "CURRENT")
+
+    def test_the_limit_follows_the_setting_including_no_late_completion(self):
+        self.clock.set(self.at(days=1))
+        nine = self.at(hours=9)
+        for hours, state in ((2, "OVERDUE"), (1, "UPCOMING"), (0, "UPCOMING")):
+            with self.subTest(hours=hours), override_settings(CYA_LATE_COMPLETION_HOURS=hours):
+                self.assertEqual(self.row(self.suction, as_of=nine).obligation_state, state)
+        with override_settings(CYA_LATE_COMPLETION_HOURS=0):
+            at_g = self.row(self.suction, as_of=self.at(hours=7))  # exactly G: Due, not missed
+            self.assertEqual(at_g.obligation_state, "DUE")
+            after_g = self.row(self.suction, as_of=self.at(hours=7) + self.TICK)
+            self.assertEqual(after_g.obligation_state, "UPCOMING")
+
+    def test_an_unable_check_past_the_limit_leaves_the_row_but_keeps_it_red(self):
+        # Assumption recorded on issue #66: an Unable-to-Inspect obligation waits for supervisor
+        # completion on its own page (UTI-1/UTI-2), not on the checklist, so it follows SCH-2 too.
+        self.clock.set(self.at(hours=9))
+        self.failed(self.suction, outcome="UNABLE_TO_INSPECT", explanation="Synthetic reason.")
+        self.assertEqual(self.row(self.suction).obligation_state, "OVERDUE")
+        self.clock.set(self.at(hours=20))
+        row = self.row(self.suction)
+        self.assertEqual(row.obligation_state, "UPCOMING")
+        self.assertEqual(row.attention.check_outcome, "UNABLE_TO_INSPECT")
+        self.assertTrue(row.attention.red)
+
+    def test_history_still_records_the_missed_obligation_as_overdue(self):
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        states = get_vehicle_obligations_as_of(
+            str(self.vehicle.pk), self.clock.now, organization_id=str(self.org.pk)
+        )
+        missed = [
+            s
+            for s in states
+            if s.obligation.item_id == str(self.suction.pk)
+            and s.obligation.due_at == self.at(hours=6)
+        ]
+        self.assertEqual([s.state for s in missed], [State.OVERDUE])
 
 
 class QueryTests(AttentionCase):
