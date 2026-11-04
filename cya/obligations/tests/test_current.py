@@ -444,6 +444,12 @@ class CurrentProjectionTests(AttentionCase):
         refresh.assert_not_called()
         self.assertEqual(before_return, list(ObligationProjection.objects.order_by("pk").values()))
         self.assert_current_matches_replay()
+        call_command(
+            "rebuild_obligation_projection",
+            organization=str(self.org.pk),
+            verify=True,
+            stdout=io.StringIO(),
+        )
 
     def test_supervisor_determinations_and_ad_hoc_orders_refresh(self):
         from cya.conditions.uti import complete_unable_obligation, invalidate_supervisor_completion
