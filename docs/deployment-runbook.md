@@ -268,6 +268,33 @@ preload stay off unless the owner approves them, so do not add
 resolved, and none may be silenced to claim readiness. After any grant change restart app
 connections and repeat runtime verification. Never run the app as schema owner.
 
+## Obligation projection rebuild and comparison
+
+After the issue #67 migration and grant installation, and after restoring a
+populated database, rebuild the disposable `obligation_projection` for each
+organization before reopening traffic. Use the protected runtime maintenance
+environment (SELECT/INSERT/UPDATE on this mutable table suffice). The source
+events are read only; no DELETE, DDL or schema-owner privilege is required.
+
+```sh
+local/venv/bin/python manage.py rebuild_obligation_projection --organization <org-uuid> --dry-run
+local/venv/bin/python manage.py rebuild_obligation_projection --organization <org-uuid>
+local/venv/bin/python manage.py rebuild_obligation_projection --organization <org-uuid> --verify
+```
+
+The preview reports differing/verified counts without writing. Both `--dry-run`
+and `--verify` exit nonzero on missing/stale rows or replay mismatches; differences
+are expected on first installation. The rebuild writes only the projection,
+checks it against a repeat recomputation and independent event replay, and is
+idempotent. `--vehicle <vehicle-uuid>` narrows the organization scope. Each
+vehicle/due-instant group commits separately; a failed group rolls back while
+previous groups remain committed. Inspect the failure and rerun after fixing it;
+never alter immutable evidence to make verification pass. Do not ignore evidence
+row-limit errors or reopen traffic after a failed verification. Current readers
+fall back to replay for a missing/partial cache; historical reads always replay.
+No projection timer is required for clock transitions. See [projection design,
+writer coverage and recovery](current-obligation-projection.md).
+
 ## Scheduled application jobs
 
 Run recurring management commands with the protected runtime environment,
@@ -467,6 +494,7 @@ The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove eithe
    - **Schema owner:** run `migrate --check` and `verify_audit_schema`.
    - **Runtime:** install runtime grants for a distinct runtime account, then run `verify_audit_runtime` and `check --fail-level WARNING`.
    - **Guards:** the runtime account is refused (1142), and the schema owner is refused (1644, append-only), for UPDATE and DELETE on audit and check tables.
+   - **Projection:** run the [obligation projection rebuild and comparison](#obligation-projection-rebuild-and-comparison); retain successful replay verification.
    - **Writes:** a new application write succeeds.
    - **Cutoff:** the last changes before the stop instant are present and none after it.
 4. **Rehearsal copies** are destroyed afterwards under production rules (DEP-9), never on a developer machine or in CI.

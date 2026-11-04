@@ -112,6 +112,8 @@ does not accept `*`; see [live-update deployment details](docs/live-updates.md).
 
 [issue #158](https://github.com/JustApu/CheckYourAmbulance-archive/issues/158) adds [explicit ad hoc inspection orders](docs/vehicle-status.md#require-an-ad-hoc-inspection-after-return-to-service-issue-158): Supervisors and Administrators select item/physical-kit pairs, explanation and future due time from the status panel. Orders are audited non-routine obligations with ordinary check linking and historical replay; returning to service alone creates nothing.
 
+[issue #67](https://github.com/JustApu/CheckYourAmbulance/issues/67) adds a [disposable current obligation projection](docs/current-obligation-projection.md) for checklist and readiness reads, transactional refresh from affected writers, and `manage.py rebuild_obligation_projection` with read-only `--dry-run`/`--verify` comparison. Explicit historical reads still replay immutable events; readiness retains its full window counts.
+
 ## Security and privacy
 
 Do not commit real crew member personal data, operational logs, credentials, API responses, medical/patient data, or production configuration. Use synthetic fixtures and follow the repository's [data hygiene rules](AGENTS.md#github-data-hygiene). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).

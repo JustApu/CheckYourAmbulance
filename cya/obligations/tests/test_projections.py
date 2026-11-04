@@ -16,6 +16,7 @@ from cya.conditions.models import ObligationDetermination
 from cya.conditions.sync import create_conditional_rule
 from cya.deficiencies.models import DeficiencyProjection
 from cya.kits.tests.support import KitCase
+from cya.obligations.current import current_rows, evaluate_facts
 from cya.obligations.models import ObligationSelection
 from cya.obligations.projections import get_vehicle_obligations_as_of, load_projection_history
 from cya.obligations.queries import effective_obligations
@@ -222,6 +223,14 @@ class HistoryAssertions:
         for instant in generate_history(self, seed=seed, **history):
             live = get_vehicle_obligations_as_of(
                 vehicle, instant, organization_id=org, start=start, end=end
+            )
+            cached = current_rows(org, [vehicle], instant)
+            self.assertIsNotNone(cached, f"missing projection: seed={seed}, instant={instant}")
+            window = get_vehicle_obligations_as_of(vehicle, instant, organization_id=org)
+            self.assertEqual(
+                {s.obligation.id: s for s in (evaluate_facts(f, instant) for f in cached[vehicle])},
+                {s.obligation.id: replace(s, attention=None, deficiencies=()) for s in window},
+                f"stored/replayed mismatch: seed={seed}, instant={instant}",
             )
             # Independent oracle uses the established ORM selection reader and status reader,
             # not the new replay fold. Check-rich histories have a separate oracle below.

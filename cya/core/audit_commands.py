@@ -204,6 +204,9 @@ def _write_effects(command, org, actor):
         recorded_at=plan.recorded_at,
     )
     plan.apply(receipt, actor)
+    from cya.obligations.refresh import refresh_for_receipt
+
+    refresh_for_receipt(receipt)
     append_audit(
         organization=org,
         command=receipt,

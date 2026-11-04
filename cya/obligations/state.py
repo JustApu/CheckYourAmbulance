@@ -405,6 +405,17 @@ def rebuild_vehicle_projection(
         if anchor not in tails or event.sequence > tails[anchor].sequence:
             tails[anchor] = event
     obligations = {o.id: o for o in history.obligations}
+    checks_by_obligation = {}
+    for check in (*history.checks, *(linked if history.use_stored_checks else ())):
+        checks_by_obligation.setdefault(check.obligation_id, []).append(check)
+    determinations_by_obligation = {}
+    for determination in history.determinations:
+        determinations_by_obligation.setdefault(determination.obligation_id, []).append(
+            determination
+        )
+    suspensions_by_obligation = {}
+    for suspension in history.suspensions:
+        suspensions_by_obligation.setdefault(suspension.obligation_id, []).append(suspension)
     result = []
     for event in tails.values():
         if event.selected_obligation_id is None:
@@ -423,10 +434,10 @@ def rebuild_vehicle_projection(
             evaluate_obligation(
                 obligation,
                 instant,
-                determinations=history.determinations,
-                checks=(*history.checks, *(linked if history.use_stored_checks else ())),
+                determinations=determinations_by_obligation.get(obligation.id, ()),
+                checks=checks_by_obligation.get(obligation.id, ()),
                 status_events=history.statuses,
-                suspensions=history.suspensions,
+                suspensions=suspensions_by_obligation.get(obligation.id, ()),
             )
         )
     # Explicit human orders are immutable and never participate in routine selection.
@@ -442,10 +453,10 @@ def rebuild_vehicle_projection(
                 evaluate_obligation(
                     obligation,
                     instant,
-                    determinations=history.determinations,
-                    checks=(*history.checks, *(linked if history.use_stored_checks else ())),
+                    determinations=determinations_by_obligation.get(obligation.id, ()),
+                    checks=checks_by_obligation.get(obligation.id, ()),
                     status_events=history.statuses,
-                    suspensions=history.suspensions,
+                    suspensions=suspensions_by_obligation.get(obligation.id, ()),
                 )
             )
     # Each item's deficiencies, in their original order: checking every deficiency against every

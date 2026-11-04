@@ -45,8 +45,15 @@ class AdHocMigrationTests(GenerationCase):
             explanation="Synthetic irreversible history.",
             **self.context(self.supervisor),
         )
-        with self.assertRaisesRegex(RuntimeError, "cannot reverse"):
-            MigrationExecutor(connection).migrate([OLD])
+        executor = MigrationExecutor(connection)
+        latest = executor.loader.graph.leaf_nodes()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "cannot reverse"):
+                executor.migrate([OLD])
+        finally:
+            # Later disposable projections may already have been dropped before the
+            # historical ad-hoc reversal refuses. Restore the complete test schema.
+            MigrationExecutor(connection).migrate(latest)
         self.assertIn(NEW, MigrationExecutor(connection).loader.applied_migrations)
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM obligation WHERE routine=0")

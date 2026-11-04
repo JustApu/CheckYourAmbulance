@@ -187,17 +187,34 @@ def _missed(state, as_of, late):
     return state.state == State.OVERDUE and as_of > state.obligation.grace_at + late
 
 
-def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup):
+def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *, current=False):
     """The most urgent obligation state per (item_id, kit_key), leaving out missed ones."""
     best = {}
     late = late_window()
-    for state in get_vehicle_obligations_as_of(
-        vehicle_id,
-        as_of,
-        organization_id=organization_id,
-        suspension_lookup=suspension_lookup,
-        include_all_ad_hoc=True,
-    ):
+    states = None
+    if current and suspension_lookup is None:
+        from cya.obligations.current import current_rows, evaluate_facts
+
+        cached = current_rows(organization_id, [vehicle_id], as_of, include_all_ad_hoc=True)
+        if cached is not None:
+            states = sorted(
+                (evaluate_facts(f, as_of) for f in cached[vehicle_id]),
+                key=lambda s: (
+                    s.obligation.due_at,
+                    s.obligation.item_id,
+                    s.obligation.kit_instance_id or NO_KIT,
+                    s.obligation.id,
+                ),
+            )
+    if states is None:
+        states = get_vehicle_obligations_as_of(
+            vehicle_id,
+            as_of,
+            organization_id=organization_id,
+            suspension_lookup=suspension_lookup,
+            include_all_ad_hoc=True,
+        )
+    for state in states:
         if _missed(state, as_of, late):
             continue
         key = (state.obligation.item_id, state.obligation.kit_instance_id or NO_KIT)
@@ -303,7 +320,7 @@ def _ordered_rows(organization_id, vehicle_id, placed, obligations):
     return placed
 
 
-def _rows(organization_id, vehicle_id, as_of, suspension_lookup):
+def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=False):
     items = _resolved_items(organization_id, vehicle_id, as_of)
     labels = dict(
         Item.objects.filter(organization_id=organization_id, pk__in=list(items)).values_list(
@@ -332,7 +349,9 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup):
             placed.append(
                 (order, requirement.display_order, item_id, None, None, resolved, version_id)
             )
-    obligations = _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup)
+    obligations = _obligation_by_key(
+        organization_id, vehicle_id, as_of, suspension_lookup, current=current
+    )
     placed = _ordered_rows(organization_id, vehicle_id, placed, obligations)
     labels.update(
         Item.objects.filter(
@@ -414,7 +433,9 @@ def vehicle_checklist(
         raise ChecklistQueryError("INVALID_AS_OF", "as_of must be timezone-aware", 400)
     if not Vehicle.objects.filter(organization_id=organization_id, pk=vehicle_id).exists():
         raise ChecklistQueryError("NOT_FOUND", "vehicle was not found", 404)
-    rows = _rows(organization_id, str(vehicle_id), instant, suspension_lookup)
+    rows = _rows(
+        organization_id, str(vehicle_id), instant, suspension_lookup, current=as_of is None
+    )
     if needs_attention_only:
         rows = [
             row

@@ -114,19 +114,8 @@ def _carry_over_rules(organization_id, rule_ids):
     }
 
 
-def _obligations(organization_id, vehicle_id, at, history):
-    """RPT-7 counts and inspection progress for one vehicle's window, from its history."""
-    start, end = at - WINDOW_BACK, at + WINDOW_AHEAD
-    states = rebuild_vehicle_projection(history, vehicle_id, at, start, end)
+def _count_states(states, unable, rule_of, carry):
     counts = dict.fromkeys((key for key, _label in CATEGORIES), 0)
-    window = {s.obligation.id for s in states}
-
-    waived = {s.evidence_id for s in states if s.state == State.WAIVED}
-    rule_of = {d.id: d.rule.id for d in history.determinations if d.id in waived and d.rule}
-    carry = _carry_over_rules(organization_id, set(rule_of.values()))
-    linked, _facts = replay_checks(history, at)
-    unable = {c.obligation_id for c in linked if c.outcome == "UNABLE_TO_INSPECT"}
-
     for state in states:
         if state.state == State.SATISFIED:
             key = {
@@ -145,6 +134,58 @@ def _obligations(organization_id, vehicle_id, at, history):
             counts[state.state.value] += 1
         else:
             counts[state.state.value] += 1
+
+    satisfied = sum(1 for s in states if s.state == State.SATISFIED)
+    owed = satisfied + sum(1 for s in states if s.state in OPEN)
+    return counts, {"checked": satisfied, "owed": owed}
+
+
+def _current_obligations(organization_id, at, facts):
+    from cya.obligations.current import evaluate_facts
+
+    states = [evaluate_facts(f, at) for f in facts]
+    waived = {s.evidence_id for s in states if s.state == State.WAIVED}
+    rule_of = {
+        d["id"]: d["rule"]["id"]
+        for f in facts
+        for d in f["determinations"]
+        if d["id"] in waived and d["rule"]
+    }
+    carry = _carry_over_rules(organization_id, set(rule_of.values()))
+    unable = {
+        c["obligation_id"]
+        for f in facts
+        for c in f["checks"]
+        if c["outcome"] == "UNABLE_TO_INSPECT"
+    }
+    counts, progress = _count_states(states, unable, rule_of, carry)
+    # One chain can satisfy several obligations under an explicit shared rule: count its
+    # invalidation/corrections only once across the window, just as historical replay does.
+    roots = {root: values for f in facts for root, values in f["roots"].items()}
+    counts["INVALIDATED"] += sum(v[0] for v in roots.values())
+    counts["SUPERSEDED"] += sum(v[1] for v in roots.values())
+    for fact in facts:
+        for determination in fact["determinations"]:
+            kind = determination["determination_type"]
+            if kind in ("INVALIDATED", "SUPERSEDED"):
+                counts[kind] += 1
+    return counts, progress
+
+
+def _obligations(organization_id, vehicle_id, at, history):
+    """RPT-7 counts and inspection progress for one vehicle's window, from its history."""
+    start, end = at - WINDOW_BACK, at + WINDOW_AHEAD
+    states = rebuild_vehicle_projection(history, vehicle_id, at, start, end)
+    counts = dict.fromkeys((key for key, _label in CATEGORIES), 0)
+    window = {s.obligation.id for s in states}
+
+    waived = {s.evidence_id for s in states if s.state == State.WAIVED}
+    rule_of = {d.id: d.rule.id for d in history.determinations if d.id in waived and d.rule}
+    carry = _carry_over_rules(organization_id, set(rule_of.values()))
+    linked, _facts = replay_checks(history, at)
+    unable = {c.obligation_id for c in linked if c.outcome == "UNABLE_TO_INSPECT"}
+
+    counts, progress = _count_states(states, unable, rule_of, carry)
 
     # Invalidated and superseded checks linked to this window's obligations (a whole chain
     # withdrawn, or entries a correction replaced), and withdrawn or replaced determinations.
@@ -167,9 +208,7 @@ def _obligations(organization_id, vehicle_id, at, history):
             elif determination.determination_type == "SUPERSEDED":
                 counts["SUPERSEDED"] += 1
 
-    satisfied = sum(1 for s in states if s.state == State.SATISFIED)
-    owed = satisfied + sum(1 for s in states if s.state in OPEN)
-    return counts, {"checked": satisfied, "owed": owed}
+    return counts, progress
 
 
 def _active_deficiencies(organization_id, vehicle_id, at):
@@ -327,18 +366,29 @@ def fleet_readiness(organization_id, *, as_of=None, now):
     suspensions = _suspension_rows(
         organization_id, [row for rows in in_force.values() for row in rows[:SUSPENSION_LIMIT]]
     )
-    histories = load_projection_histories(
-        [str(v.pk) for v in listed],
-        at,
-        organization_id=organization_id,
-        start=at - WINDOW_BACK,
-        end=at + WINDOW_AHEAD,
-    )
+    cached = None
+    if as_of is None:
+        from cya.obligations.current import current_rows
+
+        cached = current_rows(organization_id, [str(v.pk) for v in listed], at)
+    histories = None
+    if cached is None:
+        histories = load_projection_histories(
+            [str(v.pk) for v in listed],
+            at,
+            organization_id=organization_id,
+            start=at - WINDOW_BACK,
+            end=at + WINDOW_AHEAD,
+        )
     result = []
     for vehicle in listed:
         vehicle_id = str(vehicle.pk)
         status = status_at(organization_id, vehicle_id, at)
-        counts, progress = _obligations(organization_id, vehicle_id, at, histories[vehicle_id])
+        counts, progress = (
+            _current_obligations(organization_id, at, cached[vehicle_id])
+            if cached is not None
+            else _obligations(organization_id, vehicle_id, at, histories[vehicle_id])
+        )
         rows = listed_rows[vehicle_id]
         shown = [facts[str(row.pk)] for row in rows[:DEFICIENCY_LIMIT]]
         by_severity, by_status = {}, {}
