@@ -823,11 +823,18 @@ class ObligationTests(SuspensionMixin, AttentionCase, VerificationBase):
         deficiency_id = self.report({"item_id": str(self.suction.pk)})
         self.suspend(deficiency_id)
         self.assertEqual(self.states(self.suction)[self.at(hours=6)].state, State.OVERDUE)
-        # The next window is suspended, but the row still shows the miss and stays actionable.
+        # Until its late limit L = 19:00 (SCH-2, 1.26.0) the row still shows the miss and stays
+        # actionable, whatever the suspension covers.
+        self.clock.set(self.at(hours=18))
+        row = self.row(self.suction)
+        self.assertEqual((row.obligation_state, row.needs_action), ("OVERDUE", True))
+        # The next window is suspended. The miss can no longer be completed, so it stays Overdue
+        # in history but no longer decides the row (issue #66).
         self.clock.set(self.at(days=1, hours=5, minutes=30))
         states = self.states(self.suction)
+        self.assertEqual(states[self.at(hours=6)].state, State.OVERDUE)
         self.assertEqual(states[self.at(days=1, hours=6)].state, State.SUSPENDED)
-        self.assertEqual(self.row(self.suction).obligation_state, "OVERDUE")
+        self.assertEqual(self.row(self.suction).obligation_state, "SUSPENDED")
 
     def test_an_administrator_closure_during_the_window_makes_the_check_required_again(self):
         self.clock.set(self.at(hours=5, minutes=15))
