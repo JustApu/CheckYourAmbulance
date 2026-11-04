@@ -266,7 +266,7 @@ def refresh_obligations(organization_id, obligation_ids, *, dry_run=False):
                     changed.append(row)
         if changed:
             ObligationProjection.objects.bulk_update(
-                changed, ("facts", "selected", "vehicle", "due_at", "routine", "refreshed_at")
+                changed, ("facts", "selected", "vehicle_id", "due_at", "routine", "refreshed_at")
             )
     return differences
 

@@ -319,7 +319,7 @@ concurrent commands based on one tip yield one success and one conflict.
 | `notification_recipient_rule` | M | organization_id, event_type, recipient kind (`ASSIGNEE`, `REPORTER`, `REQUESTER`, `PARTICIPANTS`, `SUPERVISORS`, `ADMINISTRATORS`), enabled; unique organization/event/recipient; an administrator override of the documented default recipients, set through an audited command ([issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)) |
 | `item_lock`, `kit_lock`, `vehicle_lock`, `deficiency_lock` | M | organization_id and target FK unique; no business state; prepared at publication/entity creation |
 | `session_projection`, `deficiency_projection` | M | session_id/deficiency_id ref unique, cached state/activity or status/assignee/deadline/severity_version_id, last applied event ref; disposable, rebuildable, never historical authority |
-| `obligation_projection` | M | obligation_id ref primary key, organization_id ref, vehicle_id ref, due_at, routine, selected, effective evidence JSON, refreshed_at; disposable current-read acceleration, indexed by organization/vehicle/due; historical authority remains the event rows |
+| `obligation_projection` | M | obligation_id ref primary key, organization_id ref, vehicle_id denormalized UUID (no mutable-vehicle FK), due_at, routine, selected, effective evidence JSON, refreshed_at; disposable current-read acceleration, indexed by organization/vehicle/due; historical authority remains the event rows |
 
 The receipt reserves a client operation across **all** command kinds. A check,
 reading, deficiency creation or seal command also carries the same operation_id

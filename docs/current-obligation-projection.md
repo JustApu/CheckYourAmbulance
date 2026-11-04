@@ -9,7 +9,7 @@ check, link, determination, status and deficiency records remain authoritative.
 
 `obligation_projection` is a disposable mutable table with one row per immutable
 obligation, including replaced/retired obligations with `selected=False`. Its
-primary key is the obligation ID; organization, vehicle, due instant and routine
+primary key is the obligation ID; organization, a denormalized vehicle UUID, due instant and routine
 flag support bounded reads. The JSON `facts` field contains the immutable window
 and requirement pins, effective linked checks, determination evidence, the status
 at `min(D, refresh time)`, relevant suspension intervals and check-chain counters.
@@ -65,7 +65,9 @@ and restart recovery; materialization does not turn their after-commit
 reconciliation into a single transaction with publication/assignment.
 
 Existing domain locks remain in place. Projection rows are the final lock group,
-acquired in obligation-ID order, including missing-row creation. Replay starts
+acquired in obligation-ID order, including missing-row creation. The vehicle lookup
+is copied from the immutable obligation and has no foreign key to the mutable
+vehicle row, avoiding an implicit parent lock after projection locks. Replay starts
 **after** those locks are acquired, under the configured READ COMMITTED isolation.
 The projector acquires no vehicle, item, template or deficiency lock. A waiting
 refresh therefore sees the preceding refresh's committed source effects without

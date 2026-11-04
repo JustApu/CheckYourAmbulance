@@ -32,6 +32,7 @@ from cya.obligations.projections import get_vehicle_obligations_as_of, load_proj
 from cya.obligations.queries import effective_obligations, odometer_obligations
 from cya.obligations.state import CheckEvidence, State, rebuild_vehicle_projection
 from cya.operations.commands import set_vehicle_status
+from cya.operations.models import VehicleStatusEvent
 from cya.operations.status import out_of_service_intervals
 from cya.schedules.commands import publish_rule, seed_default_schedules
 from cya.schedules.engine import Rule
@@ -274,13 +275,13 @@ class ObligationEngineScenario:
                 self.capture("T2")
             elif day == 4:
                 self.clock.set(self.at(4, 4, 30))
-                set_vehicle_status(
+                status = set_vehicle_status(
                     vehicle_id=str(self.vehicles[1].pk),
                     status="OUT_OF_SERVICE",
                     explanation="Synthetic maintenance outage.",
                     **self.context(),
                 )
-                self.out_at = self.clock.instant
+                self.out_at = VehicleStatusEvent.objects.get(pk=status.body["event_id"]).recorded_at
                 self.generate()
             elif day == 5:
                 self.carry_over(day, 6, "unchanged")
@@ -290,13 +291,15 @@ class ObligationEngineScenario:
                 self.carry_over(day, 6, "unavailable")
                 self.clock.set(self.at(6, 14))
                 self.assert_outage_before_return()
-                set_vehicle_status(
+                status = set_vehicle_status(
                     vehicle_id=str(self.vehicles[1].pk),
                     status="IN_SERVICE",
                     explanation="Synthetic maintenance complete.",
                     **self.context(),
                 )
-                self.back_at = self.clock.instant
+                self.back_at = VehicleStatusEvent.objects.get(
+                    pk=status.body["event_id"]
+                ).recorded_at
                 self.generate()
                 self.carry_over(day, 18, "missing-check")
         self.clock.set(self.end)

@@ -288,6 +288,17 @@ class CurrentProjectionTests(AttentionCase):
         historical = fleet_readiness(org, now=at, as_of=at)
         self.assertEqual(live, historical)
 
+    def test_projection_does_not_take_a_foreign_key_lock_on_the_mutable_vehicle(self):
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            constraints = connection.introspection.get_constraints(cursor, "obligation_projection")
+        parents = {
+            value["foreign_key"][0] for value in constraints.values() if value["foreign_key"]
+        }
+        self.assertIn("obligation", parents)
+        self.assertNotIn("vehicle", parents)
+
     def test_commands_refresh_corrections_invalidations_and_kits_atomically(self):
         self.clock.set(self.at(hours=5, minutes=15))
         self.assert_current_matches_replay()

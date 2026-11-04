@@ -4,7 +4,8 @@ One read-only picture per vehicle, now or as of an instant (AC-27): operational 
 obligations in the standard window (7 days back to 48 hours ahead) with every state kept apart,
 inspection progress, the deficiencies being worked with their deadlines, age, dependency and
 acknowledgement, and the check suspensions in force. Nothing here writes or decides anything new:
-each fact comes from an existing reader, replayed at the instant.
+each fact comes from an existing reader, evaluated at the instant. Current obligation reads use
+disposable effective evidence; explicit historical reads replay the immutable events.
 
 RPT-7: states are counted separately and never folded into one "compliant" flag. Passed, Failed,
 Not Applicable (rule), Carried over (rule), other waivers, Suspended, Exempt (out of service),
@@ -14,9 +15,9 @@ determination histories, not from the checklist's one-row-per-item summary.
 
 Bounds (owner decision 2026-11-01: a small fleet first): at most VEHICLE_LIMIT vehicles and
 DEFICIENCY_LIMIT deficiencies per vehicle, each with an explicit `truncated` flag. The obligation
-evidence of every listed vehicle comes from one batch read (load_projection_histories, issue 33),
-whose query count does not depend on the number of vehicles; past its row bound the picture is
-refused rather than cut. The status, the bounded deficiency list and the bounded list of
+evidence of every listed vehicle comes from one page read (current_rows now, or
+load_projection_histories for explicit as_of and missing-cache fallback), whose query count does
+not depend on the number of vehicles; past its row bound the picture is refused rather than cut. The status, the bounded deficiency list and the bounded list of
 suspensions in force are still read per vehicle (a few queries each); the listed deficiencies'
 events, the age rule and the suspension labels are read once for the page, so the query count does
 not grow with the number of deficiencies or with the suspension history.

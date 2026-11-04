@@ -502,9 +502,10 @@ class ObligationProjection(models.Model):
         "Obligation", primary_key=True, on_delete=models.PROTECT, related_name="+"
     )
     organization = organization_fk()
-    vehicle = models.ForeignKey(
-        "cya_checklists.Vehicle", on_delete=models.PROTECT, related_name="+"
-    )
+    # Do not reference the mutable vehicle row here: an FK check could acquire its
+    # lock after projection locks and reverse the status/generator lock ordering.
+    # The immutable obligation supplies and verifies this disposable lookup value.
+    vehicle_id = IdentityIDField(db_column="vehicle_id")
     due_at = models.DateTimeField()
     routine = models.BooleanField()
     selected = models.BooleanField(default=False)
@@ -517,7 +518,7 @@ class ObligationProjection(models.Model):
         db_table = "obligation_projection"
         indexes = [
             models.Index(
-                fields=["organization", "vehicle", "due_at"], name="projection_vehicle_due"
+                fields=["organization", "vehicle_id", "due_at"], name="projection_vehicle_due"
             ),
         ]
 

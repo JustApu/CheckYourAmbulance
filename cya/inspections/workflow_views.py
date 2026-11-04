@@ -161,7 +161,7 @@ def deficiencies(request, user):
 def report(request, user, vehicle_id):
     vehicle = _vehicle(user, vehicle_id)
     now = timezone.now()
-    rows = vehicle_checklist(str(user.organization_id), str(vehicle.pk), as_of=now).rows
+    rows = vehicle_checklist(str(user.organization_id), str(vehicle.pk)).rows
     items, compartments, systems = {}, {}, {}
     for row in rows:
         items[row.item_id] = row.item_label
@@ -197,11 +197,11 @@ def report(request, user, vehicle_id):
 MAX_CHOICES = 500  # item, kit and assignee choices one form offers
 
 
-def _item_choices(organization_id, vehicle_id, now, within=None):
+def _item_choices(organization_id, vehicle_id, within=None):
     """[(value "item_id:kit_id", label)] from the vehicle's current checklist, optionally limited
     to the (item, kit) pairs in `within`. The server resolves the same rows again and refuses any
     choice that no longer applies."""
-    rows = vehicle_checklist(organization_id, vehicle_id, as_of=now).rows
+    rows = vehicle_checklist(organization_id, vehicle_id).rows
     choices = {}
     for row in rows:
         key = (str(row.item_id), str(row.kit_id) if row.kit_id else None)
@@ -297,14 +297,14 @@ def _supervisor_controls(user, found, status, roles, context, deadline, assignee
     if active and may("regrade_deficiency_severity"):
         controls["severities"] = report_options(user.organization_id, now)["severities"]
     if may("expand_verification") and status.status in ("PENDING_VERIFICATION", CLOSED_VERIFIED):
-        controls["verification_items"] = _item_choices(org, str(found.vehicle_id), now)
+        controls["verification_items"] = _item_choices(org, str(found.vehicle_id))
         controls["expanding"] = status.status == "PENDING_VERIFICATION"
     if active and may("suspend_routine_checks"):
         scope = {
             (item_id, str(kit_id) if kit_id else None)
             for item_id, _definition, kit_id in service.correction_scope(org, found, now)
         }
-        controls["suspension_items"] = _item_choices(org, str(found.vehicle_id), now, scope)
+        controls["suspension_items"] = _item_choices(org, str(found.vehicle_id), scope)
         controls["can_end_suspensions"] = True  # one at a time, beside each in force (SUS-5)
     if may("explicit_deficiency_close"):
         controls["can_close"] = active
