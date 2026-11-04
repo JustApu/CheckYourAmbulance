@@ -33,6 +33,36 @@ host details are omitted. The follow-up fixes have not been measured on the rehe
 so no result is claimed for the new head; the observed run shows the acceptance target
 remains unmet.
 
+## Twelve-month sequential profile before the status read-time join
+
+On head `7f46aaba14d5fde8a735b6b47c892ba4fd706960`, the cross-family reviewer
+also profiled the same five vehicles against twelve months of synthetic history
+(129,000 obligations). These are in-process, sequential samples with no HTTP or
+concurrent load; they do not replace the 1× scenario above.
+
+| Operation | Samples | p50 | p90 |
+|---|---:|---:|---:|
+| Current checklist | not stated | 1.44 s | 1.52 s |
+| Fleet readiness | not stated | 2.83 s | 3.12 s |
+| Explicit-as-of readiness replay | not stated | 14.1 s | not stated |
+| `record_check` save | 40 | 0.43 s | 0.57 s |
+| `set_vehicle_status` | 2 | 8.5 s | not stated |
+
+All five vehicle caches were hit and current checklist/readiness results matched
+replay on the measured data. The status command time included refreshing 1,650
+future obligations while holding the vehicle lock, which delayed a concurrent crew
+save by 6.6 seconds. The follow-up implementation removes status from persisted
+projection facts and joins the applicable immutable status event at current read
+time; these samples predate that change, and its rehearsal-host latency has not been
+measured. Checklist and readiness remained above the 1-second target in these
+isolated samples.
+
+The reviewer also reported an in-progress rebuild rate of about 22 obligations per
+second after 29,000 of 129,000 rows, projecting roughly 1.5 hours for a full rebuild.
+The rebuild and subsequent `--verify` had not completed at the time of that report.
+Treat the duration as a preliminary estimate, not a completed recovery measurement;
+the final completion result is still pending.
+
 ## Local verification
 
 Development verification uses a disposable MariaDB 10.11.18 server, Python 3.13,

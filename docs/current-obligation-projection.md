@@ -11,9 +11,11 @@ check, link, determination, status and deficiency records remain authoritative.
 obligation, including replaced/retired obligations with `selected=False`. Its
 primary key is the obligation ID; organization, a denormalized vehicle UUID, due instant and routine
 flag support bounded reads. The JSON `facts` field contains the immutable window
-and requirement pins, effective linked checks, determination evidence, the status
-at `min(D, refresh time)`, relevant suspension intervals and check-chain counters.
-It retains datetime microseconds. `refreshed_at` detects rows refreshed after the reader's captured instant; those
+and requirement pins, effective linked checks, determination evidence, relevant
+suspension intervals and check-chain counters. Vehicle status is intentionally not
+stored in these facts: current reads join the latest immutable status event whose
+recorded time is at or before `min(read time, D)`. Facts retain datetime microseconds.
+`refreshed_at` detects rows refreshed after the reader's captured instant; those
 rows alone replay their evidence at that instant, avoiding a whole-window replay
 when a save races with a live-update reload.
 
@@ -26,7 +28,7 @@ waivers, invalidations, supersessions and late completions distinct. Shared-rule
 check chains contribute their invalidation/correction counts once per window,
 even when linked to multiple obligations. It is not a count of checklist rows.
 
-The existing pure obligation evaluator computes state from the stored facts at
+The existing pure obligation evaluator computes state from the assembled facts at
 read time. No authoritative state string, checklist winner, scheduler or timer
 is needed for transitions at E, D, G, or just after the inclusive late limit L.
 All future obligations already generated are projected, so a future candidate
@@ -57,7 +59,7 @@ rows bearing that receipt, including bulk inserts and secondary effects:
 | Explicit ad hoc inspection order | Every ordered item/physical-kit obligation |
 | Supervisor Unable completion/invalidation | The determination's obligation |
 | Conditional evaluation, roster ingestion/unavailability, actual-roster correction | Every obligation with a determination appended by that command |
-| Set status / decide status request | Routine obligations whose due instant is at or after the status event |
+| Set status / approve status request | No projection rows; current reads join the status event at read time |
 | Suspend, early end, deficiency closure/cancellation | Routine obligations of the named item/physical-kit whose grace instant could have been covered by the original START |
 | Checklist/override publication, bindings, kit addition/move/deactivation | Existing reconciliation appends selection changes in its own transactions; those transactions refresh their changes |
 
@@ -65,10 +67,12 @@ Publication and kit reconciliation retain their existing transaction boundaries
 and restart recovery; materialization does not turn their after-commit
 reconciliation into a single transaction with publication/assignment.
 
-Existing domain locks remain in place. Projection rows are the final lock group,
-acquired in obligation-ID order, including missing-row creation. The vehicle lookup
-is copied from the immutable obligation and has no foreign key to the mutable
-vehicle row, avoiding an implicit parent lock after projection locks. Replay starts
+Existing domain locks remain in place. Writers that change stored obligation facts
+lock projection rows as their final lock group, acquired in obligation-ID order,
+including missing-row creation. Status commands keep their existing vehicle lock but
+do not lock or refresh obligation rows. The vehicle lookup is copied from the
+immutable obligation and has no foreign key to the mutable vehicle row, avoiding an
+implicit parent lock after projection locks. Replay starts
 **after** those locks are acquired, under the configured READ COMMITTED isolation.
 The projector acquires no vehicle, item, template or deficiency lock. A waiting
 refresh therefore sees the preceding refresh's committed source effects without
@@ -108,7 +112,8 @@ Keep traffic closed on a failed recovery verification.
 Offline tests compare compiled evidence against full replay over seeded synthetic
 histories, including later clock instants, corrections, invalidations, kits,
 outages and publication/reconciliation. Database tests cover the actual command
-hooks, supervisor determinations, suspensions, concurrent status/save refresh,
+hooks, supervisor determinations, suspensions, concurrent status/save ordering and
+read-time status joins across the generation horizon,
 missing-cache fallback, rebuild dry-run/idempotence and source rollback on a
 projection failure. Readiness tests ensure current reads avoid check-chain replay
 while explicit historical reads retain the batch replay adapter.

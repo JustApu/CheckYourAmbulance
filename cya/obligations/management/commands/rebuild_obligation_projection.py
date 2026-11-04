@@ -9,9 +9,20 @@ from django.utils import timezone
 
 from cya.accounts.models import Organization
 from cya.checklists.models import Vehicle
-from cya.obligations.current import evaluate_facts, refresh_obligations
+from cya.obligations.current import (
+    attach_status_fact,
+    evaluate_facts,
+    refresh_obligations,
+    status_timeline,
+)
 from cya.obligations.models import Obligation, ObligationProjection
-from cya.obligations.projections import MAX_INTERVAL, get_vehicle_obligations_as_of
+from cya.obligations.projections import (
+    MAX_INTERVAL,
+    MAX_ROWS,
+    _bounded,
+    get_vehicle_obligations_as_of,
+)
+from cya.operations.models import VehicleStatusEvent
 
 
 class Command(BaseCommand):
@@ -90,13 +101,27 @@ class Command(BaseCommand):
             vehicle, at, organization_id=org, start=due, end=due
         )
         expected = {s.obligation.id: replace(s, attention=None, deficiencies=()) for s in replayed}
-        actual = {
-            row.obligation_id: evaluate_facts(row.facts, at)
-            for row in ObligationProjection.objects.filter(
+        rows = list(
+            ObligationProjection.objects.filter(
                 organization_id=org,
                 obligation_id__in=ids,
                 selected=True,
             )
+        )
+        statuses = _bounded(
+            VehicleStatusEvent.objects.filter(
+                organization_id=org,
+                vehicle_id=vehicle,
+                recorded_at__lte=at,
+            ).order_by("vehicle_id", "recorded_at", "sequence")[: MAX_ROWS + 1],
+            MAX_ROWS,
+        )
+        timeline = status_timeline(statuses)
+        actual = {
+            row.obligation_id: evaluate_facts(
+                attach_status_fact(row.facts, vehicle, row.due_at, at, timeline), at
+            )
+            for row in rows
         }
         if actual != expected:
             raise CommandError("projection/event replay mismatch; rebuild group rolled back")

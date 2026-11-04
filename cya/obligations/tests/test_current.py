@@ -406,6 +406,45 @@ class CurrentProjectionTests(AttentionCase):
         )
         self.assert_current_matches_replay()
 
+    def test_status_changes_join_at_read_time_without_refreshing_future_rows(self):
+        from cya.operations.commands import set_vehicle_status
+
+        # Fill the full supported generation horizon so this exercises the many-future-row case.
+        self.clock.set(self.at(hours=5))
+        self.generate(horizon=168, lookback=168)
+        self.assertGreater(ObligationProjection.objects.count(), 40)
+        before = list(ObligationProjection.objects.order_by("pk").values())
+
+        with mock.patch(
+            "cya.obligations.refresh.refresh_obligations",
+            side_effect=AssertionError("status writes must not refresh obligation rows"),
+        ) as refresh:
+            set_vehicle_status(
+                vehicle_id=str(self.vehicle.pk),
+                status="OUT_OF_SERVICE",
+                explanation="Synthetic outage.",
+                **self.context(self.supervisor),
+            )
+        refresh.assert_not_called()
+        self.assertEqual(before, list(ObligationProjection.objects.order_by("pk").values()))
+        self.assert_current_matches_replay()
+
+        self.clock.set(self.at(days=7, hours=8))
+        before_return = list(ObligationProjection.objects.order_by("pk").values())
+        with mock.patch(
+            "cya.obligations.refresh.refresh_obligations",
+            side_effect=AssertionError("status writes must not refresh obligation rows"),
+        ) as refresh:
+            set_vehicle_status(
+                vehicle_id=str(self.vehicle.pk),
+                status="IN_SERVICE",
+                explanation="Synthetic return.",
+                **self.context(self.supervisor),
+            )
+        refresh.assert_not_called()
+        self.assertEqual(before_return, list(ObligationProjection.objects.order_by("pk").values()))
+        self.assert_current_matches_replay()
+
     def test_supervisor_determinations_and_ad_hoc_orders_refresh(self):
         from cya.conditions.uti import complete_unable_obligation, invalidate_supervisor_completion
         from cya.obligations.adhoc import request_inspection
@@ -539,30 +578,22 @@ class CurrentProjectionRaces(AttentionCase):
             self.assertEqual(second.result(timeout=30).status, 201)
         self.assert_current_matches_replay()
 
-    def test_save_waiting_on_status_projection_replays_after_the_status_commit(self):
+    def test_save_waiting_on_status_command_replays_after_the_status_commit(self):
         import threading
         from concurrent.futures import ThreadPoolExecutor
 
         from django.db import connection
 
-        from cya.obligations import current
+        from cya.operations import commands as operation_commands
         from cya.operations.commands import set_vehicle_status
 
         self.clock.set(self.at(hours=5, minutes=15))
         locked, release = threading.Event(), threading.Event()
-        real = current._source_facts
-        guard = threading.Lock()
-        first = True
 
-        def pause(*args, **kwargs):
-            nonlocal first
-            with guard:
-                hold, first = first, False
-            if hold:
-                locked.set()
-                if not release.wait(20):
-                    raise RuntimeError("synthetic race timeout")
-            return real(*args, **kwargs)
+        def pause_status_hint(*args, **kwargs):
+            locked.set()
+            if not release.wait(20):
+                raise RuntimeError("synthetic race timeout")
 
         def run(call):
             try:
@@ -571,7 +602,7 @@ class CurrentProjectionRaces(AttentionCase):
                 connection.close()
 
         with (
-            mock.patch.object(current, "_source_facts", side_effect=pause),
+            mock.patch.object(operation_commands, "_hint", side_effect=pause_status_hint),
             ThreadPoolExecutor(max_workers=2) as pool,
         ):
             status = pool.submit(
@@ -624,5 +655,5 @@ class CurrentQueryLimitTests(SimpleTestCase):
                 datetime(2026, 6, 1, tzinfo=UTC),
             )
         self.assertEqual(result, {vehicle: []})
-        self.assertEqual(len(queries), 2)
+        self.assertEqual(len(queries), 3)
         self.assertTrue(all("LIMIT 3" in sql for sql in queries), queries)

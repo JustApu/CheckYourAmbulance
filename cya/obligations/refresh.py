@@ -11,7 +11,6 @@ from cya.conditions.models import ObligationDetermination
 from cya.deficiencies.models import CheckSuspension
 from cya.obligations.current import refresh_obligations
 from cya.obligations.models import Obligation, ObligationSelection
-from cya.operations.models import VehicleStatusEvent
 
 CHECK_COMMANDS = frozenset(("CHECK_RECORD", "CHECK_CORRECTION", "CHECK_INVALIDATION"))
 DETERMINATION_COMMANDS = frozenset(
@@ -24,7 +23,6 @@ DETERMINATION_COMMANDS = frozenset(
         "RECORD_SESSION_ROSTER_CORRECTION",
     )
 )
-STATUS_COMMANDS = frozenset(("VEHICLE_STATUS_SET", "STATUS_REQUEST_DECIDE"))
 OBLIGATION_COMMANDS = frozenset(("OBLIGATIONS_RECONCILE", "AD_HOC_INSPECTION_REQUEST"))
 
 
@@ -58,16 +56,8 @@ def refresh_for_receipt(receipt):
             "previous_selection__selected_obligation_id",
         ):
             ids.update(i for i in (current, previous) if i)
-    if kind in STATUS_COMMANDS:
-        for event in VehicleStatusEvent.objects.filter(command=receipt):
-            ids.update(
-                Obligation.objects.filter(
-                    organization_id=org,
-                    vehicle_id=event.vehicle_id,
-                    routine=True,
-                    due_at__gte=event.recorded_at,
-                ).values_list("pk", flat=True)
-            )
+    # Vehicle status is read-time evidence. Keeping it out of projection facts means a status
+    # command never refreshes and locks every future routine obligation on the vehicle.
     if kind in CHECK_COMMANDS or kind.startswith("DEFICIENCY_"):
         for suspension in CheckSuspension.objects.filter(command=receipt).select_related(
             "prior_suspension"

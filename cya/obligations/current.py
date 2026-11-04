@@ -8,6 +8,7 @@ preceding commit, so concurrent source writers leave a serially reproducible pro
 """
 
 import json
+from bisect import bisect_right
 from dataclasses import asdict
 from datetime import datetime, timedelta
 
@@ -163,18 +164,13 @@ def _source_facts(organization_id, rows, instant):
         .select_related("rule")
         .order_by("recorded_at", "id")[: MAX_ROWS + 1]
     )
-    statuses = _bounded(
-        VehicleStatusEvent.objects.filter(
-            organization_id=organization_id,
-            vehicle_id=vehicle_id,
-            recorded_at__lte=instant,
-        ).order_by("sequence")[: MAX_ROWS + 1]
-    )
     history = ProjectionHistory(
         organization_id=organization_id,
         obligations=tuple(obligations.values()),
         determinations=tuple(_determination(d) for d in determinations),
-        statuses=tuple(_status(s) for s in statuses),
+        # Status is joined at read time. Persisting it would make a single status change
+        # refresh every future obligation while the command holds the vehicle lock.
+        statuses=(),
         suspensions=stored_suspensions(
             organization_id=organization_id,
             vehicle_id=vehicle_id,
@@ -271,6 +267,39 @@ def refresh_obligations(organization_id, obligation_ids, *, dry_run=False):
     return differences
 
 
+def status_timeline(events):
+    """Build a searchable, sequence-correct status timeline for current reads/rebuild checks."""
+    grouped = {}
+    for row in events:
+        grouped.setdefault(str(row.vehicle_id), []).append(_status(row))
+    result = {}
+    for vehicle, timeline in grouped.items():
+        timeline.sort(key=lambda event: (event.recorded_at, event.sequence))
+        times, newest_by_sequence = [], []
+        newest = None
+        for event in timeline:
+            times.append(event.recorded_at)
+            if newest is None or event.sequence > newest.sequence:
+                newest = event
+            newest_by_sequence.append(newest)
+        result[vehicle] = (times, newest_by_sequence)
+    return result
+
+
+def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
+    """Return projection facts with the immutable status event applicable to this read."""
+    timeline = timelines.get(str(vehicle_id))
+    status_facts = []
+    if timeline:
+        times, newest_by_sequence = timeline
+        index = bisect_right(times, min(instant, due_at))
+        if index:
+            status_facts = [_json(asdict(newest_by_sequence[index - 1]))]
+    result = dict(facts)
+    result["statuses"] = status_facts
+    return result
+
+
 def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False):
     """Read current facts, or return None for a missing/partially selected cache.
 
@@ -304,7 +333,9 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
             organization_id=organization_id,
             vehicle_id__in=vehicle_ids,
             selected=True,
-        ).values_list("obligation_id", "vehicle_id", "facts", "refreshed_at")[: page_limit + 1],
+        ).values_list("obligation_id", "vehicle_id", "facts", "refreshed_at", "due_at")[
+            : page_limit + 1
+        ],
         page_limit,
     )
     if {r[0] for r in rows} != selected:
@@ -327,9 +358,19 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
                 .order_by("id")
             )
             replayed.update(_source_facts(str(organization_id), sources, instant))
+    statuses = _bounded(
+        VehicleStatusEvent.objects.filter(
+            organization_id=organization_id,
+            vehicle_id__in=vehicle_ids,
+            recorded_at__lte=instant,
+        ).order_by("vehicle_id", "recorded_at", "sequence")[: page_limit + 1],
+        page_limit,
+    )
+    timelines = status_timeline(statuses)
     result = {v: [] for v in vehicle_ids}
-    for oid, vehicle, facts, _stamp in rows:
-        result[str(vehicle)].append(replayed.get(oid, facts))
+    for oid, vehicle, facts, _stamp, due_at in rows:
+        facts = replayed.get(oid, facts)
+        result[str(vehicle)].append(attach_status_fact(facts, vehicle, due_at, instant, timelines))
     for found in result.values():
         _bounded(found)
     return result
