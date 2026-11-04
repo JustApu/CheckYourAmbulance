@@ -180,14 +180,17 @@ null schedule ID for an ad hoc order. Requirement binding, schedule and conditio
 rule pins are null for these explicit orders; publication, overlay, definition and
 physical-kit assignment pins remain immutable. The window is `E = recorded_at`,
 `D = G = requested due_at`. Before creation the order is absent; after the deadline
-it is Overdue until qualifying linked evidence satisfies it. Out-of-Service does
+it is Overdue until qualifying linked evidence satisfies it, which a check can do only
+until `L = D + w_late` (SCH-2, 1.26.0); after that it stays Overdue (missed). Out-of-Service does
 not exempt a non-routine order, and carry-over does not waive it. Later publications
 or kit changes do not erase the order. Normal check-link allocation still applies:
 one primary link, earliest eligible due time (stable ID breaks ties), additional
 links only under an explicit shared-satisfaction rule. A session satisfies nothing.
 
 The checklist opts into `include_all_ad_hoc=True` so an explicit order remains
-visible even beyond the routine seven-day lookback/48-hour horizon. This bypasses
+visible even beyond the routine seven-day lookback/48-hour horizon, until its
+late-completion limit: a missed order no longer decides the checklist row
+([issue #66](https://github.com/JustApu/CheckYourAmbulance/issues/66); see [attention views](attention-views.md)). This bypasses
 only the due-interval filter for ad hoc rows, retaining the 10,000-row evidence caps
 and as-of cutoff. Missing current checklist/kit rows are displayed from their
 immutable request-time pins. Normal historical callers keep bounded due intervals.

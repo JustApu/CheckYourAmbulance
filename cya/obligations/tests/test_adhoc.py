@@ -248,19 +248,29 @@ class AdHocTests(GenerationCase):
             ):
                 Obligation.objects.create(**fields)
 
-    def test_far_future_and_older_overdue_orders_remain_on_checklist(self):
-        self.order(due_at=self.at(days=45))
-        view = vehicle_checklist(str(self.org.pk), str(self.vehicle.pk), as_of=self.clock.now)
-        self.assertEqual(
-            next(r for r in view.rows if r.item_id == str(self.suction.pk)).obligation_state,
-            "CURRENT",
-        )
+    def test_far_future_and_overdue_orders_stay_on_checklist_until_the_late_limit(self):
+        due = self.at(days=45)
+        self.order(due_at=due)
+
+        def state(as_of):
+            view = vehicle_checklist(str(self.org.pk), str(self.vehicle.pk), as_of=as_of)
+            return next(r for r in view.rows if r.item_id == str(self.suction.pk)).obligation_state
+
+        self.assertEqual(state(self.clock.now), "CURRENT")
         self.clock.set(self.at(days=60))
-        view = vehicle_checklist(str(self.org.pk), str(self.vehicle.pk), as_of=self.clock.now)
-        self.assertEqual(
-            next(r for r in view.rows if r.item_id == str(self.suction.pk)).obligation_state,
-            "OVERDUE",
+        # ADH-1: G = D, and §5.3 applies, so after L = D + w_late (SCH-2, 1.26.0) no check can
+        # complete the order; it stays Overdue in history but no longer decides the row (#66).
+        self.assertEqual(state(due + timedelta(hours=1)), "OVERDUE")
+        self.assertEqual(state(due + timedelta(hours=12)), "OVERDUE")
+        self.assertIsNone(state(self.clock.now))
+        history = get_vehicle_obligations_as_of(
+            str(self.vehicle.pk),
+            self.clock.now,
+            organization_id=str(self.org.pk),
+            include_all_ad_hoc=True,
         )
+        missed = [s for s in history if s.obligation.due_at == due]
+        self.assertEqual([s.state for s in missed], [State.OVERDUE])
 
     def test_removed_item_remains_visible_with_its_immutable_order(self):
         self.order()

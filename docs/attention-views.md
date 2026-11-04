@@ -52,6 +52,13 @@ and the unresolved deficiencies that apply (id, status, summary, severity code a
 reported instant). The result also has the vehicle's operational status at the instant
 (`IN_SERVICE` when no status was ever recorded) with its restrictions.
 
+- **Missed obligations** ([issue #66](https://github.com/JustApu/CheckYourAmbulance/issues/66), SPEC SCH-2, 1.26.0): an
+  obligation still unsatisfied after its late-completion limit `L = G + w_late`
+  (`CYA_LATE_COMPLETION_HOURS`, inclusive as in linking) can no longer be completed, so it no
+  longer decides the row: the row shows the item's next obligation, and the miss stays Overdue in
+  history and reports. Until `L` the row shows Overdue and is actionable. An Unable-to-Inspect
+  obligation follows the same rule; it waits for supervisor completion on its own page
+  (UTI-1/UTI-2) and keeps the row red through its check. Recorded as an assumption on the PR.
 - **Normal**: template order, then display order, then item id.
 - **Priority**: red rows first, then rows that need action, then the rest, each in Normal order.
 - **Needs Attention Only**, in either view: keeps a row that is red, or whose obligation is
@@ -66,7 +73,7 @@ reported instant). The result also has the vehicle's operational status at the i
   unresolved deficiency keeps it red; it stays in the full checklist, in either view, with the
   deficiency listed beside it. A row still shows Overdue, Due or Current, and stays in the filter,
   when another of its obligations in the window needs action, such as one missed before the
-  suspension started. Once the suspension ends, an obligation that stays Suspended in history
+  suspension started and still within its late-completion limit. Once the suspension ends, an obligation that stays Suspended in history
   ranks after every other state, so the row shows its current obligation again and is no longer
   left out of the filter. Suspensions are read from storage; the `suspension_lookup` argument replaces
   that evidence when supplied. Reading AC-18 as excluding a suspended row even when it is red from a
