@@ -25,8 +25,8 @@ its deficiency makes it red (VW-2, AC-18), but it stays in the full checklist wi
 listed. An obligation that stays Suspended in history after its suspension ended ranks last, so the
 row shows its current obligation again. A row still shows Overdue, Due or Current, and stays in the
 filter, when another of its obligations needs action, such as one missed before the suspension
-started and still within its late-completion limit. Suspensions are read from storage by the obligation reader; ``suspension_lookup``
-replaces that evidence when supplied.
+started and still within its late-completion limit. Suspensions are read from storage by the
+obligation reader; ``suspension_lookup`` replaces that evidence when supplied.
 """
 
 from dataclasses import dataclass, field
