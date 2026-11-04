@@ -306,3 +306,24 @@ class SiblingKitTests(ReferenceAssertions, ObligationLinkCleanupMixin, Attention
         page = load_projection_histories([vehicle], self.clock.now, organization_id=org)
         self.assertEqual(page[vehicle], history)
         self.assert_same_as_reference(self.clock.now)
+
+    def test_a_long_gap_does_not_read_a_resolved_siblings_settled_history(self):
+        # Kit A was checked once, a month ago; sibling kit B every day since. A's step back must
+        # read only A's rows, not B's month of settled history inside the gap.
+        self.clock.set(self.at(hours=5, minutes=30))
+        self.assertEqual(self.generate().failures, [])
+        a_check = str(self.record(self.kit_item, kit_id=self.reference).body["check_id"])
+        for day in range(1, 31):
+            self.clock.set(self.at(days=day, hours=5, minutes=30))
+            self.assertEqual(self.generate().failures, [])
+            self.record(self.kit_item, kit_id=self.kit_b)
+        org, vehicle, now = str(self.org.pk), str(self.vehicle.pk), self.clock.now
+        a_key = (vehicle, str(self.kit_item.pk), str(self.reference))
+        # A bound of 5 rows admits A's one row, never B's 30.
+        roots = projections._attention_roots(org, {a_key}, now, now, 5)
+        self.assertEqual(roots, {a_check})
+        history = load_projection_history(vehicle, now, organization_id=org)
+        page = load_projection_histories([vehicle], now, organization_id=org)
+        self.assertEqual(page[vehicle], history)
+        self.assertIn(a_check, {r.snapshot.id for r in history.check_records})
+        self.assert_same_as_reference(now)
