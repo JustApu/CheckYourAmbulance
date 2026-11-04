@@ -295,6 +295,11 @@ fall back to replay for a missing/partial cache; historical reads always replay.
 No projection timer is required for clock transitions. See [projection design,
 writer coverage and recovery](current-obligation-projection.md).
 
+If application code is rolled back to a version that does not refresh this
+projection, the event records may advance while cached facts remain stale. On a
+later forward deployment, rebuild each organization and complete `--verify`
+before reopening traffic.
+
 ## Scheduled application jobs
 
 Run recurring management commands with the protected runtime environment,

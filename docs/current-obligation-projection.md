@@ -97,8 +97,11 @@ scope. Invalid IDs and unknown scopes fail before writing. Results report the
 number of differing and verified rows. Repeating a successful rebuild leaves
 facts and timestamps unchanged. A failed group rolls back; earlier completed
 groups remain committed and rerunning is safe. Existing evidence caps still
-fail visibly instead of accepting a partial answer. Keep traffic closed on a
-failed recovery verification.
+fail visibly instead of accepting a partial answer. The independent replay checks
+each due group at `min(rebuild start, due + 31 days)`: refreshed facts are first
+compared with current source evidence, while replay stays close to the due group
+to keep the attention check-chain walk within the evidence cap on long histories.
+Keep traffic closed on a failed recovery verification.
 
 ## Verification and measurements
 

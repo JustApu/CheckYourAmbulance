@@ -11,7 +11,7 @@ from cya.accounts.models import Organization
 from cya.checklists.models import Vehicle
 from cya.obligations.current import evaluate_facts, refresh_obligations
 from cya.obligations.models import Obligation, ObligationProjection
-from cya.obligations.projections import get_vehicle_obligations_as_of
+from cya.obligations.projections import MAX_INTERVAL, get_vehicle_obligations_as_of
 
 
 class Command(BaseCommand):
@@ -43,6 +43,7 @@ class Command(BaseCommand):
             sources = sources.filter(vehicle_id=vehicle)
         read_only = options["dry_run"] or options["verify"]
         different = verified = 0
+        verification_now = timezone.now()
         # The immutable source catalogue is streamed, one (vehicle,D) at a time. A group is
         # atomic; a failure leaves earlier groups repairable/repeatable on the next invocation.
         groups = (
@@ -59,7 +60,13 @@ class Command(BaseCommand):
                     if refresh_obligations(org, ids, dry_run=True):
                         raise CommandError("projection differs after rebuild; group rolled back")
                 if not changed or not read_only:
-                    self._verify_replay(org, str(vehicle_id), due, ids)
+                    self._verify_replay(
+                        org,
+                        str(vehicle_id),
+                        due,
+                        ids,
+                        min(verification_now, due + MAX_INTERVAL),
+                    )
                     verified += len(ids)
         self.stdout.write(
             f"Different: {different}; verified: {verified}; writes: {'none' if read_only else 'projection only'}"
@@ -77,8 +84,7 @@ class Command(BaseCommand):
         return value
 
     @staticmethod
-    def _verify_replay(org, vehicle, due, ids):
-        at = timezone.now()
+    def _verify_replay(org, vehicle, due, ids, at):
         # Independent selection/history loading, chain replay and full vehicle evaluator.
         replayed = get_vehicle_obligations_as_of(
             vehicle, at, organization_id=org, start=due, end=due

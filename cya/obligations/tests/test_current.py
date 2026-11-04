@@ -450,6 +450,35 @@ class CurrentProjectionTests(AttentionCase):
                 )
         self.assertEqual(ObligationProjection.objects.get(pk=row.pk).facts, {})
 
+    def test_rebuild_replay_time_is_capped_for_old_due_groups(self):
+        from cya.obligations.projections import MAX_INTERVAL
+
+        org = str(self.org.pk)
+        due = (
+            ObligationProjection.objects.order_by("due_at").values_list("due_at", flat=True).first()
+        )
+        now = due + MAX_INTERVAL + timedelta(days=90)
+        command = "cya.obligations.management.commands.rebuild_obligation_projection"
+        with (
+            mock.patch(f"{command}.timezone.now", return_value=now),
+            mock.patch(
+                f"{command}.get_vehicle_obligations_as_of",
+                wraps=get_vehicle_obligations_as_of,
+            ) as replay,
+        ):
+            call_command(
+                "rebuild_obligation_projection",
+                organization=org,
+                verify=True,
+                stdout=io.StringIO(),
+            )
+
+        self.assertTrue(replay.call_args_list)
+        for call in replay.call_args_list:
+            replay_at = call.args[1]
+            replay_due = call.kwargs["start"]
+            self.assertLessEqual(replay_at, replay_due + MAX_INTERVAL)
+
     def test_save_after_captured_read_instant_replays_only_the_changed_obligation(self):
         from cya.obligations import current
 
@@ -578,7 +607,7 @@ class CurrentQueryLimitTests(SimpleTestCase):
         def capture(rows, limit=None):
             if isinstance(rows, QuerySet):
                 # Compile the real MySQL SELECT without executing it; SimpleTestCase
-                # forbids database access. Empty results let all three reads be inspected.
+                # forbids database access. Empty results let both reads be inspected.
                 queries.append(str(rows.query))
                 return ()
             return bounded(rows, limit)
@@ -595,5 +624,5 @@ class CurrentQueryLimitTests(SimpleTestCase):
                 datetime(2026, 6, 1, tzinfo=UTC),
             )
         self.assertEqual(result, {vehicle: []})
-        self.assertEqual(len(queries), 3)
+        self.assertEqual(len(queries), 2)
         self.assertTrue(all("LIMIT 3" in sql for sql in queries), queries)

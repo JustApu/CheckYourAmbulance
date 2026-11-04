@@ -6,12 +6,11 @@ SPEC §17.4 permits this disposable materialization; `SPEC.md` is unchanged.
 
 ## Rehearsal acceptance remains open
 
-The issue #10 production-like 1× shift-change target is **not yet verified for
-this change**. This development environment has no available connection to the
-existing Rocky rehearsal host or its 149-day synthetic history. No deployment,
-remote history extension, HTTPS/WebSocket load run, or 4×/10× run is claimed.
-Local synthetic measurements below cannot establish the owner targets of 95%
-under one second and 98% under two seconds on that host.
+The issue #10 production-like 1× shift-change target is **not met** on the
+reviewer-reported rehearsal run for this head. Only 2.8% of requests completed
+under one second and 3.1% under two seconds, below the owner's 95%/98% targets.
+The sample and its limitations are recorded below; no 4×/10× run is claimed.
+The local synthetic measurements below do not establish the owner targets.
 
 After review, the rehearsal operator should deploy the reviewed head with traffic
 closed, migrate, refresh runtime grants, run the documented projection rebuild
@@ -22,6 +21,17 @@ readiness. Record request counts, failures, p50/p90/p95, proportions below one
 and two seconds, single-process CPU and MariaDB CPU. Retain the owner's p90 >3 s
 cutoff before trying higher load steps. Record any remaining bottleneck instead
 of treating a faster isolated query as a passing shift-change result.
+
+On reviewed head `0154162a6d6e99de61eb9a8c47b8e290260ac9b0`, before the follow-up query and rebuild fixes below, the cross-family reviewer reported 750 saves with
+zero errors, but the save p50/p95 were 17.9/23.4 seconds and checklist reload
+p50/p95 were 26.3/31.1 seconds. Only 2.8% of requests completed under one second
+and 3.1% under two seconds. Both supervisor readiness pages timed out in the
+reported run. The base comparison completed 300 saves with 23 errors or timeouts
+and had 21 timeouts among 164 checklist reloads, so the runs are not directly
+comparable. These results come from the trusted cross-family review on PR #69;
+host details are omitted. The follow-up fixes have not been measured on the rehearsal host,
+so no result is claimed for the new head; the observed run shows the acceptance target
+remains unmet.
 
 ## Local verification
 
