@@ -243,10 +243,11 @@ def _attention_roots(organization_id, keys, since, instant, limit):
     unresolved = set(keys)
     upper = lower = since
     while unresolved:
-        # Each vehicle item's newest older check, from the (organization, vehicle, item, time)
-        # index alone; kits of one item share it, which only costs a kit item an extra step.
-        newest_by_item = {
-            (str(row["vehicle_id"]), str(row["item_id"])): row["newest"]
+        # Each key's own newest older check, from the (organization, vehicle, item, kit, time)
+        # index alone. Grouped by the exact key: a kit instance with no checks of its own has
+        # nothing older and stops here, never walking a sibling kit's history.
+        newest_by_key = {
+            _key(row["vehicle_id"], row["item_id"], row["kit_id"]): row["newest"]
             for row in CheckRecord.objects.filter(
                 organization_id=organization_id,
                 vehicle_id__in=sorted({k[0] for k in unresolved}),
@@ -254,10 +255,10 @@ def _attention_roots(organization_id, keys, since, instant, limit):
                 recorded_at__lte=lower,
             )
             .order_by()
-            .values("vehicle_id", "item_id")
+            .values("vehicle_id", "item_id", "kit_id")
             .annotate(newest=Max("recorded_at"))
         }
-        older = {key: newest_by_item[key[:2]] for key in unresolved if key[:2] in newest_by_item}
+        older = {key: newest_by_key[key] for key in unresolved if key in newest_by_key}
         unresolved &= set(older)  # a key with nothing older has nothing more to find
         if not unresolved:
             break

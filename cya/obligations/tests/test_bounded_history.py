@@ -15,6 +15,9 @@ read in full as before. These tests check that:
 from unittest import mock
 from uuid import uuid4
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
 from cya.attention.readiness import fleet_readiness
 from cya.attention.tests.support import AttentionCase
 from cya.checks.commands import invalidate_chain
@@ -278,3 +281,28 @@ class PageBoundTests(ObligationLinkCleanupMixin, AttentionCase):
             page = projections._history(org, {a: {}, b: {}}, now, now, bound * 2)
             self.assertEqual(page[b]["deficiency_headers"], ())
             self.assertEqual(page[a], projections._history(org, {a: {}}, now, now, bound)[a])
+
+
+class SiblingKitTests(ReferenceAssertions, ObligationLinkCleanupMixin, AttentionCase):
+    """A kit instance with no checks beside a sibling instance with a long history."""
+
+    def test_an_unchecked_kit_does_not_walk_its_siblings_history(self):
+        for day in range(30):
+            self.clock.set(self.at(days=day, hours=5, minutes=30))
+            self.assertEqual(self.generate().failures, [])
+            self.record(self.kit_item, kit_id=self.reference)
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        history = load_projection_history(vehicle, self.clock.now, organization_id=org)
+        keys = {(o.item_id, o.kit_instance_id) for o in history.obligations}
+        # Both kit instances have obligations; only the reference instance was ever checked.
+        self.assertIn((str(self.kit_item.pk), str(self.kit_b)), keys)
+        self.assertIn((str(self.kit_item.pk), str(self.reference)), keys)
+        with CaptureQueriesContext(connection) as captured:
+            load_projection_history(vehicle, self.clock.now, organization_id=org)
+        walks = [q for q in captured.captured_queries if "FROM `check_record`" in q["sql"]]
+        # The walk back stops at once for the unchecked instance; 30 days of the sibling's
+        # history would take about 15 two-day steps of two queries each.
+        self.assertLessEqual(len(walks), 6, [q["sql"][:120] for q in walks])
+        page = load_projection_histories([vehicle], self.clock.now, organization_id=org)
+        self.assertEqual(page[vehicle], history)
+        self.assert_same_as_reference(self.clock.now)

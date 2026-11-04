@@ -1,4 +1,4 @@
-"""Index check records by vehicle, item and time for bounded recent reads (issue #63).
+"""Index check records by vehicle, item, kit and time for bounded recent reads (issue #63).
 
 InnoDB silently drops the index it created implicitly for a foreign key as soon as another
 index can serve that key, and this one serves the (organization, vehicle) key. So the forward
@@ -14,7 +14,7 @@ VEHICLE_KEY_INDEX = "cya_check_record_vehicle_id_org_fk"
 
 FORWARD = [
     f"CREATE INDEX `{INDEX}` ON `check_record` "
-    "(`organization_id`, `vehicle_id`, `item_id`, `recorded_at`)",
+    "(`organization_id`, `vehicle_id`, `item_id`, `kit_id`, `recorded_at`)",
     f"DROP INDEX IF EXISTS `{VEHICLE_KEY_INDEX}` ON `check_record`",
 ]
 REVERSE = [
@@ -33,7 +33,7 @@ class Migration(migrations.Migration):
                 migrations.AddIndex(
                     model_name="checkrecord",
                     index=models.Index(
-                        fields=["organization", "vehicle", "item", "recorded_at"], name=INDEX
+                        fields=["organization", "vehicle", "item", "kit", "recorded_at"], name=INDEX
                     ),
                 ),
             ],
