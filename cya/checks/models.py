@@ -135,7 +135,7 @@ class CheckRecord(Evidence):
         indexes = [
             # The checklist and dashboard read only recent checks of each vehicle item (issue #63).
             models.Index(
-                fields=["organization", "vehicle", "item", "recorded_at"],
+                fields=["organization", "vehicle", "item", "kit", "recorded_at"],
                 name="check_vehicle_item_time",
             ),
         ]
