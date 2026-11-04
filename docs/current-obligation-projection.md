@@ -40,7 +40,8 @@ at G retains the historical evaluator's capped-instant semantics.
 also keep replay. Current readers check selected source IDs against cached IDs;
 a missing/partial cache falls back to replay without writing. A concurrent
 refresh after the captured instant replays only the affected obligation rows. Invalid fact versions fail visibly.
-Attention/known deficiencies remain separate from obligation satisfaction and
+Evidence queries carry their page cap into SQL before queryset evaluation, and
+per-vehicle caps still refuse an incomplete answer. Attention/known deficiencies remain separate from obligation satisfaction and
 use their existing readers; they are not copied into obligation projections.
 
 ## Writer coverage and locking

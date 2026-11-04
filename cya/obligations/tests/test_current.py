@@ -564,3 +564,36 @@ class CurrentProjectionRaces(AttentionCase):
             status.result(timeout=30)
             saving.result(timeout=30)
         self.assert_current_matches_replay()
+
+
+class CurrentQueryLimitTests(SimpleTestCase):
+    def test_every_current_evidence_query_is_limited_before_it_can_be_evaluated(self):
+        from django.db.models import QuerySet
+
+        from cya.obligations import current
+
+        queries = []
+        bounded = current._bounded
+
+        def capture(rows, limit=None):
+            if isinstance(rows, QuerySet):
+                # Compile the real MySQL SELECT without executing it; SimpleTestCase
+                # forbids database access. Empty results let all three reads be inspected.
+                queries.append(str(rows.query))
+                return ()
+            return bounded(rows, limit)
+
+        vehicle = "00000000-0000-0000-0000-000000000002"
+        with (
+            mock.patch.object(current, "MAX_ROWS", 2),
+            mock.patch.object(current, "_bounded", side_effect=capture),
+            mock.patch.object(current, "selected_ids", return_value=set()),
+        ):
+            result = current_rows(
+                "00000000-0000-0000-0000-000000000001",
+                [vehicle],
+                datetime(2026, 6, 1, tzinfo=UTC),
+            )
+        self.assertEqual(result, {vehicle: []})
+        self.assertEqual(len(queries), 3)
+        self.assertTrue(all("LIMIT 3" in sql for sql in queries), queries)

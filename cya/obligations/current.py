@@ -292,17 +292,24 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
         vehicle_id__in=vehicle_ids,
         recorded_at__lte=instant,
     )
-    source_ids = _bounded(sources.values_list("pk", flat=True), MAX_ROWS * max(1, len(vehicle_ids)))
+    page_limit = MAX_ROWS * max(1, len(vehicle_ids))
+    # Limit in SQL before QuerySet iteration, which otherwise buffers every matching row.
+    source_ids = _bounded(sources.values_list("pk", flat=True)[: page_limit + 1], page_limit)
     selected = selected_ids(organization_id, source_ids, instant)
-    selected.update(sources.filter(routine=False).values_list("pk", flat=True))
+    selected.update(
+        _bounded(
+            sources.filter(routine=False).values_list("pk", flat=True)[: page_limit + 1],
+            page_limit,
+        )
+    )
     rows = _bounded(
         ObligationProjection.objects.filter(
             scope,
             organization_id=organization_id,
             vehicle_id__in=vehicle_ids,
             selected=True,
-        ).values_list("obligation_id", "vehicle_id", "facts", "refreshed_at"),
-        MAX_ROWS * max(1, len(vehicle_ids)),
+        ).values_list("obligation_id", "vehicle_id", "facts", "refreshed_at")[: page_limit + 1],
+        page_limit,
     )
     if {r[0] for r in rows} != selected:
         return None
