@@ -4,11 +4,9 @@ The [current obligation projection](current-obligation-projection.md) changes
 current reads while preserving immutable events and explicit historical replay.
 SPEC §17.4 permits this disposable materialization; `SPEC.md` is unchanged.
 
-## Rehearsal acceptance remains open
+## Issue #70 latency target remains open
 
-The issue #10 production-like 1× shift-change target is **not met** on the
-reviewer-reported rehearsal run for this head. Only 2.8% of requests completed
-under one second and 3.1% under two seconds, below the owner's 95%/98% targets.
+The issue #10 production-like 1× shift-change target, tracked in [issue #70](https://github.com/JustApu/CheckYourAmbulance/issues/70), is **not met** on the reviewer-reported rehearsal run before the status-lock fix. Only 2.8% of requests completed under one second and 3.1% under two seconds, below the owner's 95%/98% targets.
 The sample and its limitations are recorded below; no 4×/10× run is claimed.
 The local synthetic measurements below do not establish the owner targets.
 
@@ -76,7 +74,7 @@ unavailable; the follow-up reviewer will measure it on the new head. In a separa
 in-memory microbenchmark, the empty-evidence evaluator path ran 3,000 synthetic
 obligations in a median 0.0141 seconds versus 0.0154 seconds for the previous
 conversion path (1.09× faster). This excludes database access and JSON decoding,
-so it does not establish full read latency. No issue #10 target is claimed.
+so it does not establish full read latency. No issue #70 target pass is claimed.
 
 ## Local verification
 
