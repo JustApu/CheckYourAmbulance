@@ -59,10 +59,11 @@ Completed checks:
   on application and through a reverse/forward round trip. Inspection confirmed
   that the cache no longer references the mutable vehicle row with a foreign key.
 
-Remote CI and independent cross-family/human review remain pending. The connector
-approval gate rejected draft-PR creation and lifecycle label updates because its
-approval policy is `never`; source commits can be pushed and issue evidence can
-be recorded. This is not a completed review handoff.
+Remote CI and independent cross-family/human review are required for a review
+handoff. During local verification the connector approval gate rejected draft-PR
+creation and lifecycle label updates because its approval policy is `never`;
+source commits can be pushed and issue evidence can be recorded. The signed
+issue/PR evidence records subsequent remote-check and review status.
 
 ## Controlled local service measurements
 
