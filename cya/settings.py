@@ -228,3 +228,6 @@ CYA_PRIOR_CHECK_LOOKUP = None
 # back to repair after missed job runs. The generate_obligations command can override both.
 CYA_OBLIGATION_HORIZON_HOURS = 48
 CYA_OBLIGATION_LOOKBACK_HOURS = 168
+# SPEC SCH-2/SCH-3 (amendment 1.26.0, issue #61): a late check may complete an overdue
+# obligation only within this many hours after its grace deadline; later it stays missed.
+CYA_LATE_COMPLETION_HOURS = env_int("LATE_COMPLETION_HOURS", 12, 0, 168)

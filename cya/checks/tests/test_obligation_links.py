@@ -896,6 +896,53 @@ class CheckObligationLinkTests(ObligationLinkCleanupMixin, ObligationCase):
         response = self.record_suction()
         self.assertEqual(response.body["obligation_links"][0]["timing"], "LATE")
 
+    def suction_states(self):
+        return [
+            s
+            for s in get_vehicle_obligations_as_of(
+                str(self.vehicle.pk), self.clock.now, organization_id=str(self.org.pk)
+            )
+            if s.obligation.item_id == str(self.suction.pk)
+        ]
+
+    def test_a_late_check_completes_only_within_w_late_of_the_grace_deadline(self):
+        # SPEC SCH-2 (1.26.0): G is 07:00 and w_late defaults to 12 h, so L is 19:00.
+        self.clock.set(self.at(hours=18, minutes=59))
+        inside = self.record_suction()
+        (link,) = inside.body["obligation_links"]
+        self.assertEqual(link["timing"], "LATE")
+        due = Obligation.objects.get(pk=link["obligation_id"]).due_at
+        self.assertEqual(due, self.at(hours=6))
+
+    def test_after_w_late_the_obligation_stays_missed_and_the_check_links_nothing(self):
+        self.clock.set(self.at(hours=19, minutes=1))
+        response = self.record_suction()
+        self.assertEqual(response.body["obligation_links"], [])
+        self.assertTrue(CheckRecord.objects.filter(pk=response.body["check_id"]).exists())
+        (today,) = [s for s in self.suction_states() if s.obligation.due_at == self.at(hours=6)]
+        self.assertEqual(today.state, State.OVERDUE)
+
+    def test_a_check_the_next_day_completes_that_day_not_the_missed_one(self):
+        # Before 1.26.0 the earliest overdue obligation (yesterday's) would have taken it.
+        self.clock.set(self.at(days=1, hours=7, minutes=1))
+        response = self.record_suction()
+        (link,) = response.body["obligation_links"]
+        self.assertEqual(link["timing"], "LATE")
+        due = Obligation.objects.get(pk=link["obligation_id"]).due_at
+        self.assertEqual(due, self.at(days=1, hours=6))
+        missed = [s for s in self.suction_states() if s.obligation.due_at == self.at(hours=6)]
+        self.assertEqual([s.state for s in missed], [State.OVERDUE])
+
+    def test_w_late_is_the_configured_agency_wide_setting(self):
+        with override_settings(CYA_LATE_COMPLETION_HOURS=2):
+            self.clock.set(self.at(hours=9, minutes=1))  # G + 2 h 1 min
+            self.assertEqual(self.record_suction().body["obligation_links"], [])
+        with override_settings(CYA_LATE_COMPLETION_HOURS=0):  # no late completion at all
+            self.clock.set(self.at(hours=9, minutes=2))
+            self.assertEqual(self.record_suction().body["obligation_links"], [])
+        self.clock.set(self.at(hours=18, minutes=58))  # the default again: still within 12 h
+        self.assertEqual(self.record_suction().body["obligation_links"][0]["timing"], "LATE")
+
     def test_a_later_repeated_check_is_retained_but_does_not_replace_first_satisfaction(self):
         self.clock.set(self.at(hours=5, minutes=15))
         first = self.record_suction()

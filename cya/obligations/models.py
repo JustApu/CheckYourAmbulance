@@ -349,6 +349,11 @@ class Obligation(Evidence):
             models.Index(
                 fields=["organization", "vehicle", "due_at"], name="obligation_vehicle_due"
             ),
+            # Check linking reads by grace deadline: open windows and w_late (issue #61).
+            models.Index(
+                fields=["organization", "vehicle", "item", "kit_key", "grace_at"],
+                name="obligation_item_grace",
+            ),
         ]
 
     def __str__(self):
