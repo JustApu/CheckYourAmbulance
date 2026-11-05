@@ -833,7 +833,9 @@ Results:
     throwaway test environment only.
   - The slowest tests on both hosts are migration reversals (the kit migration test took 923 s
     on Rocky and 1,116 s on Ubuntu).
-- **Pending:** as for Rocky, plus the SPEC decision on MariaDB 11.8.
+- **Pending:** the same host-specific checks as for Rocky. The MariaDB 11.8
+  compatibility decision is no longer pending: SPEC 1.25.0 permits 11.8
+  alongside 10.11; production version selection remains a host decision.
 
 ## Backup and restore rehearsal evidence, 2026-11-03 UTC
 
