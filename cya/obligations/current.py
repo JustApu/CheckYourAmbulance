@@ -277,13 +277,16 @@ def status_timeline(events):
     result = {}
     for vehicle, timeline in grouped.items():
         timeline.sort(key=lambda event: (event.recorded_at, event.sequence))
+        # Current reads attach a status to many obligations. Serialize each immutable event
+        # once per read instead of repeating the dataclass/JSON conversion per obligation.
+        facts_by_event = {event.id: _json(asdict(event)) for event in timeline}
         times, newest_by_sequence = [], []
         newest = None
         for event in timeline:
             times.append(event.recorded_at)
             if newest is None or event.sequence > newest.sequence:
                 newest = event
-            newest_by_sequence.append(newest)
+            newest_by_sequence.append(facts_by_event[newest.id])
         result[vehicle] = (times, newest_by_sequence)
     return result
 
@@ -296,7 +299,7 @@ def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
         times, newest_by_sequence = timeline
         index = bisect_right(times, min(instant, due_at))
         if index:
-            status_facts = [_json(asdict(newest_by_sequence[index - 1]))]
+            status_facts = [newest_by_sequence[index - 1]]
     result = dict(facts)
     result["statuses"] = status_facts
     return result

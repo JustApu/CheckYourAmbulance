@@ -4,6 +4,7 @@ import io
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from random import Random
+from types import SimpleNamespace
 from unittest import mock
 
 from django.core.management import call_command
@@ -16,11 +17,14 @@ from cya.attention.readiness import _current_obligations, _obligations, fleet_re
 from cya.attention.tests.support import AttentionCase
 from cya.checks.commands import correct_check, invalidate_chain
 from cya.checks.state import CheckDecision, CheckSnapshot
+from cya.obligations import current as current_module
 from cya.obligations.current import (
+    attach_status_fact,
     compile_history,
     current_rows,
     evaluate_facts,
     refresh_obligations,
+    status_timeline,
 )
 from cya.obligations.history import RecordedCheck, RecordedLink
 from cya.obligations.models import ObligationProjection
@@ -38,6 +42,37 @@ from cya.obligations.state import (
 
 
 class CompiledEvidenceTests(SimpleTestCase):
+    def test_status_facts_are_serialized_once_per_event_per_read(self):
+        at = datetime(2026, 6, 10, tzinfo=UTC)
+        events = [
+            SimpleNamespace(
+                pk="status-1",
+                vehicle_id="vehicle",
+                sequence=1,
+                recorded_at=at - timedelta(hours=2),
+                status="IN_SERVICE",
+            ),
+            SimpleNamespace(
+                pk="status-2",
+                vehicle_id="vehicle",
+                sequence=2,
+                recorded_at=at - timedelta(hours=1),
+                status="OUT_OF_SERVICE",
+            ),
+        ]
+
+        serialize = current_module._json
+        with mock.patch("cya.obligations.current._json", wraps=serialize) as json_encode:
+            timelines = status_timeline(events)
+            facts = {"obligation": {}, "checks": [], "determinations": [], "suspensions": []}
+            results = [attach_status_fact(facts, "vehicle", at, at, timelines) for _ in range(100)]
+
+        self.assertEqual(json_encode.call_count, 2)
+        self.assertEqual(
+            {result["statuses"][0]["status"] for result in results},
+            {"OUT_OF_SERVICE"},
+        )
+
     def test_randomized_evidence_matches_replay_and_readiness_after_clock_advances(self):
         at = datetime(2026, 6, 10, tzinfo=UTC)
         for seed in range(50):
