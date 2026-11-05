@@ -206,7 +206,7 @@ class AuditIntegrityTests(TestCase):
         },
         # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): administrator-set mandatory event/channel pairs
         # issue 14 (https://github.com/JustApu/CheckYourAmbulance/issues/14): administrator overrides of the default recipients
-        "M": {"notification_policy", "notification_recipient_rule"},
+        "M": {"notification_policy", "notification_recipient_rule", "obligation_projection"},
         # issue 80 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/80): administrator-configured severity levels
         "V": {"deficiency_severity"},
     }

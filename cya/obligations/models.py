@@ -493,3 +493,34 @@ class OdometerObligation(Evidence):
 
     def __str__(self):
         return f"OdometerObligation {self.pk}"
+
+
+class ObligationProjection(models.Model):
+    """Disposable effective evidence, one row per immutable obligation; never historical authority."""
+
+    obligation = models.OneToOneField(
+        "Obligation", primary_key=True, on_delete=models.PROTECT, related_name="+"
+    )
+    organization = organization_fk()
+    # Do not reference the mutable vehicle row here: an FK check could acquire its
+    # lock after projection locks and reverse the status/generator lock ordering.
+    # The immutable obligation supplies and verifies this disposable lookup value.
+    vehicle_id = IdentityIDField(db_column="vehicle_id")
+    due_at = models.DateTimeField()
+    routine = models.BooleanField()
+    selected = models.BooleanField(default=False)
+    # Effective linked checks, determinations, status at min(D, refresh time), suspensions,
+    # immutable requirement/window pins, and de-duplicable RPT-7 chain counters.
+    facts = models.JSONField(default=dict)
+    refreshed_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "obligation_projection"
+        indexes = [
+            models.Index(
+                fields=["organization", "vehicle_id", "due_at"], name="projection_vehicle_due"
+            ),
+        ]
+
+    def __str__(self):
+        return f"ObligationProjection {self.pk}"

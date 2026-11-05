@@ -246,18 +246,19 @@ class FanOutTests(ReadinessCase):
         self.failed(self.masks, vehicle=self.vehicles[1], quantity=1)
         self.assertGreater(len(self.vehicles), 1)
         sql = [q["sql"] for q in self.queries()]
-        for table in ("`obligation_selection`", "`check_obligation_link`"):
-            reads = [q for q in sql if f"FROM {table}" in q]
-            self.assertEqual(len(reads), 1, table)
-        # Check records: a few page-wide reads for the bounded history (issue #63: linked chains,
-        # the window's chains, the walk back to each item's last valid check, the chains' rows),
-        # never one per vehicle. BatchQueryTests checks the count does not grow with vehicles.
-        reads = [q for q in sql if "FROM `check_record`" in q]
-        self.assertLessEqual(len(reads), 6, reads)
+        self.assertEqual(sum("FROM `obligation_projection`" in q for q in sql), 1)
+        self.assertFalse(any("FROM `check_obligation_link`" in q for q in sql))
+        self.assertFalse(any("FROM `check_record`" in q for q in sql))
         with mock.patch.object(
             readiness, "load_projection_histories", wraps=readiness.load_projection_histories
         ) as batch:
             picture = self.picture()
+        batch.assert_not_called()
+        # An explicit historical read retains the batch replay path.
+        with mock.patch.object(
+            readiness, "load_projection_histories", wraps=readiness.load_projection_histories
+        ) as batch:
+            self.picture(as_of=self.clock.now)
         batch.assert_called_once()
         self.assertEqual(
             sorted(batch.call_args.args[0]), sorted(v.vehicle_id for v in picture.vehicles)

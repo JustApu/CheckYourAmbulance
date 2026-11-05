@@ -319,6 +319,7 @@ concurrent commands based on one tip yield one success and one conflict.
 | `notification_recipient_rule` | M | organization_id, event_type, recipient kind (`ASSIGNEE`, `REPORTER`, `REQUESTER`, `PARTICIPANTS`, `SUPERVISORS`, `ADMINISTRATORS`), enabled; unique organization/event/recipient; an administrator override of the documented default recipients, set through an audited command ([issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)) |
 | `item_lock`, `kit_lock`, `vehicle_lock`, `deficiency_lock` | M | organization_id and target FK unique; no business state; prepared at publication/entity creation |
 | `session_projection`, `deficiency_projection` | M | session_id/deficiency_id ref unique, cached state/activity or status/assignee/deadline/severity_version_id, last applied event ref; disposable, rebuildable, never historical authority |
+| `obligation_projection` | M | obligation_id ref primary key, organization_id ref, vehicle_id denormalized UUID (no mutable-vehicle FK), due_at, routine, selected, effective evidence JSON, refreshed_at; disposable current-read acceleration, indexed by organization/vehicle/due; historical authority remains the event rows |
 
 The receipt reserves a client operation across **all** command kinds. A check,
 reading, deficiency creation or seal command also carries the same operation_id
@@ -818,3 +819,18 @@ production host); real checklist definitions; Workspace claim/revocation
 verification before sign-in implementation; applicable BBP decisions before
 production.
 No production permission, migration execution or merge authorization is implied.
+
+
+## Current obligation materialization (issue #67)
+
+The [current projection](current-obligation-projection.md) stores one row per
+obligation, preserving readiness's window counts (including missed obligations)
+while the checklist independently selects its item/physical-kit winner. Effective
+check evidence, determinations, status/suspension boundaries and de-duplicable
+chain counters are rebuilt from immutable events. Clock-driven states use the
+existing evaluator at read time; past `as_of` reads never use this cache.
+Audited writers refresh affected rows within their own transactions, using a
+final, ordered projection lock group. The [rebuild/compare command](deployment-runbook.md#obligation-projection-rebuild-and-comparison)
+repairs missing/stale rows, supports a read-only `--dry-run` and `--verify`, and
+fails visibly on differences or event-replay mismatches. Existing source tables
+and their append-only guards are unchanged.

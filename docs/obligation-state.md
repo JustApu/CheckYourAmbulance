@@ -1,7 +1,7 @@
 # Obligation state and historical projections
 
 [issue #60](https://github.com/JustApu/CheckYourAmbulance-archive/issues/60) and [issue #87](https://github.com/JustApu/CheckYourAmbulance-archive/issues/87) implement SPEC §5.3–§5.4 and §19, with offline AC-26/27 checks.
-No state column, projection table, command, migration or dependency is added.
+Their historical replay API remains authoritative. [Issue #67 current projections](current-obligation-projection.md) add a separate disposable table and rebuild/compare command for current checklist and readiness reads; explicit as-of reads keep the API below.
 
 ## Read API
 

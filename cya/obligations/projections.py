@@ -3,7 +3,7 @@
 from datetime import timedelta
 from itertools import islice
 
-from django.db.models import F, Max, Q
+from django.db.models import F, Q
 
 from cya.checklists.models import Vehicle
 from cya.checks.models import (
@@ -258,14 +258,21 @@ def _attention_roots(organization_id, keys, since, instant, limit):
         # Each key's own newest older check, from the (organization, vehicle, item, kit, time)
         # index alone. Grouped by the exact key: a kit instance with no checks of its own has
         # nothing older and stops here, never walking a sibling kit's history.
-        newest_by_key = {
-            _key(row["vehicle_id"], row["item_id"], row["kit_id"]): row["newest"]
-            for row in CheckRecord.objects.filter(
-                _exact_keys(unresolved), organization_id=organization_id, recorded_at__lte=lower
+        candidates = [
+            CheckRecord.objects.filter(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                item_id=item_id,
+                kit_id=None if kit_key == NO_KIT else kit_key,
+                recorded_at__lte=lower,
             )
-            .order_by()
-            .values("vehicle_id", "item_id", "kit_id")
-            .annotate(newest=Max("recorded_at"))
+            .order_by("-recorded_at", "-id")
+            .values_list("vehicle_id", "item_id", "kit_id", "recorded_at")[:1]
+            for vehicle_id, item_id, kit_key in sorted(unresolved)
+        ]
+        newest_by_key = {
+            _key(vehicle, item, kit): recorded
+            for vehicle, item, kit, recorded in candidates[0].union(*candidates[1:], all=True)
         }
         older = {key: newest_by_key[key] for key in unresolved if key in newest_by_key}
         unresolved &= set(older)  # a key with nothing older has nothing more to find
@@ -327,7 +334,7 @@ def latest_check_roots(organization_id, keys, instant):
     return _attention_roots(organization_id, set(keys), instant, instant, MAX_ROWS)
 
 
-def _history(organization_id, obligations, since, instant, limit):
+def _history(organization_id, obligations, since, instant, limit, *, current_facts=False):
     """{vehicle id: check and deficiency evidence} for the obligations of one or more vehicles.
 
     Reads only the checks the projection of those obligations needs at `instant` (issue #63):
@@ -375,7 +382,8 @@ def _history(organization_id, obligations, since, instant, limit):
             limit,
         )
     }
-    roots |= _attention_roots(organization_id, keys, since, instant, limit)
+    if not current_facts:
+        roots |= _attention_roots(organization_id, keys, since, instant, limit)
     records = _bounded(
         CheckRecord.objects.filter(
             organization_id=organization_id,
@@ -417,6 +425,11 @@ def _history(organization_id, obligations, since, instant, limit):
             vehicle_ids,
         )
     )
+    if current_facts:
+        return {
+            v: _history_fields(rows[v], decisions[v], links[v], supports[v], (), {}, ())
+            for v in vehicle_ids
+        }
     # Every deficiency of the vehicle by the instant: projection states list each one that
     # applies to their item, resolved ones too. Deficiencies are rare next to checks, so this
     # stays far below the bound for years (issue #63 bounds the check reads).
