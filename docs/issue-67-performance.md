@@ -46,14 +46,15 @@ and session data.
 | 0.25 | Base B | 195 | 21 | 0% / 0% | 14.2 / 30.0 / 30.0 / 30.0 s | 9.0 / 15.3 s | 26.9 s | 0 / 11, 30 s | 0.92 / 0.46 | 1.13 |
 
 At zero reloads, differences were within the two base runs' spread. At multiplier 0.25, the
-coalesced runs completed about 15–20% more requests with fewer failures and 10–15% less app CPU
-per request, but none of the four runs completed a readiness panel, and all were at 0% under
-one or two seconds. Thus the coalescer did not approach the latency targets. Claude's narrative
-also says every coalesced run had a supervisor's first page load return 503 during cold
-simultaneous startup; the table reports zero failures for the zero-multiplier coalesced B run.
-That startup count is inconsistent in the report and remains unverified. At saturation, the
-coalesced runs report readiness 503s after the 20-second follower bound instead of some 30-second
-client timeouts. Any future comparison must continue to count those 503s as failures.
+coalesced runs completed 8–19% more requests per paired run; the mean was 212 requests versus
+187 for base (about 13% more). App CPU per request was 7–16% lower per pair, with a mean about
+12% lower. None of the four runs completed a readiness panel, and all were at 0% under one or
+two seconds. Thus the coalescer did not approach the latency targets. The rehearsal report says
+one supervisor's first page load returned 503 in each of the four coalesced runs during cold
+simultaneous setup, then succeeded on retry. Those setup requests are excluded from the table's
+measured-window failure counts. At saturation, measured readiness 503s after the 20-second
+follower bound replaced some 30-second client timeouts. Any future comparison must count 503s
+as failures.
 
 These are two runs per cell with 10–15% saturated-run variation, so the saturated gain is
 suggestive rather than conclusive. They are not production-like 1× results: the harness is
@@ -61,6 +62,84 @@ closed-loop and external, there is no real browser/WebSocket client behavior, an
 the target. PR #72 drops the coalescer because the modest, noisy overload gain does not offset
 the added coordination and initial-page 503 risk. Per-read cost and reload work remain open
 bottlenecks for issue #70.
+
+## Issue #70 profiling, reload sweep and cache experiment
+
+Claude profiled PR #72 head `eef007fc6329742a0d4608c2875c8e54ae4ed6fa` against base
+`00f412dc5cd84d4a8dee5502fe295427c40938da`, using synthetic 12-month history extended to the
+present (129,000 obligations/projection rows), one two-vCPU rehearsal host, MariaDB 10.11, and
+one uvicorn process. The external stdlib HTTP harness ran over loopback with a 30-second client
+timeout, 15 crew saving every 6–14 seconds, and two supervisors reading readiness every 10–20
+seconds. Each load run used a fresh restore, discarded a 60-second warm-up, and measured 240
+seconds. The driver was closed-loop; it is not the coordinated issue #10 browser/WebSocket
+rehearsal. Runs varied materially, so only paired alternating runs are compared. An initial
+load attempt mishandled keep-alive and cold-cache startup and is excluded.
+
+`cProfile` samples (12 reads, approximately 1.5× profiler overhead) identified the remaining
+read cost on the head: checklist p50 was 1.45 seconds/26 queries, with
+`latest_effective_checks`/`_attention_roots` about 47% of profiled time and `current_rows` about
+34%; readiness p50 was 1.97 seconds/21 queries, mostly Python, with `evaluate_facts` about 40%,
+JSON decode plus `_restore` about 40%, and SQL about 0.5 seconds. The profiled checklist call
+using explicit `as_of=now` took 2.8 seconds/42 queries, but Claude corrected the initial claim:
+no production caller on the reviewed tree passes `as_of`; production current-read callers omit
+it, and explicit instants are historical paths. The 2.8-second call shape is not a production
+bottleneck finding.
+
+### Reload-rate sweep on head
+
+The reload multiplier is the probability each crew member on a vehicle reloads after a save;
+1.0 represents three reloads per save. The zero-reload row is from earlier clean runs under the
+same settings and is a baseline bound, not a paired point. The four sweep runs used fresh
+restores from one prepared snapshot at 0, 11, 22 and 33 minutes after preparation.
+
+| Reload multiplier | Checklist reads/240 s | Requests | Under 1 s / 2 s | Overall p50 / p90 | Save p50 / p90 | Checklist p50 | Readiness p50 | App / DB cores | App CPU s/request |
+|---:|---:|---:|---|---|---|---:|---:|---|---:|
+| 0 (earlier clean runs) | 0 | 336–347 | 41–49% / 71–82% | 1.0–1.2 / 3.1–3.6 s | 1.0–1.1 / 3.1–3.5 s | n/a | 4.5–9.3 s | 0.46–0.53 / 0.20–0.26 | 0.33–0.38 |
+| 0.05 | 39 | 352 | 20% / 51% | 1.9 / 6.4 s | 1.7 / 4.2 s | 6.0 s | 16.2 s | 0.71 / 0.39 | 0.49 |
+| 0.10 | 75 | 298 | 3% / 9% | 5.6 / 15.7 s | 4.6 / 7.6 s | 13.5 s | 26.3 s | 0.90 / 0.45 | 0.72 |
+| 0.15 | 78 | 256 | 1% / 2% | 8.1 / 21.7 s | 5.9 / 10.1 s | 18.2 s | 30 s (8/10 timed out) | 0.92 / 0.46 | 0.87 |
+| 0.25 | 75 | 179 | 0% / 0% | 16.3 / 30 s | 10.0 / 15.2 s | 27.2 s | 30 s (10/10 timed out) | 0.92 / 0.44 | 1.24 |
+
+Even at multiplier 0.05, under-one-/under-two-second rates fell well short of the 95%/98%
+targets. The app core saturated from multiplier 0.25 upward. At zero reloads the app used about
+0.5 core; the observed profile attributed roughly 0.2 core to readiness and 0.3 to saves, so
+removing checklist reloads alone cannot meet the target. At multipliers 0.5 and 1 in the earlier
+sweep, respectively 33/97 and 19/58 saves returned 409 conflicts; there were none at 0 or 0.25.
+These observations point to readiness and save cost as well as reload volume.
+
+### Abandoned requests and status-change contention
+
+A readiness read used about 3.2 app CPU seconds. Six reads abandoned by clients after a 0.5-second
+timeout consumed 24.8 app CPU seconds in total, versus 19.3 seconds when allowed to finish; ten
+requests abandoned in two groups kept the server busy about 45 seconds. Requests were not
+cancelled when clients disconnected. A post-burst latency probe was inconclusive.
+
+An idle status change measured p50 0.21 seconds/p95 0.68 seconds. Under three crew continuously
+saving disjoint items on one vehicle, with status changes every 1.5 seconds, 150 saves had zero
+failures/conflicts and p50/p95 1.7/2.5 seconds; status changes measured p50/p95 1.2/2.4 seconds
+with two errors in 42. When three crew saved the same items, 271 of 407 requests saved and the
+remaining 136 returned the expected HTTP 409 conflict.
+
+### Unmerged facts-cache prototype
+
+Claude also tested, but did not push, a bounded process-local cache of decoded projection facts
+keyed by obligation ID, refresh instant, and an MD5 of facts. The digest is needed because a
+same-timestamp facts change made a refresh-instant-only key stale. Five checklist digests and
+the readiness digest matched the uncached head at a fixed instant. In three alternating
+sequential rounds, readiness p50 moved from 3.17–3.28 seconds to 2.61–2.66 seconds (about 18%);
+checklist timing was unchanged at about 2.0 seconds. After clearing cache state between query
+count cases, the changed tests passed: `FanOutTests` on both head and prototype, and
+`cya.obligations.tests.test_current` plus `cya.attention` (100 tests, one skipped). The clean
+paired multiplier-zero load showed readiness p50 about 4.5 seconds versus 8–9 seconds and about
+8% lower app CPU per request, while saves were unchanged; under-one-second rates (41–49%) were
+within run spread. An earlier load comparison with many unexpected conflicts was withdrawn as
+confounded by aged prepared data. No paired multiplier-0.25+ comparison was run. The prototype
+is not part of PR #72, does not establish a target pass, and needs further memory-bound and
+multi-process review before adoption.
+
+The host/data were synthetic and restored after the runs; identifiers and session details are
+omitted. These external-driver measurements and the prototype are exploratory evidence, not the
+issue #10 acceptance run. Independent review of the recorded claims is still required.
 
 On reviewed head `0154162a6d6e99de61eb9a8c47b8e290260ac9b0`, before the follow-up query and rebuild fixes below, the cross-family reviewer reported 750 saves with
 zero errors, but the save p50/p95 were 17.9/23.4 seconds and checklist reload
