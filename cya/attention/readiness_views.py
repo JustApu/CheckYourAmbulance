@@ -10,7 +10,9 @@ for now and the screen stays live.
 """
 
 import logging
+import threading
 import uuid
+from concurrent.futures import Future
 from datetime import datetime
 
 from django.db import DatabaseError
@@ -35,6 +37,8 @@ from cya.shell.views import deny_section
 logger = logging.getLogger(__name__)
 READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})
 LIVE_SOCKETS = 3  # one fewer than the default per-user socket limit, leaving room for one tab
+_CURRENT_READS_LOCK = threading.Lock()
+_CURRENT_READS = {}
 
 
 def _as_of(request):
@@ -53,8 +57,37 @@ def _as_of(request):
     return value, None
 
 
-def _picture(user, as_of):
-    return fleet_readiness(str(user.organization_id), as_of=as_of, now=timezone.now())
+def _picture(user, as_of, *, consumer):
+    organization_id = str(user.organization_id)
+    if as_of is not None:
+        return fleet_readiness(organization_id, as_of=as_of, now=timezone.now())
+
+    # Current readiness is identical for every authorized reader in one organization. When
+    # several supervisors refresh together, let them share the in-flight calculation; do not
+    # retain a completed picture, so later requests always read current state again.
+    key = (organization_id, consumer)
+    with _CURRENT_READS_LOCK:
+        future = _CURRENT_READS.get(key)
+        leader = future is None
+        if leader:
+            future = Future()
+            _CURRENT_READS[key] = future
+    if not leader:
+        return future.result()
+
+    try:
+        picture = fleet_readiness(organization_id, now=timezone.now())
+    except BaseException as failure:
+        with _CURRENT_READS_LOCK:
+            if _CURRENT_READS.get(key) is future:
+                del _CURRENT_READS[key]
+        future.set_exception(failure)
+        raise
+    with _CURRENT_READS_LOCK:
+        if _CURRENT_READS.get(key) is future:
+            del _CURRENT_READS[key]
+    future.set_result(picture)
+    return picture
 
 
 def _json_vehicle(vehicle):
@@ -103,7 +136,7 @@ def api(request):
     if error:
         return _reply(400, "MALFORMED_REQUEST", correlation_id, [("as_of", error)])
     try:
-        picture = _picture(user, as_of)
+        picture = _picture(user, as_of, consumer="api")
     except (DatabaseError, DeficiencyError, ValueError) as failure:
         logger.error("fleet readiness unavailable (%s)", type(failure).__name__)
         return _reply(503, "RETRY_LATER", correlation_id)
@@ -132,7 +165,7 @@ def _screen(request, template, background=False):
     if error:
         raise Http404
     try:
-        picture = _picture(user, as_of)
+        picture = _picture(user, as_of, consumer="screen")
     except (DatabaseError, DeficiencyError, ValueError) as failure:
         logger.error("fleet readiness unavailable (%s)", type(failure).__name__)
         return render(
