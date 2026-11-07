@@ -37,8 +37,77 @@ from cya.shell.views import deny_section
 logger = logging.getLogger(__name__)
 READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})
 LIVE_SOCKETS = 3  # one fewer than the default per-user socket limit, leaving room for one tab
-_CURRENT_READS_LOCK = threading.Lock()
+_CURRENT_READS_CHANGED = threading.Condition()
 _CURRENT_READS = {}
+
+
+class _ReadGeneration:
+    def __init__(self, *, claimed=False):
+        self.future = Future()
+        self.claimed = claimed
+
+
+class _ReadFlight:
+    def __init__(self, generation):
+        self.current = generation
+        self.next = None
+
+
+def _current_read(key, calculate):
+    """Coalesce callers by calculation generation without returning an older in-flight result."""
+    with _CURRENT_READS_CHANGED:
+        flight = _CURRENT_READS.get(key)
+        if flight is None:
+            generation = _ReadGeneration(claimed=True)
+            flight = _ReadFlight(generation)
+            _CURRENT_READS[key] = flight
+            owner = True
+        else:
+            if flight.current.claimed:
+                if flight.next is None:
+                    flight.next = _ReadGeneration()
+                generation = flight.next
+            else:
+                generation = flight.current
+            owner = False
+
+    while not owner:
+        with _CURRENT_READS_CHANGED:
+            while not generation.future.done():
+                if flight.current is generation and not generation.claimed:
+                    generation.claimed = True
+                    owner = True
+                    break
+                _CURRENT_READS_CHANGED.wait()
+            if not owner:
+                return generation.future.result()
+
+    try:
+        result = calculate()
+    except BaseException as failure:
+        with _CURRENT_READS_CHANGED:
+            generation.future.set_exception(failure)
+            if flight.current is generation:
+                if flight.next is None:
+                    if _CURRENT_READS.get(key) is flight:
+                        del _CURRENT_READS[key]
+                else:
+                    flight.current = flight.next
+                    flight.next = None
+            _CURRENT_READS_CHANGED.notify_all()
+        raise
+
+    with _CURRENT_READS_CHANGED:
+        generation.future.set_result(result)
+        if flight.current is generation:
+            if flight.next is None:
+                if _CURRENT_READS.get(key) is flight:
+                    del _CURRENT_READS[key]
+            else:
+                flight.current = flight.next
+                flight.next = None
+        _CURRENT_READS_CHANGED.notify_all()
+    return result
 
 
 def _as_of(request):
@@ -65,29 +134,12 @@ def _picture(user, as_of, *, consumer):
     # Current readiness is identical for every authorized reader in one organization. When
     # several supervisors refresh together, let them share the in-flight calculation; do not
     # retain a completed picture, so later requests always read current state again.
+    # Keep API and HTML screen work separate because the screen adds display-only fields to it.
     key = (organization_id, consumer)
-    with _CURRENT_READS_LOCK:
-        future = _CURRENT_READS.get(key)
-        leader = future is None
-        if leader:
-            future = Future()
-            _CURRENT_READS[key] = future
-    if not leader:
-        return future.result()
-
-    try:
-        picture = fleet_readiness(organization_id, now=timezone.now())
-    except BaseException as failure:
-        with _CURRENT_READS_LOCK:
-            if _CURRENT_READS.get(key) is future:
-                del _CURRENT_READS[key]
-        future.set_exception(failure)
-        raise
-    with _CURRENT_READS_LOCK:
-        if _CURRENT_READS.get(key) is future:
-            del _CURRENT_READS[key]
-    future.set_result(picture)
-    return picture
+    return _current_read(
+        key,
+        lambda: fleet_readiness(organization_id, now=timezone.now()),
+    )
 
 
 def _json_vehicle(vehicle):
