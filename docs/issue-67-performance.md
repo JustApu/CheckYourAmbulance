@@ -65,10 +65,11 @@ bottlenecks for issue #70.
 
 ## Issue #70 profiling, reload sweep and cache experiment
 
-Claude profiled PR #72 head `eef007fc6329742a0d4608c2875c8e54ae4ed6fa` against base
-`00f412dc5cd84d4a8dee5502fe295427c40938da`, using synthetic 12-month history extended to the
-present (129,000 obligations/projection rows), one two-vCPU rehearsal host, MariaDB 10.11, and
-one uvicorn process. The external stdlib HTTP harness ran over loopback with a 30-second client
+Claude profiled PR #72 head `eef007fc6329742a0d4608c2875c8e54ae4ed6fa`, using synthetic 12-month
+history extended to the present (129,000 obligations/projection rows), one two-vCPU rehearsal
+host, MariaDB 10.11, and one uvicorn process. The earlier sequential comparison against base
+`00f412dc5cd84d4a8dee5502fe295427c40938da` is recorded in the issue #70 comment thread. The
+external stdlib HTTP harness ran over loopback with a 30-second client
 timeout, 15 crew saving every 6–14 seconds, and two supervisors reading readiness every 10–20
 seconds. Each load run used a fresh restore, discarded a 60-second warm-up, and measured 240
 seconds. The driver was closed-loop; it is not the coordinated issue #10 browser/WebSocket
@@ -103,9 +104,11 @@ restores from one prepared snapshot at 0, 11, 22 and 33 minutes after preparatio
 Even at multiplier 0.05, under-one-/under-two-second rates fell well short of the 95%/98%
 targets. The app core saturated from multiplier 0.25 upward. At zero reloads the app used about
 0.5 core; the observed profile attributed roughly 0.2 core to readiness and 0.3 to saves, so
-removing checklist reloads alone cannot meet the target. At multipliers 0.5 and 1 in the earlier
-sweep, respectively 33/97 and 19/58 saves returned 409 conflicts; there were none at 0 or 0.25.
-These observations point to readiness and save cost as well as reload volume.
+removing checklist reloads alone cannot meet the target. The 33/97 and 19/58 save conflicts in
+the multiplier-0.5 and multiplier-1 runs occurred in runs started more than an hour after data
+preparation and are not attributed to the multiplier. No conflicts occurred in later runs
+started within about 55 minutes of preparation. The cause of the older-run conflicts was not
+isolated. These observations point to readiness and save cost as well as reload volume.
 
 ### Abandoned requests and status-change contention
 
