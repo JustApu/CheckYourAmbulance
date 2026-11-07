@@ -1,10 +1,12 @@
 """Readiness endpoint coordination for overlapping current reads."""
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.db import OperationalError
+from django.test import RequestFactory, SimpleTestCase
 
 from cya.attention import readiness_views
 
@@ -91,3 +93,137 @@ class CurrentReadSingleFlightTests(SimpleTestCase):
         picture = object()
         with mock.patch.object(readiness_views, "fleet_readiness", return_value=picture):
             self.assertIs(readiness_views._picture(user, None, consumer="screen"), picture)
+
+    def test_failed_queued_generation_reaches_followers_and_allows_a_retry(self):
+        leader_entered = Event()
+        followers_waiting = Event()
+        release_leader = Event()
+        wait_count_lock = Lock()
+        wait_count = 0
+        calls = 0
+        user = mock.Mock(organization_id="org-1")
+
+        def compute(organization_id, *, now):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                leader_entered.set()
+                self.assertTrue(release_leader.wait(timeout=2))
+                return "leader"
+            if calls == 2:
+                raise OperationalError("synthetic queued failure")
+            return "retry"
+
+        original_wait = readiness_views._CURRENT_READS_CHANGED.wait
+
+        def wait_for_followers(*args, **kwargs):
+            nonlocal wait_count
+            with wait_count_lock:
+                wait_count += 1
+                if wait_count == 2:
+                    followers_waiting.set()
+            return original_wait(*args, **kwargs)
+
+        with (
+            mock.patch.object(readiness_views, "fleet_readiness", side_effect=compute),
+            mock.patch.object(
+                readiness_views._CURRENT_READS_CHANGED, "wait", side_effect=wait_for_followers
+            ),
+            ThreadPoolExecutor(max_workers=3) as pool,
+        ):
+            leader = pool.submit(readiness_views._picture, user, None, consumer="screen")
+            self.assertTrue(leader_entered.wait(timeout=2))
+            follower_a = pool.submit(readiness_views._picture, user, None, consumer="screen")
+            follower_b = pool.submit(readiness_views._picture, user, None, consumer="screen")
+            self.assertTrue(followers_waiting.wait(timeout=2))
+            release_leader.set()
+            self.assertEqual(leader.result(timeout=2), "leader")
+            for follower in (follower_a, follower_b):
+                with self.assertRaisesRegex(OperationalError, "synthetic queued failure"):
+                    follower.result(timeout=2)
+
+        with mock.patch.object(readiness_views, "fleet_readiness", side_effect=compute) as read:
+            self.assertEqual(readiness_views._picture(user, None, consumer="screen"), "retry")
+            read.assert_called_once()
+
+    def test_different_organization_and_consumer_keys_run_independently(self):
+        first_entered = Event()
+        release_first = Event()
+        first_user = mock.Mock(organization_id="org-1")
+        second_user = mock.Mock(organization_id="org-2")
+        calls = []
+
+        def compute(organization_id, *, now):
+            calls.append(organization_id)
+            if len(calls) == 1:
+                first_entered.set()
+                self.assertTrue(release_first.wait(timeout=2))
+            return organization_id
+
+        with (
+            mock.patch.object(readiness_views, "fleet_readiness", side_effect=compute),
+            ThreadPoolExecutor(max_workers=3) as pool,
+        ):
+            first = pool.submit(readiness_views._picture, first_user, None, consumer="screen")
+            self.assertTrue(first_entered.wait(timeout=2))
+            other_organization = pool.submit(
+                readiness_views._picture, second_user, None, consumer="screen"
+            )
+            other_consumer = pool.submit(readiness_views._picture, first_user, None, consumer="api")
+            self.assertEqual(other_organization.result(timeout=2), "org-2")
+            self.assertEqual(other_consumer.result(timeout=2), "org-1")
+            self.assertFalse(first.done())
+            release_first.set()
+            self.assertEqual(first.result(timeout=2), "org-1")
+
+        self.assertCountEqual(calls, ["org-1", "org-2", "org-1"])
+
+    def test_wait_timeout_fails_retryably_and_cleans_the_queued_generation(self):
+        leader_entered = Event()
+        follower_waiting = Event()
+        release_leader = Event()
+        user = mock.Mock(organization_id="org-1")
+
+        def compute(organization_id, *, now):
+            leader_entered.set()
+            self.assertTrue(release_leader.wait(timeout=2))
+            return "leader"
+
+        original_wait = readiness_views._CURRENT_READS_CHANGED.wait
+
+        def observe_wait(*args, **kwargs):
+            follower_waiting.set()
+            return original_wait(*args, **kwargs)
+
+        with (
+            mock.patch.object(readiness_views, "COALESCED_READ_WAIT_SECONDS", 0.01),
+            mock.patch.object(readiness_views, "fleet_readiness", side_effect=compute),
+            mock.patch.object(
+                readiness_views._CURRENT_READS_CHANGED, "wait", side_effect=observe_wait
+            ),
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            leader = pool.submit(readiness_views._picture, user, None, consumer="screen")
+            self.assertTrue(leader_entered.wait(timeout=2))
+            follower = pool.submit(readiness_views._picture, user, None, consumer="screen")
+            self.assertTrue(follower_waiting.wait(timeout=2))
+            with self.assertRaises(readiness_views.ReadinessWaitExpired):
+                follower.result(timeout=2)
+            release_leader.set()
+            self.assertEqual(leader.result(timeout=2), "leader")
+
+        self.assertEqual(readiness_views._CURRENT_READS, {})
+
+    def test_wait_timeout_returns_retryable_api_response(self):
+        request = RequestFactory().get("/api/v1/fleet-readiness")
+        request.cya_user = mock.Mock(organization_id="org-1")
+        with (
+            mock.patch.object(readiness_views, "roles_for", return_value={"SUPERVISOR"}),
+            mock.patch.object(
+                readiness_views, "_picture", side_effect=readiness_views.ReadinessWaitExpired
+            ),
+        ):
+            response = readiness_views.api(request)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.content)["code"], "RETRY_LATER")

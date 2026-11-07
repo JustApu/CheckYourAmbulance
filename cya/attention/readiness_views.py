@@ -14,6 +14,7 @@ import threading
 import uuid
 from concurrent.futures import Future
 from datetime import datetime
+from time import monotonic
 
 from django.db import DatabaseError
 from django.http import Http404, JsonResponse
@@ -37,14 +38,20 @@ from cya.shell.views import deny_section
 logger = logging.getLogger(__name__)
 READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})
 LIVE_SOCKETS = 3  # one fewer than the default per-user socket limit, leaving room for one tab
+COALESCED_READ_WAIT_SECONDS = 20  # return before the issue #70 rehearsal client's 30 s timeout
 _CURRENT_READS_CHANGED = threading.Condition()
 _CURRENT_READS = {}
+
+
+class ReadinessWaitExpired(Exception):
+    """A coalesced readiness request waited too long behind another calculation."""
 
 
 class _ReadGeneration:
     def __init__(self, *, claimed=False):
         self.future = Future()
         self.claimed = claimed
+        self.waiters = 0
 
 
 class _ReadFlight:
@@ -69,17 +76,32 @@ def _current_read(key, calculate):
                 generation = flight.next
             else:
                 generation = flight.current
+            generation.waiters += 1
             owner = False
 
+    deadline = monotonic() + COALESCED_READ_WAIT_SECONDS
     while not owner:
         with _CURRENT_READS_CHANGED:
             while not generation.future.done():
                 if flight.current is generation and not generation.claimed:
+                    generation.waiters -= 1
                     generation.claimed = True
                     owner = True
                     break
-                _CURRENT_READS_CHANGED.wait()
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    generation.waiters -= 1
+                    if generation.waiters == 0:
+                        if flight.next is generation:
+                            flight.next = None
+                        elif flight.current is generation and not generation.claimed:
+                            if _CURRENT_READS.get(key) is flight:
+                                del _CURRENT_READS[key]
+                    _CURRENT_READS_CHANGED.notify_all()
+                    raise ReadinessWaitExpired
+                _CURRENT_READS_CHANGED.wait(timeout=remaining)
             if not owner:
+                generation.waiters -= 1
                 return generation.future.result()
 
     try:
@@ -189,7 +211,7 @@ def api(request):
         return _reply(400, "MALFORMED_REQUEST", correlation_id, [("as_of", error)])
     try:
         picture = _picture(user, as_of, consumer="api")
-    except (DatabaseError, DeficiencyError, ValueError) as failure:
+    except (DatabaseError, DeficiencyError, ReadinessWaitExpired, ValueError) as failure:
         logger.error("fleet readiness unavailable (%s)", type(failure).__name__)
         return _reply(503, "RETRY_LATER", correlation_id)
     return JsonResponse(
@@ -218,7 +240,7 @@ def _screen(request, template, background=False):
         raise Http404
     try:
         picture = _picture(user, as_of, consumer="screen")
-    except (DatabaseError, DeficiencyError, ValueError) as failure:
+    except (DatabaseError, DeficiencyError, ReadinessWaitExpired, ValueError) as failure:
         logger.error("fleet readiness unavailable (%s)", type(failure).__name__)
         return render(
             request,
