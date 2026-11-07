@@ -20,6 +20,48 @@ and two seconds, single-process CPU and MariaDB CPU. Retain the owner's p90 >3 s
 cutoff before trying higher load steps. Record any remaining bottleneck instead
 of treating a faster isolated query as a passing shift-change result.
 
+## PR #72 readiness coalescing paired rehearsal (2026-11-07)
+
+Claude compared PR #72 with readiness coalescing (`e057d48c5dade1282df29d9a82e12a1511c3ead3`)
+against its parent without coalescing (`eef007fc6329742a0d4608c2875c8e54ae4ed6fa`). This is an
+exploratory comparison, not the issue #10 acceptance rehearsal. Both blocks used the same host,
+synthetic 129,000-obligation dataset (five vehicles × 150 items, 15 crew), one uvicorn process,
+and two supervisors reading readiness every 10–20 seconds. Each block used a fresh data prepare
+and four runs in `head, coalesced, coalesced, head` order, each on a fresh restore; runs started
+within 36 minutes of preparation. Each run lasted 300 seconds with a 60-second warm-up discarded.
+The external closed-loop HTTP harness used a 30-second client timeout. Failures include every
+non-2xx response (503, 409 and client timeout/status 0), and under-one-/under-two-second rates
+use all requests as the denominator. No conflicts occurred. The records omit host identifiers
+and session data.
+
+| Reload multiplier | Version/run | Requests | Failures | Under 1 s / 2 s | p50 / p90 / p95 / p98 | Save p50 / p95 | Checklist p50 | Readiness success / attempts, p50 | App / DB cores | App CPU s/request |
+|---:|---|---:|---:|---|---|---|---:|---|---|---:|
+| 0 | Base A | 334 | 0 | 45% / 72% | 1.16 / 3.61 / 5.46 / 9.04 s | 1.05 / 3.61 s | n/a | 18 / 18, 7.8 s | 0.48 / 0.23 | 0.35 |
+| 0 | Coalesced A | 336 | 1 | 47% / 82% | 1.12 / 3.20 / 5.44 / 14.5 s | 1.01 / 3.20 s | n/a | 18 / 19, 9.2 s | 0.51 / 0.26 | 0.36 |
+| 0 | Coalesced B | 346 | 0 | 48% / 81% | 1.03 / 2.87 / 4.93 / 8.89 s | 0.97 / 2.71 s | n/a | 22 / 22, 6.7 s | 0.54 / 0.25 | 0.37 |
+| 0 | Base B | 345 | 0 | 52% / 81% | 0.96 / 3.20 / 5.02 / 9.19 s | 0.84 / 3.10 s | n/a | 21 / 21, 6.6 s | 0.54 / 0.25 | 0.38 |
+| 0.25 | Base A | 179 | 40 | 0% / 0% | 19.4 / 30.0 / 30.0 / 30.0 s | 10.3 / 17.9 s | 29.2 s | 0 / 11, 30 s | 0.93 / 0.42 | 1.25 |
+| 0.25 | Coalesced A | 211 | 18 | 0% / 0% | 13.5 / 27.9 / 30.0 / 30.0 s | 8.0 / 12.5 s | 25.0 s | 0 / 12, 23.5 s | 0.93 / 0.44 | 1.05 |
+| 0.25 | Coalesced B | 213 | 12 | 0% / 0% | 13.5 / 25.3 / 26.8 / 29.7 s | 8.0 / 13.3 s | 22.0 s | 0 / 12, 22.3 s | 0.93 / 0.43 | 1.05 |
+| 0.25 | Base B | 195 | 21 | 0% / 0% | 14.2 / 30.0 / 30.0 / 30.0 s | 9.0 / 15.3 s | 26.9 s | 0 / 11, 30 s | 0.92 / 0.46 | 1.13 |
+
+At zero reloads, differences were within the two base runs' spread. At multiplier 0.25, the
+coalesced runs completed about 15–20% more requests with fewer failures and 10–15% less app CPU
+per request, but none of the four runs completed a readiness panel, and all were at 0% under
+one or two seconds. Thus the coalescer did not approach the latency targets. Claude's narrative
+also says every coalesced run had a supervisor's first page load return 503 during cold
+simultaneous startup; the table reports zero failures for the zero-multiplier coalesced B run.
+That startup count is inconsistent in the report and remains unverified. At saturation, the
+coalesced runs report readiness 503s after the 20-second follower bound instead of some 30-second
+client timeouts. Any future comparison must continue to count those 503s as failures.
+
+These are two runs per cell with 10–15% saturated-run variation, so the saturated gain is
+suggestive rather than conclusive. They are not production-like 1× results: the harness is
+closed-loop and external, there is no real browser/WebSocket client behavior, and no result meets
+the target. PR #72 drops the coalescer because the modest, noisy overload gain does not offset
+the added coordination and initial-page 503 risk. Per-read cost and reload work remain open
+bottlenecks for issue #70.
+
 On reviewed head `0154162a6d6e99de61eb9a8c47b8e290260ac9b0`, before the follow-up query and rebuild fixes below, the cross-family reviewer reported 750 saves with
 zero errors, but the save p50/p95 were 17.9/23.4 seconds and checklist reload
 p50/p95 were 26.3/31.1 seconds. Only 2.8% of requests completed under one second
