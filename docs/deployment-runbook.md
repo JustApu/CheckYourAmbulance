@@ -481,8 +481,9 @@ The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove eithe
 
 ## Backup and point-in-time recovery
 
-[issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) Part A; SPEC DEP-6–DEP-9. Rehearsed on 2026-11-03
-([evidence](#backup-and-restore-rehearsal-evidence-2026-11-03-utc)). The scripts and units are in
+[issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) Parts A and B; SPEC DEP-6–DEP-9. Rehearsed on 2026-11-03
+([evidence](#backup-and-restore-rehearsal-evidence-2026-11-03-utc)) and again on 2026-11-09 on the current schema, with the
+projection comparison ([evidence](#backup-and-restore-rehearsal-evidence-2026-11-09-utc)). The scripts and units are in
 [`deploy/backup/`](../deploy/backup/).
 
 **Roles and keys.**
@@ -522,10 +523,11 @@ The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove eithe
    - **Schema owner:** run `migrate --check` and `verify_audit_schema`.
    - **Runtime:** install runtime grants for a distinct runtime account, then run `verify_audit_runtime` and `check --fail-level WARNING`.
    - **Guards:** the runtime account is refused (1142), and the schema owner is refused (1644, append-only), for UPDATE and DELETE on audit and check tables.
-   - **Projection:** run the [obligation projection rebuild and comparison](#obligation-projection-rebuild-and-comparison); retain successful replay verification.
+   - **Projection:** run the [obligation projection rebuild and comparison](#obligation-projection-rebuild-and-comparison); retain successful replay verification. `--dry-run` compares without writing and also replays the events; it took 48.6 minutes for 129,000 obligations on a 4 vCPU host and prints nothing until it ends ([measured](#backup-and-restore-rehearsal-evidence-2026-11-09-utc)).
    - **Writes:** a new application write succeeds.
    - **Cutoff:** the last changes before the stop instant are present and none after it.
-4. **Rehearsal copies** are destroyed afterwards under production rules (DEP-9), never on a developer machine or in CI.
+4. **Restoring under a different database name** (a rehearsal) needs two more steps: grant the schema-owner account `ALL PRIVILEGES` on the new name, and give the runtime account a fresh name with no earlier grants, because the grant tool refuses an account that already holds grants on another database. Run the DBA step as the operating-system root user, not as the service user. A recovery under the original name needs neither.
+5. **Rehearsal copies** are destroyed afterwards under production rules (DEP-9), never on a developer machine or in CI.
 
 ## Rocky Linux 9 host profile (rehearsed 2026-11-02)
 
@@ -954,6 +956,57 @@ Tester: Claude (Anthropic), as operator and as stand-in custodian, on the two ow
   - real custodian and operator roles.
 
 **Teardown.** See the PR for issue #7: the restored databases, store files, rehearsal keys and accounts are destroyed. The synthetic source database is kept on the Rocky host for the [issue #10](https://github.com/JustApu/CheckYourAmbulance/issues/10) load test and destroyed after it.
+
+## Backup and restore rehearsal evidence, 2026-11-09 UTC
+
+Tester: Claude (Anthropic), as operator and as stand-in custodian, on the two owner-provided throwaway hosts, with synthetic data only ([issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) Part B). It repeats the 2026-11-03 restore on the current schema and adds the projection comparison (AC-26). The Rocky host was the database host and the Ubuntu host was the off-host store and restore host, as before. The temporary keys were created for this run: a GnuPG key pair without a passphrase (RSA 3072, two-day expiry) whose private half existed only on the restore host, and an SSH key restricted to write-only uploads (`rrsync -wo -no-del -no-overwrite`). Both were destroyed with the data.
+
+| Component | Database host | Store and restore host |
+|---|---|---|
+| Operating system | Rocky Linux 9.8, 2 vCPU, 3.6 GB | Ubuntu 26.04, 4 vCPU, 7.4 GB (it had 2 vCPU and 3.4 GB on 2026-11-03, so restore times are not comparable with that run) |
+| MariaDB | 10.11.18, buffer pool 1 GiB | 11.8.6, buffer pool 1 GiB |
+| Application | `main` at a7da994 (81 migrations) | same |
+
+**Data.** The synthetic agency of the issue #70 rehearsals: 5 vehicles × 150 items, 15 crew and 2 supervisors, 129,000 obligations and projection rows (860 vehicle-and-due-instant groups, 172 per vehicle), 114,504 checks at the start, 2.07 GB of data and indexes. Before the backup the source database was migrated from 80 to 81 migrations (the issue #74 indexes, 33 s). Two phases of 150 checks each were then recorded through the application's audited command (the runtime account), with the stop instant between them: phase A on one vehicle, phase B on another. Almost every check (146 of 150 in phase A, all 150 in phase B) first drew the conflict warning for a newer check on its item and was repeated naming that check as its basis, as a client does.
+
+**Store isolation** (probed with the host's write-only key first): upload allowed; overwrite silently ignored (the original content stayed); read, delete and shell access refused.
+
+**Timeline and sizes:**
+
+| Step | Result |
+|---|---|
+| Full backup (`cya-backup-full.service`) | 126,120,901 bytes encrypted, 60 s |
+| Phase A, 150 checks | 83 s |
+| **Stop instant** | 18:31:10 UTC |
+| Phase B, 150 checks | 59 s |
+| Log shipping (`cya-backup-binlog.service`) | binary logs `000056` (2,926 bytes) and `000057` (207,098 bytes) shipped |
+| **Restore to the stop instant**, run twice on separate databases | each: full load 231 s, log replay 39 s, **270 s in total** |
+| Both timers, run unattended | the five-minute log-shipping timer ran once on schedule (one run observed) and shipped the pending log; the nightly full-backup timer, moved with a temporary drop-in to a time four minutes ahead, uploaded 126,308,162 bytes in 47 s |
+
+**Restored data.** For each of `check_record` (114,659 rows), `audit_event` (117,618), `obligation` (129,000) and `deficiency_event` (3,314), the count and a SHA-256 over every row's ID and recorded instant for rows before the stop instant match the source exactly. The 150 phase B checks recorded after the stop instant are absent from the restore (150 in the source, 0 in the restore). The restore holds 81 migrations.
+
+**Verification on the restored database:**
+- **Definers and settings:** all 166 triggers have one DEFINER, the schema owner, which exists on the restore host; binary logging and `log_bin_trust_function_creators=1` are on; the character set is `utf8mb4` with `utf8mb4_unicode_ci`.
+- **Schema owner:** `migrate --check` passes, and `verify_audit_schema` passes (40 append-only and 44 command-guarded tables).
+- **Runtime:** grants were installed for a distinct runtime account; `verify_audit_runtime` and `check --fail-level WARNING` pass.
+- **Guards:** UPDATE, DELETE and TRUNCATE on `check_record` and `audit_event` were refused for the runtime account (1142); UPDATE and DELETE were refused for the schema owner (1644, append-only), each on one real row inside a rolled-back transaction.
+
+**Projection comparison (Part B, AC-26).**
+- **Comparison:** `rebuild_obligation_projection --dry-run` for the organization, in the runtime role, recomputed every group from the events and compared it with the restored projection, then replayed the events independently. Result: `Different: 0; verified: 129000; writes: none`, exit 0, in 48.6 minutes (860 vehicle-and-due-instant groups). The command prints only at the end; progress can be estimated from the commit count, one per group.
+- **Negative control** (one vehicle, 25,800 obligations): the selected flag of one projection row was flipped. `--dry-run` then failed (`Different: 1; verified: 25650`, exit 1, 532 s). A real rebuild repaired it (`Different: 1; verified: 25800; writes: projection only`, exit 0, 631 s), and a second `--dry-run` passed (`Different: 0; verified: 25800`, 546 s). The flag returned to its original value.
+- **Not run:** a full-organization writing rebuild and a separate `--verify` pass on the restored copy; the comparison already includes the replay for every group.
+
+**Results against the objectives.**
+- **RTO 24 hours: met with a wide margin.** The logical restore took 270 s for this dataset (172 daily due instants per vehicle, 5 vehicles, 2.07 GB). Scaled linearly by due instants (an estimate, not a measurement), a year of this agency would take about 9.5 minutes and four times the agency for a year about 38 minutes. The projection comparison scales with obligations: by the same estimate about 103 minutes for a year of this agency and about 7 hours for four times that, so it should be planned as the longest step of a recovery.
+- **RPO 15 minutes: met.** The restore lost nothing before the chosen instant and applied nothing after it. The newest records were shipped by the five-minute timer.
+
+**Observations.**
+- **The schema owner can TRUNCATE an append-only table.** In an earlier restored copy the schema owner's `TRUNCATE audit_event` was not refused and emptied the table (TRUNCATE is DDL, so the transaction could not undo it). The runtime account is refused. This matches the design in [audit implementation notes](audit-implementation-notes.md) (the schema owner is trusted for migrations), so the protection against it is credential handling: keep the owner credentials out of the application and the recovery copies. That copy was dropped and the restore repeated; the figures above are from the fresh copy.
+- **The restore steps in item 4 of the restore procedure** were found during this run.
+
+**Not done here.** Custodian-side retention pruning (DEP-8); stale-backup alerts ([issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8)); real custodian and operator roles and the real off-host account (the rehearsal must be repeated against them before the DEP-12 gate); the production 02:30 time and the timer's catch-up after downtime (the nightly timer ran only at a temporary time); a restore after loss of the whole host; hot or physical backup tools (not needed, the logical restore met the RTO).
+
+**Teardown (DEP-9).** On both hosts the restored databases, runtime accounts, the encrypted store, both temporary key pairs, the environment files, the scripts and units, and the scratch release were deleted, and binary logs were purged. The synthetic source database stays on the Rocky host, migrated to the current schema and with about 305 additional synthetic checks.
 
 ## Docker diagnostic evidence, 2026-10-22 UTC
 
