@@ -509,26 +509,30 @@ class SingleReferenceLookupEquivalenceTests(ObligationLinkCleanupMixin, Attentio
         chunks = -(-no_kit_keys // projections.LOOKUP_CHUNK) + 1  # plus one statement of kit keys
         self.assertEqual(len(captured.captured_queries), chunks)
 
-    def commit_between_chunks(self, keys, run):
-        """Run `run()` with chunk size 1 and record a qualifying check for the second key just
-        before the second lookup statement, as a transaction stamped earlier but committed later
-        would appear under READ COMMITTED (each statement sees what is committed when it starts)."""
-        first, second = sorted(keys)
+    def commit_between_chunks(self, keys, run, late=((7, 6, 0, 1),)):
+        """Run `run()` with chunk size 1 and record qualifying checks just before the second lookup
+        statement, as transactions stamped earlier but committed later would appear under READ
+        COMMITTED (each statement sees what is committed when it starts).
+
+        `late` lists (day, hour, minute, index) checks recorded then, index into the sorted keys.
+        """
+        ordered = sorted(keys)
         marker, seen = "ORDER BY c.recorded_at DESC LIMIT 1", []
 
         def commit_late(execute, sql, params, many, context):
             if marker in sql:
                 seen.append(sql)
                 if len(seen) == 2:
-                    self.clock.set(self.at(days=7, hours=6))
-                    self.record(self.item_for(second))
+                    for day, hour, minute, index in late:
+                        self.clock.set(self.at(days=day, hours=hour, minutes=minute))
+                        self.record(self.item_for(ordered[index]))
             return execute(sql, params, many, context)
 
         with mock.patch.object(projections, "LOOKUP_CHUNK", 1):
             with connection.execute_wrapper(commit_late):
                 result = run()
         self.assertEqual(len(seen), 2)
-        return first, second, result
+        return ordered[0], ordered[-1], result
 
     def item_for(self, key):
         return next(i for i in (self.suction, self.siren) if str(i.pk) == key[1])
@@ -561,3 +565,23 @@ class SingleReferenceLookupEquivalenceTests(ObligationLinkCleanupMixin, Attentio
         settled = projections._attention_roots(self.org_id, key_set, bound, bound, 500)
         self.assertNotEqual(unseen, settled)  # the late check is observable in the roots
         self.assertEqual(skewed, settled)
+
+    def test_two_late_commits_on_keys_without_history_give_each_key_a_valid_answer(self):
+        # Keys A and B have no check at or before the bound. A qualifying check for A, then one
+        # for B, commit between the chunk statements, so the first chunk saw neither and the
+        # second sees both: B is returned and A is not. No single snapshot has B without A, and
+        # the former union could not return it, but each key's answer is a state that key really
+        # had during the call (A: before its check; B: after its), the keys have no invariant
+        # between them, and the next read has both. That per-key guarantee is the contract.
+        keys, bound = set(self.no_kit), self.at(hours=5)
+        a, b = sorted(keys)
+        self.assertEqual(projections._newest_older_by_key(self.org_id, keys, bound), {})
+        _first, _last, skewed = self.commit_between_chunks(
+            keys,
+            lambda: projections._newest_older_by_key(self.org_id, keys, bound),
+            late=((0, 4, 0, 0), (0, 4, 30, 1)),
+        )
+        self.assertEqual(set(skewed), {projections._key(*b)})
+        settled = projections._newest_older_by_key(self.org_id, keys, bound)
+        self.assertEqual(set(settled), {projections._key(*a), projections._key(*b)})
+        self.assertEqual(skewed[projections._key(*b)], settled[projections._key(*b)])

@@ -251,11 +251,14 @@ def _newest_older_by_key(organization_id, keys, lower):
     rows with the same time and returned that same time). Key ids are bound as the hyphenated
     strings the char(36) id columns hold, so the correlated lookup uses the key index.
     Visibility: under READ COMMITTED each statement sees what is committed when it starts, so
-    chunks (and the no-kit and kit statements) can see different commits, as the former union
-    and the window reads that follow it already could. That cannot change an answer: a key's
-    time comes from exactly one statement, a check belongs to exactly one key, and the roots
-    that _attention_roots returns depend only on the evidence, never on how the lookup or the
-    windows fell (tests: a qualifying check committed between two chunk statements).
+    chunks (and the no-kit and kit statements) can see different commits, which the former
+    single union could not. A read that overlaps two late commits can therefore return a later
+    key's check and miss an earlier key's, a pair no single snapshot holds. The guarantee is per
+    key: a key's time comes from exactly one statement, so it is a state that key really had
+    during the call, and nothing the callers do relies on a relation between two keys (a check
+    belongs to one key; the roots depend only on the evidence, not on how the windows fell).
+    The missed key is simply stale, as for any read that overlaps a commit, and the next read
+    has it (tests: late commits between two chunk statements, with and without earlier history).
     """
     table = CheckRecord._meta.db_table
     instant = _instant(lower)
