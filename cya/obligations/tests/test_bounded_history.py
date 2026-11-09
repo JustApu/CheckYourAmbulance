@@ -508,3 +508,56 @@ class SingleReferenceLookupEquivalenceTests(ObligationLinkCleanupMixin, Attentio
         no_kit_keys = sum(1 for k in keys if k[2] == NO_KIT)
         chunks = -(-no_kit_keys // projections.LOOKUP_CHUNK) + 1  # plus one statement of kit keys
         self.assertEqual(len(captured.captured_queries), chunks)
+
+    def commit_between_chunks(self, keys, run):
+        """Run `run()` with chunk size 1 and record a qualifying check for the second key just
+        before the second lookup statement, as a transaction stamped earlier but committed later
+        would appear under READ COMMITTED (each statement sees what is committed when it starts)."""
+        first, second = sorted(keys)
+        marker, seen = "ORDER BY c.recorded_at DESC LIMIT 1", []
+
+        def commit_late(execute, sql, params, many, context):
+            if marker in sql:
+                seen.append(sql)
+                if len(seen) == 2:
+                    self.clock.set(self.at(days=7, hours=6))
+                    self.record(self.item_for(second))
+            return execute(sql, params, many, context)
+
+        with mock.patch.object(projections, "LOOKUP_CHUNK", 1):
+            with connection.execute_wrapper(commit_late):
+                result = run()
+        self.assertEqual(len(seen), 2)
+        return first, second, result
+
+    def item_for(self, key):
+        return next(i for i in (self.suction, self.siren) if str(i.pk) == key[1])
+
+    def test_a_check_committed_between_chunks_changes_only_its_own_key(self):
+        # Each key's answer comes from one statement (as in the former union) and a check belongs
+        # to exactly one key, so statements at different snapshots cannot make one key's answer
+        # depend on another's: the key read before the commit gets the earlier answer, the key
+        # read after it gets the newer one, and each equals a single-statement answer at a snapshot.
+        keys, bound = set(self.no_kit), self.at(days=7, hours=12)
+        before = projections._newest_older_by_key(self.org_id, keys, bound)
+        first, second, skewed = self.commit_between_chunks(
+            keys, lambda: projections._newest_older_by_key(self.org_id, keys, bound)
+        )
+        after = projections._newest_older_by_key(self.org_id, keys, bound)
+        self.assertEqual(skewed[projections._key(*first)], before[projections._key(*first)])
+        self.assertEqual(skewed[projections._key(*second)], after[projections._key(*second)])
+        self.assertGreater(after[projections._key(*second)], before[projections._key(*second)])
+
+    def test_the_roots_do_not_depend_on_which_chunk_saw_a_late_commit(self):
+        # The final roots depend only on the evidence, never on how the lookup or windows fell
+        # (the _attention_roots contract), so a commit between chunks gives the roots computed
+        # from all of the evidence.
+        keys, bound = set(self.no_kit), self.at(days=7, hours=12)
+        key_set = {projections._key(*k) for k in keys}
+        unseen = projections._attention_roots(self.org_id, key_set, bound, bound, 500)
+        _first, _second, skewed = self.commit_between_chunks(
+            keys, lambda: projections._attention_roots(self.org_id, key_set, bound, bound, 500)
+        )
+        settled = projections._attention_roots(self.org_id, key_set, bound, bound, 500)
+        self.assertNotEqual(unseen, settled)  # the late check is observable in the roots
+        self.assertEqual(skewed, settled)

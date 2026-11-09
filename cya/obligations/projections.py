@@ -250,6 +250,12 @@ def _newest_older_by_key(organization_id, keys, lower):
     tie on recorded_at cannot change the answer (the former form's `-id` tie-break selected among
     rows with the same time and returned that same time). Key ids are bound as the hyphenated
     strings the char(36) id columns hold, so the correlated lookup uses the key index.
+    Visibility: under READ COMMITTED each statement sees what is committed when it starts, so
+    chunks (and the no-kit and kit statements) can see different commits, as the former union
+    and the window reads that follow it already could. That cannot change an answer: a key's
+    time comes from exactly one statement, a check belongs to exactly one key, and the roots
+    that _attention_roots returns depend only on the evidence, never on how the lookup or the
+    windows fell (tests: a qualifying check committed between two chunk statements).
     """
     table = CheckRecord._meta.db_table
     instant = _instant(lower)
