@@ -12,6 +12,7 @@ read in full as before. These tests check that:
   unchecked for weeks.
 """
 
+from datetime import timedelta
 from unittest import mock
 from uuid import uuid4
 
@@ -31,6 +32,7 @@ from cya.obligations.projections import (
     load_projection_histories,
     load_projection_history,
 )
+from cya.obligations.state import NO_KIT
 from cya.obligations.tests.synthetic_history import generate_history
 
 
@@ -327,3 +329,259 @@ class SiblingKitTests(ReferenceAssertions, ObligationLinkCleanupMixin, Attention
         self.assertEqual(page[vehicle], history)
         self.assertIn(a_check, {r.snapshot.id for r in history.check_records})
         self.assert_same_as_reference(now)
+
+
+def reference_newest_older(organization_id, keys, lower):
+    """The shipped ORM union (one arm per key) that _newest_older_by_key replaced."""
+    candidates = [
+        CheckRecord.objects.filter(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            item_id=item_id,
+            kit_id=None if kit_key == NO_KIT else kit_key,
+            recorded_at__lte=lower,
+        )
+        .order_by("-recorded_at", "-id")
+        .values_list("vehicle_id", "item_id", "kit_id", "recorded_at")[:1]
+        for vehicle_id, item_id, kit_key in sorted(keys)
+    ]
+    return {
+        projections._key(vehicle, item, kit): recorded
+        for vehicle, item, kit, recorded in candidates[0].union(*candidates[1:], all=True)
+    }
+
+
+class SingleReferenceLookupEquivalenceTests(ObligationLinkCleanupMixin, AttentionCase):
+    """The per-key 'newest check at or before T' lookup names check_record once per statement (issue #70:
+    150 references opened 150 table instances per checklist read). It must return exactly what the ORM
+    union it replaced returned; that union is kept above as the reference."""
+
+    def setUp(self):
+        super().setUp()
+        for day in range(8):
+            self.clock.set(self.at(days=day, hours=5, minutes=30))
+            self.assertEqual(self.generate().failures, [])
+            self.record(self.suction)
+            self.record(self.siren)
+            if day % 2 == 0:
+                self.record(self.kit_item, kit_id=self.reference)
+            if day in (1, 5):
+                self.record(self.kit_item, kit_id=self.kit_b)
+        self.org_id, self.vehicle_id = str(self.org.pk), str(self.vehicle.pk)
+        item = str(self.kit_item.pk)
+        self.no_kit = [
+            (self.vehicle_id, str(self.suction.pk), NO_KIT),
+            (self.vehicle_id, str(self.siren.pk), NO_KIT),
+        ]
+        self.kits = [
+            (self.vehicle_id, item, str(self.reference)),
+            (self.vehicle_id, item, str(self.kit_b)),
+        ]
+        self.absent = [
+            (self.vehicle_id, item, NO_KIT),  # the kit item was only ever checked with a kit
+            (self.vehicle_id, str(uuid4()), NO_KIT),  # an item with no checks at all
+        ]
+        times = sorted(
+            set(
+                CheckRecord.objects.filter(organization_id=self.org_id).values_list(
+                    "recorded_at", flat=True
+                )
+            )
+        )
+        micro = timedelta(microseconds=1)
+        edge = {t + d for t in times for d in (-micro, timedelta(0), micro)}
+        self.instants = sorted(edge | {times[0] - timedelta(days=1), times[-1] + timedelta(days=1)})
+
+    def key_sets(self):
+        return [
+            set(self.no_kit),
+            set(self.kits),
+            {self.kits[0]},
+            {self.kits[1]},
+            set(self.no_kit + self.kits),
+            set(self.no_kit + self.kits + self.absent),
+            set(self.absent),
+        ]
+
+    def test_equals_the_orm_union_for_no_kit_and_kit_keys_at_every_boundary(self):
+        # The upper bound is inclusive: a check recorded exactly at T counts, one a microsecond later
+        # does not; one a microsecond earlier does. The instants include all three for every check.
+        for keys in self.key_sets():
+            for lower in self.instants:
+                with self.subTest(keys=len(keys), lower=lower):
+                    self.assertEqual(
+                        projections._newest_older_by_key(self.org_id, keys, lower),
+                        reference_newest_older(self.org_id, keys, lower),
+                    )
+
+    def test_a_check_at_exactly_the_bound_counts_and_one_just_after_does_not(self):
+        key = self.no_kit[0]
+        stamps = sorted(
+            CheckRecord.objects.filter(
+                organization_id=self.org_id, vehicle_id=self.vehicle_id, item_id=key[1]
+            ).values_list("recorded_at", flat=True)
+        )
+        at = stamps[3]
+        self.assertEqual(projections._newest_older_by_key(self.org_id, {key}, at)[key], at)
+        before = projections._newest_older_by_key(
+            self.org_id, {key}, at - timedelta(microseconds=1)
+        )
+        self.assertEqual(before[key], stamps[2])
+
+    def test_sibling_kit_instances_and_the_no_kit_key_stay_isolated(self):
+        last = self.instants[-1]
+        only_b = projections._newest_older_by_key(self.org_id, {self.kits[1]}, last)
+        self.assertEqual(set(only_b), {projections._key(*self.kits[1])})
+        # B was checked on days 1 and 5 only; A on days 0, 2, 4, 6: B's answer is never A's time.
+        a = projections._newest_older_by_key(self.org_id, {self.kits[0]}, last)
+        self.assertNotEqual(
+            only_b[projections._key(*self.kits[1])], a[projections._key(*self.kits[0])]
+        )
+        # The kit item without its kit matches nothing (kit_id IS NULL is not 'any kit').
+        self.assertEqual(projections._newest_older_by_key(self.org_id, {self.absent[0]}, last), {})
+        # A key whose item has no checks is absent, not an error and not another key's time.
+        self.assertEqual(projections._newest_older_by_key(self.org_id, {self.absent[1]}, last), {})
+
+    def test_another_organization_sees_nothing(self):
+        keys = set(self.no_kit + self.kits)
+        last = self.instants[-1]
+        self.assertTrue(projections._newest_older_by_key(self.org_id, keys, last))
+        self.assertEqual(projections._newest_older_by_key(str(uuid4()), keys, last), {})
+        self.assertEqual(reference_newest_older(str(uuid4()), keys, last), {})
+
+    def test_chunking_gives_the_same_answer_and_each_statement_names_the_table_once(self):
+        keys = set(self.no_kit + self.kits + self.absent)
+        last = self.instants[-1]
+        want = reference_newest_older(self.org_id, keys, last)
+        with mock.patch.object(projections, "LOOKUP_CHUNK", 1):
+            with CaptureQueriesContext(connection) as chunked:
+                self.assertEqual(projections._newest_older_by_key(self.org_id, keys, last), want)
+        with CaptureQueriesContext(connection) as whole:
+            self.assertEqual(projections._newest_older_by_key(self.org_id, keys, last), want)
+        # One statement per kind of key when it fits, one per key at chunk size 1.
+        self.assertEqual(len(whole.captured_queries), 2)
+        self.assertEqual(len(chunked.captured_queries), len(keys))
+        table = CheckRecord._meta.db_table
+        for query in [*whole.captured_queries, *chunked.captured_queries]:
+            self.assertEqual(query["sql"].count(f" {table} "), 1, query["sql"][:200])
+
+    def test_a_hundred_and_fifty_keys_still_name_the_table_once(self):
+        keys = {(self.vehicle_id, str(uuid4()), NO_KIT) for _ in range(150)}
+        with CaptureQueriesContext(connection) as captured:
+            projections._newest_older_by_key(self.org_id, keys, self.instants[-1])
+        self.assertEqual(len(captured.captured_queries), 1)
+        sql = captured.captured_queries[0]["sql"]
+        self.assertEqual(sql.count(f" {CheckRecord._meta.db_table} "), 1)
+        self.assertEqual(sql.count("UNION ALL"), 149)  # 150 constant rows, not 150 table references
+
+    def test_aware_datetimes_come_back(self):
+        found = projections._newest_older_by_key(self.org_id, set(self.no_kit), self.instants[-1])
+        self.assertTrue(found)
+        for stamp in found.values():
+            self.assertIsNotNone(stamp.tzinfo)
+
+    def test_the_statement_orders_newest_first_and_takes_one_row_per_key(self):
+        # check_record rejects a second row with an identical instant (the insert trigger ties each
+        # row to its receipt), so a tie cannot be seeded. The answer is only the time, so a tie
+        # could not change it either; the ordering that picks the newest is fixed by the SQL.
+        with CaptureQueriesContext(connection) as captured:
+            projections._newest_older_by_key(self.org_id, set(self.no_kit), self.instants[-1])
+        sql = captured.captured_queries[0]["sql"]
+        self.assertIn("ORDER BY c.recorded_at DESC LIMIT 1", sql)
+        self.assertIn("c.recorded_at <= ", sql)
+
+    def test_more_than_one_chunk_of_keys_across_vehicles_matches_the_union(self):
+        # About 480 keys over three vehicles (two unknown to the organization) plus the real ones, at the
+        # real LOOKUP_CHUNK: no-kit keys span 3 chunks, kit keys one, and the answer is unchanged.
+        other_vehicles = [str(uuid4()), str(uuid4())]
+        extra = {
+            (vehicle, str(uuid4()), NO_KIT) for vehicle in [self.vehicle_id, *other_vehicles] * 160
+        }
+        extra |= {(vehicle, str(self.siren.pk), NO_KIT) for vehicle in other_vehicles}
+        keys = set(self.no_kit + self.kits + self.absent) | extra
+        self.assertGreater(len(extra), 2 * projections.LOOKUP_CHUNK)
+        last = self.instants[-1]
+        with CaptureQueriesContext(connection) as captured:
+            found = projections._newest_older_by_key(self.org_id, keys, last)
+        self.assertEqual(found, reference_newest_older(self.org_id, keys, last))
+        self.assertEqual(set(found), {projections._key(*k) for k in self.no_kit + self.kits})
+        no_kit_keys = sum(1 for k in keys if k[2] == NO_KIT)
+        chunks = -(-no_kit_keys // projections.LOOKUP_CHUNK) + 1  # plus one statement of kit keys
+        self.assertEqual(len(captured.captured_queries), chunks)
+
+    def commit_between_chunks(self, keys, run, late=((7, 6, 0, 1),)):
+        """Run `run()` with chunk size 1 and record qualifying checks just before the second lookup
+        statement, as transactions stamped earlier but committed later would appear under READ
+        COMMITTED (each statement sees what is committed when it starts).
+
+        `late` lists (day, hour, minute, index) checks recorded then, index into the sorted keys.
+        """
+        ordered = sorted(keys)
+        marker, seen = "ORDER BY c.recorded_at DESC LIMIT 1", []
+
+        def commit_late(execute, sql, params, many, context):
+            if marker in sql:
+                seen.append(sql)
+                if len(seen) == 2:
+                    for day, hour, minute, index in late:
+                        self.clock.set(self.at(days=day, hours=hour, minutes=minute))
+                        self.record(self.item_for(ordered[index]))
+            return execute(sql, params, many, context)
+
+        with mock.patch.object(projections, "LOOKUP_CHUNK", 1):
+            with connection.execute_wrapper(commit_late):
+                result = run()
+        self.assertEqual(len(seen), 2)
+        return ordered[0], ordered[-1], result
+
+    def item_for(self, key):
+        return next(i for i in (self.suction, self.siren) if str(i.pk) == key[1])
+
+    def test_a_check_committed_between_chunks_changes_only_its_own_key(self):
+        # Each key's answer comes from one statement (as in the former union) and a check belongs
+        # to exactly one key, so statements at different snapshots cannot make one key's answer
+        # depend on another's: the key read before the commit gets the earlier answer, the key
+        # read after it gets the newer one, and each equals a single-statement answer at a snapshot.
+        keys, bound = set(self.no_kit), self.at(days=7, hours=12)
+        before = projections._newest_older_by_key(self.org_id, keys, bound)
+        first, second, skewed = self.commit_between_chunks(
+            keys, lambda: projections._newest_older_by_key(self.org_id, keys, bound)
+        )
+        after = projections._newest_older_by_key(self.org_id, keys, bound)
+        self.assertEqual(skewed[projections._key(*first)], before[projections._key(*first)])
+        self.assertEqual(skewed[projections._key(*second)], after[projections._key(*second)])
+        self.assertGreater(after[projections._key(*second)], before[projections._key(*second)])
+
+    def test_the_roots_do_not_depend_on_which_chunk_saw_a_late_commit(self):
+        # The final roots depend only on the evidence, never on how the lookup or windows fell
+        # (the _attention_roots contract), so a commit between chunks gives the roots computed
+        # from all of the evidence.
+        keys, bound = set(self.no_kit), self.at(days=7, hours=12)
+        key_set = {projections._key(*k) for k in keys}
+        unseen = projections._attention_roots(self.org_id, key_set, bound, bound, 500)
+        _first, _second, skewed = self.commit_between_chunks(
+            keys, lambda: projections._attention_roots(self.org_id, key_set, bound, bound, 500)
+        )
+        settled = projections._attention_roots(self.org_id, key_set, bound, bound, 500)
+        self.assertNotEqual(unseen, settled)  # the late check is observable in the roots
+        self.assertEqual(skewed, settled)
+
+    def test_two_late_commits_on_keys_without_history_give_each_key_a_valid_answer(self):
+        # Keys A and B have no check at or before the bound. A qualifying check for A, then one
+        # for B, commit between the chunk statements, so the first chunk saw neither and the
+        # second sees both: B is returned and A is not. No single snapshot has B without A, and
+        # the former union could not return it, but each key's answer is a state that key really
+        # had during the call (A: before its check; B: after its), the keys have no invariant
+        # between them, and the next read has both. That per-key guarantee is the contract.
+        keys, bound = set(self.no_kit), self.at(hours=5)
+        a, b = sorted(keys)
+        self.assertEqual(projections._newest_older_by_key(self.org_id, keys, bound), {})
+        _first, _last, skewed = self.commit_between_chunks(
+            keys,
+            lambda: projections._newest_older_by_key(self.org_id, keys, bound),
+            late=((0, 4, 0, 0), (0, 4, 30, 1)),
+        )
+        self.assertEqual(set(skewed), {projections._key(*b)})
+        settled = projections._newest_older_by_key(self.org_id, keys, bound)
+        self.assertEqual(set(settled), {projections._key(*a), projections._key(*b)})
+        self.assertEqual(skewed[projections._key(*b)], settled[projections._key(*b)])
