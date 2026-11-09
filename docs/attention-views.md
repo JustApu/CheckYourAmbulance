@@ -52,6 +52,15 @@ and the unresolved deficiencies that apply (id, status, summary, severity code a
 reported instant). The result also has the vehicle's operational status at the instant
 (`IN_SERVICE` when no status was ever recorded) with its restrictions.
 
+- **Label-only read** ([issue #75](https://github.com/JustApu/CheckYourAmbulance/issues/75)):
+  `vehicle_label_rows(organization_id, vehicle_id)` returns only the label fields of the current
+  rows (item, kit, kind, compartment and system ids and labels), in the order `vehicle_checklist`
+  lists them, without evaluating obligations, checks or deficiencies. The ad hoc inspection form,
+  the deficiency report page and the verification and suspension item choices use it. It answers
+  from the template structure when no one-off order names an item or kit that is not a current
+  row; otherwise it runs the full read and returns that read's labels, so the two always agree.
+  A caller that needs a state, a check, a deficiency or an attention flag must call
+  `vehicle_checklist`.
 - **Missed obligations** ([issue #66](https://github.com/JustApu/CheckYourAmbulance/issues/66), SPEC SCH-2, 1.26.0): an
   obligation still unsatisfied after its late-completion limit `L = G + w_late`
   (`CYA_LATE_COMPLETION_HOURS`, inclusive as in linking) can no longer be completed, so it no
