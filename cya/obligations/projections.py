@@ -248,8 +248,8 @@ def _newest_older_by_key(organization_id, keys, lower):
     and held gigabytes (issue #70).
     A key with no check at or before `lower` is absent. Only the time is returned, so rows that
     tie on recorded_at cannot change the answer (the former form's `-id` tie-break selected among
-    rows with the same time and returned that same time). Key ids are bound as hyphenated UUID
-    strings and compared with the native UUID columns of MariaDB 10.11 and 11.8.
+    rows with the same time and returned that same time). Key ids are bound as the hyphenated
+    strings the char(36) id columns hold, so the correlated lookup uses the key index.
     """
     table = CheckRecord._meta.db_table
     instant = _instant(lower)
