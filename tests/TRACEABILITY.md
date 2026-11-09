@@ -39,6 +39,7 @@ Authoritative mappings: `contracts/step-catalog.json` (`cases[*].requirements`);
 | AC-33 | [AC-33.json](scenarios/AC-33.json) | SEAL-4, STK-B, PRN-1 | Symbolic; unimplemented |
 | AC-34 | [AC-34.json](scenarios/AC-34.json) | SEAL-2, SEAL-5, SEAL-6, STK-D | Symbolic; unimplemented |
 | AC-35 | [AC-35.json](scenarios/AC-35.json) | SEAL-7, SEAL-8 | Symbolic; unimplemented |
+| AC-36 | [AC-36.json](scenarios/AC-36.json) | RPT-5a, SCH-2 | Symbolic; unimplemented |
 
 ## Supplemental coverage
 

@@ -672,6 +672,37 @@
         "SEAL-7",
         "SEAL-8"
       ]
+    },
+    "AC-36": {
+      "setup": [
+        "vehicle_with_daily_item",
+        "monday_obligation_missed_after_late_limit"
+      ],
+      "actions": [
+        "read_current_readiness",
+        "record_later_pass",
+        "record_later_fail",
+        "read_at_late_limit_boundary",
+        "read_asof_before_later_invalidation",
+        "read_readiness_page",
+        "read_readiness_api",
+        "read_reports_containing_readiness_counts"
+      ],
+      "assert": [
+        "overdue_and_missed_counted",
+        "overdue_cleared_missed_retained_history_unchanged",
+        "fail_keeps_item_not_ready",
+        "missed_aged_out_after_seven_days_and_late_limit_boundary",
+        "asof_missed_as_known_then",
+        "stored_summary_equals_recomputation",
+        "missed_count_on_page_per_vehicle_and_fleet_totals",
+        "missed_count_in_readiness_api",
+        "missed_count_summarized_in_reports"
+      ],
+      "requirements": [
+        "RPT-5a",
+        "SCH-2"
+      ]
     }
   }
 }
