@@ -41,7 +41,7 @@ from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, res
 from cya.checks.linking import late_window
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
-from cya.obligations.models import RequirementVersion
+from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.requirements import bound_template_ids
 from cya.obligations.state import NO_KIT, State
@@ -320,7 +320,9 @@ def _ordered_rows(organization_id, vehicle_id, placed, obligations):
     return placed
 
 
-def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=False):
+def _placements(organization_id, vehicle_id, as_of):
+    """(placed, labels): one entry per checklist row the bound templates define, before any
+    obligation is consulted, and the item labels by id. Shared by the full and label-only paths."""
     items = _resolved_items(organization_id, vehicle_id, as_of)
     labels = dict(
         Item.objects.filter(organization_id=organization_id, pk__in=list(items)).values_list(
@@ -349,6 +351,11 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=Fals
             placed.append(
                 (order, requirement.display_order, item_id, None, None, resolved, version_id)
             )
+    return placed, labels
+
+
+def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=False):
+    placed, labels = _placements(organization_id, vehicle_id, as_of)
     obligations = _obligation_by_key(
         organization_id, vehicle_id, as_of, suspension_lookup, current=current
     )
@@ -452,4 +459,94 @@ def vehicle_checklist(
         needs_attention_only=needs_attention_only,
         vehicle_status=_vehicle_status(organization_id, vehicle_id, instant),
         rows=tuple(rows),
+    )
+
+
+@dataclass(frozen=True)
+class LabelRow:
+    """The label fields of one checklist row, in the order vehicle_checklist lists the rows."""
+
+    item_id: str
+    item_label: str
+    kit_id: str | None
+    kit_label: str | None
+    kind: str
+    compartment_id: str | None
+    compartment_label: str | None
+    system_id: str | None
+    system_label: str | None
+
+
+ADHOC_KEY_LIMIT = 2000  # distinct (item, kit) pairs read before the full path decides instead
+
+
+def _label_row(row):
+    return LabelRow(
+        item_id=row.item_id,
+        item_label=row.item_label,
+        kit_id=row.kit_id,
+        kit_label=row.kit_label,
+        kind=row.kind,
+        compartment_id=row.compartment_id,
+        compartment_label=row.compartment_label,
+        system_id=row.system_id,
+        system_label=row.system_label,
+    )
+
+
+def _adhoc_keys_missing(organization_id, vehicle_id, as_of, placed):
+    """True when a one-off order names an (item, kit) that is not a current checklist row.
+
+    The full path keeps such a row (its immutable order) while the order is not missed, so only
+    the full path can answer. This reads keys only and over-approximates: a missed or unselected
+    order also triggers it, which is safe because the full path is always exact. Routine
+    obligations never add a row, so they are not read.
+    """
+    keys = {(p[2], p[3] or NO_KIT) for p in placed}
+    found = list(
+        Obligation.objects.filter(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            routine=False,
+            recorded_at__lte=as_of,
+        )
+        .values_list("item_id", "kit_instance_id")
+        .distinct()[: ADHOC_KEY_LIMIT + 1]
+    )
+    if len(found) > ADHOC_KEY_LIMIT:
+        return True
+    return any((str(item), str(kit) if kit else NO_KIT) not in keys for item, kit in found)
+
+
+def vehicle_label_rows(organization_id, vehicle_id):
+    """The label fields of the vehicle's current checklist rows, without evaluating obligations.
+
+    Returns exactly the label fields, in exactly the order, that vehicle_checklist(...).rows
+    gives for a current read. It answers from the template structure alone when no one-off order
+    names an item or kit that is not a current row; otherwise it falls back to the full path.
+    For callers that show or choose by label only: anything that needs a state, a check, a
+    deficiency or an attention flag must call vehicle_checklist.
+    """
+    instant = timezone.now()
+    if not Vehicle.objects.filter(organization_id=organization_id, pk=vehicle_id).exists():
+        raise ChecklistQueryError("NOT_FOUND", "vehicle was not found", 404)
+    vehicle_id = str(vehicle_id)
+    placed, labels = _placements(organization_id, vehicle_id, instant)
+    if _adhoc_keys_missing(organization_id, vehicle_id, instant, placed):
+        rows = _rows(organization_id, vehicle_id, instant, None, current=True)
+        return tuple(_label_row(row) for row in rows)
+    placed.sort(key=lambda p: (p[0], p[1], p[2], str(p[3] or "")))
+    return tuple(
+        LabelRow(
+            item_id=item_id,
+            item_label=labels.get(item_id, ""),
+            kit_id=str(kit_id) if kit_id else None,
+            kit_label=kit_label,
+            kind=resolved.requirement.kind,
+            compartment_id=str(resolved.compartment_id) if resolved.compartment_id else None,
+            compartment_label=resolved.compartment_label,
+            system_id=str(resolved.system_id) if resolved.system_id else None,
+            system_label=resolved.system_label,
+        )
+        for (_order, _display, item_id, kit_id, kit_label, resolved, _version) in placed
     )

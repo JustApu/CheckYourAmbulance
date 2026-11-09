@@ -98,7 +98,7 @@ class AdHocHttpTests(StatusHttpCase):
         self.set_status("IN_SERVICE")
         client, _token = self.as_role("SUPERVISOR", "adhoc-unavailable")
         with mock.patch(
-            "cya.attention.checklist.vehicle_checklist",
+            "cya.attention.checklist.vehicle_label_rows",
             side_effect=ValueError("synthetic evidence limit"),
         ):
             response = client.get(f"/status/vehicles/{self.vehicle.pk}/")

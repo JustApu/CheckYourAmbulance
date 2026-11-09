@@ -19,7 +19,7 @@ from django.views.decorators.http import require_GET
 
 from cya.accounts.models import User
 from cya.attention.api import check_authors, checklist_row
-from cya.attention.checklist import vehicle_checklist
+from cya.attention.checklist import vehicle_checklist, vehicle_label_rows
 from cya.authorization.backend import canonical_id
 from cya.authorization.models import RoleGrant
 from cya.authorization.policy import ResourceContext, Role, permitted
@@ -161,7 +161,7 @@ def deficiencies(request, user):
 def report(request, user, vehicle_id):
     vehicle = _vehicle(user, vehicle_id)
     now = timezone.now()
-    rows = vehicle_checklist(str(user.organization_id), str(vehicle.pk)).rows
+    rows = vehicle_label_rows(str(user.organization_id), str(vehicle.pk))
     items, compartments, systems = {}, {}, {}
     for row in rows:
         items[row.item_id] = row.item_label
@@ -201,7 +201,7 @@ def _item_choices(organization_id, vehicle_id, within=None):
     """[(value "item_id:kit_id", label)] from the vehicle's current checklist, optionally limited
     to the (item, kit) pairs in `within`. The server resolves the same rows again and refuses any
     choice that no longer applies."""
-    rows = vehicle_checklist(organization_id, vehicle_id).rows
+    rows = vehicle_label_rows(organization_id, vehicle_id)
     choices = {}
     for row in rows:
         key = (str(row.item_id), str(row.kit_id) if row.kit_id else None)
