@@ -390,6 +390,14 @@ class CurrentProjectionTests(AttentionCase):
             "rebuild_obligation_projection", organization=org, verify=True, stdout=io.StringIO()
         )
         self.assert_current_matches_replay()
+        cached = current_rows(org, [str(self.vehicle.pk)], self.clock.now, include_all_ad_hoc=True)
+        missing_id = cached[str(self.vehicle.pk)][0]["obligation"]["id"]
+        ObligationProjection.objects.filter(pk=missing_id).delete()
+        self.assertIsNone(
+            current_rows(org, [str(self.vehicle.pk)], self.clock.now, include_all_ad_hoc=True)
+        )
+        call_command("rebuild_obligation_projection", organization=org, stdout=io.StringIO())
+        self.assert_current_matches_replay()
         ObligationProjection.objects.all().delete()
         self.assertIsNone(current_rows(org, [str(self.vehicle.pk)], self.clock.now))
         self.assertEqual(self.rows(), self.rows(as_of=self.clock.now))
@@ -668,6 +676,40 @@ class CurrentProjectionRaces(AttentionCase):
 
 
 class CurrentQueryLimitTests(SimpleTestCase):
+    def test_stable_current_page_uses_projection_selection_without_rechecking_events(self):
+        from django.db.models import QuerySet
+
+        from cya.obligations import current
+        from cya.obligations.models import Obligation, ObligationProjection
+        from cya.operations.models import VehicleStatusEvent
+
+        organization = "00000000-0000-0000-0000-000000000001"
+        vehicle = "00000000-0000-0000-0000-000000000002"
+        obligation = "00000000-0000-0000-0000-000000000003"
+        instant = datetime(2026, 6, 1, tzinfo=UTC)
+        facts = {"version": 1, "obligation": {"id": obligation}}
+
+        def capture(rows, limit=None):
+            if not isinstance(rows, QuerySet):
+                return ()
+            if rows.model is Obligation:
+                return ((obligation, True),)
+            if rows.model is ObligationProjection:
+                return ((obligation, vehicle, facts, instant, instant, True),)
+            if rows.model is VehicleStatusEvent:
+                return ()
+            self.fail(f"unexpected bounded query for {rows.model!r}")
+
+        with (
+            mock.patch.object(current, "_bounded", side_effect=capture),
+            mock.patch.object(
+                current, "selected_ids", side_effect=AssertionError("selection stream reread")
+            ),
+        ):
+            result = current_rows(organization, [vehicle], instant)
+
+        self.assertEqual(result[vehicle], [{**facts, "statuses": []}])
+
     def test_every_current_evidence_query_is_limited_before_it_can_be_evaluated(self):
         from django.db.models import QuerySet
 
@@ -688,7 +730,7 @@ class CurrentQueryLimitTests(SimpleTestCase):
         with (
             mock.patch.object(current, "MAX_ROWS", 2),
             mock.patch.object(current, "_bounded", side_effect=capture),
-            mock.patch.object(current, "selected_ids", return_value=set()),
+            mock.patch.object(current, "selected_ids", return_value=set()) as selected,
         ):
             result = current_rows(
                 "00000000-0000-0000-0000-000000000001",
@@ -698,3 +740,4 @@ class CurrentQueryLimitTests(SimpleTestCase):
         self.assertEqual(result, {vehicle: []})
         self.assertEqual(len(queries), 3)
         self.assertTrue(all("LIMIT 3" in sql for sql in queries), queries)
+        selected.assert_not_called()

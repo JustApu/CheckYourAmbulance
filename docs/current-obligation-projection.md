@@ -39,9 +39,13 @@ at G retains the historical evaluator's capped-instant semantics.
 `vehicle_checklist` with omitted `as_of` and no suspension adapter, and
 `fleet_readiness` with omitted `as_of`, use this table. Supplying any explicit
 `as_of`, even a recent instant, keeps event replay. Custom suspension adapters
-also keep replay. Current readers check selected source IDs against cached IDs;
-a missing/partial cache falls back to replay without writing. A concurrent
-refresh after the captured instant replays only the affected obligation rows. Invalid fact versions fail visibly.
+also keep replay. Current readers compare the complete in-scope obligation ID set
+with the projection rows; a missing/partial cache falls back to replay without
+writing. Selection flags come from the projection, which writers refresh
+transactionally with append-only selection events, avoiding a per-read walk of the
+selection stream. If any projection row was refreshed after the request captured
+its instant, the reader re-reads selection history at that instant and replays only
+the affected selected rows. Invalid fact versions fail visibly.
 Evidence queries carry their page cap into SQL before queryset evaluation, and
 per-vehicle caps still refuse an incomplete answer. Attention/known deficiencies remain separate from obligation satisfaction and
 use their existing readers; they are not copied into obligation projections.

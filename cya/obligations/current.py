@@ -308,7 +308,9 @@ def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
 def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False):
     """Read current facts, or return None for a missing/partially selected cache.
 
-    Comparing selected source IDs protects first deployment/recovery from a partial cache.
+    Comparing all in-scope source IDs protects first deployment/recovery from a partial
+    cache. Selection flags are transactional projection facts; the immutable selection stream
+    is re-read only when a row refreshed after the captured instant may be newer than it.
     Rows refreshed after the captured instant are replayed individually at that instant.
     Historical requests never call this function. No cache population occurs in a reader.
     """
@@ -329,29 +331,39 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     page_limit = MAX_ROWS * max(1, len(vehicle_ids))
     # Limit in SQL before QuerySet iteration, which otherwise buffers every matching row.
     source_rows = _bounded(sources.values_list("pk", "routine")[: page_limit + 1], page_limit)
-    routine_ids = [oid for oid, routine in source_rows if routine]
-    selected = selected_ids(organization_id, routine_ids, instant)
-    selected.update(oid for oid, routine in source_rows if not routine)
     rows = _bounded(
         ObligationProjection.objects.filter(
             scope,
             organization_id=organization_id,
             vehicle_id__in=vehicle_ids,
-            selected=True,
-        ).values_list("obligation_id", "vehicle_id", "facts", "refreshed_at", "due_at")[
+        ).values_list("obligation_id", "vehicle_id", "facts", "refreshed_at", "due_at", "selected")[
             : page_limit + 1
         ],
         page_limit,
     )
-    if {r[0] for r in rows} != selected:
+    source_ids = {oid for oid, _routine in source_rows}
+    if {r[0] for r in rows} != source_ids:
+        return None
+    newer = {r[0] for r in rows if r[3] > instant}
+    # The projection's selected flag is maintained in the same transaction as each
+    # selection event. Only re-read the immutable stream when a row refreshed after this
+    # request's captured instant could contain a later selection change.
+    if newer:
+        routine_ids = [oid for oid, routine in source_rows if routine]
+        selected = selected_ids(organization_id, routine_ids, instant)
+        selected.update(oid for oid, routine in source_rows if not routine)
+    else:
+        selected = {row[0] for row in rows if row[5]}
+    if not selected.issubset(source_ids):
         return None
     # A save can commit between the reader capturing T and loading this table. Replay ONLY
     # those newer rows at T, rather than making a busy vehicle replay its whole nine-day
     # window on every live-update reload. Explicit as_of readers never enter this adapter.
-    newer = {r[0] for r in rows if r[3] > instant}
     replayed = {}
     for vehicle in vehicle_ids:
-        wanted = sorted(r[0] for r in rows if str(r[1]) == vehicle and r[0] in newer)
+        wanted = sorted(
+            r[0] for r in rows if str(r[1]) == vehicle and r[0] in newer and r[0] in selected
+        )
         for offset in range(0, len(wanted), BATCH_SIZE):
             sources = list(
                 Obligation.objects.filter(
@@ -373,7 +385,9 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     )
     timelines = status_timeline(statuses)
     result = {v: [] for v in vehicle_ids}
-    for oid, vehicle, facts, _stamp, due_at in rows:
+    for oid, vehicle, facts, _stamp, due_at, _selected in rows:
+        if oid not in selected:
+            continue
         facts = replayed.get(oid, facts)
         result[str(vehicle)].append(attach_status_fact(facts, vehicle, due_at, instant, timelines))
     for found in result.values():
