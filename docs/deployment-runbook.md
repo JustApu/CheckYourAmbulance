@@ -18,7 +18,7 @@ changes this runbook needed are built; each still needs its host check:
 | Production application server | Built ([issue #24](https://github.com/JustApu/CheckYourAmbulance/issues/24)): uvicorn 0.54.0 with its pure-Python `wsproto` WebSocket protocol is pinned in `requirements/base.txt`, and [Proxy and application service](#proxy-and-application-service) gives the one-process launch command. Do not use Django `runserver` publicly. Rehearsed on Rocky Linux 9 (2026-11-02): one process after restart and reboot, socket reachable only by the proxy. |
 | HTTPS recognition | Built ([issue #25](https://github.com/JustApu/CheckYourAmbulance/issues/25)): `CYA_TRUST_PROXY_SSL_HEADER`, `CYA_SSL_REDIRECT` and `CYA_HSTS_SECONDS` (below) recognize HTTPS behind the proxy, redirect to it and send HSTS. All are off by default; enable them only with the proxy rule in [Proxy and application service](#proxy-and-application-service). Rehearsed on Rocky Linux 9 (2026-11-02): HTTPS recognized behind nginx, spoofed forwarding headers overwritten, HSTS observed. |
 | Application rate limits | Built for sign-in ([issue #26](https://github.com/JustApu/CheckYourAmbulance/issues/26)): `/auth/login/` and `/auth/callback/` are limited in the application per client address (`CYA_SIGNIN_RATE_LIMIT`, `CYA_SIGNIN_RATE_WINDOW_SECONDS`), in addition to the proxy. Export routes do not exist yet; every future export route must apply the same application limiter and a proxy limit before it ships. Rehearsed on Rocky Linux 9 (2026-11-02): both layers answer 429 and spoofed client-address headers do not reset the count. |
-| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. An Ubuntu 26.04 rehearsal with MariaDB 11.8 followed on 2026-11-03 (11.8 is allowed since SPEC 1.25.0, issue #56) ([host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03), [evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)). |
+| Rehearsal | A Rocky Linux 9 throwaway-host rehearsal ran on 2026-11-02 ([host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02), [verification record](#throwaway-server-verification-record)). Rows that need vehicles and real checklists, alert delivery or named operators remain pending; SSH source restriction is deferred by owner decision. An Ubuntu 26.04 rehearsal with MariaDB 11.8 followed on 2026-11-03 (11.8 is allowed since SPEC 1.25.0, issue #56) ([host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03-and-on-a-rebuilt-host-2026-11-09), [evidence](#ubuntu-2604-rehearsal-evidence-2026-11-03-utc)). The profile was repeated on a freshly reinstalled Ubuntu 26.04 host on 2026-11-09 with synthetic vehicles, an authorized WebSocket check, a synthetic deputy, interrupted-migration recovery, prior-code compatibility and a reboot ([evidence](#ubuntu-2604-rebuilt-host-rehearsal-evidence-2026-11-09-utc)); a real certificate renewal, alert delivery, a named human deputy and teardown remain pending. |
 
 This issue's runbook scope does not include changing application files; the
 application changes above were made under their own issues. Backup jobs and restore measurements
@@ -81,7 +81,7 @@ operator actions; this draft has not performed them on the developer machine.
 Use the chosen distribution's versioned installation and firewall documentation
 when making a concrete host profile; do not guess package names, firewall commands or
 unit names. The [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
-below was verified on a throwaway host, and the [Ubuntu 26.04 host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03)
+below was verified on a throwaway host, and the [Ubuntu 26.04 host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03-and-on-a-rebuilt-host-2026-11-09)
 on another (with MariaDB 11.8, allowed by SPEC §17.5 since 1.25.0).
 
 ## Secrets and service configuration
@@ -657,13 +657,15 @@ package comes from Rocky's own repositories except Certbot (EPEL).
 10. **Teardown.** Remove any temporary passwordless sudo rule and test credentials, and
     destroy the throwaway host and its certificate when the rehearsal is recorded.
 
-## Ubuntu 26.04 host profile (rehearsed 2026-11-03)
+## Ubuntu 26.04 host profile (rehearsed 2026-11-03 and, on a rebuilt host, 2026-11-09)
 
 Verified on a throwaway Ubuntu 26.04.1 LTS (x86_64) host with AppArmor enabled, using
 synthetic data and release `05cb656`. It follows the [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)
 step by step and reuses its files from [`deploy/rocky9/`](../deploy/rocky9/), except
 [`deploy/ubuntu2604/nginx.conf`](../deploy/ubuntu2604/nginx.conf). Every package comes from
-Ubuntu's own repositories. Only the differences are listed here.
+Ubuntu's own repositories. Only the differences are listed here. The profile was repeated on a
+freshly reinstalled image on 2026-11-09 ([evidence](#ubuntu-2604-rebuilt-host-rehearsal-evidence-2026-11-09-utc)); the
+notes marked *2026-11-09* come from that run.
 
 **MariaDB version.** Ubuntu 26.04 ships MariaDB 11.8. This profile was first rehearsed as a
 compatibility test (2026-11-03); SPEC 1.25.0 ([issue #56](https://github.com/JustApu/CheckYourAmbulance/issues/56)) then allowed 11.8 alongside 10.11, and
@@ -677,6 +679,14 @@ CI tests both. The application suite's version check accepts exactly those two v
    rollback timer. Rules apply to IPv4 and IPv6. Restrict SSH sources as on Rocky when the
    owner lifts the deferral.
 
+   *2026-11-09:* `ufw --force enable` loads the rules at once, but the `ufw` unit stays inactive until the next
+   boot, so check with `ufw status`, not `systemctl is-active ufw` (a reboot made the unit active with the same
+   rules). The stock image allowed SSH password logins (its cloud-init drop-in `50-cloud-init.conf` sets
+   `PasswordAuthentication yes`). Turn them off with a drop-in that sorts first, because sshd keeps the first value
+   it reads: `/etc/ssh/sshd_config.d/00-cya-hardening.conf` containing `PasswordAuthentication no` and
+   `KbdInteractiveAuthentication no`. Check with `sshd -t`, reload, confirm a fresh key login, and confirm a
+   password attempt is refused. Make sure every account that needs SSH has a key first.
+
 2. **Packages.** No module streams or EPEL:
 
    ```sh
@@ -686,6 +696,12 @@ CI tests both. The application suite's version check accepts exactly those two v
 
    Python is 3.14 (the project supports 3.12 or later; CI uses 3.13). The journal is
    already persistent, and Certbot's `certbot.timer` is enabled by the package.
+
+   *2026-11-09:* on a new image run `apt-get update` and `apt-get upgrade` first. `upgrade` holds back
+   `ubuntu-server-minimal`, which needs one new package (`xxd`); a simulated `apt-get dist-upgrade` showed only that
+   change, and applying it left nothing upgradable. The installer's default LVM root volume is half of its volume
+   group; if the host needs more room, `lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv` extends the volume and
+   the ext4 file system online.
 
 3. **Service identity and release.** As on Rocky, with `--shell /usr/sbin/nologin` and
    `python3 -m venv`. No SELinux labels are needed.
@@ -709,6 +725,13 @@ CI tests both. The application suite's version check accepts exactly those two v
    site is not served. Certificate steps are as on Rocky, except the renewal timer is
    `certbot.timer` (already enabled). Then install `nginx-cya.conf` and
    `cya_proxy_headers.conf` and set the HTTPS variables as on Rocky.
+
+   *2026-11-09:* certbot names a certificate after its host name unless told otherwise, while `nginx-cya.conf` expects
+   `/etc/letsencrypt/live/cya/`; either issue with `--cert-name cya` or change the two paths. Renewal must use the
+   `webroot` authenticator with `/var/lib/cya-acme` (nginx answers the challenge there): a certificate issued with
+   certbot's `standalone` authenticator needs port 80 for itself and will fail to renew while nginx holds it. Give the
+   renewal a reload hook (`--deploy-hook 'systemctl reload nginx'`, or a script in
+   `/etc/letsencrypt/renewal-hooks/deploy/`), or nginx keeps serving the old certificate.
 
 8. **Google sign-in.** Besides the client ID, secret and hosted domain, `runtime.env` needs
    `CYA_GOOGLE_REDIRECT_URI=https://__HOST__/auth/callback/`, and the OAuth client must list
@@ -892,6 +915,52 @@ Results:
   - The slowest tests on both hosts are migration reversals (the kit migration test took 923 s
     on Rocky and 1,116 s on Ubuntu).
 - **Pending:** as for Rocky, plus the SPEC decision on MariaDB 11.8.
+
+## Ubuntu 26.04 rebuilt-host rehearsal evidence, 2026-11-09 UTC
+
+Tester: Claude (Anthropic), as operator, on an Ubuntu 26.04 host that the owner reinstalled from a fresh image for [issue #6](https://github.com/JustApu/CheckYourAmbulance/issues/6), with synthetic data only and release `5147c01`. It follows the [Ubuntu 26.04 host profile](#ubuntu-2604-host-profile-rehearsed-2026-11-03-and-on-a-rebuilt-host-2026-11-09) from an unconfigured image. The certificate was obtained by the owner (see the findings). No real production server or data was in scope.
+
+| Component | Value |
+|---|---|
+| Operating system | Ubuntu 26.04.1 LTS, kernel 7.0.0-43, AppArmor enabled, 4 vCPU, 7.4 GB RAM |
+| Disk | the installer's default root volume (half of its volume group, 19 GB) was extended online to the whole group (38 GB) |
+| Packages | MariaDB 11.8.6, nginx 1.28.3, Certbot 4.0.0, Python 3.14.4, Django 6.1.2, uvicorn 0.54.0 |
+| Starting state | up for minutes; fail2ban active; no firewall tool; SSH password logins enabled; 31 packages upgradable; only ports 22 and 53 listening; `/srv` and `/usr/local/sbin` empty |
+
+**Steps and results** (every command exited 0 unless a finding says otherwise):
+
+| Step | Result |
+|---|---|
+| `apt-get update`, `upgrade`, then `dist-upgrade` | 30 packages upgraded, then the held-back `ubuntu-server-minimal` and its new dependency; nothing upgradable; no reboot required |
+| Firewall | `ufw` with default deny in and allow out; OpenSSH, 443 and 80 allowed on IPv4 and IPv6; rollback timer armed first, a fresh login confirmed, timer stopped |
+| SSH password logins | disabled on this host (and on the Rocky host) with a drop-in; a fresh key login worked and a password attempt was refused on both |
+| Profile packages | 108 packages installed; MariaDB bound to loopback only |
+| Service identity, release, environment | `cya` system account without a login shell; release root-owned; the virtual environment built with hash-checked requirements and not writable by `cya` |
+| MariaDB | `60-cya.cnf` installed: binary logging on, `log_bin_trust_function_creators=1`, loopback bind, 1 GiB buffer pool; database `utf8mb4` / `utf8mb4_unicode_ci`; no anonymous users and no test database; owner and runtime accounts with generated passwords (never printed) in 0600 root files |
+| Migrations through `cya-manage` | `migrate --plan`, then `migrate --noinput`: 81 migrations in 145 s with binary logging on and the non-SUPER owner; `verify_audit_schema` (40 append-only and 44 guarded tables); grants installed; `verify_audit_runtime`; `check --fail-level WARNING`; `migrate --check` |
+| Application service | `cya.service` (uvicorn on a Unix socket, directory 0750 `cya:cya`); nothing else listens on a TCP port for the application |
+| nginx and HTTPS | per the Ubuntu profile: port 80 serves only the challenge path and redirects the rest; HTTPS from outside: certificate chain valid, HTTP/2, TLS 1.2 and 1.3 only (1.1 refused), an unknown host name gets no handshake, HSTS 300, `X-Frame-Options: DENY`, `nosniff`, `no-store`, unauthenticated requests redirected to sign-in |
+| Synthetic agency | `tools/rehearsal_history.py` with its default seed (7), 5 days: 5 vehicles × 150 items, 15 crew, 3,750 checks, 4,500 obligations and projection rows |
+| Projection comparison | `rebuild_obligation_projection --dry-run`: `Different: 0; verified: 4500`, 28 s |
+| Client through nginx over TLS | the project's load client (15 crew and 1 supervisor, 150 s, sessions minted in the runtime environment): 18 WebSocket connections accepted, 193 saves, 665 live pushes, no errors. The latencies came from one saturated worker and are not claimed |
+| WebSocket authorization | no session, a foreign Origin and no Origin were each refused (HTTP 403); a valid session was accepted up to four connections per user and a fifth was refused at the handshake; deactivating the user while four sockets were open closed all four with code 4403 after about 59 s (recheck interval 60 s); a reconnect was refused |
+| Prior-code compatibility | the release before migration 0011 (`b4cec1e`) against the migrated schema: `check`, `verify_audit_runtime`, owner `migrate --check` (nothing planned), a 150-row checklist, fleet readiness over 5 vehicles and an audited write all succeeded. `migrate --check` exits 1 for the runtime role on old and new code alike (a privilege limit), so it is not a compatibility difference |
+| Interrupted migration, rehearsed on a database copy | after rewinding the copy to before 0011, an index planted where the second operation would create it made the migration fail halfway: the first index was created, the second failed with error 1061 (duplicate key name), 0011 was not recorded, and a blind rerun failed again at the first index. Dropping exactly the leftover indexes and rerunning succeeded; `migrate --check` and `verify_audit_schema` passed and the row counts were unchanged. The copy was dropped |
+| Synthetic deputy | a separate account with its own SSH key (never the operator's), the password locked, and its key restricted to one source with `from=`: a login through the allowed source worked; the same key from another address was refused (the log shows "Refused by key options"); the operator and deputy keys were refused for each other's accounts; a read-only deputy check (services, updates, certificate days left, disk, memory, errors) ran; the logs attribute logins and sudo commands to each user with distinct key fingerprints; both logins survived `ufw reload`. **Revocation:** removing the key refused new logins, but an already open session kept running until `loginctl terminate-user`; the account was then locked and deleted |
+| Reboot | back in 47 s; every service started on its own (the `ufw` unit became active), the same six firewall rules, listening ports, MariaDB settings, SSH hardening and data were unchanged, time synchronized in UTC, and `/run/cya` was recreated 0750 `cya:cya` |
+| Exposure from outside | From outside over IPv4 (TCP ports 1 to 1024 plus 3306, 5432, 6379, 8000, 8080, 8099, 8443, 9000, 9090, 11211 and 27017) only ports 22, 80 and 443 answered; the `Server` header shows `nginx` without a version; plain HTTP to any path or to the bare address redirects to HTTPS; HTTPS by bare address gets no handshake; unauthenticated application paths redirect to sign-in or return 404. The host has no global IPv6 address, so IPv6 exposure could not be tested from outside; the firewall carries the IPv6 rules |
+
+**Findings for the runbook** (changes are in the profile steps above):
+- **Certificate renewal.** The owner's certificate used certbot's `standalone` authenticator and its default name (the host name, not `cya`). Standalone renewal needs port 80 and fails while nginx holds it, and there was no reload hook. The nginx file was pointed at the actual path for this run. The owner then reconfigured the lineage to `webroot` with a reload hook, and a `certbot renew --dry-run` run by the owner simulated a successful renewal (see below).
+- **Password SSH logins** were on in the image; the cloud-init drop-in sets them, so the hardening drop-in must sort first.
+- **The `ufw` unit** stays inactive until the next boot after `ufw enable`; monitoring should use `ufw status`.
+- **Revocation** must end open sessions as well as remove the key.
+- **Updates:** `apt-get upgrade` holds back `ubuntu-server-minimal`; the default root volume is half the volume group.
+
+**Not done or not verified here.**
+- **A real certificate renewal.** The owner reconfigured the renewal and ran the dry run (its output: all simulated renewals succeeded). I read the renewal file back (authenticator `webroot`, web root `/var/lib/cya-acme`, `renew_hook = systemctl reload nginx`) and did not run the renewal myself. A real renewal (certbot starts about 30 days before the certificate expires) has not happened, so the reload after a real renewal is untested.
+- **Google sign-in.** No OAuth client was configured, so sessions were minted with the application's own signed-cookie store; real Workspace sign-in was not exercised.
+- **Alert delivery** ([issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8)); a named human deputy (DEP-3); SSH source restriction for the operator (the owner's deferral stands; the restriction was tested on the deputy key only); IPv6 exposure from outside; the load targets of [issue #10](https://github.com/JustApu/CheckYourAmbulance/issues/10); the backup path (rehearsed under [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7)); and teardown, which waits for the owner's confirmation.
 
 ## Backup and restore rehearsal evidence, 2026-11-03 UTC
 
