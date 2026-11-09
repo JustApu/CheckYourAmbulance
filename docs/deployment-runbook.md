@@ -212,6 +212,18 @@ MariaDB DDL can leave partial changes on failure. Stop on a nonzero exit and
 inspect the migration record and schema; do not fake completion, blindly reverse
 or repeatedly restart. Rehearse the recovery on a copy first.
 
+Migration `cya_obligations.0011_routine_scope_indexes` ([issue #74](https://github.com/JustApu/CheckYourAmbulance/issues/74))
+only builds two secondary indexes, `obligation_vehicle_routine` and
+`projection_vehicle_routine`, and changes no data. In scratch rehearsals MariaDB
+10.11.18 and 11.8.6 accepted both builds as `ALGORITHM=INPLACE, LOCK=NONE`, so they
+do not copy the table or block writers; the instruction above to stop application
+traffic before schema changes still applies. Observed build times on the synthetic
+rehearsal tables (about 130,000 to 147,000 rows each, NFS-backed disk): 1 to 5 s
+when the table was recently read, and 15 to 19 s for the first build after a cold
+start. Expect the time to grow with row count and a busy disk, and record the actual
+time from the rehearsal on a copy. Reversal drops the two indexes (under 4 s in the
+same rehearsals) and changes no data.
+
 After the DBA creates the runtime account, preview grants, inspect the target
 and apply using the actual account name and account host. These synthetic
 examples assume the DBA created exactly this account; the host is the MariaDB
