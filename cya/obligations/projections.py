@@ -258,7 +258,9 @@ def _newest_older_by_key(organization_id, keys, lower):
     during the call, and nothing the callers do relies on a relation between two keys (a check
     belongs to one key; the roots depend only on the evidence, not on how the windows fell).
     The missed key is simply stale, as for any read that overlaps a commit, and the next read
-    has it (tests: late commits between two chunk statements, with and without earlier history).
+    has it. This does not promise a request-wide snapshot: no read path here does, under the
+    mandatory READ COMMITTED (tests: late commits between two chunk statements, with and
+    without earlier history).
     """
     table = CheckRecord._meta.db_table
     instant = _instant(lower)
