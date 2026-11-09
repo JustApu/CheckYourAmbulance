@@ -17,14 +17,16 @@
     "a later effective Pass for i1 is recorded and the summary is read again",
     "the later check is a Fail instead of a Pass",
     "the obligation is more than seven days before the read instant; a read at exactly L versus after L",
-    "a default as-of read at an instant before a later invalidation was recorded"
+    "a default as-of read at an instant before a later invalidation was recorded",
+    "read the readiness page, the readiness API response, and every report output that already contains fleet-readiness counts"
   ],
   "then": [
     "Monday's obligation counts as Overdue and as Missed in the current summary",
     "it no longer counts as Overdue but still counts as Missed until it is more than seven days before the read instant; history still shows it as permanently Overdue (missed); the readiness page shows the Missed count per vehicle and in the fleet totals",
     "the same Overdue and Missed counts apply and the item stays not ready (section 5.4)",
     "the obligation is in neither count once older than seven days; a check at exactly L still completes it and it is missed only when the read instant is after L (SCH-2)",
-    "the default as-of Missed count is as known then and ignores the later invalidation; the as-of Overdue count follows section 19.3; a stored summary equals a recomputation from events (section 19)"
+    "the default as-of Missed count is as known then and ignores the later invalidation; the as-of Overdue count follows section 19.3; a stored summary equals a recomputation from events (section 19)",
+    "each shows the Missed count: the page per vehicle and in the fleet totals, the API in its response, and the reports as a summarized count (the report list and formats stay open, OQ-61)"
   ],
   "status": "contract",
   "notes": "Language-neutral behavioral contract for SPEC amendment 1.28.0 (issue #77); runner implementation is deferred like the other contracts."
