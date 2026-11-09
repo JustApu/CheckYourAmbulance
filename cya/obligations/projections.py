@@ -1,8 +1,9 @@
 """Bounded, organization-scoped ORM adapter for immutable obligation projections."""
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 from itertools import islice
 
+from django.db import connection
 from django.db.models import F, Q
 
 from cya.checklists.models import Vehicle
@@ -222,6 +223,69 @@ def _exact_keys(keys):
     return condition
 
 
+LOOKUP_CHUNK = 200  # keys per statement, so a page of vehicles is not one enormous statement
+
+
+def _instant(value):
+    """A datetime as the raw cursor must receive it (naive UTC), as the ORM would send it."""
+    return connection.ops.adapt_datetimefield_value(value)
+
+
+def _aware(value):
+    """A raw cursor returns naive UTC datetimes; the ORM path returns aware ones."""
+    return value if value is None or value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _newest_older_by_key(organization_id, keys, lower):
+    """{key: newest recorded_at at or before `lower`} for each (vehicle, item, kit) key with a check.
+
+    Each key's answer is one backward step on the (organization, vehicle, item, kit, time) index:
+    ORDER BY recorded_at DESC LIMIT 1 reads one row per key whatever the history, where a MAX over
+    the same index would read every row of the key. The statement names check_record once, as a
+    correlated lookup over a derived table of the keys. The former form was one UNION ALL arm per
+    key, and MariaDB opens a table instance for every reference in a statement: 150 instances per
+    checklist read, each large because the table has 27 indexes, which filled the open-table cache
+    and held gigabytes (issue #70).
+    A key with no check at or before `lower` is absent. Only the time is returned, so rows that
+    tie on recorded_at cannot change the answer (the former form's `-id` tie-break selected among
+    rows with the same time and returned that same time). Key ids are bound as hyphenated UUID
+    strings and compared with the native UUID columns of MariaDB 10.11 and 11.8.
+    """
+    table = CheckRecord._meta.db_table
+    instant = _instant(lower)
+    found = {}
+    for kitted in (False, True):
+        group = sorted(k for k in keys if (k[2] != NO_KIT) == kitted)
+        for start in range(0, len(group), LOOKUP_CHUNK):
+            chunk = group[start : start + LOOKUP_CHUNK]
+            width = 3 if kitted else 2
+            first = "SELECT %s AS vehicle_id, %s AS item_id" + (", %s AS kit_id" if kitted else "")
+            rest = "SELECT %s, %s" + (", %s" if kitted else "")
+            kit = "c.kit_id = k.kit_id" if kitted else "c.kit_id IS NULL"
+            sql = (
+                "SELECT k.vehicle_id, k.item_id, "
+                + ("k.kit_id, " if kitted else "")
+                + "(SELECT c.recorded_at FROM "
+                + table
+                + " c WHERE c.organization_id = %s AND c.vehicle_id = k.vehicle_id"
+                + " AND c.item_id = k.item_id AND "
+                + kit
+                + " AND c.recorded_at <= %s ORDER BY c.recorded_at DESC LIMIT 1) AS recorded_at FROM ("
+                + " UNION ALL ".join([first] + [rest] * (len(chunk) - 1))
+                + ") k"
+            )
+            params = [organization_id, instant]
+            for vehicle_id, item_id, kit_key in chunk:
+                params += [vehicle_id, item_id] + ([kit_key] if kitted else [])
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                for row in cursor.fetchall():
+                    newest = row[width]
+                    if newest is not None:
+                        found[_key(*row[:width], *([] if kitted else [None]))] = _aware(newest)
+    return found
+
+
 def _attention_roots(organization_id, keys, since, instant, limit):
     """Roots of the check chains attention needs at every instant in [since, instant].
 
@@ -258,22 +322,7 @@ def _attention_roots(organization_id, keys, since, instant, limit):
         # Each key's own newest older check, from the (organization, vehicle, item, kit, time)
         # index alone. Grouped by the exact key: a kit instance with no checks of its own has
         # nothing older and stops here, never walking a sibling kit's history.
-        candidates = [
-            CheckRecord.objects.filter(
-                organization_id=organization_id,
-                vehicle_id=vehicle_id,
-                item_id=item_id,
-                kit_id=None if kit_key == NO_KIT else kit_key,
-                recorded_at__lte=lower,
-            )
-            .order_by("-recorded_at", "-id")
-            .values_list("vehicle_id", "item_id", "kit_id", "recorded_at")[:1]
-            for vehicle_id, item_id, kit_key in sorted(unresolved)
-        ]
-        newest_by_key = {
-            _key(vehicle, item, kit): recorded
-            for vehicle, item, kit, recorded in candidates[0].union(*candidates[1:], all=True)
-        }
+        newest_by_key = _newest_older_by_key(organization_id, unresolved, lower)
         older = {key: newest_by_key[key] for key in unresolved if key in newest_by_key}
         unresolved &= set(older)  # a key with nothing older has nothing more to find
         if not unresolved:
