@@ -107,14 +107,14 @@ def _panel_context(user, vehicle):
     roles = roles_for(user)
     # Setting and deciding share one permission (supervisor, administrator); crew may only request.
     can_set = permitted(ACTION, str(user.pk), roles, context=ResourceContext(intent="mutate"))
-    from cya.attention.checklist import vehicle_checklist
+    from cya.attention.checklist import vehicle_label_rows
     from cya.obligations.adhoc import ACTION as ADHOC_ACTION
 
     can_order = permitted(ADHOC_ACTION, str(user.pk), roles)
     choices, inspection_unavailable = (), False
     if can_order:
         try:
-            choices = vehicle_checklist(organization_id, str(vehicle.pk)).rows
+            choices = vehicle_label_rows(organization_id, str(vehicle.pk))
         except ValueError:
             # An optional inspection form must not hide operational status and its controls
             # when checklist resolution or the bounded compliance reader is unavailable.
