@@ -354,6 +354,12 @@ class Obligation(Evidence):
                 fields=["organization", "vehicle", "item", "kit_key", "grace_at"],
                 name="obligation_item_grace",
             ),
+            # The readers' scope is "due window OR routine = false"; with this index the
+            # optimizer reads a vehicle's ad hoc rows by range instead of scanning its history
+            # (issue #74).
+            models.Index(
+                fields=["organization", "vehicle", "routine"], name="obligation_vehicle_routine"
+            ),
         ]
 
     def __str__(self):
@@ -519,6 +525,10 @@ class ObligationProjection(models.Model):
         indexes = [
             models.Index(
                 fields=["organization", "vehicle_id", "due_at"], name="projection_vehicle_due"
+            ),
+            # Same purpose for the projection's "due window OR routine = false" scope (issue #74).
+            models.Index(
+                fields=["organization", "vehicle_id", "routine"], name="projection_vehicle_routine"
             ),
         ]
 
