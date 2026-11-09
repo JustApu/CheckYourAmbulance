@@ -16,7 +16,6 @@
     "read the current fleet-readiness summary with no later check",
     "a later effective Pass for i1 is recorded and the summary is read again",
     "the later check is a Fail instead of a Pass",
-    "the later check is invalidated and the summary is read again",
     "a check is recorded for k2 only and the summary is read again",
     "the obligation is more than seven days before the read instant; a read at exactly L versus after L",
     "a default as-of read at an instant before a later invalidation was recorded"
@@ -25,7 +24,6 @@
     "Monday's obligation counts as Overdue and as Missed in the current summary",
     "it no longer counts as Overdue but still counts as Missed until it is more than seven days before the read instant; history still shows it as permanently Overdue (missed); the readiness page shows the Missed count per vehicle and in the fleet totals",
     "the same Overdue and Missed counts apply and the item stays not ready (section 5.4)",
-    "the earlier miss counts as Overdue again in the current summary (owner to confirm, OQ-63 and the AC-36 case 6 note)",
     "k2's check does not clear i1's missed obligation (same vehicle, item and kit instance, OQ-63)",
     "the obligation is in neither count once older than seven days; a check at exactly L still completes it and it is missed only when the read instant is after L (SCH-2)",
     "the default as-of Missed count is as known then and ignores the later invalidation; the as-of Overdue count follows section 19.3; a stored summary equals a recomputation from events (section 19)"
