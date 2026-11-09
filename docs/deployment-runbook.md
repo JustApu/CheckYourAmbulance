@@ -979,9 +979,9 @@ Tester: Claude (Anthropic), as operator and as stand-in custodian, on the two ow
 | Phase A, 150 checks | 83 s |
 | **Stop instant** | 18:31:10 UTC |
 | Phase B, 150 checks | 59 s |
-| Log shipping (`cya-backup-binlog.service`) | binary logs `000056` (2,926 bytes) and `000057` (207,098 bytes) shipped |
+| Log shipping (`cya-backup-binlog.service`), started by hand | binary logs `000056` (2,926 bytes) and `000057` (207,098 bytes) shipped; the run started at 18:32:15 UTC, 3 s after phase B's last write (18:32:12) |
 | **Restore to the stop instant**, run twice on separate databases | each: full load 231 s, log replay 39 s, **270 s in total** |
-| Both timers, run unattended | the five-minute log-shipping timer ran once on schedule (one run observed) and shipped the pending log; the nightly full-backup timer, moved with a temporary drop-in to a time four minutes ahead, uploaded 126,308,162 bytes in 47 s |
+| Both timers, run unattended | the five-minute log-shipping timer ran once on schedule (one run observed, at 19:40 UTC) and shipped the pending log, with no write timed against it; the nightly full-backup timer, moved with a temporary drop-in to a time four minutes ahead, uploaded 126,308,162 bytes in 47 s |
 
 **Restored data.** For each of `check_record` (114,659 rows), `audit_event` (117,618), `obligation` (129,000) and `deficiency_event` (3,314), the count and a SHA-256 over every row's ID and recorded instant for rows before the stop instant match the source exactly. The 150 phase B checks recorded after the stop instant are absent from the restore (150 in the source, 0 in the restore). The restore holds 81 migrations.
 
@@ -998,7 +998,7 @@ Tester: Claude (Anthropic), as operator and as stand-in custodian, on the two ow
 
 **Results against the objectives.**
 - **RTO 24 hours: met with a wide margin.** The logical restore took 270 s for this dataset (172 daily due instants per vehicle, 5 vehicles, 2.07 GB). Scaled linearly by due instants (an estimate, not a measurement), a year of this agency would take about 9.5 minutes and four times the agency for a year about 38 minutes. The projection comparison scales with obligations: by the same estimate about 103 minutes for a year of this agency and about 7 hours for four times that, so it should be planned as the longest step of a recovery.
-- **RPO 15 minutes: met.** The restore lost nothing before the chosen instant and applied nothing after it. The newest records were shipped by the five-minute timer.
+- **RPO 15 minutes: not demonstrated end to end in this run.** The restore lost nothing before the chosen instant and applied nothing after it, but that shows the restore is correct, not the loss window. The loss window is the shipping interval (five minutes) plus the upload time. Here the shipping after phase B was started by hand 3 s after the last write, and the scheduled five-minute timer was observed once (19:40 UTC), shipping a log in seconds, with no write timed against it. The timed evidence is the [2026-11-03 run](#backup-and-restore-rehearsal-evidence-2026-11-03-utc), where the timer put a write recorded at 15:46:35 off-host by 15:50:07. A rehearsal against the real off-host account should time a write against the scheduled timer again.
 
 **Observations.**
 - **The schema owner can TRUNCATE an append-only table.** In an earlier restored copy the schema owner's `TRUNCATE audit_event` was not refused and emptied the table (TRUNCATE is DDL, so the transaction could not undo it). The runtime account is refused. This matches the design in [audit implementation notes](audit-implementation-notes.md) (the schema owner is trusted for migrations), so the protection against it is credential handling: keep the owner credentials out of the application and the recovery copies. That copy was dropped and the restore repeated; the figures above are from the fresh copy.
