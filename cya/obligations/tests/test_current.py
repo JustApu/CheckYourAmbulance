@@ -708,7 +708,7 @@ class CurrentQueryLimitTests(SimpleTestCase):
         vehicle = "00000000-0000-0000-0000-000000000002"
         obligation = "00000000-0000-0000-0000-000000000003"
         instant = datetime(2026, 6, 1, tzinfo=UTC)
-        facts = {"version": 1, "obligation": {"id": obligation}}
+        facts = {"version": current.FACTS_VERSION, "obligation": {"id": obligation}}
 
         def capture(rows, limit=None):
             if not isinstance(rows, QuerySet):
