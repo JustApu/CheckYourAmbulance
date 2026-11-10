@@ -317,7 +317,7 @@ def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
 
 
 def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False):
-    """Read current facts, or return None for a missing/partially selected cache.
+    """Read current facts, or return None for a missing, partially selected or outdated cache.
 
     Comparing all in-scope source IDs protects first deployment/recovery from a partial
     cache. Selection flags are transactional projection facts; the immutable selection stream
@@ -354,6 +354,11 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     )
     source_ids = {oid for oid, _routine in source_rows}
     if {r[0] for r in rows} != source_ids:
+        return None
+    # Rows written by an older facts version (for example before the pinned late limit of
+    # issue #80) are treated like a missing cache: the caller replays the immutable events.
+    # A reader never rebuilds rows; that remains the writers' and the rebuild command's job.
+    if any(not isinstance(r[2], dict) or r[2].get("version") != FACTS_VERSION for r in rows):
         return None
     newer = {r[0] for r in rows if r[3] > instant}
     # The projection's selected flag is maintained in the same transaction as each
