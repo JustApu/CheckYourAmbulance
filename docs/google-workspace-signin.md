@@ -102,3 +102,19 @@ The owner chose dedicated, **non-personal** test accounts in the organization's 
 - **Passed:** sign-in with a managed Workspace account; a signed-in session ending after the bound once the account was suspended (tested with `CYA_SESSION_MAX_AGE=300`); Google refusing the suspended account at sign-in; and in-application deactivation (immediate sign-out, then refusal with attribution kept).
 - **Not exercised in this application's code:** sign-in with a personal Google account. The OAuth client's consent screen is "Internal", so Google itself refuses non-organization accounts before the callback. That refusal remains covered by the offline tests (AC-22).
 - **Limits:** the check ran with stand-ins for the role granter and audit sink, it does not verify the concrete role/audit adapters now installed by [issue #22](https://github.com/JustApu/CheckYourAmbulance-archive/issues/22)/[issue #23](https://github.com/JustApu/CheckYourAmbulance-archive/issues/23). Those have offline MariaDB coverage; a deployment smoke check with the concrete collaborators remains unperformed here.
+
+**Result (2026-11-10, on the retained Ubuntu 26.04 rehearsal host, with the owner's Internal OAuth client, synthetic data and two dedicated test accounts, A and B; pass or fail only):**
+- **Passed:**
+  - A managed Workspace account signed in and was provisioned with Crew only, with `USER_PROVISIONED` and `SIGN_IN` `SUCCEEDED` audit entries. The concrete role and audit adapters ran, not stand-ins.
+  - The signed-in user used the application through nginx over HTTPS: pages, six saved checks (HTTP 201) and accepted WebSocket connections.
+  - The session ended at the bound. With `CYA_SESSION_MAX_AGE=300`, the last request accepted was 298 s after the sign-in and the first rejected one (HTTP 401) was 345 s after it; a save sent after the bound was rejected and not recorded.
+  - Google refused a suspended Workspace account, and the account signed in again after it was restored. The refusal is owner-observed (it happens at Google, see below); the later sign-in is in the audit trail.
+  - Google refused a personal Google account with its own "can only be used within its organization" page (owner-observed). The application saw a login start and no callback, and created no user and no audit entry.
+  - In-application deactivation, through the audited `set_user_active` command: the next request was redirected to sign-in, the next sign-in was refused as `user_inactive`, and the refusal's audit entry carries the correlation ID shown on the refusal page. After the user was reactivated, a sign-in succeeded again (it is in the audit trail), and the user's roles, profile and earlier records were unchanged.
+  - A second Workspace account (B) was provisioned in the same way.
+- **Found while testing (for operators):**
+  - A malformed client secret in `runtime.env` (twice the length of the corrected one) made the code exchange fail; the application recorded a refused sign-in with reason `CODE_REJECTED`, and correcting the value and restarting the service cured it. Check the secret's length and that the line appears once.
+  - Requests that arrive while the service restarts get a brief HTTP 502 from nginx, including a sign-in callback.
+  - The audit table stores a refusal with outcome `DENIED` (the sink's `REFUSED` is mapped to it) and an upper-case reason code such as `USER_INACTIVE`; the refusal page shows the code in lower case.
+  - Google's own refusals (a non-organization account, a suspended account) never reach the application, so they appear in no audit table. A login start without a callback in the proxy log is the only trace.
+- **Not recorded here:** rotating or deleting the test client secret (step 6) is the owner's step; the production OAuth client and domain were not verified.

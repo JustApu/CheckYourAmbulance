@@ -731,11 +731,17 @@ CI tests both. The application suite's version check accepts exactly those two v
    `webroot` authenticator with `/var/lib/cya-acme` (nginx answers the challenge there): a certificate issued with
    certbot's `standalone` authenticator needs port 80 for itself and will fail to renew while nginx holds it. Give the
    renewal a reload hook (`--deploy-hook 'systemctl reload nginx'`, or a script in
-   `/etc/letsencrypt/renewal-hooks/deploy/`), or nginx keeps serving the old certificate.
+   `/etc/letsencrypt/renewal-hooks/deploy/`), or nginx keeps serving the old certificate. A plain
+   `certbot renew --dry-run` skips deploy hooks; add `--run-deploy-hooks` to exercise the reload.
 
 8. **Google sign-in.** Besides the client ID, secret and hosted domain, `runtime.env` needs
    `CYA_GOOGLE_REDIRECT_URI=https://__HOST__/auth/callback/`, and the OAuth client must list
    that address; without it, sign-in stays unavailable (503).
+
+   *2026-11-10:* put the four Google values into `runtime.env` with `sudoedit`, so the secret never appears in a
+   command line or shell history, then restart the service (requests during the restart get a brief 502). Before using a
+   browser, check that `/auth/login/` answers a redirect to Google (code flow, PKCE `S256`, scope `openid email profile`,
+   the domain hint and the exact callback) and that Google accepts that request without a client or callback error.
 
 9. **Recurring jobs and teardown.** As on Rocky.
 
@@ -950,6 +956,8 @@ Tester: Claude (Anthropic), as operator, on an Ubuntu 26.04 host that the owner 
 | Interrupted migration, rehearsed on a database copy | after rewinding the copy to before 0011, an index planted where the second operation would create it made the migration fail halfway: the first index was created, the second failed with error 1061 (duplicate key name), 0011 was not recorded, and a blind rerun failed again at the first index. Dropping exactly the leftover indexes and rerunning succeeded; `migrate --check` and `verify_audit_schema` passed and the row counts were unchanged. The copy was dropped |
 | Synthetic deputy | a separate account with its own SSH key (never the operator's), the password locked, and its key restricted to one source with `from=`: a login through the allowed source worked; the same key from another address was refused (the log shows "Refused by key options"); the operator and deputy keys were refused for each other's accounts; a read-only deputy check (services, updates, certificate days left, disk, memory, errors) ran; the logs attribute logins and sudo commands to each user with distinct key fingerprints; both logins survived `ufw reload`. **Revocation:** removing the key refused new logins, but an already open session kept running until `loginctl terminate-user`; the account was then locked and deleted |
 | Reboot | back in 47 s; every service started on its own (the `ufw` unit became active), the same six firewall rules, listening ports, MariaDB settings, SSH hardening and data were unchanged, time synchronized in UTC, and `/run/cya` was recreated 0750 `cya:cya` |
+| Real Workspace sign-in (2026-11-10) | with the owner's Internal OAuth client and two test accounts: the start of sign-in sends the expected authorization request (code flow with PKCE S256, scope `openid email profile`, domain hint, this site's callback) and Google accepts it; a managed account signs in and is provisioned with Crew only; a session ends at the configured bound; Google refuses a non-organization account and a suspended account; in-application deactivation signs the user out and refuses the next sign-in; reactivation restores it. Details and operator notes are in the [sign-in procedure](google-workspace-signin.md#manual-verification-with-real-accounts-owner-decision-option-b) |
+| Renewal hook | `certbot renew --dry-run --run-deploy-hooks` (run with the owner's authorization): simulated renewal succeeded; nginx reloaded afterwards; certificate and HTTPS unchanged |
 | Exposure from outside | From outside over IPv4 (TCP ports 1 to 1024 plus 3306, 5432, 6379, 8000, 8080, 8099, 8443, 9000, 9090, 11211 and 27017) only ports 22, 80 and 443 answered; the `Server` header shows `nginx` without a version; plain HTTP to any path or to the bare address redirects to HTTPS; HTTPS by bare address gets no handshake; unauthenticated application paths redirect to sign-in or return 404. The host has no global IPv6 address, so IPv6 exposure could not be tested from outside; the firewall carries the IPv6 rules |
 
 **Findings for the runbook** (changes are in the profile steps above):
@@ -960,8 +968,8 @@ Tester: Claude (Anthropic), as operator, on an Ubuntu 26.04 host that the owner 
 - **Updates:** `apt-get upgrade` holds back `ubuntu-server-minimal`; the default root volume is half the volume group.
 
 **Not done or not verified here.**
-- **A real certificate renewal.** The owner reconfigured the renewal and ran the dry run (its output: all simulated renewals succeeded). I read the renewal file back (authenticator `webroot`, web root `/var/lib/cya-acme`, `renew_hook = systemctl reload nginx`) and did not run the renewal myself. A real renewal (certbot starts about 30 days before the certificate expires) has not happened, so the reload after a real renewal is untested.
-- **Google sign-in.** No OAuth client was configured, so sessions were minted with the application's own signed-cookie store; real Workspace sign-in was not exercised.
+- **A real certificate renewal.** The owner reconfigured the renewal and ran a plain dry run (all simulated renewals succeeded); I read the renewal file back (authenticator `webroot`, web root `/var/lib/cya-acme`, `renew_hook = systemctl reload nginx`). A plain `renew --dry-run` skips deploy hooks, so with the owner's authorization I then ran `certbot renew --dry-run --run-deploy-hooks` (Certbot 4.0.0's help: it runs the saved hooks only if the dry run succeeds, with the current certificate): the simulation succeeded in 127 s, the reload ran afterwards (the nginx master process kept its process ID, all four workers were replaced, the journal shows the reload, `nginx -t` passes), the certificate serial was unchanged, and HTTPS from outside still returned the sign-in redirect with a valid chain on the same certificate. What remains untested is a real renewal: certbot starts about 30 days before the certificate expires, and nginx picking up a new certificate has not been seen.
+- **Google client secret.** The load client and the WebSocket checks used sessions minted with the application's signed-cookie store; real Workspace sign-in was verified separately (see the table). Rotating or deleting the test client secret afterwards is the owner's step and is not recorded here.
 - **Alert delivery** ([issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8)); a named human deputy (DEP-3); SSH source restriction for the operator (the owner's deferral stands; the restriction was tested on the deputy key only); IPv6 exposure from outside; the load targets of [issue #10](https://github.com/JustApu/CheckYourAmbulance/issues/10); the backup path (rehearsed under [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7)); and teardown, which waits for the owner's confirmation.
 
 ## Backup and restore rehearsal evidence, 2026-11-03 UTC
