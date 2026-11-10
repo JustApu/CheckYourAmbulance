@@ -13,26 +13,35 @@ class Element {
     this.hidden = false; this.disabled = false; this.checked = false; this._text = "";
     this.parentNode = null; this._document = null;
   }
-  set textContent(text) { this._text = text; this.children = []; }
+  set textContent(text) {
+    if (this._document && this._document.activeElement && this.contains(this._document.activeElement)) this._document.activeElement = null;
+    for (const child of this.children) child.parentNode = null;
+    this._text = text; this.children = [];
+  }
   get textContent() { return this._text || this.children.map(e => e.textContent).join(""); }
   setAttribute(name, value) { this[name] = value; }
   removeAttribute(name) { delete this[name]; }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   fire(name) {
-    if (name === "click" && this.type === "button" && this._document) this._document.activeElement = this;
+    if (name === "click" && this.type === "button" && this._document && !this.disabled) this._document.activeElement = this;
     if (this.listeners[name]) this.listeners[name]({preventDefault() {}});
   }
   appendChild(node) { node.parentNode = this; node._document = this._document; this.children.push(node); return node; }
   removeChild(node) {
     this.children.splice(this.children.indexOf(node), 1);
+    if (this._document.activeElement && node.contains(this._document.activeElement)) this._document.activeElement = null;
+    node.parentNode = null;
     if (this.id === "items" && this._document.defaultView.simulateListJump) { this._document.defaultView.scrollY = 0; }
   }
   get firstChild() { return this.children[0]; }
   get selectedOptions() { return this.children.filter(node => node.selected); }
   contains(node) { for (let current = node; current; current = current.parentNode) { if (current === this) return true; } return false; }
-  showModal() { this.open = true; }
-  close() { this.open = false; }
-  focus(options) { this.focusOptions = options; if (this._document) this._document.activeElement = this; }
+  showModal() { this.open = true; if (this._document) this._document.activeElement = this; }
+  close() { this.open = false; if (this._document) this._document.activeElement = null; }
+  focus(options) {
+    this.focusOptions = options;
+    if (!this.disabled && this._document && this._document.contains(this)) this._document.activeElement = this;
+  }
   getBoundingClientRect() {
     if (this.type !== "li" || !this.parentNode || this.parentNode.id !== "items") return {top: 0, bottom: 0};
     const top = this.parentNode.children.indexOf(this) * 100 - this._document.defaultView.scrollY;
@@ -71,6 +80,11 @@ function environment(config, forms = []) {
         }
       }
       elements[id]._document = document; return elements[id];
+    },
+    contains(node) {
+      const roots = Object.values(elements);
+      for (let current = node; current; current = current.parentNode) { if (roots.includes(current)) return true; }
+      return false;
     },
     querySelector() { return {value: "synthetic-csrf"}; },
     querySelectorAll(selector) { return selector === ".workflow-write" ? forms : []; },
@@ -133,16 +147,19 @@ function generic(kind) {
     run.window.scrollY = 500; run.window.simulateListJump = true;
     const target = run.elements.items.children[5], pass = findAction(target, "pass"); pass.fire("click");
     assert.equal(run.window.scrollY, 500, "pending render keeps the active checklist item in place");
-    assert.equal(run.document.activeElement.dataset.action, "pass", "pending render restores the same action focus");
+    assert.equal(run.document.activeElement.type, "li", "pending render moves focus to the item while its action is disabled");
+    assert.equal(run.document.activeElement.dataset.itemKey, "item-5|kit-a");
     response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
     assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
     response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
+    run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
+    assert.equal(run.document.activeElement, run.get("outcome-dialog"), "a live rerender keeps focus inside the open deficiency dialog");
     newReport(run); run.get("outcome-form").fire("submit");
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
-    assert.equal(run.document.activeElement.dataset.action, "failed", "deficiency submission restores focus to the failed item action");
+    assert.equal(run.document.activeElement.type, "li", "deficiency submission moves focus to the failed item while its action is disabled");
     response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
     assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
