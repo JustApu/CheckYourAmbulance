@@ -135,7 +135,8 @@
     var k = key(row);
     if (entries[k] && (entries[k].status === "pending" || entries[k].status === "unconfirmed")) { return; }
     var entry = {status: "pending", operationId: uuid4(), basis: row.latest_check_id, value: value,
-                 retryable: true, outcome: outcome, deficiency: deficiency, explanation: explanation};
+                 retryable: true, outcome: outcome, deficiency: deficiency, explanation: explanation,
+                 dueAt: row.due_at || null};
     entries[k] = entry;
     if (config.verification_for_deficiency_id) { verificationRows[k] = row; }
     send(row, entry);
@@ -318,12 +319,16 @@
   // The outcome this person's acknowledged tap recorded, or null when nothing was saved.
   var outcomeWords = {PASSED: "Pass", FAILED: "Fail", UNABLE_TO_INSPECT: "Unable to inspect", NOT_APPLICABLE: "Not applicable"};
   function savedOutcome(entry) { return entry && entry.status === "saved" ? entry.savedOutcome || "PASSED" : null; }
-  // The result recorded for this window: the server's satisfying outcome, else this page's save
-  // while the row's newest check is still that save (or its basis, before the reload arrives).
+  // The newest result recorded for the shown window, or null. This page's save counts while the
+  // row still shows the same obligation and its newest check is that save (or its basis, before
+  // the reload arrives); a satisfied window otherwise reports its newest effective check, because
+  // a later Fail does not change the earlier Pass that satisfied it (SCH-7).
   function recordedOutcome(row, entry) {
-    if (row.obligation_state === "SATISFIED" && row.obligation_outcome) { return row.obligation_outcome; }
-    var mine = entry && (row.latest_check_id === entry.checkId || row.latest_check_id === entry.basis);
-    return mine ? savedOutcome(entry) : null;
+    var mine = savedOutcome(entry) && (row.due_at || null) === entry.dueAt &&
+      (row.latest_check_id === entry.checkId || row.latest_check_id === entry.basis);
+    if (mine) { return savedOutcome(entry); }
+    if (row.obligation_state === "SATISFIED") { return row.latest_check_outcome || row.obligation_outcome || null; }
+    return null;
   }
   function saveIndicator(entry) {
     var p = el("p", "save-state save-state-" + entry.status);

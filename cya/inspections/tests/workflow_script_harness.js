@@ -222,9 +222,32 @@ function generic(kind) {
     assert(pill, "the server's failed result has its own pill"); assert.equal(pill.textContent, "Inspected — failed");
     assert(!isPrimary(findAction(item(), "pass")), "after reload the recorded Fail still keeps Pass unhighlighted");
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
-    run.context.testUI.setRows([{...open, obligation_state: "DUE", latest_check_id: "next-window", latest_check_outcome: "PASSED"}]);
+    run.context.testUI.setRows([{...open, obligation_state: "DUE", latest_check_id: "other", latest_check_outcome: "PASSED"}]);
     run.context.testUI.render();
-    assert(isPrimary(findAction(item(), "pass")), "a newer check (or a new window) is no longer held back by this page's old Fail");
+    assert(isPrimary(findAction(item(), "pass")), "someone else's newer check is no longer held back by this page's old Fail");
+    run.context.testUI.setRows([{...open, obligation_state: "DUE", due_at: "2026-06-02T06:00:00Z", latest_check_id: "mine", latest_check_outcome: "FAILED"}]);
+    run.context.testUI.render();
+    assert(isPrimary(findAction(item(), "pass")), "a new window with the same newest check makes Pass primary again");
+  }
+  {
+    // Review of PR #93: an earlier Pass satisfied the window; a new acknowledged Fail must still un-highlight Pass.
+    const run = checklist(), item = () => run.elements.items.children[0];
+    const passed = {...row, obligation_state: "SATISFIED", obligation_outcome: "PASSED", due_at: "2026-06-01T06:00:00Z"};
+    run.context.testUI.setRows([passed]); run.context.testUI.render();
+    assert(isPrimary(findAction(item(), "pass")), "a satisfied Pass window keeps Pass primary");
+    findAction(item(), "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run); run.get("outcome-form").fire("submit");
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "FAILED", server_recorded_at: "2026-06-01T05:40:00Z"}}); await tick();
+    assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
+    assert(!isPrimary(findAction(item(), "pass")), "immediately after the acknowledged Fail, Pass is not primary");
+    run.context.testUI.setRows([{...passed, latest_check_id: "mine", latest_check_outcome: "FAILED"}]); run.context.testUI.render();
+    assert(!isPrimary(findAction(item(), "pass")), "after refresh (still satisfied by the earlier Pass), the newest Fail keeps Pass unhighlighted");
+    const fresh = checklist(), freshItem = () => fresh.elements.items.children[0];
+    fresh.context.testUI.setRows([{...passed, latest_check_id: "theirs", latest_check_outcome: "FAILED"}]); fresh.context.testUI.render();
+    assert(!isPrimary(findAction(freshItem(), "pass")), "another viewer of the same server state also sees Pass unhighlighted");
+    fresh.context.testUI.setRows([{...passed, latest_check_id: "later", latest_check_outcome: "PASSED"}]); fresh.context.testUI.render();
+    assert(isPrimary(findAction(freshItem(), "pass")), "a newer Pass restores Pass as the recorded result");
   }
   {
     // The server's outcome is shown, not the tap's guess: a count that does not match is a saved Fail.
@@ -246,7 +269,8 @@ function generic(kind) {
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Pass."));
     assert(isPrimary(findAction(item(), "pass")), "a saved Pass keeps Pass primary");
     assert.equal(findClass(item(), "pill-failed"), null);
-    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED"}]); run.context.testUI.render();
+    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "theirs", latest_check_outcome: "FAILED"}]);
+    run.context.testUI.render();
     assert(!isPrimary(findAction(item(), "pass")), "the server's recorded Fail outranks this page's earlier saved Pass");
   }
   for (const outcome of ["unconfirmed", "rejected"]) {
