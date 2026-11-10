@@ -43,6 +43,11 @@ from cya.obligations.requirements import CARRY_OVER
 from cya.obligations.state import State, aware, rebuild_vehicle_projection
 from cya.operations.status import status_at
 
+# RPT-5a (c), OQ-61: report outputs that contain fleet-readiness counts, as (name, render) pairs
+# whose rendered text must include the Missed count. None exists yet; a report that adds the
+# readiness counts must be listed here so scenario AC-36 checks it.
+REPORT_OUTPUTS = ()
+
 VEHICLE_LIMIT = 25
 MAX_EVENTS = 10000  # deficiency events one picture replays; more is refused, never cut
 FACT_EVENT_TYPES = (

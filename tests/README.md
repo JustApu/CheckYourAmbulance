@@ -18,7 +18,7 @@ The requirement mappings in `contracts/step-catalog.json` are authoritative. Eac
 1. registers a function for every step of its catalog case with `cya.testing.scenarios.STEPS`, in a module imported by `cya/testing/bindings.py`;
 2. changes the scenario's status to `bound` and its TRACEABILITY row.
 
-Steps share a context dict and may add callables to `context["cleanups"]`. AC-22 is bound (`cya/accounts/scenario_steps.py`, [issue #21](https://github.com/JustApu/CheckYourAmbulance-archive/issues/21)).
+Steps share a context dict and may add callables to `context["cleanups"]`. AC-22 is bound (`cya/accounts/scenario_steps.py`, [issue #21](https://github.com/JustApu/CheckYourAmbulance-archive/issues/21)). AC-36 is bound with `"database": "commit"` (`cya/attention/scenario_steps.py`, [issue #80](https://github.com/JustApu/CheckYourAmbulance/issues/80)).
 
 A bound scenario runs its `setup`, `actions` and `assert` steps in order and fails before running anything if any step is unbound. `EX-*` scenarios have no catalog step list. One that is ready to bind lists its own ordered `steps` in its file (same registry and rules as above) and is then marked `bound`; without `steps` it stays pending. A scenario whose steps run audited commands also sets `"database": "commit"`, which runs it in a `TransactionTestCase` because those commands refuse to run inside a wrapping transaction. `EX-role-change-end-to-end` is bound this way (`cya/authorization/scenario_steps.py`, [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25)). Bindings must test positive and negative matrix branches.
 
