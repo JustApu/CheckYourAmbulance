@@ -8,6 +8,8 @@ SPEC §17.4 permits this disposable materialization; `SPEC.md` is unchanged.
 
 The issue #10 production-like 1× shift-change target, tracked in [issue #70](https://github.com/JustApu/CheckYourAmbulance/issues/70), is **not met** on the reviewer-reported rehearsal run before the status-lock fix. Only 2.8% of requests completed under one second and 3.1% under two seconds, below the owner's 95%/98% targets.
 The sample and its limitations are recorded below; no 4×/10× run is claimed.
+A later measurement on the current `main` after issues #73 to #75 and the worker-count test of 2026-11-09 are recorded in
+[their own section](#net-benchmark-and-worker-count-test-after-issues-73-to-75-2026-11-09); the targets are still **not met**.
 The local synthetic measurements below do not establish the owner targets.
 
 After review, the rehearsal operator should deploy the reviewed head with traffic
@@ -19,6 +21,68 @@ readiness. Record request counts, failures, p50/p90/p95, proportions below one
 and two seconds, single-process CPU and MariaDB CPU. Retain the owner's p90 >3 s
 cutoff before trying higher load steps. Record any remaining bottleneck instead
 of treating a faster isolated query as a passing shift-change result.
+
+## Net benchmark and worker-count test after issues #73 to #75 (2026-11-09)
+
+Claude ran the issue #10 1× scenario against `main` at `a7da994` (which contains issues #73, #74 and #75) on the
+Ubuntu rehearsal host (4 vCPU, MariaDB 11.8.6), with the two issue #74 indexes present. It is a worker-count and
+channel-layer test as well as a net benchmark, so it varies the number of uvicorn workers. Synthetic data only; one run per
+arm, one host, directional. It does **not** satisfy issue #70's final 1× acceptance.
+
+**Setup.** The synthetic twelve-month history (161 distinct days; 25,800 obligations per vehicle) held 148,500 obligations
+and projection rows and 114,504 checks for five vehicles at the start of each arm, with 15 crew and two supervisors, think
+time 3 to 8 s, arrivals over 30 s, the shipped page's acknowledgement reload (`--ack-reload`) and a 600 s limit. Each arm
+restored the same prepared snapshot, started the application, waited until the disk was quiet (30 s consecutive, no swap,
+I/O wait under 5%) and then ran the push-driven client; every arm was valid (swap 0, steal at most 0.09%, no watchdog stop;
+one 5-second I/O-wait sample of 21% in the first arm). Each crew session performs a fixed 50 saves (750 in all). The arms
+were run in this order:
+
+| Arm | Workers and channel layer |
+|---|---|
+| W1 | 1 worker, in-memory layer (the shipped configuration) |
+| W3m | 3 workers, in-memory layer. Diagnostic only: the in-memory layer does not deliver live updates across workers, so this is not a deployable configuration |
+| W3v | 3 workers, Valkey as the shared layer through `channels_redis` (a scratch install; nothing was added to the repository) |
+| W3v2 | W3v repeated |
+| W3m2 | W3m repeated |
+
+**Results** (seconds, client-side wall time):
+
+| Arm | Saves done (window) | Pages and saves p50 / p90 / p95 | Under 1 s / under 2 s | Live reload p50 / p90 / p95 | Supervisor readiness p50 / p90 / p95 | App / DB cores |
+|---|---|---|---|---|---|---|
+| W1 | 351 of 750 (630 s, stopped at the deadline) | 18.3 / 23.5 / 24.8 | 3.5% / 4.8% | 26.1 / 29.9 / 32.1 | 106 / 136 / 140 | 1.16 / 0.34 |
+| W3m | 750 (525 s) | 3.1 / 7.3 / 8.8 | 15.8% / 32.4% | 7.9 / 14.3 / 16.1 | 41 / 68 / 75 | 2.39 / 0.79 |
+| W3v | 750 (492 s) | 2.6 / 6.9 / 8.7 | 22.6% / 40.0% | 6.7 / 16.5 / 18.1 | 33 / 83 / 90 | 2.48 / 0.85 |
+| W3v2 | 750 (471 s) | 1.8 / 6.4 / 7.9 | 26.4% / 54.2% | 8.4 / 14.0 / 15.7 | 46 / 72 / 77 | 2.42 / 0.84 |
+| W3m2 | 750 (484 s) | 1.9 / 6.1 / 8.1 | 26.2% / 51.9% | 6.1 / 16.8 / 18.4 | 35 / 84 / 92 | 2.30 / 0.81 |
+
+Supervisor readiness reads were never under 1 s or under 2 s in any arm; the crew-visible readiness reads were under 2 s in
+0 to 3% of cases.
+
+**Reading the results.**
+- **The targets are still not met.** The target is at least 95% of page loads and saves under 1 s and at least 98% under 2 s,
+  and a stop before higher steps if p90 exceeds 3 s. The best arm had 26% under 1 s and 54% under 2 s, and p90 above 6 s. The remaining cost
+  is the checklist and readiness reads, not the saves; issue #80 targets the readiness read.
+- **Throughput.** One worker was saturated on application CPU (1.16 cores) and finished 351 of the 750 saves by its deadline
+  (0.56 saves per report-second). Three workers finished all 750 in 471 to 525 s (1.43 to 1.59 per second), using 2.3 to
+  2.5 application cores and about 0.8 database cores of the four. These windows end when the fixed workload ends and include
+  the client's think time, so the 2.6 to 2.9 times ratio is a lower bound on the capacity difference, not a measured capacity.
+- **The channel layer's cost is not distinguishable from noise.** Within one condition the two runs differ by about 8 to 25% at
+  p90 and up to about 50% at p50 (pages and saves p90: in memory 7.3 and 6.1 s, Valkey 6.9 and 6.4 s), more than any difference between
+  conditions. Valkey itself used 3.3 to 3.7 CPU-seconds in about eight minutes and handled about 19,000 and 17,000 commands in
+  the two runs.
+- **Cross-worker delivery.** A direct two-process test showed Valkey delivered a group message across processes and the in-memory layer
+  did not. In the load arms the client counted 2,137 and 2,223 WebSocket pushes with Valkey against 1,135 and 1,243 in memory; the
+  expected number of messages was not recorded, so these counts support no loss fraction. **Unexplained:** the two Valkey arms each had abnormal WebSocket closes
+  (code 1006), 8 and 9, and the other three arms had none. Whether the layer, worker timing or the client caused them was not
+  investigated; it needs an answer before any layer is recommended.
+- **Relation to earlier measurements.** Three-worker figures are in the same range as the earlier matrix taken before issues
+  #73 to #75 (check-save p90 6.1 to 6.2 s there, 6.1 to 7.0 s here). The arms differ in base and are single runs, so no effect of
+  those issues on the 1× result is claimed in either direction.
+
+**Not measured here.** The per-read query count and wall time with the status-at-read join, the status-change duration
+and same-vehicle save contention (the client records stale-connection retries, 204 to 448 per arm, which are not a
+contention measure). Issue #70 still needs them. **Not claimed:** a worker count, a hosting layout or a channel layer
+(SPEC DEP-2 and section 17.7 item 7 remain owner decisions), any split-host result, or any statistical statement.
 
 ## PR #72 readiness coalescing paired rehearsal (2026-11-07)
 
