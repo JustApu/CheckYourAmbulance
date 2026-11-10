@@ -529,6 +529,12 @@ projection comparison ([evidence](#backup-and-restore-rehearsal-evidence-2026-11
 4. **Restoring under a different database name** (a rehearsal) needs two more steps: grant the schema-owner account `ALL PRIVILEGES` on the new name, and give the runtime account a fresh name with no earlier grants, because the grant tool refuses an account that already holds grants on another database. Run the DBA step as the operating-system root user, not as the service user. A recovery under the original name needs neither.
 5. **Rehearsal copies** are destroyed afterwards under production rules (DEP-9), never on a developer machine or in CI.
 
+**Hot or physical backup tools and a warm spare** ([issue #10](https://github.com/JustApu/CheckYourAmbulance/issues/10); synthetic data, single runs, read from the rehearsals above):
+- **Hot or physical backup tools were not evaluated.** The logical restore met the 24-hour RTO with a wide margin (270 s for 129,000 obligations and 2.07 GB; a linear estimate is about 9.5 minutes for a year of that agency and about 38 minutes for four times the agency). Re-evaluate them if a restore ever approaches the RTO.
+- **The restore time does not call for a warm spare.** Not covered by those figures: a recovery also needs a new host, its certificate and its configuration (the rebuilt-host rehearsal built one from a fresh image but was not timed as a recovery), and the projection comparison, estimated at about 103 minutes for a year of that agency and about 7 hours for four times that. On these estimates the whole recovery fits in 24 hours, but it has not been timed end to end.
+- **The 15-minute RPO** rests on the five-minute shipping interval; the 2026-11-03 run timed a write reaching the store in 3.5 minutes, and the scheduled-timer timing was not repeated on 2026-11-09 (see the evidence above).
+- **Capacity is a separate question.** The worker-count test in the [performance record](issue-67-performance.md#net-benchmark-and-worker-count-test-after-issues-73-to-75-2026-11-09) kept 3.1 to 3.3 of a 4-vCPU host's cores busy with three workers. I have not priced such a server against the DEP-4 planning budget (about USD 25 a month for server, off-host storage and monitoring together). Whether to fund more capacity or a spare is the owner's decision.
+
 ## Rocky Linux 9 host profile (rehearsed 2026-11-02)
 
 Verified on a throwaway Rocky Linux 9.8 (x86_64) host with SELinux enforcing, using
