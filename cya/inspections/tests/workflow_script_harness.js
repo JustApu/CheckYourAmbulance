@@ -11,21 +11,33 @@ class Element {
     this.id = id; this.type = type; this.value = ""; this.defaultValue = "";
     this.children = []; this.listeners = {}; this.dataset = {}; this.fields = {}; this.queries = {};
     this.hidden = false; this.disabled = false; this.checked = false; this._text = "";
+    this.parentNode = null; this._document = null;
   }
   set textContent(text) { this._text = text; this.children = []; }
   get textContent() { return this._text || this.children.map(e => e.textContent).join(""); }
   setAttribute(name, value) { this[name] = value; }
   removeAttribute(name) { delete this[name]; }
   addEventListener(name, fn) { this.listeners[name] = fn; }
-  fire(name) { if (this.listeners[name]) this.listeners[name]({preventDefault() {}}); }
-  appendChild(node) { this.children.push(node); return node; }
-  removeChild(node) { this.children.splice(this.children.indexOf(node), 1); }
+  fire(name) {
+    if (name === "click" && this.type === "button" && this._document) this._document.activeElement = this;
+    if (this.listeners[name]) this.listeners[name]({preventDefault() {}});
+  }
+  appendChild(node) { node.parentNode = this; node._document = this._document; this.children.push(node); return node; }
+  removeChild(node) {
+    this.children.splice(this.children.indexOf(node), 1);
+    if (this.id === "items" && this._document.defaultView.simulateListJump) { this._document.defaultView.scrollY = 0; }
+  }
   get firstChild() { return this.children[0]; }
   get selectedOptions() { return this.children.filter(node => node.selected); }
-  contains() { return false; }
+  contains(node) { for (let current = node; current; current = current.parentNode) { if (current === this) return true; } return false; }
   showModal() { this.open = true; }
   close() { this.open = false; }
-  focus() {}
+  focus(options) { this.focusOptions = options; if (this._document) this._document.activeElement = this; }
+  getBoundingClientRect() {
+    if (this.type !== "li" || !this.parentNode || this.parentNode.id !== "items") return {top: 0, bottom: 0};
+    const top = this.parentNode.children.indexOf(this) * 100 - this._document.defaultView.scrollY;
+    return {top, bottom: top + 100};
+  }
   reset() { for (const field of Object.values(this.fields)) { field.value = field.defaultValue; field.checked = false; } }
   querySelector(selector) {
     const match = selector.match(/^\[name="([^"]+)"\](:checked)?$/);
@@ -45,7 +57,10 @@ function field(form, name, value = "", type = "text") {
 }
 function environment(config, forms = []) {
   const elements = {}, requests = [], sockets = [], timers = [];
+  const window = {scrollY: 0, innerHeight: 200, simulateListJump: false, scrollBy(_x, y) { this.scrollY += y; }};
   const document = {
+    defaultView: window,
+    activeElement: null,
     getElementById(id) {
       if (((config.state && config.state !== "OPEN") || config.verification_for_deficiency_id) && /^(odometer-form|odo-)/.test(id)) return null;
       if (!elements[id]) {
@@ -55,16 +70,16 @@ function environment(config, forms = []) {
           field(elements[id], "severity", "HIGH", "radio");
         }
       }
-      return elements[id];
+      elements[id]._document = document; return elements[id];
     },
     querySelector() { return {value: "synthetic-csrf"}; },
     querySelectorAll(selector) { return selector === ".workflow-write" ? forms : []; },
-    createElement(tag) { return new Element("", tag); },
-    createTextNode(text) { const node = new Element(); node.textContent = text; return node; },
+    createElement(tag) { const node = new Element("", tag); node._document = document; return node; },
+    createTextNode(text) { const node = new Element(); node._document = document; node.textContent = text; return node; },
     addEventListener() {},
   };
   const context = {
-    document, crypto: crypto.webcrypto, Uint8Array,
+    document, window, crypto: crypto.webcrypto, Uint8Array,
     location: {protocol: "https:", host: "example.invalid"},
     setTimeout(fn) { timers.push(fn); return timers.length; }, clearTimeout() {},
     WebSocket: class { constructor() { sockets.push(this); } },
@@ -75,7 +90,7 @@ function environment(config, forms = []) {
     },
   };
   vm.createContext(context);
-  return {context, document, elements, requests, sockets, timers,
+  return {context, document, window, elements, requests, sockets, timers,
     get: id => document.getElementById(id), posts: () => requests.filter(r => r.body),
     run(file, transform = source => source) { vm.runInContext(transform(fs.readFileSync(path.join(root, file), "utf8")), context); },
   };
@@ -88,10 +103,15 @@ function checklist(state = "OPEN", extra = {}) {
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   return run;
 }
 const row = {item_id: "item", item_label: "Synthetic item", kit_id: "kit-a", kit_label: "Synthetic kit A", kind: "PRESENCE", checklist_version_id: "version", latest_check_id: "basis-a", latest_check_outcome: "PASSED", latest_check_at: "2026-06-01T00:00:00Z", deficiencies: [], allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]};
+function findAction(node, action) {
+  if (node.dataset && node.dataset.action === action) return node;
+  for (const child of node.children) { const found = findAction(child, action); if (found) return found; }
+  return null;
+}
 function newReport(run) {
   const form = run.get("outcome-form");
   for (const [name, value] of Object.entries({category_id: "category", summary: "Synthetic failure", description: "Synthetic description."})) form.fields[name].value = value;
@@ -107,6 +127,26 @@ function generic(kind) {
   return {...run, form, button};
 }
 (async () => {
+  {
+    const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index}));
+    run.context.testUI.setRows(rows); run.context.testUI.render();
+    run.window.scrollY = 500; run.window.simulateListJump = true;
+    const target = run.elements.items.children[5], pass = findAction(target, "pass"); pass.fire("click");
+    assert.equal(run.window.scrollY, 500, "pending render keeps the active checklist item in place");
+    assert.equal(run.document.activeElement.dataset.action, "pass", "pending render restores the same action focus");
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
+    assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
+    const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
+    response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run); run.get("outcome-form").fire("submit");
+    const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
+    assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
+    assert.equal(run.document.activeElement.dataset.action, "failed", "deficiency submission restores focus to the failed item action");
+    response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
+    assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
+  }
   for (const state of ["CLOSED", "INCOMPLETE"]) {
     const run = checklist(state); assert.equal(run.sockets.length, 1); assert(run.timers.length);
   }
@@ -436,5 +476,5 @@ function generic(kind) {
     assert.equal(run.requests.length, count);
     assert.equal(run.requests.some(r => String(r.url).startsWith("/auth/")), false);
   }
-  console.log("Offline workflow script regressions passed: outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and the supervisor forms.");
+  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
