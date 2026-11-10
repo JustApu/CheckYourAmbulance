@@ -8,6 +8,7 @@
 .status-pill[data-status="LIMITED_SERVICE"] { background: var(--wait-bg); color: var(--wait-fg); }
 .status-pill[data-status="OUT_OF_SERVICE"] { background: var(--bad-bg); color: var(--bad-fg); }
 .pill-attention { background: var(--bad-bg); color: var(--bad-fg); }
+.pill-failed { background: var(--bad-bg); color: var(--bad-fg); }
 .status-line { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; font-size: 1.125rem; }
 .notice { padding: .75rem 1rem; border: 2px solid var(--line); border-radius: .5rem; }
 .notice[hidden], #session-message:empty { display: none; }
