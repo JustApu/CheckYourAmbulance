@@ -285,7 +285,8 @@
     if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
     else { restoreFocusIntent(); }
   }
-  $("outcome-cancel").addEventListener("click", closeOutcome);
+  $("outcome-cancel").addEventListener("click", function () { closeOutcome(false); });
+  outcomeDialog.addEventListener("cancel", function (event) { event.preventDefault(); closeOutcome(false); });
   outcomeChoice.addEventListener("change", function () { $("outcome-create-fields").hidden = !!outcomeChoice.value; });
   outcomeForm.addEventListener("submit", function (event) {
     event.preventDefault();
