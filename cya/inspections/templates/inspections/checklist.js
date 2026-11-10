@@ -11,7 +11,7 @@
   var entries = {};       // item key -> {status, payload, text, operationId}
   var verificationRows = {}, verificationNotice = "";
   var drafts = {};        // item key -> typed value, kept across re-renders
-  var rows = [];
+  var rows = [], focusIntent = null;
   var view = config.view, onlyAttention = config.needs_attention_only;
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false;
 
@@ -33,6 +33,13 @@
     return isNaN(d) ? "" : d.toLocaleString();
   }
   function key(row) { return row.item_id + "|" + (row.kit_id || ""); }
+  function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
+  function restoreFocusIntent() {
+    if (!focusIntent) { return; }
+    var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
+    if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
+    else { (item || list).focus({preventScroll: true}); }
+  }
   function itemForKey(itemKey) {
     for (var i = 0; i < list.children.length; i++) {
       if (list.children[i].dataset.itemKey === itemKey) { return list.children[i]; }
@@ -200,7 +207,7 @@
     dialog.newest = newest.check_id; dialog.entry = entry;
     if (typeof dialog.showModal === "function") { dialog.showModal(); } else { dialog.setAttribute("open", ""); }
   }
-  function closeDialog() { conflictShowing = false; if (dialog.close) { dialog.close(); } dialog.removeAttribute("open"); }
+  function closeDialog() { conflictShowing = false; if (dialog.close) { dialog.close(); } dialog.removeAttribute("open"); restoreFocusIntent(); }
   function nextConflict() {
     if (!conflictQueue.length) { return; }
     var next = conflictQueue.shift(); askConflict(next.row, next.entry, next.newest);
@@ -265,7 +272,13 @@
     }).catch(function () { if (generation === outcomeGeneration) { $("outcome-matches").textContent = "Possible matches could not be loaded. Refresh to choose an existing report, or explicitly report a new one."; } });
     if (typeof outcomeDialog.showModal === "function") { outcomeDialog.showModal(); } else { outcomeDialog.setAttribute("open", ""); }
   }
-  function closeOutcome() { outcomeGeneration += 1; if (outcomeDialog.close) { outcomeDialog.close(); } outcomeDialog.removeAttribute("open"); }
+  function closeOutcome(keepFocusIntent) {
+    outcomeGeneration += 1;
+    if (outcomeDialog.close) { outcomeDialog.close(); }
+    outcomeDialog.removeAttribute("open");
+    if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
+    else { restoreFocusIntent(); }
+  }
   $("outcome-cancel").addEventListener("click", closeOutcome);
   outcomeChoice.addEventListener("change", function () { $("outcome-create-fields").hidden = !!outcomeChoice.value; });
   outcomeForm.addEventListener("submit", function (event) {
@@ -280,7 +293,7 @@
       if (!fields.category_id || !fields.severity || !fields.summary || !fields.description) { $("outcome-error").textContent = "Choose a category and severity, and describe the new deficiency."; return; }
       deficiency = {create: fields};
     }
-    closeOutcome(); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
+    closeOutcome(true); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
   });
 
   // ---- rendering -------------------------------------------------------------------------
@@ -327,6 +340,7 @@
       if (row.kind === "QUANTITY") { box.appendChild(el("span", "muted", "Expected " + row.expected_quantity)); }
       if (row.unit && row.kind === "MEASUREMENT") { box.appendChild(el("span", "muted", row.unit)); }
       button.addEventListener("click", function () {
+        rememberFocus(row, "record");
         var raw = (input.value || "").trim();
         var ok = row.kind === "QUANTITY" ? /^[0-9]{1,6}$/.test(raw) : /^-?[0-9]+(\.[0-9]+)?$/.test(raw);
         if (!ok) {
@@ -339,7 +353,7 @@
       });
       if (row.kind === "MEASUREMENT") { button.textContent = "Record and pass"; }
     } else {
-      button.addEventListener("click", function () { startCheck(row, null); });
+      button.addEventListener("click", function () { rememberFocus(row, "pass"); startCheck(row, null); });
     }
     if (row.allowed_outcomes.indexOf("PASSED") !== -1) { box.appendChild(button); }
     ["FAILED", "UNABLE_TO_INSPECT"].forEach(function (outcome) {
@@ -348,7 +362,7 @@
       action.type = "button"; action.disabled = !!busy;
       action.dataset.action = outcome.toLowerCase();
       action.setAttribute("aria-label", action.textContent + " " + label);
-      action.addEventListener("click", function () { openOutcome(row, outcome); });
+      action.addEventListener("click", function () { rememberFocus(row, outcome.toLowerCase()); openOutcome(row, outcome); });
       box.appendChild(action);
     });
     if (entry && entry.retryable && (entry.status === "failed" || entry.status === "unconfirmed")) {
@@ -356,7 +370,7 @@
       retry.type = "button";
       retry.dataset.action = "retry";
       retry.setAttribute("aria-label", "Retry " + label);
-      retry.addEventListener("click", function () { retryCheck(row); });
+      retry.addEventListener("click", function () { rememberFocus(row, "retry"); retryCheck(row); });
       box.appendChild(retry);
     }
     return box;
@@ -427,12 +441,19 @@
       message = "";
     }
     notice.textContent = message; notice.hidden = !message;
-    if (focusInList) {
-      var restoredItem = itemForKey(focusKey);
-      var target = restoredItem && actionIn(restoredItem, focusAction);
-      if (!target) { target = restoredItem || list; }
-      target.focus({preventScroll: true});
-    } else if (focusId && $(focusId)) { $(focusId).focus({preventScroll: true}); }
+    var modalOpen = dialog.open || outcomeDialog.open;
+    if (!modalOpen) {
+      if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
+        restoreFocusIntent();
+      } else if (focusInList) {
+        var restoredItem = itemForKey(focusKey);
+        var target = restoredItem && actionIn(restoredItem, focusAction);
+        if (!target || target.disabled) { target = restoredItem || list; }
+        target.focus({preventScroll: true});
+      } else if (focusIntent) {
+        focusIntent = null;
+      } else if (focusId && $(focusId)) { $(focusId).focus({preventScroll: true}); }
+    }
     if (anchor && anchorTop !== null && typeof window !== "undefined" && typeof window.scrollBy === "function") {
       var replacement = itemForKey(anchor.dataset.itemKey);
       if (!replacement && shown.length) { replacement = list.children[Math.min(anchorIndex, list.children.length - 1)]; }
