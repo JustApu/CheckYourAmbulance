@@ -190,6 +190,9 @@ def latest_clearing_due(organization_id, at, overdue, *, current):
         ids = [oid for found in batch.values() for _due, oid in found]
         facts = _candidate_facts(organization_id, at, ids, current)
         retired = retirement_dispositions(organization_id, ids, at)
+        absent = [oid for oid in ids if oid not in facts]
+        if absent:  # fail closed: never treat a candidate without evidence as unsatisfied
+            raise ValueError(f"{len(absent)} candidate obligations have no evidence at T")
         for key, found in batch.items():
             for due_at, oid in found:
                 if _qualifies(facts[oid], retired.get(oid, set()), at):

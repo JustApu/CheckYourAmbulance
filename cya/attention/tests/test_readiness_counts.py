@@ -7,6 +7,7 @@ the current (stored facts) and the as-of (event replay) path, which must agree.
 """
 
 from datetime import timedelta
+from unittest import mock
 
 from cya.attention.readiness import fleet_readiness
 from cya.attention.tests.support import AttentionCase
@@ -162,3 +163,38 @@ class Rpt5aCountTests(AttentionCase):
         now = self.at(days=1, hours=5, minutes=55)
         self.assertEqual(self.counts(now, as_of=self.at(days=1, hours=5, minutes=40)), known)
         self.assertEqual(self.counts(now)[0], known[0] + 1)  # the current picture reflects it
+
+    def test_newer_unsatisfied_candidates_do_not_hide_an_older_qualifying_one(self):
+        # PR #96 review: each key is searched newest first in rounds; four newer, unsatisfied
+        # later obligations (days 2 to 5) come before day 1's qualifying one, which must still
+        # clear day 0, and with one candidate per round too. Invalidating day 1's check must
+        # remove the clearing.
+        from cya.attention import readiness_counts
+        from cya.obligations.current import current_rows, evaluate_facts
+        from cya.obligations.state import State
+
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        check = self.record(self.suction).body["check_id"]
+        for day in range(2, 6):
+            self.clock.set(self.at(days=day))
+            self.assertEqual(self.generate().failures, [])
+        at = self.at(days=5, hours=8)
+        self.clock.set(at)
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+
+        def clearing(**kw):
+            states = [evaluate_facts(f, at) for f in current_rows(org, [vehicle], at)[vehicle]]
+            overdue = [s.obligation for s in states if s.state == State.OVERDUE]
+            with mock.patch.object(readiness_counts, "CANDIDATE_ROUND", kw.get("per_round", 3)):
+                result = readiness_counts.latest_clearing_due(org, at, overdue, current=True)
+            return result.get(
+                (vehicle, str(self.suction.pk), "00000000-0000-0000-0000-000000000000")
+            )
+
+        self.assertEqual(clearing(), self.at(days=1, hours=6))
+        self.assertEqual(clearing(per_round=1), self.at(days=1, hours=6))
+        self.clock.set(self.at(days=5, hours=8, minutes=1))
+        invalidate_chain(check_id=check, explanation="Synthetic.", **self.context(self.admin))
+        at = self.at(days=5, hours=8, minutes=2)
+        self.clock.set(at)
+        self.assertIsNone(clearing())
