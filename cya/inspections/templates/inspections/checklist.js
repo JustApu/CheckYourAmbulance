@@ -207,7 +207,13 @@
     dialog.newest = newest.check_id; dialog.entry = entry;
     if (typeof dialog.showModal === "function") { dialog.showModal(); } else { dialog.setAttribute("open", ""); }
   }
-  function closeDialog() { conflictShowing = false; if (dialog.close) { dialog.close(); } dialog.removeAttribute("open"); restoreFocusIntent(); }
+  function closeDialog(keepFocusIntent) {
+    conflictShowing = false;
+    if (dialog.close) { dialog.close(); }
+    dialog.removeAttribute("open");
+    if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
+    else { restoreFocusIntent(); }
+  }
   function nextConflict() {
     if (!conflictQueue.length) { return; }
     var next = conflictQueue.shift(); askConflict(next.row, next.entry, next.newest);
@@ -217,7 +223,7 @@
   dialog.addEventListener("cancel", function (event) { event.preventDefault(); cancelConflict(); });
   $("conflict-proceed").addEventListener("click", function () {
     var k = dialog.dataset.key, row = dialog.row, previous = dialog.entry, warned = dialog.newest;
-    closeDialog();
+    closeDialog(true);
     // Proceed is a new decision, preserving the full Failed/Unable report and the warning basis.
     // Never substitute a newer background row: another check must receive its own warning.
     var operationId = uuid4();
