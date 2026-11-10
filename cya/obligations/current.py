@@ -43,8 +43,19 @@ from cya.obligations.state import (
 from cya.operations.models import VehicleStatusEvent
 
 BATCH_SIZE = 250
+# Version 2 adds the obligation's pinned late limit (issue #80); version-1 rows need a rebuild.
+FACTS_VERSION = 2
 DATE_FIELDS = frozenset(
-    ("recorded_at", "early_at", "due_at", "grace_at", "voided_at", "effective_at", "ended_at")
+    (
+        "recorded_at",
+        "early_at",
+        "due_at",
+        "grace_at",
+        "late_limit_at",
+        "voided_at",
+        "effective_at",
+        "ended_at",
+    )
 )
 
 
@@ -66,7 +77,7 @@ def _restore(kind, values):
 
 def evaluate_facts(facts, instant):
     """Use the SAME pure evaluator as historical replay, without replaying check chains."""
-    if facts.get("version") != 1:
+    if facts.get("version") != FACTS_VERSION:
         raise ValueError("unsupported obligation projection; rebuild required")
     if not any(facts[key] for key in ("checks", "determinations", "statuses", "suspensions")):
         return evaluate_obligation(_restore(ObligationEvidence, facts["obligation"]), instant)
@@ -132,7 +143,7 @@ def compile_history(history, instant):
         )
         result[obligation.id] = _json(
             {
-                "version": 1,
+                "version": FACTS_VERSION,
                 "obligation": asdict(obligation),
                 "checks": [asdict(c) for c in by_check.get(obligation.id, ())],
                 "determinations": [asdict(d) for d in determinations.get(obligation.id, ())],

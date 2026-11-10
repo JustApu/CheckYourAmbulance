@@ -18,8 +18,17 @@ MAX_LINK_CANDIDATES = 10_000
 
 
 def late_window():
-    """w_late (SPEC SCH-3): how long after its grace deadline an obligation is late-linkable."""
+    """The current w_late setting (SPEC SCH-3).
+
+    It applies only to obligations created from now on: each obligation captures it as
+    late_seconds when created, and its late limit L never moves (SCH-2, issue #80).
+    """
     return timedelta(hours=settings.CYA_LATE_COMPLETION_HOURS)
+
+
+def captured_late_seconds():
+    """The current w_late in whole seconds, as a creator stores it on a new obligation."""
+    return int(late_window().total_seconds())
 
 
 class LinkScopeTooLarge(ValueError):
@@ -76,11 +85,10 @@ def _eligible(
         recorded_at__lte=recorded_at,
     ).annotate(selected_id=Subquery(selected))
     if late:
-        # SCH-2 (1.26.0): only within w_late after the grace deadline; older ones stay missed.
-        # Bounding grace_at keeps the read off the item's settled history (issue #61).
-        candidates = candidates.filter(
-            grace_at__lt=recorded_at, grace_at__gte=recorded_at - late_window()
-        )
+        # SCH-2: only up to the obligation's pinned late limit L (inclusive); older ones stay
+        # missed. The range on late_limit_at keeps the read off the item's settled history
+        # (issue #61), and grace_at < t keeps a late completion apart from an on-time one.
+        candidates = candidates.filter(grace_at__lt=recorded_at, late_limit_at__gte=recorded_at)
     else:
         candidates = candidates.filter(early_at__lte=recorded_at, grace_at__gte=recorded_at)
     candidates = candidates.filter(Q(routine=False) | Q(pk=F("selected_id")))

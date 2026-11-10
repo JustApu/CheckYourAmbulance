@@ -10,6 +10,7 @@ from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
 from cya.checklists.models import ChecklistPublication
 from cya.checklists.overlay import resolve_checklist
+from cya.checks.linking import captured_late_seconds
 from cya.checks.models import ItemLock
 from cya.core.audit_commands import Plan, run_command
 from cya.deficiencies.commands import _authorizer
@@ -177,6 +178,7 @@ def request_inspection(
                 actor_user=current.user,
                 actor_roles_at_time=list(current.roles),
             )
+            late_seconds = captured_late_seconds()  # SCH-3: pinned when the order is created
             for pin, oid in zip(pins, obligation_ids, strict=True):
                 version = RequirementVersion.objects.create(
                     organization_id=organization_id, vehicle_id=vehicle_id, **pin, **evidence
@@ -194,6 +196,7 @@ def request_inspection(
                     early_at=receipt.recorded_at,
                     due_at=due_at,
                     grace_at=due_at,
+                    late_seconds=late_seconds,
                     basis_at=receipt.recorded_at,
                     **evidence,
                 )
