@@ -126,6 +126,12 @@ function findAction(node, action) {
   for (const child of node.children) { const found = findAction(child, action); if (found) return found; }
   return null;
 }
+function findClass(node, name) {
+  if (String(node.className || "").split(" ").includes(name)) return node;
+  for (const child of node.children) { const found = findClass(child, name); if (found) return found; }
+  return null;
+}
+const isPrimary = button => String(button.className).split(" ").includes("primary");
 function newReport(run) {
   const form = run.get("outcome-form");
   for (const [name, value] of Object.entries({category_id: "category", summary: "Synthetic failure", description: "Synthetic description."})) form.fields[name].value = value;
@@ -192,6 +198,71 @@ function generic(kind) {
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
     assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
     assert.equal(run.elements.items.children[4].getBoundingClientRect().top, 100, "removed active row keeps the nearest visible row in place");
+  }
+  {
+    // Issue 87: a saved Fail reads as Fail, and Pass is not styled as the chosen result.
+    const run = checklist(), open = {...row, obligation_state: "DUE"}, item = () => run.elements.items.children[0];
+    run.context.testUI.setRows([open]); run.context.testUI.render();
+    assert(isPrimary(findAction(item(), "pass")), "Pass is the primary action while nothing is recorded");
+    findAction(item(), "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run); run.get("outcome-form").fire("submit");
+    const posted = run.posts()[0];
+    assert.equal(posted.body.outcome, "FAILED"); assert.equal(posted.body.deficiency.create.summary, "Synthetic failure");
+    assert.equal(findClass(item(), "save-state").textContent, "⌛Saving…", "pending is said in words, not as a result");
+    response(posted, 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "FAILED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    let saved = findClass(item(), "save-state");
+    assert(saved.className.includes("save-state-saved")); assert(saved.textContent.startsWith("✓Saved: Fail."), saved.textContent);
+    let pass = findAction(item(), "pass");
+    assert(!isPrimary(pass), "after a saved Fail, Pass is not styled as the selected result");
+    assert.equal(pass.textContent, "Pass"); assert.equal(pass.disabled, false, "Pass stays available as a distinct next action");
+    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "mine", latest_check_outcome: "FAILED"}]);
+    run.context.testUI.render();
+    const pill = findClass(item(), "pill-failed");
+    assert(pill, "the server's failed result has its own pill"); assert.equal(pill.textContent, "Inspected — failed");
+    assert(!isPrimary(findAction(item(), "pass")), "after reload the recorded Fail still keeps Pass unhighlighted");
+    assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
+    run.context.testUI.setRows([{...open, obligation_state: "DUE", latest_check_id: "next-window", latest_check_outcome: "PASSED"}]);
+    run.context.testUI.render();
+    assert(isPrimary(findAction(item(), "pass")), "a newer check (or a new window) is no longer held back by this page's old Fail");
+  }
+  {
+    // The server's outcome is shown, not the tap's guess: a count that does not match is a saved Fail.
+    const run = checklist(), item = () => run.elements.items.children[0];
+    const count = {...row, kind: "QUANTITY", expected_quantity: 6, obligation_state: "DUE"};
+    run.context.testUI.setRows([count]); run.context.testUI.render();
+    run.context.testUI.startCheck(count, 3);
+    assert.equal(run.posts()[0].body.quantity, 3); assert(!("outcome" in run.posts()[0].body), "a count is sent without an outcome");
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "FAILED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
+    assert(!isPrimary(findAction(item(), "record")), "Record count is not highlighted after a saved Fail");
+  }
+  {
+    // A saved Pass still says Pass and keeps Pass primary; another person's later Fail wins on reload.
+    const run = checklist(), open = {...row, obligation_state: "DUE"}, item = () => run.elements.items.children[0];
+    run.context.testUI.setRows([open]); run.context.testUI.render();
+    findAction(item(), "pass").fire("click");
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Pass."));
+    assert(isPrimary(findAction(item(), "pass")), "a saved Pass keeps Pass primary");
+    assert.equal(findClass(item(), "pill-failed"), null);
+    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED"}]); run.context.testUI.render();
+    assert(!isPrimary(findAction(item(), "pass")), "the server's recorded Fail outranks this page's earlier saved Pass");
+  }
+  for (const outcome of ["unconfirmed", "rejected"]) {
+    // Not-saved and unconfirmed Fail attempts stay distinct from a saved Fail, in words and icon.
+    const run = checklist(), item = () => run.elements.items.children[0];
+    run.context.testUI.setRows([{...row, obligation_state: "DUE"}]); run.context.testUI.render();
+    findAction(item(), "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run); run.get("outcome-form").fire("submit");
+    if (outcome === "unconfirmed") run.posts()[0].reject(new Error("synthetic lost response"));
+    else response(run.posts()[0], 400, {status: "REJECTED", code: "INVALID_OUTCOME"});
+    await tick();
+    const state = findClass(item(), "save-state");
+    assert(state.className.includes(outcome === "unconfirmed" ? "save-state-unconfirmed" : "save-state-failed"));
+    assert(state.textContent.startsWith(outcome === "unconfirmed" ? "?Unconfirmed" : "✕Not saved"), state.textContent);
+    assert(!state.textContent.includes("Saved"), "an unsaved Fail is never called saved");
   }
   for (const state of ["CLOSED", "INCOMPLETE"]) {
     const run = checklist(state); assert.equal(run.sockets.length, 1); assert(run.timers.length);

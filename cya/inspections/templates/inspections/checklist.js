@@ -152,6 +152,9 @@
     post(config.urls.checks, entry.payload).then(function (answer) {
       if (answer.kind === "committed") {
         entry.status = "saved"; entry.text = "Recorded " + when(answer.body.result.server_recorded_at);
+        // The server's outcome is authoritative (a count can derive Fail); remember which check it is.
+        entry.savedOutcome = answer.body.result.outcome || entry.outcome || "PASSED";
+        entry.checkId = answer.body.result.check_id;
         var verification = answer.body.result.verification;
         if (verification) {
           var detail = verification.status === "CLOSED_VERIFIED" ? "Closed — Verified." :
@@ -312,11 +315,24 @@
                UPCOMING: "Not due yet", SUSPENDED: "Known Deficiency — Check Suspended", EXEMPT: "Exempt", WAIVED: "Waived"};
     return map[row.obligation_state] || "";
   }
+  // The outcome this person's acknowledged tap recorded, or null when nothing was saved.
+  var outcomeWords = {PASSED: "Pass", FAILED: "Fail", UNABLE_TO_INSPECT: "Unable to inspect", NOT_APPLICABLE: "Not applicable"};
+  function savedOutcome(entry) { return entry && entry.status === "saved" ? entry.savedOutcome || "PASSED" : null; }
+  // The result recorded for this window: the server's satisfying outcome, else this page's save
+  // while the row's newest check is still that save (or its basis, before the reload arrives).
+  function recordedOutcome(row, entry) {
+    if (row.obligation_state === "SATISFIED" && row.obligation_outcome) { return row.obligation_outcome; }
+    var mine = entry && (row.latest_check_id === entry.checkId || row.latest_check_id === entry.basis);
+    return mine ? savedOutcome(entry) : null;
+  }
   function saveIndicator(entry) {
     var p = el("p", "save-state save-state-" + entry.status);
     p.setAttribute("role", "status");
     var icons = {pending: "⌛", saved: "✓", failed: "✕", unconfirmed: "?"};
-    var words = {pending: "Saving…", saved: "Saved", failed: "Not saved", unconfirmed: "Unconfirmed"};
+    var outcome = savedOutcome(entry);
+    // Say which result was saved, so a saved Fail never reads as a saved Pass (issue 87).
+    var words = {pending: "Saving…", saved: outcome && outcomeWords[outcome] ? "Saved: " + outcomeWords[outcome] : "Saved",
+                 failed: "Not saved", unconfirmed: "Unconfirmed"};
     var icon = el("span", "indicator-icon", icons[entry.status]); icon.setAttribute("aria-hidden", "true");
     p.appendChild(icon);
     p.appendChild(el("span", "save-state-text", words[entry.status] + (entry.text && entry.status !== "pending" ? ". " + entry.text : "")));
@@ -331,7 +347,11 @@
       return box;
     }
     var label = row.item_label + (row.kit_label ? " (" + row.kit_label + ")" : "");
-    var button = el("button", "button primary", row.kind === "QUANTITY" ? "Record count" : "Pass");
+    // Primary styling looks like the chosen result, so Pass keeps it only while no other
+    // result is recorded for this window (issue 87); it stays available as a plain action.
+    var recorded = recordedOutcome(row, entry);
+    var button = el("button", recorded && recorded !== "PASSED" ? "button" : "button primary",
+      row.kind === "QUANTITY" ? "Record count" : "Pass");
     button.type = "button"; button.disabled = !!busy;
     button.dataset.action = row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
     button.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Record count for " : "Pass ") + label);
@@ -392,7 +412,10 @@
     head.appendChild(title);
     if (row.item_attention === "ATTENTION") { head.appendChild(el("span", "pill pill-attention", "⚠ Needs attention")); }
     var st = stateText(row);
-    if (st) { head.appendChild(el("span", "pill", st)); }
+    if (st) {
+      var failed = !config.verification_for_deficiency_id && row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED";
+      head.appendChild(el("span", failed ? "pill pill-failed" : "pill", st));
+    }
     li.appendChild(head);
     var place = [row.compartment_label, row.system_label].filter(Boolean).join(" · ");
     if (place) { li.appendChild(el("p", "muted", place)); }
