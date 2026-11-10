@@ -63,7 +63,8 @@ reported instant). The result also has the vehicle's operational status at the i
   `vehicle_checklist`.
 - **Missed obligations** ([issue #66](https://github.com/JustApu/CheckYourAmbulance/issues/66), SPEC SCH-2, 1.26.0): an
   obligation still unsatisfied after its late-completion limit `L = G + w_late`
-  (`CYA_LATE_COMPLETION_HOURS`, inclusive as in linking) can no longer be completed, so it no
+  (inclusive as in linking; `w_late` is the `CYA_LATE_COMPLETION_HOURS` value captured on the
+  obligation when it was created, SCH-2/SCH-3, SPEC 1.31.0) can no longer be completed, so it no
   longer decides the row: the row shows the item's next obligation, and the miss stays Overdue in
   history and reports. Until `L` the row shows Overdue and is actionable. An Unable-to-Inspect
   obligation follows the same rule; it waits for supervisor completion on its own page
@@ -157,7 +158,8 @@ view, so the check names the two roles the issue gives.
 **RPT-7.** States are counted separately and never folded into a "compliant" flag:
 - **From the obligation evaluator:** Passed, Failed, Not Applicable (rule), Carried over (a
   waiver by a carry-over rule), Waived (another rule), Suspended, Exempt (out of service), Completed
-  by supervisor — unable to inspect, and the open states Overdue, Due, Current and Upcoming.
+  by supervisor — unable to inspect, and the open states Overdue (adjusted by RPT-5a, below), Due,
+  Current and Upcoming; and Missed (RPT-5a).
 - **From the check and determination histories,** following the planning review on the issue
   rather than the checklist's one-row-per-item summary:
   - Unable to inspect: an obligation still owed with an effective Unable check;
@@ -165,6 +167,23 @@ view, so the check names the two roles the issue gives.
   - Superseded: each entry a correction replaced, and each superseded determination;
   - Completed late: a satisfied obligation completed after its grace deadline, counted in addition
     to its outcome.
+
+**Overdue and Missed (RPT-5a, SPEC 1.29.0 to 1.31.0; issue #80).**
+- **Overdue** leaves out an overdue obligation once a later-due obligation of the same vehicle, item
+  and physical kit instance has qualifying satisfaction from an effective linked check (OQ-63).
+  This applies after the grace deadline `G`, whether or not `L` has passed. The later obligation
+  may be due beyond the window, retired, or shown as Exempt, Waived or Suspended: what counts is
+  its satisfaction, judged by the evaluator's own rules, so a supervisor completion survives
+  retirement but a withdrawn one does not.
+- **Missed** counts the obligations in the window still Overdue after their pinned `L` and due no
+  more than seven days before the instant (inclusive). A miss stays counted after the item is
+  re-checked until it ages out.
+- The later obligations are read once for the whole page (`cya/attention/readiness_counts.py`),
+  from stored current facts or, for a past instant or a stale row, by replay at the instant.
+- The screen and the API also give **fleet totals**: each count summed over the vehicles shown
+  (`totals` in the API).
+- No report output contains readiness counts yet (OQ-61). `readiness.REPORT_OUTPUTS` lists any that
+  do, and scenario AC-36 checks that each shows the Missed count.
 
 **As of.** `as_of` must be an offset-qualified instant not in the future (400 otherwise). The answer
 uses only what was recorded by then (AC-27): obligations, checks, statuses, deficiency events,
