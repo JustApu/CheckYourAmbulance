@@ -7,10 +7,11 @@
   var csrf = document.querySelector("[name=csrfmiddlewaretoken]").value;
   var $ = function (id) { return document.getElementById(id); };
   var list = $("items"), liveBanner = $("live-banner"), notice = $("screen-notice");
+  list.tabIndex = -1;
   var entries = {};       // item key -> {status, payload, text, operationId}
   var verificationRows = {}, verificationNotice = "";
   var drafts = {};        // item key -> typed value, kept across re-renders
-  var rows = [];
+  var rows = [], focusIntent = null;
   var view = config.view, onlyAttention = config.needs_attention_only;
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false;
 
@@ -32,6 +33,29 @@
     return isNaN(d) ? "" : d.toLocaleString();
   }
   function key(row) { return row.item_id + "|" + (row.kit_id || ""); }
+  function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
+  function restoreFocusIntent() {
+    if (!focusIntent) { return; }
+    var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
+    if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
+    else { (item || list).focus({preventScroll: true}); }
+  }
+  function itemForKey(itemKey) {
+    for (var i = 0; i < list.children.length; i++) {
+      if (list.children[i].dataset.itemKey === itemKey) { return list.children[i]; }
+    }
+    return null;
+  }
+  function actionIn(item, action) {
+    if (!item || !action) { return null; }
+    var pending = [item];
+    while (pending.length) {
+      var node = pending.shift();
+      if (node.dataset && node.dataset.action === action) { return node; }
+      Array.prototype.push.apply(pending, node.children || []);
+    }
+    return null;
+  }
 
   var MESSAGES = {
     DEFICIENCY_REQUIRED: "Choose or report a deficiency for this result.",
@@ -183,7 +207,13 @@
     dialog.newest = newest.check_id; dialog.entry = entry;
     if (typeof dialog.showModal === "function") { dialog.showModal(); } else { dialog.setAttribute("open", ""); }
   }
-  function closeDialog() { conflictShowing = false; if (dialog.close) { dialog.close(); } dialog.removeAttribute("open"); }
+  function closeDialog(keepFocusIntent) {
+    conflictShowing = false;
+    if (dialog.close) { dialog.close(); }
+    dialog.removeAttribute("open");
+    if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
+    else { restoreFocusIntent(); focusIntent = null; }
+  }
   function nextConflict() {
     if (!conflictQueue.length) { return; }
     var next = conflictQueue.shift(); askConflict(next.row, next.entry, next.newest);
@@ -193,7 +223,7 @@
   dialog.addEventListener("cancel", function (event) { event.preventDefault(); cancelConflict(); });
   $("conflict-proceed").addEventListener("click", function () {
     var k = dialog.dataset.key, row = dialog.row, previous = dialog.entry, warned = dialog.newest;
-    closeDialog();
+    closeDialog(true);
     // Proceed is a new decision, preserving the full Failed/Unable report and the warning basis.
     // Never substitute a newer background row: another check must receive its own warning.
     var operationId = uuid4();
@@ -248,8 +278,15 @@
     }).catch(function () { if (generation === outcomeGeneration) { $("outcome-matches").textContent = "Possible matches could not be loaded. Refresh to choose an existing report, or explicitly report a new one."; } });
     if (typeof outcomeDialog.showModal === "function") { outcomeDialog.showModal(); } else { outcomeDialog.setAttribute("open", ""); }
   }
-  function closeOutcome() { outcomeGeneration += 1; if (outcomeDialog.close) { outcomeDialog.close(); } outcomeDialog.removeAttribute("open"); }
-  $("outcome-cancel").addEventListener("click", closeOutcome);
+  function closeOutcome(keepFocusIntent) {
+    outcomeGeneration += 1;
+    if (outcomeDialog.close) { outcomeDialog.close(); }
+    outcomeDialog.removeAttribute("open");
+    if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
+    else { restoreFocusIntent(); focusIntent = null; }
+  }
+  $("outcome-cancel").addEventListener("click", function () { closeOutcome(false); });
+  outcomeDialog.addEventListener("cancel", function (event) { event.preventDefault(); closeOutcome(false); });
   outcomeChoice.addEventListener("change", function () { $("outcome-create-fields").hidden = !!outcomeChoice.value; });
   outcomeForm.addEventListener("submit", function (event) {
     event.preventDefault();
@@ -263,7 +300,7 @@
       if (!fields.category_id || !fields.severity || !fields.summary || !fields.description) { $("outcome-error").textContent = "Choose a category and severity, and describe the new deficiency."; return; }
       deficiency = {create: fields};
     }
-    closeOutcome(); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
+    closeOutcome(true); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
   });
 
   // ---- rendering -------------------------------------------------------------------------
@@ -296,18 +333,21 @@
     var label = row.item_label + (row.kit_label ? " (" + row.kit_label + ")" : "");
     var button = el("button", "button primary", row.kind === "QUANTITY" ? "Record count" : "Pass");
     button.type = "button"; button.disabled = !!busy;
+    button.dataset.action = row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
     button.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Record count for " : "Pass ") + label);
     if (row.kind === "QUANTITY" || row.kind === "MEASUREMENT") {
       var input = el("input", "number-input");
       input.disabled = !!busy;
       input.type = "text"; input.inputMode = row.kind === "QUANTITY" ? "numeric" : "decimal";
       input.id = "in-" + li.id; input.value = drafts[k] || "";
+      input.dataset.action = "observation";
       input.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Counted quantity" : "Measured value" + (row.unit ? " in " + row.unit : "")) + " for " + label);
       input.addEventListener("input", function () { drafts[k] = input.value; });
       box.appendChild(input);
       if (row.kind === "QUANTITY") { box.appendChild(el("span", "muted", "Expected " + row.expected_quantity)); }
       if (row.unit && row.kind === "MEASUREMENT") { box.appendChild(el("span", "muted", row.unit)); }
       button.addEventListener("click", function () {
+        rememberFocus(row, "record");
         var raw = (input.value || "").trim();
         var ok = row.kind === "QUANTITY" ? /^[0-9]{1,6}$/.test(raw) : /^-?[0-9]+(\.[0-9]+)?$/.test(raw);
         if (!ok) {
@@ -320,22 +360,24 @@
       });
       if (row.kind === "MEASUREMENT") { button.textContent = "Record and pass"; }
     } else {
-      button.addEventListener("click", function () { startCheck(row, null); });
+      button.addEventListener("click", function () { rememberFocus(row, "pass"); startCheck(row, null); });
     }
     if (row.allowed_outcomes.indexOf("PASSED") !== -1) { box.appendChild(button); }
     ["FAILED", "UNABLE_TO_INSPECT"].forEach(function (outcome) {
       if (row.allowed_outcomes.indexOf(outcome) === -1 || (config.verification_for_deficiency_id && outcome === "UNABLE_TO_INSPECT")) { return; }
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
       action.type = "button"; action.disabled = !!busy;
+      action.dataset.action = outcome.toLowerCase();
       action.setAttribute("aria-label", action.textContent + " " + label);
-      action.addEventListener("click", function () { openOutcome(row, outcome); });
+      action.addEventListener("click", function () { rememberFocus(row, outcome.toLowerCase()); openOutcome(row, outcome); });
       box.appendChild(action);
     });
     if (entry && entry.retryable && (entry.status === "failed" || entry.status === "unconfirmed")) {
       var retry = el("button", "button", "Retry");
       retry.type = "button";
+      retry.dataset.action = "retry";
       retry.setAttribute("aria-label", "Retry " + label);
-      retry.addEventListener("click", function () { retryCheck(row); });
+      retry.addEventListener("click", function () { rememberFocus(row, "retry"); retryCheck(row); });
       box.appendChild(retry);
     }
     return box;
@@ -344,6 +386,7 @@
     var k = key(row), entry = entries[k];
     var li = el("li", "item" + (row.item_attention === "ATTENTION" ? " item-attention" : ""));
     li.id = "item-" + index;
+    li.dataset.itemKey = k; li.tabIndex = -1;
     var head = el("div", "item-head");
     var title = el("h3", "", row.item_label + (row.kit_label ? " — " + row.kit_label : ""));
     head.appendChild(title);
@@ -373,6 +416,26 @@
   }
   function render() {
     var focused = document.activeElement, focusId = focused && focused.id && list.contains(focused) ? focused.id : null;
+    var focusKey = null, focusAction = null, focusInList = false;
+    for (var parent = focused; parent && parent !== list; parent = parent.parentNode) {
+      if (parent.parentNode === list) { focusKey = parent.dataset.itemKey; }
+    }
+    focusInList = !!focusKey;
+    focusAction = focused && focused.dataset ? focused.dataset.action : null;
+    var anchor = null, anchorIndex = -1, anchorTop = null;
+    for (var visible = 0; visible < list.children.length; visible++) {
+      var candidate = list.children[visible], rect = candidate.getBoundingClientRect();
+      if (typeof window === "undefined" || rect.bottom > 0 && rect.top < window.innerHeight) {
+        anchor = candidate; anchorIndex = visible; anchorTop = rect.top; break;
+      }
+    }
+    if (focusKey) {
+      var focusedItem = itemForKey(focusKey);
+      if (focusedItem) {
+        anchor = focusedItem; anchorIndex = Array.prototype.indexOf.call(list.children, focusedItem);
+        anchorTop = focusedItem.getBoundingClientRect().top;
+      }
+    }
     var shown = rows.filter(function (r) { return (config.verification_for_deficiency_id || r.checklist_version_id === config.checklist_version_id); });
     while (list.firstChild) { list.removeChild(list.firstChild); }
     shown.forEach(function (row, i) { list.appendChild(itemNode(row, i)); });
@@ -385,7 +448,27 @@
       message = "";
     }
     notice.textContent = message; notice.hidden = !message;
-    if (focusId && $(focusId)) { $(focusId).focus(); }
+    var modalOpen = dialog.open || outcomeDialog.open;
+    if (!modalOpen) {
+      if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
+        restoreFocusIntent();
+      } else if (focusInList) {
+        var restoredItem = itemForKey(focusKey);
+        var target = restoredItem && actionIn(restoredItem, focusAction);
+        if (!target || target.disabled) { target = restoredItem || list; }
+        target.focus({preventScroll: true});
+      } else if (focusIntent) {
+        focusIntent = null;
+      } else if (focusId && $(focusId)) { $(focusId).focus({preventScroll: true}); }
+    }
+    if (anchor && anchorTop !== null && typeof window !== "undefined" && typeof window.scrollBy === "function") {
+      var replacement = itemForKey(anchor.dataset.itemKey);
+      if (!replacement && shown.length) { replacement = list.children[Math.min(anchorIndex, list.children.length - 1)]; }
+      if (replacement) {
+        var shift = replacement.getBoundingClientRect().top - anchorTop;
+        if (shift) { window.scrollBy(0, shift); }
+      }
+    }
   }
 
   // ---- loading and live updates ----------------------------------------------------------
