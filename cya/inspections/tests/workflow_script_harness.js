@@ -20,7 +20,7 @@ class Element {
   }
   get textContent() { return this._text || this.children.map(e => e.textContent).join(""); }
   setAttribute(name, value) { this[name] = value; }
-  removeAttribute(name) { delete this[name]; }
+  removeAttribute(name) { if (name === "open") this.open = false; else delete this[name]; }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   fire(name) {
     if (name === "click" && this.type === "button" && this._document && !this.disabled) this._document.activeElement = this;
@@ -142,6 +142,29 @@ function generic(kind) {
 }
 (async () => {
   {
+    const run = checklist();
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    findAction(run.elements.items.children[0], "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.get("outcome-cancel").fire("click");
+    assert.equal(run.document.activeElement.dataset.action, "failed", "Cancel restores focus to the Fail action");
+    run.document.activeElement = null;
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    assert.equal(run.document.activeElement, null, "a later live render does not reuse the cancelled focus intent");
+  }
+  {
+    const run = checklist();
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    findAction(run.elements.items.children[0], "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.get("outcome-dialog").fire("cancel");
+    assert.equal(run.get("outcome-dialog").open, false, "Escape closes the outcome dialog through its cancel handler");
+    assert.equal(run.document.activeElement.dataset.action, "failed", "Escape restores focus to the Fail action");
+    run.document.activeElement = null;
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    assert.equal(run.document.activeElement, null, "a later live render does not reuse Escape's cancelled focus intent");
+  }
+  {
     const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index}));
     run.context.testUI.setRows(rows); run.context.testUI.render();
     run.window.scrollY = 500; run.window.simulateListJump = true;
@@ -200,7 +223,7 @@ function generic(kind) {
     assert.equal(run.posts()[2].body.acknowledges_check_id, "warning-a");
     assert.equal(run.posts()[2].body.deficiency.create.summary, "Synthetic first failure");
     assert.equal(run.get("conflict-dialog").newest, "warning-b");
-    run.get("conflict-dialog").fire("cancel"); assert.equal(run.get("conflict-dialog").open, undefined);
+    run.get("conflict-dialog").fire("cancel"); assert.equal(!!run.get("conflict-dialog").open, false);
   }
   {
     const run = checklist(); run.context.testUI.openOutcome(row, "UNABLE_TO_INSPECT"); newReport(run);
