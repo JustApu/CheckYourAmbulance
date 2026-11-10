@@ -7,6 +7,7 @@
   var csrf = document.querySelector("[name=csrfmiddlewaretoken]").value;
   var $ = function (id) { return document.getElementById(id); };
   var list = $("items"), liveBanner = $("live-banner"), notice = $("screen-notice");
+  list.tabIndex = -1;
   var entries = {};       // item key -> {status, payload, text, operationId}
   var verificationRows = {}, verificationNotice = "";
   var drafts = {};        // item key -> typed value, kept across re-renders
@@ -32,6 +33,22 @@
     return isNaN(d) ? "" : d.toLocaleString();
   }
   function key(row) { return row.item_id + "|" + (row.kit_id || ""); }
+  function itemForKey(itemKey) {
+    for (var i = 0; i < list.children.length; i++) {
+      if (list.children[i].dataset.itemKey === itemKey) { return list.children[i]; }
+    }
+    return null;
+  }
+  function actionIn(item, action) {
+    if (!item || !action) { return null; }
+    var pending = [item];
+    while (pending.length) {
+      var node = pending.shift();
+      if (node.dataset && node.dataset.action === action) { return node; }
+      Array.prototype.push.apply(pending, node.children || []);
+    }
+    return null;
+  }
 
   var MESSAGES = {
     DEFICIENCY_REQUIRED: "Choose or report a deficiency for this result.",
@@ -296,12 +313,14 @@
     var label = row.item_label + (row.kit_label ? " (" + row.kit_label + ")" : "");
     var button = el("button", "button primary", row.kind === "QUANTITY" ? "Record count" : "Pass");
     button.type = "button"; button.disabled = !!busy;
+    button.dataset.action = row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
     button.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Record count for " : "Pass ") + label);
     if (row.kind === "QUANTITY" || row.kind === "MEASUREMENT") {
       var input = el("input", "number-input");
       input.disabled = !!busy;
       input.type = "text"; input.inputMode = row.kind === "QUANTITY" ? "numeric" : "decimal";
       input.id = "in-" + li.id; input.value = drafts[k] || "";
+      input.dataset.action = "observation";
       input.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Counted quantity" : "Measured value" + (row.unit ? " in " + row.unit : "")) + " for " + label);
       input.addEventListener("input", function () { drafts[k] = input.value; });
       box.appendChild(input);
@@ -327,6 +346,7 @@
       if (row.allowed_outcomes.indexOf(outcome) === -1 || (config.verification_for_deficiency_id && outcome === "UNABLE_TO_INSPECT")) { return; }
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
       action.type = "button"; action.disabled = !!busy;
+      action.dataset.action = outcome.toLowerCase();
       action.setAttribute("aria-label", action.textContent + " " + label);
       action.addEventListener("click", function () { openOutcome(row, outcome); });
       box.appendChild(action);
@@ -334,6 +354,7 @@
     if (entry && entry.retryable && (entry.status === "failed" || entry.status === "unconfirmed")) {
       var retry = el("button", "button", "Retry");
       retry.type = "button";
+      retry.dataset.action = "retry";
       retry.setAttribute("aria-label", "Retry " + label);
       retry.addEventListener("click", function () { retryCheck(row); });
       box.appendChild(retry);
@@ -344,6 +365,7 @@
     var k = key(row), entry = entries[k];
     var li = el("li", "item" + (row.item_attention === "ATTENTION" ? " item-attention" : ""));
     li.id = "item-" + index;
+    li.dataset.itemKey = k; li.tabIndex = -1;
     var head = el("div", "item-head");
     var title = el("h3", "", row.item_label + (row.kit_label ? " — " + row.kit_label : ""));
     head.appendChild(title);
@@ -373,6 +395,26 @@
   }
   function render() {
     var focused = document.activeElement, focusId = focused && focused.id && list.contains(focused) ? focused.id : null;
+    var focusKey = null, focusAction = null, focusInList = false;
+    for (var parent = focused; parent && parent !== list; parent = parent.parentNode) {
+      if (parent.parentNode === list) { focusKey = parent.dataset.itemKey; }
+    }
+    focusInList = !!focusKey;
+    focusAction = focused && focused.dataset ? focused.dataset.action : null;
+    var anchor = null, anchorIndex = -1, anchorTop = null;
+    for (var visible = 0; visible < list.children.length; visible++) {
+      var candidate = list.children[visible], rect = candidate.getBoundingClientRect();
+      if (typeof window === "undefined" || rect.bottom > 0 && rect.top < window.innerHeight) {
+        anchor = candidate; anchorIndex = visible; anchorTop = rect.top; break;
+      }
+    }
+    if (focusKey) {
+      var focusedItem = itemForKey(focusKey);
+      if (focusedItem) {
+        anchor = focusedItem; anchorIndex = Array.prototype.indexOf.call(list.children, focusedItem);
+        anchorTop = focusedItem.getBoundingClientRect().top;
+      }
+    }
     var shown = rows.filter(function (r) { return (config.verification_for_deficiency_id || r.checklist_version_id === config.checklist_version_id); });
     while (list.firstChild) { list.removeChild(list.firstChild); }
     shown.forEach(function (row, i) { list.appendChild(itemNode(row, i)); });
@@ -385,7 +427,20 @@
       message = "";
     }
     notice.textContent = message; notice.hidden = !message;
-    if (focusId && $(focusId)) { $(focusId).focus(); }
+    if (focusInList) {
+      var restoredItem = itemForKey(focusKey);
+      var target = restoredItem && actionIn(restoredItem, focusAction);
+      if (!target) { target = restoredItem || list; }
+      target.focus({preventScroll: true});
+    } else if (focusId && $(focusId)) { $(focusId).focus({preventScroll: true}); }
+    if (anchor && anchorTop !== null && typeof window !== "undefined" && typeof window.scrollBy === "function") {
+      var replacement = itemForKey(anchor.dataset.itemKey);
+      if (!replacement && shown.length) { replacement = list.children[Math.min(anchorIndex, list.children.length - 1)]; }
+      if (replacement) {
+        var shift = replacement.getBoundingClientRect().top - anchorTop;
+        if (shift) { window.scrollBy(0, shift); }
+      }
+    }
   }
 
   // ---- loading and live updates ----------------------------------------------------------
