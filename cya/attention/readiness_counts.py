@@ -24,8 +24,6 @@ skipped when choosing the effective determination. Every query is bounded and re
 
 from datetime import timedelta
 
-from django.db.models import Q
-
 from cya.obligations.current import BATCH_SIZE, FACTS_VERSION, _restore, _source_facts
 from cya.obligations.models import Obligation, ObligationProjection, ObligationSelection
 from cya.obligations.projections import MAX_ROWS, _bounded
@@ -99,51 +97,85 @@ def clearing_determination(obligation, determinations, retired_ids, at):
     raise ValueError("determination history has a cycle")
 
 
+CANDIDATE_ROUND = 3  # later obligations evaluated per key per round, newest first
+
+
 def _candidates(organization_id, at, floor):
-    """Bounded page-wide read of the later obligations that could clear a visible OVERDUE row."""
-    scope = Q()
-    for (vehicle_id, item_id, kit_key), due_at in floor.items():
-        scope |= Q(vehicle_id=vehicle_id, item_id=item_id, kit_key=kit_key, due_at__gt=due_at)
-    limit = MAX_ROWS * max(1, len({key[0] for key in floor}))
-    return _bounded(
+    """{key: [(due_at, obligation id), ...] newest first}: later obligations that could clear.
+
+    One bounded range read for the page's vehicles (no per-key OR clause and no model
+    instances): due after the page's earliest visible OVERDUE row, early window opened by T,
+    recorded by T. Rows of other keys or not after their key's floor are dropped here.
+    """
+    vehicles = sorted({key[0] for key in floor})
+    limit = MAX_ROWS * len(vehicles)
+    rows = _bounded(
         Obligation.objects.filter(
-            scope, organization_id=organization_id, recorded_at__lte=at, early_at__lte=at
-        )
-        .select_related("requirement_version")
-        .order_by("vehicle_id", "id")[: limit + 1],
+            organization_id=organization_id,
+            vehicle_id__in=vehicles,
+            due_at__gt=min(floor.values()),
+            early_at__lte=at,
+            recorded_at__lte=at,
+        ).values_list("pk", "vehicle_id", "item_id", "kit_key", "due_at")[: limit + 1],
         limit,
     )
+    result = {}
+    for oid, vehicle_id, item_id, kit_key, due_at in rows:
+        key = (str(vehicle_id), str(item_id), str(kit_key))
+        if key in floor and due_at > floor[key]:
+            result.setdefault(key, []).append((due_at, str(oid)))
+    for found in result.values():
+        found.sort(reverse=True)
+    return result
 
 
-def _candidate_facts(organization_id, at, rows, current):
+def _candidate_facts(organization_id, at, ids, current):
     """{obligation id: facts at T}: stored current facts where usable, otherwise replayed at T."""
     facts = {}
     if current:
-        limit = len(rows)
+        limit = len(ids)
         for oid, stored, refreshed_at in _bounded(
             ObligationProjection.objects.filter(
-                organization_id=organization_id, obligation_id__in=[r.pk for r in rows]
+                organization_id=organization_id, obligation_id__in=ids
             ).values_list("obligation_id", "facts", "refreshed_at")[: limit + 1],
             limit,
         ):
             if isinstance(stored, dict) and stored.get("version") == FACTS_VERSION:
                 if refreshed_at <= at:
                     facts[str(oid)] = stored
-    by_vehicle = {}
-    for row in rows:
-        if str(row.pk) not in facts:
+    missing = [oid for oid in ids if oid not in facts]
+    if missing:
+        rows = _bounded(
+            Obligation.objects.filter(organization_id=organization_id, pk__in=missing)
+            .select_related("requirement_version")
+            .order_by("vehicle_id", "id")[: len(missing) + 1],
+            len(missing),
+        )
+        by_vehicle = {}
+        for row in rows:
             by_vehicle.setdefault(str(row.vehicle_id), []).append(row)
-    for vehicle_rows in by_vehicle.values():
-        for offset in range(0, len(vehicle_rows), BATCH_SIZE):
-            batch = vehicle_rows[offset : offset + BATCH_SIZE]
-            facts.update(_source_facts(str(organization_id), batch, at))
+        for vehicle_rows in by_vehicle.values():
+            for offset in range(0, len(vehicle_rows), BATCH_SIZE):
+                batch = vehicle_rows[offset : offset + BATCH_SIZE]
+                facts.update(_source_facts(str(organization_id), batch, at))
     return facts
+
+
+def _qualifies(fact, retired_ids, at):
+    obligation = _restore(ObligationEvidence, fact["obligation"])
+    checks = tuple(_restore(CheckEvidence, c) for c in fact["checks"])
+    determinations = tuple(_restore(DeterminationEvidence, d) for d in fact["determinations"])
+    determination = clearing_determination(obligation, determinations, retired_ids, at)
+    return _satisfaction(obligation, _checks_for(obligation, checks, at), determination) is not None
 
 
 def latest_clearing_due(organization_id, at, overdue, *, current):
     """{(vehicle, item, kit key): latest due of a later obligation with qualifying satisfaction}.
 
-    `overdue` is every visible OVERDUE obligation (ObligationEvidence) of the page.
+    `overdue` is every visible OVERDUE obligation (ObligationEvidence) of the page. Each key's
+    candidates are evaluated newest first in rounds of CANDIDATE_ROUND, and a key stops at its
+    first qualifying one: only the latest qualifying due instant matters (strictly later than a
+    row's own due instant suppresses it), so older candidates of a resolved key are never read.
     """
     floor = {}
     for obligation in overdue:
@@ -151,22 +183,23 @@ def latest_clearing_due(organization_id, at, overdue, *, current):
         floor[key] = min(floor.get(key, obligation.due_at), obligation.due_at)
     if not floor:
         return {}
-    rows = _candidates(organization_id, at, floor)
-    if not rows:
-        return {}
-    facts = _candidate_facts(organization_id, at, rows, current)
-    retired = retirement_dispositions(organization_id, list(facts), at)
+    pending = _candidates(organization_id, at, floor)
     result = {}
-    for oid, fact in facts.items():
-        obligation = _restore(ObligationEvidence, fact["obligation"])
-        checks = tuple(_restore(CheckEvidence, c) for c in fact["checks"])
-        determinations = tuple(_restore(DeterminationEvidence, d) for d in fact["determinations"])
-        determination = clearing_determination(
-            obligation, determinations, retired.get(oid, set()), at
-        )
-        if _satisfaction(obligation, _checks_for(obligation, checks, at), determination):
-            key = (obligation.vehicle_id, *_key(obligation))
-            result[key] = max(result.get(key, obligation.due_at), obligation.due_at)
+    while pending:  # bounded: every round consumes up to CANDIDATE_ROUND candidates per key
+        batch = {key: found[:CANDIDATE_ROUND] for key, found in pending.items()}
+        ids = [oid for found in batch.values() for _due, oid in found]
+        facts = _candidate_facts(organization_id, at, ids, current)
+        retired = retirement_dispositions(organization_id, ids, at)
+        for key, found in batch.items():
+            for due_at, oid in found:
+                if _qualifies(facts[oid], retired.get(oid, set()), at):
+                    result[key] = due_at
+                    break
+        pending = {
+            key: found[CANDIDATE_ROUND:]
+            for key, found in pending.items()
+            if key not in result and len(found) > CANDIDATE_ROUND
+        }
     return result
 
 
