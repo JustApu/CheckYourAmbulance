@@ -212,7 +212,7 @@
     if (dialog.close) { dialog.close(); }
     dialog.removeAttribute("open");
     if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
-    else { restoreFocusIntent(); }
+    else { restoreFocusIntent(); focusIntent = null; }
   }
   function nextConflict() {
     if (!conflictQueue.length) { return; }
@@ -283,7 +283,7 @@
     if (outcomeDialog.close) { outcomeDialog.close(); }
     outcomeDialog.removeAttribute("open");
     if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
-    else { restoreFocusIntent(); }
+    else { restoreFocusIntent(); focusIntent = null; }
   }
   $("outcome-cancel").addEventListener("click", function () { closeOutcome(false); });
   outcomeDialog.addEventListener("cancel", function (event) { event.preventDefault(); closeOutcome(false); });
