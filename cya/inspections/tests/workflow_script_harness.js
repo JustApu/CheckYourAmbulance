@@ -146,8 +146,10 @@ function generic(kind) {
     run.context.testUI.setRows([row]); run.context.testUI.render();
     findAction(run.elements.items.children[0], "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.context.testUI.setRows([]); run.context.testUI.render();
+    assert.equal(run.document.activeElement, run.get("outcome-dialog"), "a live update keeps focus in the dialog when the item disappears");
     run.get("outcome-cancel").fire("click");
-    assert.equal(run.document.activeElement.dataset.action, "failed", "Cancel restores focus to the Fail action");
+    assert.equal(run.document.activeElement, run.elements.items, "Cancel falls back to the checklist if the item disappeared");
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse the cancelled focus intent");
@@ -157,9 +159,10 @@ function generic(kind) {
     run.context.testUI.setRows([row]); run.context.testUI.render();
     findAction(run.elements.items.children[0], "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.context.testUI.setRows([]); run.context.testUI.render();
     run.get("outcome-dialog").fire("cancel");
     assert.equal(run.get("outcome-dialog").open, false, "Escape closes the outcome dialog through its cancel handler");
-    assert.equal(run.document.activeElement.dataset.action, "failed", "Escape restores focus to the Fail action");
+    assert.equal(run.document.activeElement, run.elements.items, "Escape falls back to the checklist if the item disappeared");
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse Escape's cancelled focus intent");
