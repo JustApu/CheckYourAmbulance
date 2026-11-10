@@ -28,6 +28,7 @@ from datetime import timedelta
 
 from django.db.models import Exists, OuterRef, Subquery
 
+from cya.attention.readiness_counts import apply_rpt5a
 from cya.checklists.models import Item, KitInstance, Vehicle
 from cya.checks.state import effective_checks
 from cya.conditions.models import ConditionalRule
@@ -70,6 +71,7 @@ CATEGORIES = (
     ("SUPERSEDED", "Superseded"),
     ("COMPLETED_LATE", "Completed late"),
     ("OVERDUE", "Overdue"),
+    ("MISSED", "Missed"),
     ("DUE", "Due"),
     ("CURRENT", "Current"),
     ("UPCOMING", "Upcoming"),
@@ -101,6 +103,8 @@ class FleetReadiness:
     window_end: object
     vehicles: list
     truncated: bool
+    # Each category summed over the listed vehicles (RPT-5a (c): Missed in the fleet totals).
+    totals: dict = field(default_factory=dict)
 
 
 def _carry_over_rules(organization_id, rule_ids):
@@ -141,10 +145,12 @@ def _count_states(states, unable, rule_of, carry):
     return counts, {"checked": satisfied, "owed": owed}
 
 
-def _current_obligations(organization_id, at, facts):
+def _current_obligations(organization_id, at, facts, collect=None):
     from cya.obligations.current import evaluate_facts
 
     states = [evaluate_facts(f, at) for f in facts]
+    if collect is not None:
+        collect.extend(states)
     waived = {s.evidence_id for s in states if s.state == State.WAIVED}
     rule_of = {
         d["id"]: d["rule"]["id"]
@@ -173,10 +179,12 @@ def _current_obligations(organization_id, at, facts):
     return counts, progress
 
 
-def _obligations(organization_id, vehicle_id, at, history):
+def _obligations(organization_id, vehicle_id, at, history, collect=None):
     """RPT-7 counts and inspection progress for one vehicle's window, from its history."""
     start, end = at - WINDOW_BACK, at + WINDOW_AHEAD
     states = rebuild_vehicle_projection(history, vehicle_id, at, start, end)
+    if collect is not None:
+        collect.extend(states)
     counts = dict.fromkeys((key for key, _label in CATEGORIES), 0)
     window = {s.obligation.id for s in states}
 
@@ -208,7 +216,6 @@ def _obligations(organization_id, vehicle_id, at, history):
                 counts["INVALIDATED"] += 1
             elif determination.determination_type == "SUPERSEDED":
                 counts["SUPERSEDED"] += 1
-
     return counts, progress
 
 
@@ -381,15 +388,17 @@ def fleet_readiness(organization_id, *, as_of=None, now):
             start=at - WINDOW_BACK,
             end=at + WINDOW_AHEAD,
         )
-    result = []
+    result, visible = [], []
     for vehicle in listed:
         vehicle_id = str(vehicle.pk)
         status = status_at(organization_id, vehicle_id, at)
+        states = []
         counts, progress = (
-            _current_obligations(organization_id, at, cached[vehicle_id])
+            _current_obligations(organization_id, at, cached[vehicle_id], states)
             if cached is not None
-            else _obligations(organization_id, vehicle_id, at, histories[vehicle_id])
+            else _obligations(organization_id, vehicle_id, at, histories[vehicle_id], states)
         )
+        visible.append((states, counts))
         rows = listed_rows[vehicle_id]
         shown = [facts[str(row.pk)] for row in rows[:DEFICIENCY_LIMIT]]
         by_severity, by_status = {}, {}
@@ -414,4 +423,8 @@ def fleet_readiness(organization_id, *, as_of=None, now):
                 suspensions_truncated=len(in_force[vehicle_id]) > SUSPENSION_LIMIT,
             )
         )
-    return FleetReadiness(at, at - WINDOW_BACK, at + WINDOW_AHEAD, result, truncated)
+    # RPT-5a (issue #80): one page-wide read for the later-satisfaction source, then Overdue
+    # and Missed are adjusted in each vehicle's counts (the same dict the picture holds).
+    apply_rpt5a(organization_id, at, visible, current=cached is not None)
+    totals = {code: sum(v.counts[code] for v in result) for code, _label in CATEGORIES}
+    return FleetReadiness(at, at - WINDOW_BACK, at + WINDOW_AHEAD, result, truncated, totals)
