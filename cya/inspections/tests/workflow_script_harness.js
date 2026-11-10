@@ -146,6 +146,9 @@ function generic(kind) {
     response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
     assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
+    run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
+    assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
+    assert.equal(run.elements.items.children[4].getBoundingClientRect().top, 100, "removed active row keeps the nearest visible row in place");
   }
   for (const state of ["CLOSED", "INCOMPLETE"]) {
     const run = checklist(state); assert.equal(run.sockets.length, 1); assert(run.timers.length);
