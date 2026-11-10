@@ -221,3 +221,53 @@ class Rpt5aCountTests(AttentionCase):
         mine = next(v for v in picture.vehicles if v.vehicle_id == str(self.vehicle.pk))
         self.assertGreater(mine.counts["EXEMPT"], 0)
         self.assertEqual(self.counts(at)[0], before[0] - 1)
+
+    def test_every_hiding_display_state_is_checked_against_its_facts(self):
+        # PR #96 review: the visible-state shortcut must equal the satisfaction rule. A later
+        # obligation whose display state is Exempt, Waived or Suspended is judged from its facts:
+        # with a qualifying check it clears day 0, and without one it does not.
+        from dataclasses import replace
+
+        from cya.attention import readiness_counts
+        from cya.obligations.current import current_rows, evaluate_facts
+        from cya.obligations.state import State
+
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        self.record(self.suction)
+        self.clock.set(self.at(days=2))
+        self.assertEqual(self.generate().failures, [])
+        at = self.at(days=2, hours=8)
+        self.clock.set(at)
+        org, vehicle, item = str(self.org.pk), str(self.vehicle.pk), str(self.suction.pk)
+        states = [evaluate_facts(f, at) for f in current_rows(org, [vehicle], at)[vehicle]]
+        suction = {s.obligation.due_at: s for s in states if s.obligation.item_id == item}
+        checked, unchecked = suction[self.at(days=1, hours=6)], suction[self.at(days=2, hours=6)]
+        self.assertEqual((checked.state, unchecked.state), (State.SATISFIED, State.OVERDUE))
+        overdue = [s.obligation for s in states if s.state == State.OVERDUE]
+        key = (vehicle, item, "00000000-0000-0000-0000-000000000000")
+
+        def clearing(shown, hidden_state):
+            visible = {s.obligation.id: s for s in states}
+            visible[shown.obligation.id] = replace(shown, state=hidden_state)
+            if shown is checked:  # the later obligation must not also be decided by day 2
+                visible[unchecked.obligation.id] = replace(unchecked, state=hidden_state)
+            return readiness_counts.latest_clearing_due(
+                org, at, overdue, current=True, visible=visible
+            ).get(key)
+
+        for hidden in (State.EXEMPT, State.WAIVED, State.SUSPENDED):
+            with self.subTest(hidden=hidden.value):
+                self.assertEqual(clearing(checked, hidden), self.at(days=1, hours=6))
+                self.assertEqual(clearing(unchecked, hidden), self.at(days=1, hours=6))
+
+    def test_a_corrected_later_check_still_clears(self):
+        from cya.checks.commands import correct_check
+
+        before = self.counts(self.at(days=1, hours=5, minutes=29))
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        check = self.failed(self.suction).body["check_id"]
+        self.clock.set(self.at(days=1, hours=5, minutes=35))
+        correct_check(
+            check_id=check, expected_tip_check_id=check, outcome="PASSED", **self.context(self.crew)
+        )
+        self.assertEqual(self.counts(self.at(days=1, hours=5, minutes=40))[0], before[0] - 1)
