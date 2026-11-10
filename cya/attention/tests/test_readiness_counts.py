@@ -7,7 +7,6 @@ the current (stored facts) and the as-of (event replay) path, which must agree.
 """
 
 from datetime import timedelta
-from unittest import mock
 
 from cya.attention.readiness import fleet_readiness
 from cya.attention.tests.support import AttentionCase
@@ -167,7 +166,7 @@ class Rpt5aCountTests(AttentionCase):
     def test_newer_unsatisfied_candidates_do_not_hide_an_older_qualifying_one(self):
         # PR #96 review: each key is searched newest first in rounds; four newer, unsatisfied
         # later obligations (days 2 to 5) come before day 1's qualifying one, which must still
-        # clear day 0, and with one candidate per round too. Invalidating day 1's check must
+        # clear day 0, and with through both the visible-state and the facts path. Invalidating day 1's check must
         # remove the clearing.
         from cya.attention import readiness_counts
         from cya.obligations.current import current_rows, evaluate_facts
@@ -182,19 +181,43 @@ class Rpt5aCountTests(AttentionCase):
         self.clock.set(at)
         org, vehicle = str(self.org.pk), str(self.vehicle.pk)
 
-        def clearing(**kw):
+        def clearing(use_visible=True):
             states = [evaluate_facts(f, at) for f in current_rows(org, [vehicle], at)[vehicle]]
             overdue = [s.obligation for s in states if s.state == State.OVERDUE]
-            with mock.patch.object(readiness_counts, "CANDIDATE_ROUND", kw.get("per_round", 3)):
-                result = readiness_counts.latest_clearing_due(org, at, overdue, current=True)
+            visible = {s.obligation.id: s for s in states} if use_visible else None
+            result = readiness_counts.latest_clearing_due(
+                org, at, overdue, current=True, visible=visible
+            )
             return result.get(
                 (vehicle, str(self.suction.pk), "00000000-0000-0000-0000-000000000000")
             )
 
-        self.assertEqual(clearing(), self.at(days=1, hours=6))
-        self.assertEqual(clearing(per_round=1), self.at(days=1, hours=6))
+        self.assertEqual(clearing(), self.at(days=1, hours=6))  # decided from visible states
+        self.assertEqual(clearing(use_visible=False), self.at(days=1, hours=6))  # facts path
         self.clock.set(self.at(days=5, hours=8, minutes=1))
         invalidate_chain(check_id=check, explanation="Synthetic.", **self.context(self.admin))
         at = self.at(days=5, hours=8, minutes=2)
         self.clock.set(at)
         self.assertIsNone(clearing())
+
+    def test_a_checked_later_obligation_shown_as_exempt_still_clears(self):
+        # The later obligation is checked at 05:30, then the vehicle goes out of service at 05:40,
+        # before its 06:00 due instant: it displays as Exempt, which takes precedence over its
+        # satisfaction, yet its effective linked check still clears day 0 (issue #80, revision 5).
+        from cya.operations.commands import set_vehicle_status
+
+        before = self.counts(self.at(days=1, hours=5, minutes=29))
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        self.record(self.suction)
+        self.clock.set(self.at(days=1, hours=5, minutes=40))
+        set_vehicle_status(
+            vehicle_id=str(self.vehicle.pk),
+            status="OUT_OF_SERVICE",
+            explanation="Synthetic reason.",
+            **self.context(self.supervisor),
+        )
+        at = self.at(days=1, hours=6, minutes=30)
+        picture = fleet_readiness(str(self.org.pk), now=at)
+        mine = next(v for v in picture.vehicles if v.vehicle_id == str(self.vehicle.pk))
+        self.assertGreater(mine.counts["EXEMPT"], 0)
+        self.assertEqual(self.counts(at)[0], before[0] - 1)

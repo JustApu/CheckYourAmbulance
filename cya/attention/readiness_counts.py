@@ -97,9 +97,6 @@ def clearing_determination(obligation, determinations, retired_ids, at):
     raise ValueError("determination history has a cycle")
 
 
-CANDIDATE_ROUND = 3  # later obligations evaluated per key per round, newest first
-
-
 def _candidates(organization_id, at, floor):
     """{key: [(due_at, obligation id), ...] newest first}: later obligations that could clear.
 
@@ -169,47 +166,74 @@ def _qualifies(fact, retired_ids, at):
     return _satisfaction(obligation, _checks_for(obligation, checks, at), determination) is not None
 
 
-def latest_clearing_due(organization_id, at, overdue, *, current):
+# Display states that can hide a satisfaction (they take precedence over it in the evaluator).
+_MAY_HIDE = frozenset((State.EXEMPT, State.WAIVED, State.SUSPENDED))
+_UNSATISFIED = frozenset((State.UPCOMING, State.CURRENT, State.DUE, State.OVERDUE))
+
+
+def latest_clearing_due(organization_id, at, overdue, *, current, visible=None):
     """{(vehicle, item, kit key): latest due of a later obligation with qualifying satisfaction}.
 
-    `overdue` is every visible OVERDUE obligation (ObligationEvidence) of the page. Each key's
-    candidates are evaluated newest first in rounds of CANDIDATE_ROUND, and a key stops at its
-    first qualifying one: only the latest qualifying due instant matters (strictly later than a
-    row's own due instant suppresses it), so older candidates of a resolved key are never read.
+    `overdue` is every visible OVERDUE obligation (ObligationEvidence) of the page and `visible`
+    maps the page's evaluated window rows {obligation id: ObligationState}. A visible candidate
+    without a retirement disposition is decided from its evaluated state: SATISFIED comes only
+    from a satisfaction and an open state only without one, so neither needs its facts again;
+    Exempt, Waived and Suspended can hide a satisfaction and are checked from facts, as are
+    candidates outside the window or retired. Each key is walked newest first and stops at its
+    first qualifying candidate (only the latest qualifying due instant matters), so facts are
+    read in one bounded pass only for undecided candidates newer than that one.
     """
+    visible = visible or {}
     floor = {}
     for obligation in overdue:
         key = (obligation.vehicle_id, *_key(obligation))
         floor[key] = min(floor.get(key, obligation.due_at), obligation.due_at)
     if not floor:
         return {}
-    pending = _candidates(organization_id, at, floor)
+    candidates = _candidates(organization_id, at, floor)
+    retired = retirement_dispositions(
+        organization_id, [oid for found in candidates.values() for _due, oid in found], at
+    )
+
+    def decided(oid):
+        state = visible.get(oid)
+        if state is None or oid in retired or state.state in _MAY_HIDE:
+            return None
+        if state.state == State.SATISFIED:
+            return True
+        if state.state in _UNSATISFIED:
+            return False
+        return None
+
+    needed = []
+    for found in candidates.values():
+        for _due, oid in found:
+            verdict = decided(oid)
+            if verdict is True:
+                break
+            if verdict is None:
+                needed.append(oid)
+    facts = _candidate_facts(organization_id, at, needed, current) if needed else {}
+    absent = [oid for oid in needed if oid not in facts]
+    if absent:  # fail closed: never treat a candidate without evidence as unsatisfied
+        raise ValueError(f"{len(absent)} candidate obligations have no evidence at T")
     result = {}
-    while pending:  # bounded: every round consumes up to CANDIDATE_ROUND candidates per key
-        batch = {key: found[:CANDIDATE_ROUND] for key, found in pending.items()}
-        ids = [oid for found in batch.values() for _due, oid in found]
-        facts = _candidate_facts(organization_id, at, ids, current)
-        retired = retirement_dispositions(organization_id, ids, at)
-        absent = [oid for oid in ids if oid not in facts]
-        if absent:  # fail closed: never treat a candidate without evidence as unsatisfied
-            raise ValueError(f"{len(absent)} candidate obligations have no evidence at T")
-        for key, found in batch.items():
-            for due_at, oid in found:
-                if _qualifies(facts[oid], retired.get(oid, set()), at):
-                    result[key] = due_at
-                    break
-        pending = {
-            key: found[CANDIDATE_ROUND:]
-            for key, found in pending.items()
-            if key not in result and len(found) > CANDIDATE_ROUND
-        }
+    for key, found in candidates.items():
+        for due_at, oid in found:
+            verdict = decided(oid)
+            if verdict is None:
+                verdict = _qualifies(facts[oid], retired.get(oid, set()), at)
+            if verdict:
+                result[key] = due_at
+                break
     return result
 
 
 def apply_rpt5a(organization_id, at, vehicles, *, current):
     """Adjust Overdue (a) and set Missed (b) for a page: `vehicles` is [(states, counts), ...]."""
     overdue = [s.obligation for states, _ in vehicles for s in states if s.state == State.OVERDUE]
-    clearing = latest_clearing_due(organization_id, at, overdue, current=current)
+    visible = {s.obligation.id: s for states, _ in vehicles for s in states}
+    clearing = latest_clearing_due(organization_id, at, overdue, current=current, visible=visible)
     for states, counts in vehicles:
         suppressed = missed = 0
         for state in states:
