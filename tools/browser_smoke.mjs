@@ -68,39 +68,45 @@ try {
       assert.equal(await page.title(), "Synthetic vehicle inspection");
       assert.equal(await page.getByRole("heading", { name: "Unit 12 inspection" }).count(), 1);
       assert.equal(await page.getByRole("navigation", { name: "Main" }).count(), 1);
+      const skipLink = page.getByRole("link", { name: "Skip to main content" });
+      await page.keyboard.press("Tab");
+      assert.equal(await skipLink.evaluate((element) => element === document.activeElement), true, `${viewport.name}: first Tab did not focus the skip link`);
+      const skipBox = await skipLink.boundingBox();
+      assert.ok(skipBox && skipBox.y >= 0, `${viewport.name}: focused skip link is not visible`);
+      assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: skip link focus indicator is missing`);
       const navToggle = page.getByRole("button", { name: "Menu" });
       const navList = page.locator("#site-nav-list");
       if (viewport.width < 768) {
-        assert.equal(await navToggle.isVisible(), true);
-        assert.equal(await navList.isVisible(), false);
+        assert.equal(await navToggle.isVisible(), true, `${viewport.name}: mobile menu toggle is not visible`);
+        assert.equal(await navList.isVisible(), false, `${viewport.name}: mobile navigation is not initially collapsed`);
         await navToggle.click();
-        assert.equal(await navToggle.getAttribute("aria-expanded"), "true");
+        assert.equal(await navToggle.getAttribute("aria-expanded"), "true", `${viewport.name}: opening the menu did not update aria-expanded`);
         assert.equal(await page.getByRole("link", { name: "Inspection" }).getAttribute("aria-current"), "page");
         assert.equal(await page.getByRole("link", { name: "Deficiencies" }).isVisible(), true);
         await page.keyboard.press("Escape");
-        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
-        assert.equal(await navToggle.getAttribute("aria-expanded"), "false");
-        assert.equal(await navList.isVisible(), false);
+        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true, `${viewport.name}: Escape did not return focus to the menu toggle`);
+        assert.equal(await navToggle.getAttribute("aria-expanded"), "false", `${viewport.name}: Escape did not close the menu`);
+        assert.equal(await navList.isVisible(), false, `${viewport.name}: menu remains visible after Escape`);
         await page.setViewportSize({ width: 768, height: viewport.height });
         await waitForNavLayout(page, false);
-        assert.equal(await navList.isVisible(), true);
-        assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true);
+        assert.equal(await navList.isVisible(), true, `${viewport.name}: navigation is not visible at desktop width`);
+        assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: focus was not returned to the current link at desktop width`);
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
         await waitForNavLayout(page, true);
-        assert.equal(await navToggle.isVisible(), true);
-        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
+        assert.equal(await navToggle.isVisible(), true, `${viewport.name}: menu toggle is not visible after resizing to mobile`);
+        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true, `${viewport.name}: focus was not returned to the mobile menu toggle`);
       } else {
-        assert.equal(await navToggle.isVisible(), false);
-        assert.equal(await navList.isVisible(), true);
+        assert.equal(await navToggle.isVisible(), false, `${viewport.name}: desktop menu toggle should be hidden`);
+        assert.equal(await navList.isVisible(), true, `${viewport.name}: desktop navigation should be visible`);
         await page.getByRole("link", { name: "Inspection" }).focus();
         await page.setViewportSize({ width: 600, height: viewport.height });
         await waitForNavLayout(page, true);
-        assert.equal(await navToggle.isVisible(), true);
-        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
+        assert.equal(await navToggle.isVisible(), true, `${viewport.name}: menu toggle is not visible after resizing to mobile`);
+        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true, `${viewport.name}: focus was not returned to the mobile menu toggle`);
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
         await waitForNavLayout(page, false);
-        assert.equal(await navList.isVisible(), true);
-        assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true);
+        assert.equal(await navList.isVisible(), true, `${viewport.name}: navigation is not visible at desktop width`);
+        assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: focus was not returned to the current link at desktop width`);
       }
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);
@@ -128,13 +134,6 @@ try {
       assert.ok(metrics.statusVisible, `${viewport.name}: status indicators are not visible`);
       assert.ok(metrics.statusColorsDiffer, `${viewport.name}: service states have indistinguishable backgrounds`);
       assert.ok(metrics.actionHeight >= 48, `${viewport.name}: action target is shorter than 48 CSS pixels`);
-
-      const skipLink = page.getByRole("link", { name: "Skip to main content" });
-      await page.keyboard.press("Tab");
-      assert.equal(await skipLink.evaluate((element) => element === document.activeElement), true);
-      const skipBox = await skipLink.boundingBox();
-      assert.ok(skipBox && skipBox.y >= 0, `${viewport.name}: focused skip link is not visible`);
-      assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px");
 
       await page.emulateMedia({ colorScheme: "dark" });
       const theme = page.getByLabel("Theme");
