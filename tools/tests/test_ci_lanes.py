@@ -4,6 +4,7 @@ These assert the configured patterns and the fail-closed behavior, not GitHub's 
 """
 
 import io
+import json
 import re
 import sys
 import tempfile
@@ -325,6 +326,14 @@ class CoverageMapTests(unittest.TestCase):
                 for django_delimiter in ("{%", "{{", "{#"):
                     with self.subTest(css_path=css_path, delimiter=django_delimiter):
                         self.assertNotIn(django_delimiter, css)
+
+    def test_each_browser_test_path_exists_and_runs_in_the_browser_job(self):
+        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        browser_command = package["scripts"]["test:browser-smoke"]
+        for path in ci_lanes.BROWSER_TEST_PATHS:
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file())
+                self.assertIn(path, browser_command)
 
 
 if __name__ == "__main__":
