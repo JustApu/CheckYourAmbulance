@@ -11,6 +11,7 @@ import re
 from uuid import uuid4
 
 from django.test import Client, override_settings
+from django.utils.html import strip_tags
 
 from cya.accounts.returns import sign_in_location
 from cya.attention.tests.support import AttentionCase
@@ -254,7 +255,7 @@ class PageTests(CrewUiCase):
 
         html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
 
-        self.assertIn("Open inspection: Night Shift Vehicle Safety Checklist", html)
+        self.assertIn("Open inspection: Night Shift Vehicle Safety Checklist", strip_tags(html))
         self.assertIn('class="button primary join-session"', html)
         self.assertIn('class="active-inspection"', html)
         self.assertIn('class="session-row-status"', html)
