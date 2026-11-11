@@ -23,22 +23,32 @@ class AptMirrorFallbackTests(unittest.TestCase):
         self.assertIn("https://mirror.example/ubuntu/\tpriority:1 arch:amd64\n", result)
         self.assertIn(f"{FALLBACK}\tpriority:2\n", result)
 
+    def test_preserves_every_configured_primary_before_fallback(self):
+        result = configure(
+            "http://azure.archive.ubuntu.com/ubuntu/\nhttp://mirror.example/ubuntu/\n"
+        )
+        self.assertIn("http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n", result)
+        self.assertIn("http://mirror.example/ubuntu/\tpriority:1\n", result)
+        self.assertLess(result.index("priority:1"), result.index(f"{FALLBACK}\tpriority:2"))
+
     def test_simulation_uses_reserved_unresolvable_domain(self):
         result = configure(
-            "http://azure.archive.ubuntu.com/ubuntu/\n", simulate_primary_failure=True
+            "http://azure.archive.ubuntu.com/ubuntu/\nhttp://mirror.example/ubuntu/\n",
+            simulate_primary_failure=True,
         )
-        self.assertIn("http://primary-unavailable.invalid/ubuntu/\tpriority:1\n", result)
+        self.assertIn("http://primary-1-unavailable.invalid/ubuntu/\tpriority:1\n", result)
+        self.assertIn("http://primary-2-unavailable.invalid/ubuntu/\tpriority:1\n", result)
         self.assertIn(f"{FALLBACK}\tpriority:2\n", result)
 
     def test_configuring_an_already_configured_list_is_idempotent(self):
         configured = configure("http://azure.archive.ubuntu.com/ubuntu/\n")
         self.assertEqual(configure(configured), configured)
 
-    def test_rejects_unexpected_or_multiple_active_mirrors(self):
+    def test_rejects_unexpected_mirror_layouts(self):
         for contents in (
             "# empty\n",
-            "http://one.example/ubuntu/\nhttp://two.example/ubuntu/\n",
             f"http://one.example/ubuntu/\tpriority:1\n{FALLBACK}\tpriority:1\n",
+            "http://one.example/ubuntu/\nhttp://two.example/non-ubuntu/\n",
             "file:/local/archive\n",
             "http://mirror.example/other/\n",
         ):

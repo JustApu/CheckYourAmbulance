@@ -207,15 +207,15 @@ jobs:
           backup="$RUNNER_TEMP/apt-mirrors.original"
           log="$RUNNER_TEMP/apt-mirror-fallback.log"
           sudo test -r "$mirrors"
-          sudo cp "$mirrors" "$backup"
+          sudo cp -p "$mirrors" "$backup"
           restore_mirrors() {
-            sudo cp "$backup" "$mirrors"
+            sudo cp -p "$backup" "$mirrors"
             rm -f "$backup"
           }
           trap restore_mirrors EXIT
 
-          # Force a reserved, unresolvable primary for this probe. The official
-          # archive mirror must serve apt metadata before the normal install runs.
+          # Force each configured primary to a reserved, unresolvable host. The
+          # official archive mirror must serve metadata before normal install.
           sudo python3 tools/apt_mirror_fallback.py "$mirrors" --simulate-primary-failure
           if ! sudo apt-get -o Debug::Acquire::http=true update >"$log" 2>&1; then
             echo 'APT mirror fallback probe failed; check apt resolver and download errors on this runner.'
