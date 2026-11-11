@@ -56,6 +56,23 @@ UI_TESTS = {
     "shell": ("cya.tests.test_shell",),
 }
 
+# Shared shell templates that affect every extending/included page keep full coverage. Only the
+# shell's leaf pages use its focused suite; an unmapped shell template also fails closed below.
+SHELL_FULL_TEMPLATES = frozenset(
+    {
+        "cya/shell/templates/shell/base.html",
+        "cya/shell/templates/shell/save_state.html",
+    }
+)
+SHELL_FOCUSED_TEMPLATES = frozenset(
+    {
+        "cya/shell/templates/shell/home.html",
+        "cya/shell/templates/shell/forbidden.html",
+        "cya/shell/templates/shell/placeholder.html",
+        "cya/shell/templates/shell/administration.html",
+    }
+)
+
 # Only CSS files loaded directly by the browser fixture may bypass database checks.
 BROWSER_CSS = frozenset(
     {
@@ -150,7 +167,15 @@ def classify(paths, query_failed=False, changed_files=None):
                 else:
                     labels.extend(app_labels)
                     reasons.append(f"{path}: shared shell script; focused tests and browser smoke")
-            elif path.endswith(".html") and app_labels is not None:
+            elif path in SHELL_FULL_TEMPLATES:
+                full = True
+                browser = True
+                reasons.append(f"{path}: shared shell template; full suite and browser smoke")
+            elif path in SHELL_FOCUSED_TEMPLATES:
+                labels.extend(UI_TESTS["shell"])
+                browser = True
+                reasons.append(f"{path}: shell leaf template; focused tests and browser smoke")
+            elif path.endswith(".html") and app_labels is not None and match.group(1) != "shell":
                 browser = True
                 labels.extend(app_labels)
                 reasons.append(f"{path}: server template; focused tests and browser smoke")

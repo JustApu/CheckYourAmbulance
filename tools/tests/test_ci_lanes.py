@@ -61,11 +61,20 @@ class RoutingTests(unittest.TestCase):
         )
         self.assertTrue(browser_smoke(TEMPLATE))
 
-    def test_shared_shell_templates_use_the_existing_focused_suite(self):
-        decision = ci_lanes.classify(["cya/shell/templates/shell/base.html"])
-        self.assertEqual(decision["django-mode"], "focused")
-        self.assertEqual(decision["django-labels"], ("cya.tests.test_shell",))
-        self.assertTrue(decision["run-browser-smoke"])
+    def test_shell_leaf_templates_use_the_existing_focused_suite(self):
+        for path in ci_lanes.SHELL_FOCUSED_TEMPLATES:
+            with self.subTest(path=path):
+                decision = ci_lanes.classify([path])
+                self.assertEqual(decision["django-mode"], "focused")
+                self.assertEqual(decision["django-labels"], ("cya.tests.test_shell",))
+                self.assertTrue(decision["run-browser-smoke"])
+
+    def test_shared_shell_templates_keep_the_full_suite(self):
+        for path in ci_lanes.SHELL_FULL_TEMPLATES:
+            with self.subTest(path=path):
+                decision = ci_lanes.classify([path])
+                self.assertEqual(decision["django-mode"], "full")
+                self.assertTrue(decision["run-browser-smoke"])
 
     def test_covered_css_uses_browser_smoke_without_database_or_client_harnesses(self):
         for path in ci_lanes.BROWSER_CSS:
@@ -155,6 +164,10 @@ class RoutingTests(unittest.TestCase):
     def test_a_template_without_focused_coverage_runs_the_full_suite(self):
         self.assertEqual(
             lanes("cya/shell/templates/shell/unknown.dat"), (True, "full", ("cya",), True)
+        )
+        self.assertEqual(
+            lanes("cya/shell/templates/shell/new-page.html"),
+            (True, "full", ("cya",), True),
         )
         self.assertEqual(lanes("cya/newapp/static/newapp/app.css")[1], "full")
 
@@ -248,13 +261,19 @@ class CoverageMapTests(unittest.TestCase):
                     )
 
     def test_an_app_including_another_apps_templates_is_in_that_apps_focused_tests(self):
-        include = re.compile(r'\{%\s*(?:include|extends)\s+"([a-z_]+)/')
+        reference = re.compile(r'\{%\s*(?:include|extends)\s+"([a-z_]+/[^" ]+)"')
         for template in sorted(ROOT.glob("cya/*/templates/**/*")):
             if not template.is_file():
                 continue
             app = template.relative_to(ROOT).parts[1]
-            for used in set(include.findall(template.read_text(encoding="utf-8"))):
-                if used == app or used == "shell" or used not in ci_lanes.UI_TESTS:
+            for used_path in set(reference.findall(template.read_text(encoding="utf-8"))):
+                used = used_path.split("/", 1)[0]
+                if used_path in {"shell/base.html", "shell/save_state.html"}:
+                    source_path = f"cya/shell/templates/{used_path}"
+                    with self.subTest(template=str(template.relative_to(ROOT)), uses=used_path):
+                        self.assertEqual(ci_lanes.classify([source_path])["django-mode"], "full")
+                    continue
+                if used == app or used not in ci_lanes.UI_TESTS:
                     continue  # a change to an app without a focused set runs the full suite
                 with self.subTest(template=str(template.relative_to(ROOT)), uses=used):
                     self.assertIn(f"cya.{app}", ci_lanes.UI_TESTS[used])
@@ -300,6 +319,10 @@ class CoverageMapTests(unittest.TestCase):
             with self.subTest(css_path=css_path):
                 self.assertTrue((ROOT / css_path).is_file())
                 self.assertIn(css_path, source)
+                css = (ROOT / css_path).read_text(encoding="utf-8")
+                for django_delimiter in ("{%", "{{", "{#"):
+                    with self.subTest(css_path=css_path, delimiter=django_delimiter):
+                        self.assertNotIn(django_delimiter, css)
 
 
 if __name__ == "__main__":
