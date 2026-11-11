@@ -19,7 +19,7 @@ from threading import Lock
 from django.conf import settings
 from django.db import connection
 from django.db.models import Exists, OuterRef, Q
-from django.db.models.functions import MD5
+from django.db.models.functions import SHA256
 from django.utils import timezone
 
 from cya.checks.state import effective_checks
@@ -123,7 +123,7 @@ def _evidence(facts, statuses=()):
 class _FactsCache:
     """A bounded, least-recently-used map from (obligation id, facts digest) to CurrentFacts.
 
-    The key is the content of the stored row (an MD5 of its facts text computed by the
+    The key is the content of the stored row (a SHA-256 of its facts text computed by the
     database), never its refresh time, so a changed row can never be served from here: its new
     content has a new key. Old keys simply age out. Each worker process has its own cache.
     """
@@ -164,6 +164,15 @@ FACTS_CACHE = _FactsCache()
 FETCH_BATCH = 2000  # stored facts fetched per query on a cache miss
 
 
+def facts_digest():
+    """The content identity of a stored facts row: SHA-256 of its text, computed by MariaDB.
+
+    A collision-resistant hash, so a changed row cannot share its old key (PR #116 review). MariaDB
+    returns NULL where SHA2 is unavailable; stored_facts then replays those rows and caches none.
+    """
+    return SHA256("facts")
+
+
 def stored_facts(organization_id, digests):
     """({obligation id: CurrentFacts}, changed ids, outdated ids) for {id: expected digest}.
 
@@ -173,19 +182,22 @@ def stored_facts(organization_id, digests):
     not returned; a row of another facts version is reported as outdated and never cached.
     """
     organization_id = str(organization_id)
-    keys = {str(oid): (str(oid), digest) for oid, digest in digests.items()}
+    # Without a digest there is no content identity: neither serve nor cache such a row, and
+    # report it as changed so the caller replays it at T (fail safe, never stale).
+    unknown = {str(oid) for oid, digest in digests.items() if not digest}
+    keys = {str(oid): (str(oid), digest) for oid, digest in digests.items() if digest}
     limit = settings.CYA_CURRENT_FACTS_CACHE_ROWS
     found = FACTS_CACHE.lookup(keys.values()) if limit > 0 else {}
     result = {oid: found[key] for oid, key in keys.items() if key in found}
     missing = sorted(oid for oid in keys if oid not in result)
-    changed, outdated, fresh = set(), set(), {}
+    changed, outdated, fresh = set(unknown), set(), {}
     for offset in range(0, len(missing), FETCH_BATCH):
         batch = missing[offset : offset + FETCH_BATCH]
         rows = _bounded(
             ObligationProjection.objects.filter(
                 organization_id=organization_id, obligation_id__in=batch
             )
-            .annotate(digest=MD5("facts"))
+            .annotate(digest=facts_digest())
             .values_list("obligation_id", "facts", "digest")[: len(batch) + 1],
             len(batch),
         )
@@ -198,6 +210,9 @@ def stored_facts(organization_id, digests):
                 continue
             entry = CurrentFacts(_shared(facts))
             entry.evidence = _evidence(entry)
+            if not digest:  # no identity for what was fetched: replay it, cache nothing
+                changed.add(oid)
+                continue
             fresh[(oid, digest)] = entry
             if digest == keys[oid][1]:
                 result[oid] = entry
@@ -501,7 +516,7 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
             organization_id=organization_id,
             vehicle_id__in=vehicle_ids,
         )
-        .annotate(digest=MD5("facts"))
+        .annotate(digest=facts_digest())
         .values_list("obligation_id", "vehicle_id", "digest", "refreshed_at", "due_at", "selected")[
             : page_limit + 1
         ],

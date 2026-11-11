@@ -416,19 +416,19 @@ class CurrentProjectionTests(AttentionCase):
         good, stale, outdated = rows
         ObligationProjection.objects.filter(pk=outdated.pk).update(facts=["not", "facts"])
         current_module.FACTS_CACHE.clear()
-        from django.db.models.functions import MD5
-
         digest = dict(
-            ObligationProjection.objects.annotate(d=MD5("facts")).values_list("obligation_id", "d")
+            ObligationProjection.objects.annotate(d=current_module.facts_digest()).values_list(
+                "obligation_id", "d"
+            )
         )
         missing = "00000000-0000-4000-8000-000000000099"
         found, changed, old = current_module.stored_facts(
             org,
             {
                 good.pk: digest[good.pk],
-                stale.pk: "0" * 32,  # refreshed after its digest was read
+                stale.pk: "0" * 64,  # refreshed after its digest was read
                 outdated.pk: digest[outdated.pk],
-                missing: "0" * 32,
+                missing: "0" * 64,
             },
         )
         self.assertEqual(set(found), {good.pk})
@@ -438,9 +438,54 @@ class CurrentProjectionTests(AttentionCase):
         # The stale row is cached under its actual content, never under the expected digest.
         keys = set(current_module.FACTS_CACHE._entries)
         self.assertIn((stale.pk, digest[stale.pk]), keys)
-        self.assertNotIn((stale.pk, "0" * 32), keys)
+        self.assertNotIn((stale.pk, "0" * 64), keys)
         self.assertNotIn((outdated.pk, digest[outdated.pk]), keys)
         self.assertIsNone(current_rows(org, [vehicle], at))  # malformed facts: replay instead
+
+    def test_the_cache_key_is_the_sha256_of_the_stored_facts_text(self):
+        # PR #116 review: the content identity must be collision resistant (SHA-256, not MD5).
+        import hashlib
+
+        from django.db import connection
+
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        current_module.FACTS_CACHE.clear()
+        current_rows(org, [vehicle], at)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT obligation_id, facts FROM obligation_projection WHERE vehicle_id = %s",
+                [vehicle],
+            )
+            text = dict(cursor.fetchall())
+        keys = list(current_module.FACTS_CACHE._entries)
+        self.assertTrue(keys)
+        for oid, digest in keys:
+            with self.subTest(obligation=oid):
+                self.assertRegex(digest, r"\A[0-9a-f]{64}\Z")
+                self.assertEqual(digest, hashlib.sha256(text[oid].encode()).hexdigest())
+
+    def test_rows_without_a_digest_are_replayed_and_never_cached(self):
+        # Where MariaDB cannot compute SHA2 it returns NULL: no identity, so never serve or cache.
+        from django.db.models import Value
+
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        expected = current_rows(org, [vehicle], at)
+        current_module.FACTS_CACHE.clear()
+        no_digest = Value(None, output_field=ObligationProjection._meta.get_field("facts"))
+        with (
+            mock.patch.object(current_module, "facts_digest", return_value=no_digest),
+            mock.patch.object(
+                current_module, "_source_facts", wraps=current_module._source_facts
+            ) as replay,
+        ):
+            actual = current_rows(org, [vehicle], at)
+        self.assertEqual(actual, expected)
+        self.assertTrue(replay.called)
+        self.assertEqual(len(current_module.FACTS_CACHE), 0)
+        found, changed, _old = current_module.stored_facts(
+            org, {expected[vehicle][0]["obligation"]["id"]: None}
+        )
+        self.assertEqual((found, len(changed)), ({}, 1))
 
     def test_a_row_refreshed_between_digest_and_fetch_is_replayed_at_the_read_instant(self):
         at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)

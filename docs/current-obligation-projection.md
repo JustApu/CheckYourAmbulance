@@ -49,8 +49,11 @@ the affected selected rows. A selected row with another facts version is treated
 missing cache, so current readers replay until the projection is rebuilt (version 2 carries the
 pinned late limit, issue #80); evaluating such facts directly still fails visibly.
 
-**Per-process facts cache (issue #99).** A current read first reads each row's digest, an MD5
-of its stored facts computed by MariaDB, not the facts themselves. Each worker process keeps the
+**Per-process facts cache (issue #99).** A current read first reads each row's digest, a SHA-256
+of its stored facts computed by MariaDB (`SHA2(facts, 256)`), not the facts themselves. SHA-256
+is collision resistant, so a changed row cannot keep its old key. MariaDB returns NULL where
+SHA2 is unavailable in its build; such rows are replayed and never cached, so the cache only
+loses its benefit there, never correctness. Each worker process keeps the
 decoded facts and their restored (frozen) evidence objects in a least-recently-used cache keyed
 on (obligation ID, digest); only rows missing from it are fetched, in bounded batches. Because
 the key is the stored content, never the refresh time, a changed row always misses: a stale

@@ -24,9 +24,13 @@ skipped when choosing the effective determination. Every query is bounded and re
 
 from datetime import timedelta
 
-from django.db.models.functions import MD5
-
-from cya.obligations.current import BATCH_SIZE, _restore, _source_facts, stored_facts
+from cya.obligations.current import (
+    BATCH_SIZE,
+    _restore,
+    _source_facts,
+    facts_digest,
+    stored_facts,
+)
 from cya.obligations.models import Obligation, ObligationProjection, ObligationSelection
 from cya.obligations.projections import MAX_ROWS, _bounded
 from cya.obligations.state import (
@@ -142,7 +146,7 @@ def _candidate_facts(organization_id, at, ids, current):
                 ObligationProjection.objects.filter(
                     organization_id=organization_id, obligation_id__in=ids
                 )
-                .annotate(digest=MD5("facts"))
+                .annotate(digest=facts_digest())
                 .values_list("obligation_id", "digest", "refreshed_at")[: limit + 1],
                 limit,
             )
