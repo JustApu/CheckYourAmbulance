@@ -344,6 +344,126 @@ class CurrentProjectionTests(AttentionCase):
         )
         self.assertEqual(before, list(ObligationProjection.objects.order_by("pk").values()))
 
+    # Issue #99: the per-process facts cache.
+
+    def selected_row(self, org, vehicle, at):
+        (facts,) = [
+            f
+            for f in current_rows(org, [vehicle], at)[vehicle]
+            if f["obligation"]["item_id"] == str(self.suction.pk)
+            and f["obligation"]["due_at"].startswith(self.at(hours=6).date().isoformat())
+        ]
+        return ObligationProjection.objects.get(obligation_id=facts["obligation"]["id"])
+
+    def test_a_cached_row_whose_content_changes_is_never_served_even_with_the_same_refresh_time(
+        self,
+    ):
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        current_module.FACTS_CACHE.clear()
+        row = self.selected_row(org, vehicle, at)  # the read caches every selected row
+        self.assertGreater(len(current_module.FACTS_CACHE), 0)
+        stamp = row.refreshed_at
+        changed = {**row.facts, "obligation": {**row.facts["obligation"], "explanation": "Marker"}}
+        ObligationProjection.objects.filter(pk=row.pk).update(facts=changed, refreshed_at=stamp)
+        (served,) = [
+            f
+            for f in current_rows(org, [vehicle], at)[vehicle]
+            if f["obligation"]["id"] == str(row.pk)
+        ]
+        self.assertEqual(served["obligation"]["explanation"], "Marker")
+        self.assertEqual(evaluate_facts(served, at).obligation.explanation, "Marker")
+
+    def test_cached_reads_equal_uncached_reads_and_replay_and_readers_never_change_the_cache(self):
+        org = str(self.org.pk)
+        self.clock.set(self.at(hours=5, minutes=15))
+        self.record(self.suction)  # evidence on one row, so the cache holds checks too
+        self.clock.set(self.at(hours=7, minutes=30))
+        at = self.clock.now
+        with self.settings(CYA_CURRENT_FACTS_CACHE_ROWS=0):
+            current_module.FACTS_CACHE.clear()
+            uncached = fleet_readiness(org, now=at)
+            self.assertEqual(len(current_module.FACTS_CACHE), 0)
+        cold = fleet_readiness(org, now=at)  # fills the cache
+        warm = fleet_readiness(org, now=at)  # served from it
+        self.assertEqual(cold, uncached)
+        self.assertEqual(warm, uncached)
+        self.assertEqual(warm, fleet_readiness(org, now=at, as_of=at))
+        self.assert_current_matches_replay()
+        # Every cached entry still equals its stored row and carries no read's status.
+        stored = dict(ObligationProjection.objects.values_list("obligation_id", "facts"))
+        entries = list(current_module.FACTS_CACHE._entries.items())
+        self.assertTrue(entries)
+        for (oid, _digest), entry in entries:
+            self.assertEqual(dict(entry), stored[oid])
+            self.assertEqual(entry.evidence[4], ())
+
+    def test_the_cache_keeps_at_most_the_configured_number_of_rows(self):
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        current_module.FACTS_CACHE.clear()
+        with self.settings(CYA_CURRENT_FACTS_CACHE_ROWS=3):
+            first = current_rows(org, [vehicle], at)
+            self.assertEqual(len(current_module.FACTS_CACHE), 3)
+            self.assertEqual(current_rows(org, [vehicle], at), first)
+            self.assertEqual(len(current_module.FACTS_CACHE), 3)
+        current_module.FACTS_CACHE.clear()
+
+    def test_stored_facts_reports_changed_missing_and_outdated_rows_without_returning_them(self):
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        rows = list(
+            ObligationProjection.objects.filter(organization_id=org, vehicle_id=vehicle)[:3]
+        )
+        self.assertEqual(len(rows), 3)
+        good, stale, outdated = rows
+        ObligationProjection.objects.filter(pk=outdated.pk).update(facts=["not", "facts"])
+        current_module.FACTS_CACHE.clear()
+        from django.db.models.functions import MD5
+
+        digest = dict(
+            ObligationProjection.objects.annotate(d=MD5("facts")).values_list("obligation_id", "d")
+        )
+        missing = "00000000-0000-4000-8000-000000000099"
+        found, changed, old = current_module.stored_facts(
+            org,
+            {
+                good.pk: digest[good.pk],
+                stale.pk: "0" * 32,  # refreshed after its digest was read
+                outdated.pk: digest[outdated.pk],
+                missing: "0" * 32,
+            },
+        )
+        self.assertEqual(set(found), {good.pk})
+        self.assertEqual(dict(found[good.pk]), good.facts)
+        self.assertEqual(changed, {stale.pk, missing})
+        self.assertEqual(old, {outdated.pk})
+        # The stale row is cached under its actual content, never under the expected digest.
+        keys = set(current_module.FACTS_CACHE._entries)
+        self.assertIn((stale.pk, digest[stale.pk]), keys)
+        self.assertNotIn((stale.pk, "0" * 32), keys)
+        self.assertNotIn((outdated.pk, digest[outdated.pk]), keys)
+        self.assertIsNone(current_rows(org, [vehicle], at))  # malformed facts: replay instead
+
+    def test_a_row_refreshed_between_digest_and_fetch_is_replayed_at_the_read_instant(self):
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        expected = current_rows(org, [vehicle], at)
+        target = expected[vehicle][0]["obligation"]["id"]
+        real = current_module.stored_facts
+
+        def racing(organization_id, digests):
+            found, changed, outdated = real(organization_id, digests)
+            found.pop(target)
+            return found, changed | {target}, outdated
+
+        with (
+            mock.patch.object(current_module, "stored_facts", side_effect=racing),
+            mock.patch.object(
+                current_module, "_source_facts", wraps=current_module._source_facts
+            ) as replay,
+        ):
+            actual = current_rows(org, [vehicle], at)
+        self.assertEqual(actual, expected)
+        replay.assert_called_once()
+        self.assertEqual([o.pk for o in replay.call_args.args[1]], [target])
+
     def test_projection_does_not_take_a_foreign_key_lock_on_the_mutable_vehicle(self):
         from django.db import connection
 
@@ -709,14 +829,17 @@ class CurrentQueryLimitTests(SimpleTestCase):
         obligation = "00000000-0000-0000-0000-000000000003"
         instant = datetime(2026, 6, 1, tzinfo=UTC)
         facts = {"version": current.FACTS_VERSION, "obligation": {"id": obligation}}
+        current.FACTS_CACHE.clear()
 
         def capture(rows, limit=None):
             if not isinstance(rows, QuerySet):
                 return ()
             if rows.model is Obligation:
                 return ((obligation, True),)
+            if rows.model is ObligationProjection and "facts" in rows._fields:
+                return ((obligation, facts, "digest"),)  # the cache miss fetch
             if rows.model is ObligationProjection:
-                return ((obligation, vehicle, facts, instant, instant, True),)
+                return ((obligation, vehicle, "digest", instant, instant, True),)
             if rows.model is VehicleStatusEvent:
                 return ()
             self.fail(f"unexpected bounded query for {rows.model!r}")
@@ -726,10 +849,13 @@ class CurrentQueryLimitTests(SimpleTestCase):
             mock.patch.object(
                 current, "selected_ids", side_effect=AssertionError("selection stream reread")
             ),
+            # These minimal facts are not restorable evidence; only the query shape is tested.
+            mock.patch.object(current, "_evidence", return_value=((),) * 5),
         ):
             result = current_rows(organization, [vehicle], instant)
 
         self.assertEqual(result[vehicle], [{**facts, "statuses": []}])
+        current.FACTS_CACHE.clear()  # never leave the stubbed evidence for a later test
 
     def test_every_current_evidence_query_is_limited_before_it_can_be_evaluated(self):
         from django.db.models import QuerySet

@@ -8,12 +8,18 @@ preceding commit, so concurrent source writers leave a serially reproducible pro
 """
 
 import json
+import sys
 from bisect import bisect_right
+from collections import OrderedDict
 from dataclasses import asdict
 from datetime import datetime, timedelta
+from functools import lru_cache
+from threading import Lock
 
+from django.conf import settings
 from django.db import connection
 from django.db.models import Exists, OuterRef, Q
+from django.db.models.functions import MD5
 from django.utils import timezone
 
 from cya.checks.state import effective_checks
@@ -64,30 +70,163 @@ def _json(value):
     return json.loads(json.dumps(value, default=lambda v: v.isoformat(), sort_keys=True))
 
 
+@lru_cache(maxsize=65536)
+def _instant(text):
+    # Datetimes are immutable, so rows that share an instant can share one object (issue #99).
+    return datetime.fromisoformat(text)
+
+
+def _shared(value):
+    """The same decoded JSON with equal strings shared, so cached rows hold one copy of each."""
+    if isinstance(value, str):
+        return sys.intern(value)
+    if isinstance(value, dict):
+        return {sys.intern(k): _shared(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_shared(v) for v in value]
+    return value
+
+
 def _restore(kind, values):
     values = dict(values)
     for key in DATE_FIELDS & values.keys():
         if values[key] is not None:
-            values[key] = datetime.fromisoformat(values[key])
+            values[key] = _instant(values[key])
     for key in ("rule", "na_rule"):
         if values.get(key) is not None:
             values[key] = _restore(RuleEvidence, values[key])
     return kind(**values)
 
 
+class CurrentFacts(dict):
+    """Stored projection facts as decoded once, with their evidence restored once (issue #99).
+
+    The per-process cache below hands the SAME object to later reads, so treat it as read-only.
+    `evidence` is (obligation, checks, determinations, suspensions, statuses) of frozen
+    evidence objects; statuses stay empty until attach_status_fact gives a copy the status
+    applicable to its read. Equality is the plain dict's, so the facts compare as before.
+    """
+
+    __slots__ = ("evidence",)
+
+
+def _evidence(facts, statuses=()):
+    return (
+        _restore(ObligationEvidence, facts["obligation"]),
+        tuple(_restore(CheckEvidence, r) for r in facts["checks"]),
+        tuple(_restore(DeterminationEvidence, r) for r in facts["determinations"]),
+        tuple(_restore(SuspensionEvidence, r) for r in facts["suspensions"]),
+        statuses,
+    )
+
+
+class _FactsCache:
+    """A bounded, least-recently-used map from (obligation id, facts digest) to CurrentFacts.
+
+    The key is the content of the stored row (an MD5 of its facts text computed by the
+    database), never its refresh time, so a changed row can never be served from here: its new
+    content has a new key. Old keys simply age out. Each worker process has its own cache.
+    """
+
+    def __init__(self):
+        self._entries = OrderedDict()
+        self._lock = Lock()
+
+    def lookup(self, keys):
+        found = {}
+        with self._lock:
+            for key in keys:
+                entry = self._entries.get(key)
+                if entry is not None:
+                    self._entries.move_to_end(key)
+                    found[key] = entry
+        return found
+
+    def store(self, entries, limit):
+        if limit <= 0:
+            return
+        with self._lock:
+            for key, value in entries.items():
+                self._entries[key] = value
+                self._entries.move_to_end(key)
+            while len(self._entries) > limit:
+                self._entries.popitem(last=False)
+
+    def clear(self):
+        with self._lock:
+            self._entries.clear()
+
+    def __len__(self):
+        return len(self._entries)
+
+
+FACTS_CACHE = _FactsCache()
+FETCH_BATCH = 2000  # stored facts fetched per query on a cache miss
+
+
+def stored_facts(organization_id, digests):
+    """({obligation id: CurrentFacts}, changed ids, outdated ids) for {id: expected digest}.
+
+    Cached rows are served by content key; the others are fetched in bounded batches, decoded,
+    restored and cached under the digest read with them. A row whose content no longer has the
+    expected digest (a refresh committed after the caller read it) is reported as changed and
+    not returned; a row of another facts version is reported as outdated and never cached.
+    """
+    organization_id = str(organization_id)
+    keys = {str(oid): (str(oid), digest) for oid, digest in digests.items()}
+    limit = settings.CYA_CURRENT_FACTS_CACHE_ROWS
+    found = FACTS_CACHE.lookup(keys.values()) if limit > 0 else {}
+    result = {oid: found[key] for oid, key in keys.items() if key in found}
+    missing = sorted(oid for oid in keys if oid not in result)
+    changed, outdated, fresh = set(), set(), {}
+    for offset in range(0, len(missing), FETCH_BATCH):
+        batch = missing[offset : offset + FETCH_BATCH]
+        rows = _bounded(
+            ObligationProjection.objects.filter(
+                organization_id=organization_id, obligation_id__in=batch
+            )
+            .annotate(digest=MD5("facts"))
+            .values_list("obligation_id", "facts", "digest")[: len(batch) + 1],
+            len(batch),
+        )
+        seen = set()
+        for oid, facts, digest in rows:
+            oid = str(oid)
+            seen.add(oid)
+            if not isinstance(facts, dict) or facts.get("version") != FACTS_VERSION:
+                outdated.add(oid)
+                continue
+            entry = CurrentFacts(_shared(facts))
+            entry.evidence = _evidence(entry)
+            fresh[(oid, digest)] = entry
+            if digest == keys[oid][1]:
+                result[oid] = entry
+            else:
+                changed.add(oid)
+        changed.update(oid for oid in batch if oid not in seen)
+    FACTS_CACHE.store(fresh, limit)
+    return result, changed, outdated
+
+
 def evaluate_facts(facts, instant):
     """Use the SAME pure evaluator as historical replay, without replaying check chains."""
     if facts.get("version") != FACTS_VERSION:
         raise ValueError("unsupported obligation projection; rebuild required")
-    if not any(facts[key] for key in ("checks", "determinations", "statuses", "suspensions")):
-        return evaluate_obligation(_restore(ObligationEvidence, facts["obligation"]), instant)
+    evidence = getattr(facts, "evidence", None)
+    if evidence is None:
+        evidence = _evidence(
+            facts, tuple(_restore(StatusEvidence, r) for r in facts.get("statuses", ()))
+        )
+    obligation, checks, determinations, suspensions, statuses = evidence
+    if not (checks or determinations or statuses or suspensions):
+        return evaluate_obligation(obligation, instant)
     return evaluate_obligation(
-        _restore(ObligationEvidence, facts["obligation"]),
+        obligation,
         instant,
-        checks=tuple(_restore(CheckEvidence, r) for r in facts["checks"]),
-        determinations=tuple(_restore(DeterminationEvidence, r) for r in facts["determinations"]),
-        status_events=tuple(_restore(StatusEvidence, r) for r in facts["statuses"]),
-        suspensions=tuple(_restore(SuspensionEvidence, r) for r in facts["suspensions"]),
+        checks=checks,
+        determinations=determinations,
+        status_events=statuses,
+        suspensions=suspensions,
     )
 
 
@@ -297,22 +436,34 @@ def status_timeline(events):
             times.append(event.recorded_at)
             if newest is None or event.sequence > newest.sequence:
                 newest = event
-            newest_by_sequence.append(facts_by_event[newest.id])
+            # The facts and the evidence object of the same event (issue #99).
+            newest_by_sequence.append((facts_by_event[newest.id], newest))
         result[vehicle] = (times, newest_by_sequence)
     return result
 
 
 def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
-    """Return projection facts with the immutable status event applicable to this read."""
+    """Return projection facts with the immutable status event applicable to this read.
+
+    The input is never changed. A cached CurrentFacts gives a CurrentFacts copy whose evidence
+    carries the same status, so its evaluation restores nothing.
+    """
     timeline = timelines.get(str(vehicle_id))
-    status_facts = []
+    status_facts, status_events = [], ()
     if timeline:
         times, newest_by_sequence = timeline
         index = bisect_right(times, min(instant, due_at))
         if index:
-            status_facts = [newest_by_sequence[index - 1]]
-    result = dict(facts)
+            status, event = newest_by_sequence[index - 1]
+            status_facts, status_events = [status], (event,)
+    evidence = getattr(facts, "evidence", None)
+    if evidence is None:
+        result = dict(facts)
+        result["statuses"] = status_facts
+        return result
+    result = CurrentFacts(facts)
     result["statuses"] = status_facts
+    result.evidence = (*evidence[:4], status_events)
     return result
 
 
@@ -342,23 +493,22 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     page_limit = MAX_ROWS * max(1, len(vehicle_ids))
     # Limit in SQL before QuerySet iteration, which otherwise buffers every matching row.
     source_rows = _bounded(sources.values_list("pk", "routine")[: page_limit + 1], page_limit)
+    # The facts themselves are not read here, only a digest of each row's content: unchanged
+    # rows come from the per-process cache, and only the others are fetched (issue #99).
     rows = _bounded(
         ObligationProjection.objects.filter(
             scope,
             organization_id=organization_id,
             vehicle_id__in=vehicle_ids,
-        ).values_list("obligation_id", "vehicle_id", "facts", "refreshed_at", "due_at", "selected")[
+        )
+        .annotate(digest=MD5("facts"))
+        .values_list("obligation_id", "vehicle_id", "digest", "refreshed_at", "due_at", "selected")[
             : page_limit + 1
         ],
         page_limit,
     )
     source_ids = {oid for oid, _routine in source_rows}
     if {r[0] for r in rows} != source_ids:
-        return None
-    # Rows written by an older facts version (for example before the pinned late limit of
-    # issue #80) are treated like a missing cache: the caller replays the immutable events.
-    # A reader never rebuilds rows; that remains the writers' and the rebuild command's job.
-    if any(not isinstance(r[2], dict) or r[2].get("version") != FACTS_VERSION for r in rows):
         return None
     newer = {r[0] for r in rows if r[3] > instant}
     # The projection's selected flag is maintained in the same transaction as each
@@ -372,6 +522,16 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
         selected = {row[0] for row in rows if row[5]}
     if not selected.issubset(source_ids):
         return None
+    stored, changed, outdated = stored_facts(
+        organization_id, {r[0]: r[2] for r in rows if r[0] in selected and r[0] not in newer}
+    )
+    # Rows written by an older facts version (for example before the pinned late limit of
+    # issue #80) are treated like a missing cache: the caller replays the immutable events.
+    # A reader never rebuilds rows; that remains the writers' and the rebuild command's job.
+    if outdated:
+        return None
+    # A refresh that committed after the digests were read is replayed at T like a newer row.
+    newer = newer | {r[0] for r in rows if str(r[0]) in changed}
     # A save can commit between the reader capturing T and loading this table. Replay ONLY
     # those newer rows at T, rather than making a busy vehicle replay its whole nine-day
     # window on every live-update reload. Explicit as_of readers never enter this adapter.
@@ -401,10 +561,10 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     )
     timelines = status_timeline(statuses)
     result = {v: [] for v in vehicle_ids}
-    for oid, vehicle, facts, _stamp, due_at, _selected in rows:
+    for oid, vehicle, _digest, _stamp, due_at, _selected in rows:
         if oid not in selected:
             continue
-        facts = replayed.get(oid, facts)
+        facts = replayed[oid] if oid in newer else stored[str(oid)]
         result[str(vehicle)].append(attach_status_fact(facts, vehicle, due_at, instant, timelines))
     for found in result.values():
         _bounded(found)

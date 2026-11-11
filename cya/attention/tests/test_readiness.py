@@ -22,6 +22,7 @@ from cya.deficiencies.dependency import enter_dependency
 from cya.deficiencies.models import DeficiencyEvent
 from cya.deficiencies.suspension import suspend_checks
 from cya.inspections.tests.test_crew_ui import CrewUiCase
+from cya.obligations.current import FACTS_CACHE
 from cya.obligations.state import ObligationState, State
 from cya.operations.commands import set_vehicle_status
 
@@ -212,7 +213,11 @@ class DeficiencyFactTests(ReadinessCase):
 class FanOutTests(ReadinessCase):
     """PR 34 review: the deficiency list is bounded in the database and facts are read in bulk."""
 
-    def queries(self):
+    def queries(self, cold=True):
+        # Issue #99: a cold read also fetches the page's facts; clear the per-process cache so
+        # the counts compared here do not depend on what an earlier read left in it.
+        if cold:
+            FACTS_CACHE.clear()
         with CaptureQueriesContext(connection) as captured:
             self.picture()
         return captured.captured_queries
@@ -245,10 +250,13 @@ class FanOutTests(ReadinessCase):
         self.record(self.suction)
         self.failed(self.masks, vehicle=self.vehicles[1], quantity=1)
         self.assertGreater(len(self.vehicles), 1)
-        sql = [q["sql"] for q in self.queries()]
-        self.assertEqual(sum("FROM `obligation_projection`" in q for q in sql), 1)
-        self.assertFalse(any("FROM `check_obligation_link`" in q for q in sql))
-        self.assertFalse(any("FROM `check_record`" in q for q in sql))
+        # Cold: one digest read and one batched fetch for the whole page (issue #99). Warm: the
+        # digest read alone. Neither grows with the number of vehicles.
+        for cold, reads in ((True, 2), (False, 1)):
+            sql = [q["sql"] for q in self.queries(cold=cold)]
+            self.assertEqual(sum("FROM `obligation_projection`" in q for q in sql), reads)
+            self.assertFalse(any("FROM `check_obligation_link`" in q for q in sql))
+            self.assertFalse(any("FROM `check_record`" in q for q in sql))
         with mock.patch.object(
             readiness, "load_projection_histories", wraps=readiness.load_projection_histories
         ) as batch:

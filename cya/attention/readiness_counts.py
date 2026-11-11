@@ -24,7 +24,9 @@ skipped when choosing the effective determination. Every query is bounded and re
 
 from datetime import timedelta
 
-from cya.obligations.current import BATCH_SIZE, FACTS_VERSION, _restore, _source_facts
+from django.db.models.functions import MD5
+
+from cya.obligations.current import BATCH_SIZE, _restore, _source_facts, stored_facts
 from cya.obligations.models import Obligation, ObligationProjection, ObligationSelection
 from cya.obligations.projections import MAX_ROWS, _bounded
 from cya.obligations.state import (
@@ -130,16 +132,23 @@ def _candidate_facts(organization_id, at, ids, current):
     """{obligation id: facts at T}: stored current facts where usable, otherwise replayed at T."""
     facts = {}
     if current:
+        # Only digests are read here; the facts come from the per-process cache or are fetched
+        # by stored_facts (issue #99). A row refreshed after T, changed since its digest was
+        # read or of another facts version is replayed below.
         limit = len(ids)
-        for oid, stored, refreshed_at in _bounded(
-            ObligationProjection.objects.filter(
-                organization_id=organization_id, obligation_id__in=ids
-            ).values_list("obligation_id", "facts", "refreshed_at")[: limit + 1],
-            limit,
-        ):
-            if isinstance(stored, dict) and stored.get("version") == FACTS_VERSION:
-                if refreshed_at <= at:
-                    facts[str(oid)] = stored
+        digests = {
+            str(oid): digest
+            for oid, digest, refreshed_at in _bounded(
+                ObligationProjection.objects.filter(
+                    organization_id=organization_id, obligation_id__in=ids
+                )
+                .annotate(digest=MD5("facts"))
+                .values_list("obligation_id", "digest", "refreshed_at")[: limit + 1],
+                limit,
+            )
+            if refreshed_at <= at
+        }
+        facts, _changed, _outdated = stored_facts(organization_id, digests)
     missing = [oid for oid in ids if oid not in facts]
     if missing:
         rows = _bounded(
@@ -159,9 +168,13 @@ def _candidate_facts(organization_id, at, ids, current):
 
 
 def _qualifies(fact, retired_ids, at):
-    obligation = _restore(ObligationEvidence, fact["obligation"])
-    checks = tuple(_restore(CheckEvidence, c) for c in fact["checks"])
-    determinations = tuple(_restore(DeterminationEvidence, d) for d in fact["determinations"])
+    evidence = getattr(fact, "evidence", None)  # restored once when cached (issue #99)
+    if evidence is not None:
+        obligation, checks, determinations = evidence[:3]
+    else:
+        obligation = _restore(ObligationEvidence, fact["obligation"])
+        checks = tuple(_restore(CheckEvidence, c) for c in fact["checks"])
+        determinations = tuple(_restore(DeterminationEvidence, d) for d in fact["determinations"])
     determination = clearing_determination(obligation, determinations, retired_ids, at)
     return _satisfaction(obligation, _checks_for(obligation, checks, at), determination) is not None
 
