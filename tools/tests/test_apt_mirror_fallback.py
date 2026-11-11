@@ -30,10 +30,15 @@ class AptMirrorFallbackTests(unittest.TestCase):
         self.assertIn("http://primary-unavailable.invalid/ubuntu/\tpriority:1\n", result)
         self.assertIn(f"{FALLBACK}\tpriority:2\n", result)
 
+    def test_configuring_an_already_configured_list_is_idempotent(self):
+        configured = configure("http://azure.archive.ubuntu.com/ubuntu/\n")
+        self.assertEqual(configure(configured), configured)
+
     def test_rejects_unexpected_or_multiple_active_mirrors(self):
         for contents in (
             "# empty\n",
             "http://one.example/ubuntu/\nhttp://two.example/ubuntu/\n",
+            f"http://one.example/ubuntu/\tpriority:1\n{FALLBACK}\tpriority:1\n",
             "file:/local/archive\n",
             "http://mirror.example/other/\n",
         ):

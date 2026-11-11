@@ -15,6 +15,11 @@ class BrowserInstallWorkflowTests(unittest.TestCase):
         self.assertIn("--simulate-primary-failure", WORKFLOW[probe:install])
         self.assertIn("archive.ubuntu.com", WORKFLOW[probe:install])
         self.assertIn("sudo apt-get -o Debug::Acquire::http=true update", WORKFLOW[probe:install])
+        self.assertIn("trap restore_mirrors EXIT", WORKFLOW[probe:install])
+        self.assertIn(
+            "restore_mirrors\n          sudo python3 tools/apt_mirror_fallback.py",
+            WORKFLOW[probe:install],
+        )
 
     def test_only_install_is_retried_with_bounded_attempts(self):
         install = WORKFLOW.index("Install pinned Chromium and system dependencies")

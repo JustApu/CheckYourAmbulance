@@ -25,10 +25,23 @@ def configure(contents: str, *, simulate_primary_failure: bool = False) -> str:
     """Add the official fallback, preserving comments and requiring one known primary."""
     lines = contents.splitlines()
     active = [line for line in lines if line.strip() and not line.lstrip().startswith("#")]
-    if len(active) != 1:
-        raise ValueError("expected exactly one active Ubuntu apt mirror")
+    parsed_lines = [_parts(line) for line in active]
+    if len(active) == 1:
+        primary, metadata = parsed_lines[0]
+    elif len(active) == 2:
+        fallbacks = [pair for pair in parsed_lines if pair[0] == FALLBACK]
+        primaries = [pair for pair in parsed_lines if pair[0] != FALLBACK]
+        if (
+            len(fallbacks) != 1
+            or len(primaries) != 1
+            or "priority:1" not in primaries[0][1]
+            or "priority:2" not in fallbacks[0][1]
+        ):
+            raise ValueError("unexpected active Ubuntu apt mirror list")
+        primary, metadata = primaries[0]
+    else:
+        raise ValueError("expected one primary and at most one configured fallback")
 
-    primary, metadata = _parts(active[0])
     parsed = urlsplit(primary)
     if (
         parsed.scheme not in {"http", "https"}
@@ -36,7 +49,7 @@ def configure(contents: str, *, simulate_primary_failure: bool = False) -> str:
         or not parsed.path.endswith("/ubuntu/")
     ):
         raise ValueError("unexpected primary Ubuntu apt mirror URI")
-    if primary.rstrip("/") == FALLBACK.rstrip("/"):
+    if primary == FALLBACK:
         raise ValueError("primary mirror already is the configured fallback")
 
     if simulate_primary_failure:
@@ -47,10 +60,10 @@ def configure(contents: str, *, simulate_primary_failure: bool = False) -> str:
     output = []
     replaced = False
     for line in lines:
-        if line == active[0] and not replaced:
+        if line in active and not replaced:
             output.extend((primary_line, fallback_line))
             replaced = True
-        else:
+        elif line not in active:
             output.append(line)
     return "\n".join(output).rstrip("\n") + "\n"
 
