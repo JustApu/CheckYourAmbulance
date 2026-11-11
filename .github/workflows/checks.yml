@@ -200,8 +200,55 @@ jobs:
       - name: Install pinned browser test dependency
         run: npm ci --no-audit --no-fund
 
+      - name: Verify apt mirror fallback and configure runner mirrors
+        run: |
+          set -euo pipefail
+          mirrors=/etc/apt/apt-mirrors.txt
+          backup="$RUNNER_TEMP/apt-mirrors.original"
+          log="$RUNNER_TEMP/apt-mirror-fallback.log"
+          sudo test -r "$mirrors"
+          sudo cp "$mirrors" "$backup"
+          restore_mirrors() {
+            sudo cp "$backup" "$mirrors"
+            rm -f "$backup"
+          }
+          trap restore_mirrors EXIT
+
+          # Force a reserved, unresolvable primary for this probe. The official
+          # archive mirror must serve apt metadata before the normal install runs.
+          sudo python3 tools/apt_mirror_fallback.py "$mirrors" --simulate-primary-failure
+          if ! sudo apt-get -o Debug::Acquire::http=true update >"$log" 2>&1; then
+            echo 'APT mirror fallback probe failed; check apt resolver and download errors on this runner.'
+            grep -E 'Temporary failure resolving|Could not resolve|Failed to fetch' "$log" | tail -n 10 || true
+            exit 1
+          fi
+          if ! grep -Fq 'archive.ubuntu.com' "$log"; then
+            echo 'APT mirror probe did not show the fallback serving metadata.'
+            exit 1
+          fi
+          echo 'APT fallback served metadata after the simulated primary DNS failure.'
+
+          restore_mirrors
+          sudo python3 tools/apt_mirror_fallback.py "$mirrors"
+          trap - EXIT
+
       - name: Install pinned Chromium and system dependencies
-        run: npx playwright install --with-deps chromium
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            echo "Playwright dependency install attempt ${attempt}/2."
+            if timeout --kill-after=15s 180s npx playwright install --with-deps chromium; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Playwright dependency installation failed after two bounded attempts (exit ${status})."
+              exit "$status"
+            fi
+            echo 'Dependency installation failed; retrying once after the apt mirror fallback.'
+            sleep 5
+          done
 
       - name: Cross-device browser smoke
         env:
