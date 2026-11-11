@@ -114,6 +114,10 @@ async function testInspectionNavigation(viewport) {
     assert.equal(await page.locator("#area-overview").isVisible(), false);
     assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (1)" }).count(), 1);
     assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (2)" }).count(), 1);
+    const compartmentItems = await page.locator("#items > li.item").evaluateAll((items) => items.map((item) => item.dataset.itemKey));
+    assert.equal(compartmentItems.length, 4, `${viewport.name}: compartment drill-down did not contain its four checklist rows`);
+    assert.ok(compartmentItems.includes("item-mask|kit-one"), `${viewport.name}: first physical kit instance was not nested under the compartment`);
+    assert.ok(compartmentItems.includes("item-mask|kit-two"), `${viewport.name}: second physical kit instance was not nested under the compartment`);
     await page.evaluate(() => {
       const item = document.querySelector('#items [data-item-key]');
       item.scrollIntoView({ block: "start" });

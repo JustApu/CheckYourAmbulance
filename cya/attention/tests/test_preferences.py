@@ -197,6 +197,23 @@ class PreferenceApiTests(AttentionCase):
         self.assertGreater(len(wide["items"]), 1)
         self.assertEqual(wide["vehicle_status"]["status"], "IN_SERVICE")
 
+    def test_group_progress_matches_real_compartment_and_kit_instance_rows(self):
+        result = self.checklist("?needs_attention_only=false").json()
+        compartment_id = str(self.cabinet.pk)
+        compartment_rows = [
+            row for row in result["items"] if row["compartment_id"] == compartment_id
+        ]
+        kit_rows = [row for row in compartment_rows if row["item_id"] == str(self.kit_item.pk)]
+        self.assertCountEqual([row["kit_id"] for row in kit_rows], [self.reference, self.kit_b])
+
+        group = next(
+            group
+            for group in result["group_progress"]
+            if group["key"] == f"compartment:{compartment_id}"
+        )
+        self.assertEqual(group["total"], len(compartment_rows))
+        self.assertEqual(group["label"], self.cabinet.label)
+
     def test_bad_requests(self):
         for body in (
             self.body(preferred_view="SIDEWAYS"),
