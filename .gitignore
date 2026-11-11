@@ -21,3 +21,6 @@ incoming/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Node.js dependencies
+/node_modules/

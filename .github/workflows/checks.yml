@@ -50,6 +50,7 @@ jobs:
       django-mode: ${{ steps.filter.outputs.django-mode }}
       django-labels: ${{ steps.filter.outputs.django-labels }}
       run-client-scripts: ${{ steps.filter.outputs.run-client-scripts }}
+      run-browser-smoke: ${{ steps.filter.outputs.run-browser-smoke }}
     env:
       GITLEAKS_VERSION: 8.30.1
       # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, from the release's checksums file.
@@ -91,6 +92,7 @@ jobs:
           assert "Failed to query changed files from GitHub API; failing closed to both lanes." in workflow
           assert "python3 tools/ci_lanes.py --query-failed" in workflow
           assert "--changed-files" in workflow, "the 3,000-file list limit must fail closed"
+          assert "run-browser-smoke" in workflow, "browser smoke routing output is missing"
           assert "  workflow_dispatch:\n" in workflow, "manual full-check dispatch is missing"
           event_expression = "$" + "{{ github.event_name }}"
           dispatch_condition = f'if [ "{event_expression}" != "pull_request" ]; then'
@@ -179,6 +181,42 @@ jobs:
             echo "::endgroup::"
           done
 
+  browser-smoke:
+    needs: [stack-neutral]
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'synchronize')) && needs.stack-neutral.outputs.run-browser-smoke == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install pinned browser test dependency
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pinned Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Cross-device browser smoke
+        env:
+          BROWSER_SMOKE_OUTPUT_DIR: ${{ runner.temp }}/browser-smoke-artifacts
+        run: npm run test:browser-smoke
+
+      - name: Upload synthetic browser failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-smoke-failure
+          path: ${{ runner.temp }}/browser-smoke-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
   django:
     name: django (MariaDB ${{ matrix.mariadb.version }})
     needs: [stack-neutral]
@@ -240,6 +278,7 @@ jobs:
           local/venv/bin/pip install --require-hashes -r requirements/dev.txt
 
       - name: Lint and format check
+        if: matrix.mariadb.version == '10.11'
         run: |
           local/venv/bin/ruff check .
           local/venv/bin/ruff format --check .
