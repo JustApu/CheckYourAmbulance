@@ -18,7 +18,7 @@ from threading import Lock
 
 from django.conf import settings
 from django.db import connection
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import CharField, Exists, OuterRef, Q
 from django.db.models.functions import SHA256
 from django.utils import timezone
 
@@ -170,7 +170,9 @@ def facts_digest():
     A collision-resistant hash, so a changed row cannot share its old key (PR #116 review). MariaDB
     returns NULL where SHA2 is unavailable; stored_facts then replays those rows and caches none.
     """
-    return SHA256("facts")
+    # A text result: the digest takes its input's JSONField type otherwise, and every row's hex
+    # string would then go through json.loads (about 1 s per 40,000-row read on Rocky).
+    return SHA256("facts", output_field=CharField(max_length=64))
 
 
 def stored_facts(organization_id, digests):
