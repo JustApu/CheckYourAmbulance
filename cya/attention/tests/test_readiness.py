@@ -19,7 +19,7 @@ from cya.deficiencies import acknowledgement, service
 from cya.deficiencies.closure import close_administrator
 from cya.deficiencies.commands import assign_deficiency, regrade_severity, set_deadline
 from cya.deficiencies.dependency import enter_dependency
-from cya.deficiencies.models import DeficiencyEvent
+from cya.deficiencies.models import DeficiencyEvent, DeficiencySeverity
 from cya.deficiencies.suspension import suspend_checks
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 from cya.obligations.current import FACTS_CACHE
@@ -464,6 +464,22 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, f'href="/deficiencies/{deficiency_id}/"')
         self.assertContains(page, 'id="readiness-attention-only"')
         self.assertNotContains(page, 'data-readiness="compliant"')
+
+    def test_vehicle_summary_uses_configured_severity_rank_and_label(self):
+        DeficiencySeverity.objects.create(
+            organization=self.org,
+            code="URGENT",
+            revision=1,
+            label="Urgent",
+            description="Synthetic top severity for this organization.",
+            rank=5,
+            active=True,
+            effective_at=self.clock.now - timedelta(days=1),
+        )
+        self.failed(self.suction, create=self.new_fields(severity="URGENT"))
+        page = self.supervisor_client().get("/fleet/readiness/")
+        self.assertContains(page, "Urgent / Critical shown: 1")
+        self.assertContains(page, 'data-attention="true"')
 
     def test_as_of_is_validated_and_shown_as_a_static_picture(self):
         sup = self.supervisor_client()

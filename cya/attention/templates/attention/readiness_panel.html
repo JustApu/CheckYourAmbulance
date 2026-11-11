@@ -20,13 +20,13 @@
 <li class="pill{% if vehicle.counts.FAILED %} pill-attention{% endif %}">Failed: {{ vehicle.counts.FAILED }}</li>
 <li class="pill{% if vehicle.counts.OVERDUE %} pill-attention{% endif %}">Overdue: {{ vehicle.counts.OVERDUE }}</li>
 <li class="pill{% if vehicle.counts.MISSED %} pill-attention{% endif %}">Missed: {{ vehicle.counts.MISSED }}</li>
-<li class="pill{% if vehicle.critical_high_count %} pill-attention{% endif %}">Critical/high shown: {{ vehicle.critical_high_count }}</li>
+<li class="pill{% if vehicle.highest_severity_count %} pill-attention{% endif %}">{{ vehicle.highest_severity_label }} shown: {{ vehicle.highest_severity_count }}</li>
 <li class="pill{% if vehicle.suspensions %} pill-attention{% endif %}">Suspensions: {{ vehicle.suspensions|length }}{% if vehicle.suspensions_truncated %}+{% endif %}</li>
 </ul>
 <nav class="readiness-actions" aria-label="{{ vehicle.display_name }} workflows">
 <a href="{% url 'inspection-vehicle' vehicle.vehicle_id %}">Open vehicle inspection</a>
 <a href="{% url 'status-vehicle' vehicle.vehicle_id %}">Current status workflow</a>
-{% if vehicle.deficiencies %}<a href="{% url 'deficiencies-detail' vehicle.deficiencies.0.deficiency_id %}">Open a deficiency</a>{% endif %}
+{% if vehicle.deficiencies %}<a href="{% url 'deficiencies-detail' vehicle.deficiencies.0.deficiency_id %}">Open oldest active deficiency</a>{% endif %}
 </nav>
 {% if vehicle.deficiencies_truncated %}<p class="readiness-truncation">More active deficiencies exist than the details below show.</p>{% endif %}
 </div>

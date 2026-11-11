@@ -26,6 +26,7 @@ from cya.authorization.policy import Role
 from cya.checks.api import _reply
 from cya.deficiencies.api import _stamp
 from cya.deficiencies.service import DeficiencyError
+from cya.deficiencies.severity import active_levels
 from cya.inspections.views import STATUS_LABELS as VEHICLE_STATUS_LABELS
 from cya.inspections.views import _authorized, reverse_socket
 from cya.inspections.workflow_views import STATUS_LABELS
@@ -148,6 +149,17 @@ def _screen(request, template, background=False):
     picture.total_states = [
         (label, picture.totals[code]) for code, label in CATEGORIES if picture.totals[code]
     ]
+    severity_levels = active_levels(str(user.organization_id), picture.as_of)
+    top_ranks = sorted({level.rank for level in severity_levels}, reverse=True)[:2]
+    severity_threshold = min(top_ranks) if top_ranks else None
+    attention_severity_labels = list(
+        dict.fromkeys(
+            level.label
+            for level in sorted(severity_levels, key=lambda level: (-level.rank, level.code))
+            if severity_threshold is not None and level.rank >= severity_threshold
+        )
+    )
+    attention_severity_label = " / ".join(attention_severity_labels) or "Active deficiencies"
     for vehicle in picture.vehicles:
         vehicle.status_label = VEHICLE_STATUS_LABELS.get(vehicle.status, vehicle.status)
         vehicle.states = [
@@ -155,9 +167,11 @@ def _screen(request, template, background=False):
         ]
         for row in vehicle.deficiencies:
             row["status_label"] = STATUS_LABELS.get(row["status"], row["status"])
-        vehicle.critical_high_count = sum(
-            row["severity"]["code"] in {"CRITICAL", "HIGH"} for row in vehicle.deficiencies
+        vehicle.highest_severity_count = sum(
+            severity_threshold is None or row["severity"]["rank"] >= severity_threshold
+            for row in vehicle.deficiencies
         )
+        vehicle.highest_severity_label = attention_severity_label
         # This is only a filter predicate over independent attention signals, not a persisted
         # readiness or compliance state. Operational status remains an explicitly set fact.
         vehicle.needs_attention = any(
@@ -166,7 +180,7 @@ def _screen(request, template, background=False):
                 vehicle.counts["FAILED"] > 0,
                 vehicle.counts["OVERDUE"] > 0,
                 vehicle.counts["MISSED"] > 0,
-                vehicle.critical_high_count > 0,
+                vehicle.highest_severity_count > 0,
                 vehicle.deficiencies_truncated,
                 bool(vehicle.suspensions),
             )

@@ -1,8 +1,9 @@
-.readiness-filter { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .5rem .75rem; margin: 1rem 0; border: 2px solid var(--line); border-radius: .5rem; }
-.readiness-filter label { display: inline-flex; align-items: center; min-height: 48px; cursor: pointer; }
-.readiness-filter-input { display: inline-block; width: 1.5rem; height: 1.5rem; min-height: auto; margin: 0; }
-.readiness-filter-help { flex-basis: 100%; margin: 0; }
-.readiness-filter #readiness-panel { flex: 1 0 100%; min-width: 0; }
+.readiness-filter { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr); align-items: start; margin: 1rem 0; }
+.readiness-filter-copy { grid-column: 1 / -1; grid-row: 1; min-width: 0; padding: .35rem .75rem; border: 2px solid var(--line); border-radius: .5rem; }
+.readiness-filter label { display: flex; align-items: center; min-height: 48px; padding-left: 2rem; cursor: pointer; overflow-wrap: anywhere; }
+.readiness-filter-input { grid-column: 1; grid-row: 1; z-index: 1; align-self: start; justify-self: center; width: 1.5rem; height: 1.5rem; min-height: auto; margin: .95rem 0 0; }
+.readiness-filter-help { margin: 0 0 .35rem; padding-left: 2rem; }
+.readiness-filter #readiness-panel { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
 #readiness-attention-only:checked ~ #readiness-panel .readiness-vehicle[data-attention="false"] { display: none; }
 .readiness-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); align-items: start; gap: .75rem 1rem; }
 .readiness-identity h2 { margin: 0 0 .35rem; overflow-wrap: anywhere; }
