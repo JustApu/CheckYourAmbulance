@@ -102,7 +102,7 @@ async function checkLayout(page, viewport) {
       scrollWidth: document.documentElement.scrollWidth,
       bodyWidth: document.body.scrollWidth,
       viewport: innerWidth,
-      headingWidth: heading.getBoundingClientRect().width,
+      headingRight: heading.getBoundingClientRect().right,
       titleRight: title.right,
       statusRight: status.right,
       statusTop: status.top,
@@ -112,8 +112,8 @@ async function checkLayout(page, viewport) {
   });
   assert.ok(metrics.scrollWidth <= viewport.width, `${viewport.name}: horizontal overflow ${JSON.stringify(metrics)}`);
   assert.ok(metrics.bodyWidth <= viewport.width, `${viewport.name}: body overflow ${JSON.stringify(metrics)}`);
-  assert.ok(metrics.titleRight <= metrics.headingWidth + 20, `${viewport.name}: vehicle name overflowed the heading row`);
-  assert.ok(metrics.statusRight <= metrics.headingWidth + 20, `${viewport.name}: status overflowed the heading row`);
+  assert.ok(metrics.titleRight <= metrics.headingRight + 1, `${viewport.name}: vehicle name overflowed the heading row`);
+  assert.ok(metrics.statusRight <= metrics.headingRight + 1, `${viewport.name}: status overflowed the heading row`);
   if (viewport.width >= 600) {
     assert.ok(Math.abs(metrics.titleTop - metrics.statusTop) <= 4, `${viewport.name}: vehicle name and status did not share the heading row`);
   }

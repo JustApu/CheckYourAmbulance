@@ -96,9 +96,11 @@ class RoutingTests(unittest.TestCase):
         self.assertTrue(decision["run-browser-smoke"])
 
     def test_browser_test_source_change_runs_full_server_and_browser_checks(self):
-        decision = ci_lanes.classify(["tools/browser_smoke.mjs"])
-        self.assertEqual(decision["django-mode"], "full")
-        self.assertTrue(decision["run-browser-smoke"])
+        for path in ci_lanes.BROWSER_TEST_PATHS:
+            with self.subTest(path=path):
+                decision = ci_lanes.classify([path])
+                self.assertEqual(decision["django-mode"], "full")
+                self.assertTrue(decision["run-browser-smoke"])
 
     def test_unknown_ui_paths_run_every_lane(self):
         decision = ci_lanes.classify(["cya/newapp/static/newapp/app.css"])
