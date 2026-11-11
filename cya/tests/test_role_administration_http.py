@@ -248,13 +248,14 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         admin_client, _ = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
         before = self.counts()
+        outage_detail = "synthetic-audit-outage-detail"
         with mock.patch(
             "cya.core.audit_commands.append_audit",
-            side_effect=RuntimeError("synthetic-audit-outage-detail"),
+            side_effect=RuntimeError(outage_detail),
         ):
             response = self.change(admin_client, crew)
         self.assertEqual(response.status_code, 503)
-        self.assertNotContains(response, "synthetic-audit-outage-detail", status_code=503)
+        self.assertNotContains(response, outage_detail, status_code=503)
         self.assertEqual(self.counts()[:2], before[:2])
         self.assertEqual(current_role_codes(crew), ("CREW",))
 
