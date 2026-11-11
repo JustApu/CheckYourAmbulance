@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {% if refresh_to %}<meta http-equiv="refresh" content="0;url={{ refresh_to }}">{% endif %}
 <title>{{ title }} - Check Your Ambulance</title>
+<script>{% include "shell/theme_bootstrap.js" %}</script>
 <style>{% include "shell/shell.css" %}</style>
 {% block head %}{% endblock %}
 </head>
@@ -12,16 +13,26 @@
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header">
   <a class="brand" href="{% url 'home' %}">Check Your Ambulance</a>
-  {% if cya_user %}
-  <div class="account">
-    <span class="account-name">{{ cya_user.display_name|default:cya_user.email }}</span>
-    <form method="post" action="{% url 'sign-out' %}">{% csrf_token %}<button type="submit" class="button">Sign out</button></form>
+  <div class="header-tools">
+    {% if cya_user %}
+    <div class="account">
+      <span class="account-name">{{ cya_user.display_name|default:cya_user.email }}</span>
+      <form method="post" action="{% url 'sign-out' %}">{% csrf_token %}<button type="submit" class="button">Sign out</button></form>
+    </div>
+    {% endif %}
+    <label class="theme-control" for="theme-select">Theme
+      <select id="theme-select" name="theme">
+        <option value="auto">Auto</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
   </div>
-  {% endif %}
 </header>
 {% if cya_menu %}
 <nav class="site-nav" aria-label="Main">
-  <ul>
+  <button id="site-nav-toggle" class="button site-nav-toggle" type="button" aria-controls="site-nav-list" aria-expanded="false" hidden>Menu</button>
+  <ul id="site-nav-list" class="site-nav-list">
   {% for item in cya_menu %}
     <li><a href="{{ item.url }}"{% if item.current %} aria-current="page"{% endif %}>{{ item.label }}</a></li>
   {% endfor %}

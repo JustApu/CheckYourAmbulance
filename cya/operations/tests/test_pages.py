@@ -105,8 +105,17 @@ class StatusPageTests(StatusHttpCase):
         self.request("IN_SERVICE")
         html = self.client.get("/status/").content.decode()
         self.assertIn("1 status-change request waiting", html)
-        self.assertIn("1 request", html)
+        self.assertIn('data-count="1">1 pending request</span>', html)
         self.assertIn('data-status="OUT_OF_SERVICE"', html)
+
+    def test_fleet_list_distinguishes_zero_and_multiple_pending_requests(self):
+        html = self.client.get("/status/").content.decode()
+        self.assertIn('data-count="0">0 pending requests</span>', html)
+        self.request("OUT_OF_SERVICE")
+        self.request("LIMITED_SERVICE", reason="Synthetic second request.")
+        html = self.client.get("/status/").content.decode()
+        self.assertIn('data-count="2">2 pending requests</span>', html)
+        self.assertIn('class="pill status-pill" data-status="IN_SERVICE">In Service</span>', html)
 
     def test_a_database_failure_is_an_honest_503_page(self):
         with mock.patch(
