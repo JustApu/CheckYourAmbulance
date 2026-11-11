@@ -204,8 +204,15 @@ def latest_clearing_due(organization_id, at, overdue, *, current, visible=None):
     if not floor:
         return {}
     candidates = _candidates(organization_id, at, floor)
+    # Only candidates outside the visible rows can have a retirement disposition by T: a visible
+    # row is selected at T (or is a non-routine order, which has no selection stream), and the
+    # selection insert trigger (obligations migration 0002) refuses to select an obligation that
+    # was ever selected before or that its command did not create. So a retired obligation is
+    # never selected again, and the visible rows need no retirement lookup (issue #99).
     retired = retirement_dispositions(
-        organization_id, [oid for found in candidates.values() for _due, oid in found], at
+        organization_id,
+        [oid for found in candidates.values() for _due, oid in found if oid not in visible],
+        at,
     )
 
     def decided(oid):
