@@ -92,7 +92,13 @@ SCRIPT_HARNESSES = {
 
 # Shared shell behavior is executed in Chromium rather than a mock-DOM harness.
 BROWSER_SCRIPTS = frozenset({"cya/shell/templates/shell/shell.js"})
-BROWSER_TEST_PATHS = frozenset({"tools/browser_smoke.mjs", "tools/vehicle_landing_smoke.mjs"})
+BROWSER_TEST_PATHS = frozenset(
+    {
+        "tools/browser_smoke.mjs",
+        "tools/vehicle_landing_smoke.mjs",
+        "tools/vehicle_readings_smoke.mjs",
+    }
+)
 
 # Documentation and repository metadata need neither lane.
 NEUTRAL_PATH = re.compile(r"^(?:docs/.*|.*\.md|\.gitignore|\.gitattributes)$")

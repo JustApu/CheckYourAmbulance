@@ -312,11 +312,18 @@ class PageTests(CrewUiCase):
         self.assertEqual(config["state"], "OPEN")
         self.assertEqual(config["view"], "NORMAL")
         self.assertFalse(config["needs_attention_only"])
+        self.assertIsNone(config["odometer_unit"])
         self.assertEqual(config["urls"]["socket"], f"/ws/v1/vehicles/{self.vehicle.pk}/live/")
         self.assertEqual(config["urls"]["checks"], "/api/v1/checks")
         html = page.content.decode()
         self.assertIn('name="csrfmiddlewaretoken"', html)
         self.assertIn('id="odometer-form"', html)
+        self.assertIn("Vehicle readings", html)
+        self.assertIn("Mileage", html)
+        self.assertIn("Engine hours (optional)", html)
+        self.assertIn('inputmode="decimal"', html)
+        self.assertIn('id="odo-unit"', html)
+        self.assertIn("Distance unit", html)
         self.assertIn('id="conflict-dialog"', html)
         self.assertIn('id="layout-compartments"', html)
         self.assertIn('id="layout-flat"', html)
@@ -333,6 +340,26 @@ class PageTests(CrewUiCase):
         unknown = other.get(f"/inspection/sessions/{uuid4()}/")
         stranger = other.get(f"/inspection/sessions/{session_id}/")
         self.assertEqual((unknown.status_code, stranger.status_code), (404, 404))
+
+    def test_the_vehicle_distance_unit_is_shown_without_reselection_after_first_reading(self):
+        session_id = self.open().json()["result"]["session_id"]
+        saved = self.post(
+            "/api/v1/odometer-entries",
+            {
+                "operation_id": str(uuid4()),
+                "vehicle_id": str(self.vehicle.pk),
+                "value": "64000",
+                "unit": "km",
+            },
+        )
+        self.assertEqual(saved.status_code, 201, saved.content)
+
+        page = self.client.get(f"/inspection/sessions/{session_id}/")
+        self.assertEqual(self.config(page)["odometer_unit"], "km")
+        html = page.content.decode()
+        self.assertIn('Mileage <span class="muted">(kilometres)</span>', html)
+        self.assertIn('id="odo-unit" type="hidden" value="km"', html)
+        self.assertNotIn("Distance unit", html)
 
     def test_an_ended_session_page_offers_reopen_and_no_recording(self):
         session_id = self.open().json()["result"]["session_id"]

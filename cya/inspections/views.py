@@ -217,6 +217,7 @@ def session(request, session_id):
     template = ChecklistTemplate.objects.filter(
         organization_id=user.organization_id, pk=found.checklist_version.template_id
     ).first()
+    odometer_unit = _odometer_unit(user, found.vehicle)
     config = {
         "session_id": str(found.pk),
         "user_id": str(user.pk),
@@ -225,7 +226,7 @@ def session(request, session_id):
         "state": shown,
         "view": saved["preferred_view"],
         "needs_attention_only": saved["needs_attention_only"],
-        "odometer_unit": _odometer_unit(user, found.vehicle),
+        "odometer_unit": odometer_unit,
         "urls": {
             "checklist": reverse("api-vehicle-checklist", args=[found.vehicle_id]),
             "checks": reverse("api-checks"),
@@ -246,6 +247,7 @@ def session(request, session_id):
     context = {
         "title": found.vehicle.display_name,
         "vehicle": found.vehicle,
+        "odometer_unit_label": {"mi": "miles", "km": "kilometres"}.get(odometer_unit),
         "template_label": template.label if template else "",
         "state": shown,
         "state_label": STATE_LABELS[shown],

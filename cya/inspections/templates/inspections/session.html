@@ -29,16 +29,28 @@
   <button type="button" id="reopen-session" class="button primary">Reopen session</button>
 </section>
 {% else %}
-<section aria-labelledby="odo-heading" class="panel">
-  <h2 id="odo-heading">Odometer</h2>
+<section aria-labelledby="odo-heading" class="panel vehicle-readings">
+  <h2 id="odo-heading">Vehicle readings</h2>
   <form id="odometer-form" novalidate>
-    <label for="odo-value">Odometer reading</label>
-    <input id="odo-value" class="number-input" type="text" inputmode="decimal" autocomplete="off" required>
-    <label for="odo-unit">Unit</label>
-    <select id="odo-unit"><option value="mi">miles</option><option value="km">kilometres</option></select>
-    <label for="odo-hours">Engine hours (optional)</label>
-    <input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off">
-    <button type="submit" class="button primary">Save reading</button>
+    <div class="vehicle-readings-fields">
+      <label class="vehicle-reading-field" for="odo-value">
+        <span>Mileage{% if odometer_unit_label %} <span class="muted">({{ odometer_unit_label }})</span>{% endif %}</span>
+        <input id="odo-value" class="number-input" type="text" inputmode="decimal" autocomplete="off" required>
+      </label>
+      {% if config.odometer_unit %}
+      <input id="odo-unit" type="hidden" value="{{ config.odometer_unit }}">
+      {% else %}
+      <label class="vehicle-reading-field" for="odo-unit">
+        <span>Distance unit</span>
+        <select id="odo-unit"><option value="mi">miles</option><option value="km">kilometres</option></select>
+      </label>
+      {% endif %}
+      <label class="vehicle-reading-field" for="odo-hours">
+        <span>Engine hours (optional)</span>
+        <input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off">
+      </label>
+      <button type="submit" class="button primary">Save</button>
+    </div>
   </form>
   <div id="odo-confirm" hidden>
     <label for="odo-why">Why is this reading correct? (optional)</label>
