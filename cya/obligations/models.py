@@ -12,6 +12,7 @@ selection stream and remain effective from creation.
 """
 
 from django.db import models
+from django.db.models.functions import SHA256
 
 from cya.accounts.fields import IdentityIDField, new_id
 from cya.checklists.models import non_blank, organization_fk
@@ -557,6 +558,14 @@ class ObligationProjection(models.Model):
     # Effective linked checks, determinations, status at min(D, refresh time), suspensions,
     # immutable requirement/window pins, and de-duplicable RPT-7 chain counters.
     facts = models.JSONField(default=dict)
+    # SHA-256 of the stored facts text, kept by MariaDB on every write (issue #99). Current reads
+    # compare it with the per-process cache key instead of hashing every row on each read; NULL
+    # where SHA2 is unavailable, which makes readers replay instead of trusting the cache.
+    facts_digest = models.GeneratedField(
+        expression=SHA256("facts"),
+        output_field=models.CharField(max_length=64, null=True),
+        db_persist=True,
+    )
     refreshed_at = models.DateTimeField()
 
     class Meta:
