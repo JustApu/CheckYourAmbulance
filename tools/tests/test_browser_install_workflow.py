@@ -18,6 +18,7 @@ class BrowserInstallWorkflowTests(unittest.TestCase):
         self.assertIn("Dir::Etc::sourceparts=-", WORKFLOW[probe:install])
         self.assertIn("timeout --kill-after=10s 120s sudo apt-get", WORKFLOW[probe:install])
         self.assertIn("trap restore_mirrors EXIT", WORKFLOW[probe:install])
+        self.assertIn('if [ -f "$backup" ]; then', WORKFLOW[probe:install])
         self.assertIn(
             "restore_mirrors\n          sudo python3 tools/apt_mirror_fallback.py",
             WORKFLOW[probe:install],

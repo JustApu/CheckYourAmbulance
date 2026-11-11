@@ -210,8 +210,11 @@ jobs:
           sudo test -r "$mirrors"
           sudo cp -p "$mirrors" "$backup"
           restore_mirrors() {
-            sudo cp -p "$backup" "$mirrors"
-            rm -f "$backup" "$probe_sources" "$log"
+            if [ -f "$backup" ]; then
+              sudo cp -p "$backup" "$mirrors"
+              rm -f "$backup"
+            fi
+            rm -f "$probe_sources" "$log"
           }
           trap restore_mirrors EXIT
 
