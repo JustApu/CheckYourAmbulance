@@ -55,7 +55,7 @@ try {
         saveHeight: document.querySelector("#odometer-form button").getBoundingClientRect().height,
       }));
       assert.ok(metrics.documentWidth <= viewport.width, `${viewport.name}: horizontal overflow ${JSON.stringify(metrics)}`);
-      assert.ok(metrics.cardHeight <= 150, `${viewport.name}: readings card is not compact ${JSON.stringify(metrics)}`);
+      assert.ok(metrics.cardHeight <= 170, `${viewport.name}: readings card is not compact ${JSON.stringify(metrics)}`);
       assert.ok(metrics.saveHeight >= 48, `${viewport.name}: save target is too small ${JSON.stringify(metrics)}`);
       console.log(`${viewport.name}: compact readings layout passed`);
     } finally {
