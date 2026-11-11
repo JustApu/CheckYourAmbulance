@@ -161,8 +161,9 @@ try {
       assert.equal(await page.getByRole("alert").isVisible(), true);
       await page.evaluate(() => window.dispatchEvent(new Event("online")));
       assert.equal(await page.getByRole("alert").isVisible(), false);
-      // Half the CSS viewport approximates 200% browser zoom and checks reflow/overflow.
-      await page.setViewportSize({ width: Math.floor(viewport.width / 2), height: viewport.height });
+      // Half width approximates 200% zoom where possible; never test below 320 CSS px.
+      const zoomWidth = Math.max(320, Math.floor(viewport.width / 2));
+      await page.setViewportSize({ width: zoomWidth, height: viewport.height });
       const zoomMetrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
       assert.ok(zoomMetrics.document <= zoomMetrics.viewport, `${viewport.name} at 200%: document overflow ${JSON.stringify(zoomMetrics)}`);
       assert.ok(zoomMetrics.body <= zoomMetrics.viewport, `${viewport.name} at 200%: body overflow ${JSON.stringify(zoomMetrics)}`);
