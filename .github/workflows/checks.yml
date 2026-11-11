@@ -200,8 +200,84 @@ jobs:
       - name: Install pinned browser test dependency
         run: npm ci --no-audit --no-fund
 
+      - name: Verify apt mirror fallback on manual full-check run
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          mirrors=/etc/apt/apt-mirrors.txt
+          backup="$RUNNER_TEMP/apt-mirrors.original"
+          probe_sources="$RUNNER_TEMP/apt-mirror-probe.list"
+          log="$RUNNER_TEMP/apt-mirror-fallback.log"
+          sudo test -r "$mirrors"
+          sudo cp -p "$mirrors" "$backup"
+          restore_mirrors() {
+            if [ -f "$backup" ]; then
+              sudo cp -p "$backup" "$mirrors"
+              rm -f "$backup"
+            fi
+            rm -f "$probe_sources" "$log"
+          }
+          trap restore_mirrors EXIT
+
+          # Force each configured primary to a reserved, unresolvable host. The
+          # official archive mirror must serve metadata for a single suite/component.
+          probe_status=0
+          if ! sudo python3 tools/apt_mirror_fallback.py "$mirrors" --simulate-primary-failure; then
+            echo '::warning::Could not run the simulated apt mirror fallback probe; normal setup will continue.'
+            probe_status=1
+          else
+            codename=$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")
+            if [ "$codename" != "noble" ]; then
+              echo "::warning::Unexpected Ubuntu release codename for fallback probe: ${codename}"
+              probe_status=1
+            else
+              printf 'deb mirror+file:/etc/apt/apt-mirrors.txt %s main\n' "$codename" >"$probe_sources"
+              if ! timeout --kill-after=10s 120s sudo apt-get \
+                -o Dir::Etc::sourcelist="$probe_sources" \
+                -o Dir::Etc::sourceparts=- \
+                -o Acquire::Languages=none \
+                -o Acquire::Retries=0 \
+                -o Acquire::http::Timeout=20 \
+                -o Debug::Acquire::http=true update >"$log" 2>&1; then
+                echo 'APT mirror fallback probe failed; check apt resolver and download errors on this runner.'
+                grep -E 'Temporary failure resolving|Could not resolve|Failed to fetch' "$log" | tail -n 10 || true
+                probe_status=1
+              elif ! grep -Fq 'http://archive.ubuntu.com/ubuntu/' "$log"; then
+                echo 'APT mirror probe did not show the official archive serving metadata.'
+                probe_status=1
+              else
+                echo 'APT fallback served metadata after the simulated primary DNS failure.'
+              fi
+            fi
+          fi
+
+          restore_mirrors
+          rm -f "$probe_sources" "$log"
+          trap - EXIT
+          if [ "$probe_status" -ne 0 ]; then
+            echo '::warning::The apt fallback diagnostic did not verify; the normal mirror setup and bounded dependency installation will proceed.'
+          fi
+
+      - name: Configure runner apt mirrors
+        run: sudo python3 tools/apt_mirror_fallback.py /etc/apt/apt-mirrors.txt
+
       - name: Install pinned Chromium and system dependencies
-        run: npx playwright install --with-deps chromium
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            echo "Playwright dependency install attempt ${attempt}/2."
+            if timeout --kill-after=15s 180s npx playwright install --with-deps chromium; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Playwright dependency installation failed after two bounded attempts (exit ${status})."
+              exit "$status"
+            fi
+            echo 'Dependency installation failed; retrying once after the apt mirror fallback.'
+            sleep 5
+          done
 
       - name: Cross-device browser smoke
         env:

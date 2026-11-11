@@ -35,6 +35,8 @@ The path-trigger policy is:
 
 Pushes to `main` and `workflow_dispatch` continue to run the full Django matrix, client harnesses and browser smoke. A manually dispatched run is the full-CI override for a PR head; compare its SHA with the PR head before using it as evidence.
 
+The browser-smoke job keeps Playwright 1.65.0 and its matching Chromium revision. Each browser job configures the runner's existing apt mirrors at priority 1 and `archive.ubuntu.com` at priority 2 before Playwright installs system dependencies. A manual `workflow_dispatch` run additionally probes failover by replacing each existing primary with a reserved unresolvable hostname and checking only the Ubuntu Noble `main` component through that mirror list. The diagnostic disables language indexes and APT retries and has a two-minute timeout. Its failure emits a warning and restores the runner's mirror list; it does not block a run when the normal primary is available. Normal mirror configuration and dependency installation remain fail-closed. Playwright's dependency installation gets at most two attempts, each limited to three minutes; the browser smoke itself is not retried. This setup touches only the ephemeral GitHub runner and leaves test routing and coverage unchanged. Run 43067234935 recorded a 31-second browser-smoke job, including the successful fallback probe, install and cross-device smoke; the earlier PR #114 browser job took about 35 seconds. This is one observation, about four seconds lower, and does not establish a repeatable runtime improvement.
+
 ## Issue #113 design and expected savings
 
 The PR proposes three conservative routing changes:
