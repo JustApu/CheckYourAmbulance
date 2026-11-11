@@ -66,7 +66,9 @@ function field(form, name, value = "", type = "text") {
 }
 function environment(config, forms = []) {
   const elements = {}, requests = [], sockets = [], timers = [];
-  const window = {scrollY: 0, innerHeight: 200, simulateListJump: false, scrollBy(_x, y) { this.scrollY += y; }};
+  const window = {scrollY: 0, innerHeight: 200, simulateListJump: false,
+    localStorage: {getItem(key) { return key.endsWith(":user:session") ? JSON.stringify({version: 1, mode: "FLAT"}) : null; }, setItem() {}},
+    scrollBy(_x, y) { this.scrollY += y; }};
   const document = {
     defaultView: window,
     activeElement: null,
@@ -112,12 +114,14 @@ function environment(config, forms = []) {
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
-  const config = {state, view: "NORMAL", needs_attention_only: false, session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version",
+  const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version",
     urls: {checks: "/checks", checklist: "/checklist", suggestions: "/suggestions", deficiency_detail: "/deficiencies/DEFICIENCY/", socket: "/live", odometer: "/odometer"}};
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
     "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+  // Verification regressions exercise item actions, including the no-session retry path.
+  if (config.verification_for_deficiency_id) run.get("layout-flat").fire("click");
   return run;
 }
 const row = {item_id: "item", item_label: "Synthetic item", kit_id: "kit-a", kit_label: "Synthetic kit A", kind: "PRESENCE", checklist_version_id: "version", latest_check_id: "basis-a", latest_check_outcome: "PASSED", latest_check_at: "2026-06-01T00:00:00Z", deficiencies: [], allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]};
@@ -485,7 +489,7 @@ function generic(kind) {
     assert.equal(first.body.kit_id, "kit-a"); assert(!("session_id" in first.body));
     first.reject(new Error("Synthetic lost acknowledgement")); await tick();
     run.context.testUI.reload();
-    response(run.requests.at(-1), 200, {status: "OK", items: [], vehicle_status: {status: "IN_SERVICE"}, verification_status: "Closed — Verified", remaining_scope_rows: 0}); await tick();
+    response(run.requests.at(-1), 200, {status: "OK", items: [], group_progress: [], vehicle_status: {status: "IN_SERVICE"}, verification_status: "Closed — Verified", remaining_scope_rows: 0}); await tick();
     assert(run.get("items").textContent.includes("Retry")); // retained even after automatic closure
     run.context.testUI.retryCheck({...row, checklist_version_id: "new-version"});
     assert.equal(run.posts()[1].options.body, first.options.body);

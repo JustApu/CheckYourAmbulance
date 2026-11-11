@@ -591,17 +591,26 @@
     }
     focusInList = !!focusKey;
     focusAction = focused && focused.dataset ? focused.dataset.action : null;
-    var anchor = null, anchorIndex = -1, anchorTop = null;
+    var anchor = null, anchorIndex = -1, anchorItemIndex = -1, anchorTop = null;
     for (var visible = 0; visible < list.children.length; visible++) {
       var candidate = list.children[visible], rect = candidate.getBoundingClientRect();
       if (candidate.dataset.itemKey && (typeof window === "undefined" || rect.bottom > 0 && rect.top < window.innerHeight)) {
         anchor = candidate; anchorIndex = visible; anchorTop = rect.top; break;
       }
     }
+    function itemIndexAt(childIndex) {
+      var index = -1;
+      for (var i = 0; i <= childIndex && i < list.children.length; i++) {
+        if (list.children[i].dataset.itemKey) { index++; }
+      }
+      return index;
+    }
+    if (anchor) { anchorItemIndex = itemIndexAt(anchorIndex); }
     if (focusKey) {
       var focusedItem = itemForKey(focusKey);
       if (focusedItem) {
         anchor = focusedItem; anchorIndex = Array.prototype.indexOf.call(list.children, focusedItem);
+        anchorItemIndex = itemIndexAt(anchorIndex);
         anchorTop = focusedItem.getBoundingClientRect().top;
       }
     }
@@ -653,7 +662,10 @@
     }
     if (anchor && anchorTop !== null && typeof window !== "undefined" && typeof window.scrollBy === "function") {
       var replacement = itemForKey(anchor.dataset.itemKey);
-      if (!replacement && shown.length) { replacement = list.querySelector("[data-item-key]"); }
+      if (!replacement && shown.length) {
+        var itemNodes = Array.prototype.filter.call(list.children, function (node) { return !!node.dataset.itemKey; });
+        if (itemNodes.length) { replacement = itemNodes[Math.min(Math.max(anchorItemIndex, 0), itemNodes.length - 1)]; }
+      }
       if (replacement) {
         var shift = replacement.getBoundingClientRect().top - anchorTop;
         if (shift) { window.scrollBy(0, shift); }
