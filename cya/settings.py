@@ -231,3 +231,7 @@ CYA_OBLIGATION_LOOKBACK_HOURS = 168
 # SPEC SCH-2/SCH-3 (amendment 1.26.0, issue #61): a late check may complete an overdue
 # obligation only within this many hours after its grace deadline; later it stays missed.
 CYA_LATE_COMPLETION_HOURS = env_int("LATE_COMPLETION_HOURS", 12, 0, 168)
+# Issue #99: how many decoded obligation-projection rows each worker process keeps for current
+# checklist and readiness reads. Rows are keyed on their content, so the cache never serves
+# stale facts; it only bounds memory. 0 turns it off.
+CYA_CURRENT_FACTS_CACHE_ROWS = env_int("CURRENT_FACTS_CACHE_ROWS", 50000, 0, 1000000)

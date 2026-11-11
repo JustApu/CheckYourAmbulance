@@ -118,6 +118,7 @@ does not claim a root-only source file prevents exposure by the running process.
 | `CYA_GOOGLE_CLIENT_ID`, `CYA_GOOGLE_CLIENT_SECRET`, `CYA_GOOGLE_HOSTED_DOMAIN`, `CYA_GOOGLE_REDIRECT_URI` | Organization-owned OAuth configuration; exact HTTPS callback `/auth/callback/` |
 | `CYA_SESSION_MAX_AGE` | Explicitly chosen revocation bound in seconds; current range 300–86400, default 28800 |
 | `CYA_LATE_COMPLETION_HOURS` | `w_late` (SPEC SCH-2/SCH-3): hours after an obligation's grace deadline that a late check may still complete it; default 12, allowed 0–168 (0 turns late completion off) |
+| `CYA_CURRENT_FACTS_CACHE_ROWS` | Decoded obligation-projection rows each worker process keeps for current checklist and readiness reads (issue #99); default 50000, allowed 0–1000000 (0 turns it off). About 2.6 KB per row on the local synthetic set, so the default bounds it near 130 MB per worker; a page with more rows than this still answers correctly but gains less. On the Rocky rehearsal set a worker's peak memory under 1× load fell from about 1.2 GB to 0.6–0.7 GB with the cache, because rows are no longer decoded on every read (issue #99) |
 | `CYA_PUBLIC_BASE_URL` | Public HTTPS base URL used for email deep links; unset sends a bare path |
 | `CYA_NOTIFICATION_SENDER` | Dotted path to the sender factory; unset leaves email queued and the delivery command refuses to run |
 | `CYA_NOTIFICATION_MAX_ATTEMPTS` | Attempts before `GAVE_UP`; default 5, allowed 1–20 |

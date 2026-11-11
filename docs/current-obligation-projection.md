@@ -45,9 +45,24 @@ writing. Selection flags come from the projection, which writers refresh
 transactionally with append-only selection events, avoiding a per-read walk of the
 selection stream. If any projection row was refreshed after the request captured
 its instant, the reader re-reads selection history at that instant and replays only
-the affected selected rows. A row with another facts version is treated like a missing
-cache, so current readers replay until the projection is rebuilt (version 2 carries the pinned
-late limit, issue #80); evaluating such facts directly still fails visibly.
+the affected selected rows. A selected row with another facts version is treated like a
+missing cache, so current readers replay until the projection is rebuilt (version 2 carries the
+pinned late limit, issue #80); evaluating such facts directly still fails visibly.
+
+**Per-process facts cache (issue #99).** A current read first reads each row's digest, a SHA-256
+of its stored facts computed by MariaDB (`SHA2(facts, 256)`), not the facts themselves. SHA-256
+is collision resistant, so a changed row cannot keep its old key. MariaDB returns NULL where
+SHA2 is unavailable in its build; such rows are replayed and never cached, so the cache only
+loses its benefit there, never correctness. Each worker process keeps the
+decoded facts and their restored (frozen) evidence objects in a least-recently-used cache keyed
+on (obligation ID, digest); only rows missing from it are fetched, in bounded batches. Because
+the key is the stored content, never the refresh time, a changed row always misses: a stale
+entry can never be served, and old entries simply age out. A row whose content changed between
+the digest read and the fetch is replayed at the read instant, like a row refreshed after it.
+Readers treat cached entries as read-only; the status applicable to a read is attached to a
+copy. `CYA_CURRENT_FACTS_CACHE_ROWS` bounds the entries per process (0 turns the cache off).
+The RPT-5a count's own stored-facts read uses the same cache. Explicit `as_of` reads replay and
+never use it.
 Evidence queries carry their page cap into SQL before queryset evaluation, and
 per-vehicle caps still refuse an incomplete answer. Attention/known deficiencies remain separate from obligation satisfaction and
 use their existing readers; they are not copied into obligation projections.
