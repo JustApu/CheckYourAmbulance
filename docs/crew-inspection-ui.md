@@ -12,7 +12,7 @@
 
 A vehicle in another organization, an inactive vehicle and a malformed id are all 404. A signed-out visitor is sent to sign-in and a user with no role gets 403, as for the other sections.
 
-The landing page uses the configured checklist-template label. A participant continues their open session; a nonparticipant can join the latest open vehicle session using the existing command. When an open session is shown, a separate start is available under a disclosure and asks for confirmation before creating another session. A normal start can still join a session opened concurrently after page load; the command remains authoritative.
+The landing page uses the configured checklist-template label. A participant continues their open session; a nonparticipant can join the latest open vehicle session using the existing command. If several sessions are open, each nonparticipant row explains that the primary action joins the latest one. When an open session is shown, a separate start is available under a disclosure and asks for confirmation before creating another session. A normal start can still join a session opened concurrently after page load; the command remains authoritative.
 
 `tools/vehicle_landing_smoke.mjs` exercises the real vehicle-page script and CSS with synthetic sessions at 375, 600, 768, 1024 and 1440 CSS pixels. It checks the start/join distinction, confirmation and cancellation for a separate start, accessible task names, 48 px targets and horizontal overflow. `npm run test:browser-smoke` runs this alongside the checklist and shell smoke.
 

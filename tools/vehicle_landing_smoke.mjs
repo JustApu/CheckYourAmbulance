@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Responsive smoke for the inspection landing page, using synthetic sessions and the real client.
+// Django-rendered structure and class hooks are asserted in test_crew_ui.py.
 
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -49,7 +50,7 @@ function markup({ active = false, participant = false } = {}) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Medic 6 — North Crew - Check Your Ambulance</title><style>${css}</style></head><body>
     <main id="main"><div class="vehicle-page-heading"><h1>Medic 6 — North Crew</h1>
-      <p class="status-line" aria-label="Vehicle operational status"><span class="pill status-pill" data-status="IN_SERVICE">In Service</span></p></div>
+      <p class="status-line"><span class="visually-hidden">Vehicle operational status: </span><span class="pill status-pill" data-status="IN_SERVICE">In Service</span></p></div>
     <nav class="vehicle-actions" aria-label="Vehicle tasks"><a href="/history">Inspection history</a><a href="/report">Report a deficiency</a></nav>
     <p id="vehicle-message" class="notice" role="status" hidden></p><form id="csrf-holder"><input name="csrfmiddlewaretoken" value="synthetic"></form>
     <script id="cya-config" type="application/json">{"vehicle_id":"vehicle-synthetic","sessions_url":"/api/v1/inspection-sessions"}</script>
@@ -89,7 +90,7 @@ async function openPage(browser, viewport, options) {
 
 async function checkLayout(page, viewport) {
   assert.equal(await page.getByRole("heading", { level: 1, name: "Medic 6 — North Crew" }).count(), 1);
-  assert.equal(await page.getByLabel("Vehicle operational status").count(), 1);
+  assert.equal(await page.locator(".status-line .visually-hidden").textContent(), "Vehicle operational status: ");
   assert.equal(await page.getByRole("link", { name: "Inspection history" }).count(), 1);
   assert.equal(await page.getByRole("link", { name: "Report a deficiency" }).count(), 1);
   const metrics = await page.evaluate(() => {

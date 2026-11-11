@@ -3,7 +3,7 @@
 {% block page_heading %}
 <div class="vehicle-page-heading">
   <h1>{{ vehicle.display_name }}</h1>
-  <p class="status-line" aria-label="Vehicle operational status"><span class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>{% if status.restrictions %}<span class="muted">{{ status.restrictions }}</span>{% endif %}</p>
+  <p class="status-line"><span class="visually-hidden">Vehicle operational status: </span><span class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>{% if status.restrictions %}<span class="muted">{{ status.restrictions }}</span>{% endif %}</p>
 </div>
 {% endblock %}
 {% block content %}
@@ -60,7 +60,7 @@
       {% if s.participant and s.state == "OPEN" %}<a class="button" href="{{ s.url }}">Continue inspection</a>
       {% elif s.participant and s.state == "INCOMPLETE" %}<a class="button" href="{{ s.url }}">Resume incomplete inspection</a>
       {% elif s.participant and s.state == "CLOSED" %}<a class="button" href="{{ s.url }}">Open closed inspection</a>
-      {% elif s.state == "OPEN" %}<span class="muted">Join using the primary action above.</span>{% endif %}
+      {% elif s.state == "OPEN" %}<span class="muted">The primary action above joins the latest open inspection.</span>{% endif %}
     </li>
   {% endfor %}
   </ul>

@@ -232,7 +232,7 @@ class PageTests(CrewUiCase):
         self.assertRegex(
             html,
             r'<div class="vehicle-page-heading">\s*<h1>Medic 6 — North Crew</h1>\s*'
-            r'<p class="status-line" aria-label="Vehicle operational status">',
+            r'<p class="status-line"><span class="visually-hidden">Vehicle operational status: </span>',
         )
         self.assertIn(f'data-template="{self.template.pk}"', html)
         self.assertIn("Start or join Night Shift Vehicle Safety Checklist inspection", html)
@@ -256,11 +256,24 @@ class PageTests(CrewUiCase):
 
         self.assertIn("Open inspection: Night Shift Vehicle Safety Checklist", html)
         self.assertIn('class="button primary join-session"', html)
+        self.assertIn('class="active-inspection"', html)
+        self.assertIn('class="session-row-status"', html)
         self.assertIn("Join latest open inspection", html)
         self.assertNotIn(f"/inspection/sessions/{session_id}/", html)
         self.assertIn("Start a separate inspection", html)
         self.assertIn("creates a second inspection instead of joining the open one", html)
         self.assertIn("Start separate Night Shift Vehicle Safety Checklist inspection", html)
+
+    def test_all_open_nonparticipant_rows_explain_that_join_selects_the_latest(self):
+        other, _user, token = self.second_user()
+        self.open(other, token)
+        self.open(other, token, separate=True)
+
+        html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+
+        self.assertEqual(
+            html.count("The primary action above joins the latest open inspection."), 2
+        )
 
     def test_a_participant_gets_a_continue_action_and_ended_sessions_are_labeled(self):
         session_id = self.open().json()["result"]["session_id"]

@@ -2,6 +2,7 @@
 .vehicle-page-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; margin: .5rem 0 1rem; }
 .vehicle-page-heading h1 { flex: 1 1 14rem; min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .vehicle-page-heading .status-line { flex: 0 1 auto; margin: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 .vehicle-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; margin-bottom: 1rem; }
 .vehicle-actions a { display: inline-flex; align-items: center; min-height: 48px; }
 .inspection-start h2 { margin-top: 0; }
