@@ -136,6 +136,10 @@ function findClass(node, name) {
   return null;
 }
 const isPrimary = button => String(button.className).split(" ").includes("primary");
+function outcomeButtons(node) {
+  const box = findClass(node, "item-controls");
+  return box ? box.children.filter(child => child.type === "button" && ["pass", "failed", "unable_to_inspect", "record"].includes(child.dataset.action)) : [];
+}
 function newReport(run) {
   const form = run.get("outcome-form");
   for (const [name, value] of Object.entries({category_id: "category", summary: "Synthetic failure", description: "Synthetic description."})) form.fields[name].value = value;
@@ -207,7 +211,7 @@ function generic(kind) {
     // Issue 87: a saved Fail reads as Fail, and Pass is not styled as the chosen result.
     const run = checklist(), open = {...row, obligation_state: "DUE"}, item = () => run.elements.items.children[0];
     run.context.testUI.setRows([open]); run.context.testUI.render();
-    assert(isPrimary(findAction(item(), "pass")), "Pass is the primary action while nothing is recorded");
+    assert(!isPrimary(findAction(item(), "pass")), "Pass is a neutral action while nothing is recorded");
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     newReport(run); run.get("outcome-form").fire("submit");
@@ -223,22 +227,22 @@ function generic(kind) {
     run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "mine", latest_check_outcome: "FAILED"}]);
     run.context.testUI.render();
     const pill = findClass(item(), "pill-failed");
-    assert(pill, "the server's failed result has its own pill"); assert.equal(pill.textContent, "Inspected — failed");
+    assert(pill, "the current window status has its own pill"); assert.equal(pill.textContent, "Window status: Inspected — failed");
     assert(!isPrimary(findAction(item(), "pass")), "after reload the recorded Fail still keeps Pass unhighlighted");
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
     run.context.testUI.setRows([{...open, obligation_state: "DUE", latest_check_id: "other", latest_check_outcome: "PASSED"}]);
     run.context.testUI.render();
-    assert(isPrimary(findAction(item(), "pass")), "someone else's newer check is no longer held back by this page's old Fail");
+    assert(!isPrimary(findAction(item(), "pass")), "someone else's newer check does not make Pass look selected");
     run.context.testUI.setRows([{...open, obligation_state: "DUE", due_at: "2026-06-02T06:00:00Z", latest_check_id: "mine", latest_check_outcome: "FAILED"}]);
     run.context.testUI.render();
-    assert(isPrimary(findAction(item(), "pass")), "a new window with the same newest check makes Pass primary again");
+    assert(!isPrimary(findAction(item(), "pass")), "a new window keeps Pass a neutral action");
   }
   {
     // Review of PR #93: an earlier Pass satisfied the window; a new acknowledged Fail must still un-highlight Pass.
     const run = checklist(), item = () => run.elements.items.children[0];
     const passed = {...row, obligation_state: "SATISFIED", obligation_outcome: "PASSED", due_at: "2026-06-01T06:00:00Z"};
     run.context.testUI.setRows([passed]); run.context.testUI.render();
-    assert(isPrimary(findAction(item(), "pass")), "a satisfied Pass window keeps Pass primary");
+    assert(!isPrimary(findAction(item(), "pass")), "a satisfied Pass window still shows Pass as a neutral action");
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     newReport(run); run.get("outcome-form").fire("submit");
@@ -251,7 +255,7 @@ function generic(kind) {
     fresh.context.testUI.setRows([{...passed, latest_check_id: "theirs", latest_check_outcome: "FAILED"}]); fresh.context.testUI.render();
     assert(!isPrimary(findAction(freshItem(), "pass")), "another viewer of the same server state also sees Pass unhighlighted");
     fresh.context.testUI.setRows([{...passed, latest_check_id: "later", latest_check_outcome: "PASSED"}]); fresh.context.testUI.render();
-    assert(isPrimary(findAction(freshItem(), "pass")), "a newer Pass restores Pass as the recorded result");
+    assert(!isPrimary(findAction(freshItem(), "pass")), "a newer Pass does not style the action as a recorded result");
   }
   {
     // The server's outcome is shown, not the tap's guess: a count that does not match is a saved Fail.
@@ -271,11 +275,47 @@ function generic(kind) {
     findAction(item(), "pass").fire("click");
     response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Pass."));
-    assert(isPrimary(findAction(item(), "pass")), "a saved Pass keeps Pass primary");
+    assert(!isPrimary(findAction(item(), "pass")), "a saved Pass is still shown separately from the action");
     assert.equal(findClass(item(), "pill-failed"), null);
     run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "theirs", latest_check_outcome: "FAILED"}]);
     run.context.testUI.render();
     assert(!isPrimary(findAction(item(), "pass")), "the server's recorded Fail outranks this page's earlier saved Pass");
+  }
+  {
+    // Issue 104: window status, latest recorded result and deficiency lifecycle remain separate.
+    const run = checklist(), item = () => run.elements.items.children[0];
+    const dueFail = {...row, obligation_state: "DUE", obligation_outcome: null, item_attention: "ATTENTION",
+      latest_check_id: "failed-check", latest_check_outcome: "FAILED", latest_check_by: "Synthetic EMT",
+      latest_check_at: "2026-06-01T00:00:00Z", deficiencies: [{id: "def-open", severity_label: "High", status: "OPEN", summary: "Synthetic brake issue"}]};
+    run.context.testUI.setRows([dueFail]); run.context.testUI.render();
+    assert(findClass(item(), "window-status").textContent.includes("Window status: Due"));
+    assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Fail by Synthetic EMT"));
+    assert(findClass(item(), "known-deficiency").textContent.includes("Deficiency status: Open. Severity: High."));
+    assert.equal(findClass(item(), "pill-attention"), null, "the open deficiency supplies the attention cue without a duplicate badge");
+    assert(outcomeButtons(item()).every(button => !isPrimary(button)), "no outcome action is highlighted for a failed item");
+
+    const passedWithOpenDeficiency = {...dueFail, obligation_state: "SATISFIED", obligation_outcome: "PASSED",
+      latest_check_id: "passed-check", latest_check_outcome: "PASSED"};
+    run.context.testUI.setRows([passedWithOpenDeficiency]); run.context.testUI.render();
+    assert(findClass(item(), "window-status").textContent.includes("Window status: Done for this window"));
+    assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Pass"));
+    assert(findClass(item(), "known-deficiency").textContent.includes("Deficiency status: Open"), "a passing check does not hide an open deficiency");
+    assert(outcomeButtons(item()).every(button => !isPrimary(button)), "a passing check does not make Pass look like the saved result");
+
+    const newWindow = {...row, obligation_state: "DUE", obligation_outcome: null,
+      latest_check_id: "prior-check", latest_check_outcome: "PASSED", deficiencies: []};
+    run.context.testUI.setRows([newWindow]); run.context.testUI.render();
+    assert(findClass(item(), "window-status").textContent.includes("Window status: Due"));
+    assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Pass"));
+    assert(outcomeButtons(item()).every(button => !isPrimary(button)), "a prior-window Pass does not style the new-window action as selected");
+
+    const unable = {...newWindow, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_outcome: "UNABLE_TO_INSPECT"};
+    run.context.testUI.setRows([unable]); run.context.testUI.render();
+    assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Unable to inspect"));
+    assert(outcomeButtons(item()).every(button => !isPrimary(button)), "Unable to inspect remains distinct from every next action");
+
+    run.context.testUI.setRows([{...row, obligation_state: null, obligation_outcome: null, latest_check_id: null, deficiencies: []}]); run.context.testUI.render();
+    assert(findClass(item(), "window-status").textContent.includes("Window status: No current requirement"));
   }
   for (const outcome of ["unconfirmed", "rejected"]) {
     // Not-saved and unconfirmed Fail attempts stay distinct from a saved Fail, in words and icon.

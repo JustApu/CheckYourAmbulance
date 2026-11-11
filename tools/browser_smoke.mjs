@@ -52,6 +52,12 @@ const sampleRows = [
   { item_id: "item-mask", item_label: "Oxygen mask", kit_id: "kit-two", kit_label: "Airway Kit", compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 3, obligation_state: "OVERDUE", obligation_outcome: null, due_at: null, item_attention: "CLEAR", needs_action: true, check_suspended: false, deficiencies: [], latest_check_id: null, latest_check_outcome: null, latest_check_at: null, latest_check_by: null, expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
   { item_id: "item-radio", item_label: "Radio", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: "sys-radio", system_label: "Communications", checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 4, obligation_state: "SUSPENDED", obligation_outcome: null, due_at: null, item_attention: "ATTENTION", needs_action: false, check_suspended: true, deficiencies: [], latest_check_id: null, latest_check_outcome: null, latest_check_at: null, latest_check_by: null, expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
 ];
+const outcomeRows = [
+  { item_id: "item-fail", item_label: "Brake light", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 1, obligation_state: "DUE", obligation_outcome: null, due_at: "2026-06-01T06:00:00Z", item_attention: "ATTENTION", needs_action: true, check_suspended: false, deficiencies: [{ id: "def-fail", severity_label: "High", status: "OPEN", summary: "Synthetic brake issue" }], latest_check_id: "check-fail", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T00:00:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+  { item_id: "item-pass-open", item_label: "Oxygen regulator", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 2, obligation_state: "SATISFIED", obligation_outcome: "PASSED", due_at: "2026-06-01T06:00:00Z", item_attention: "ATTENTION", needs_action: false, check_suspended: false, deficiencies: [{ id: "def-pass", severity_label: "Medium", status: "OPEN", summary: "Synthetic regulator issue" }], latest_check_id: "check-pass", latest_check_outcome: "PASSED", latest_check_at: "2026-06-01T00:05:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+  { item_id: "item-prior-pass", item_label: "Suction unit", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 3, obligation_state: "DUE", obligation_outcome: null, due_at: "2026-06-01T06:00:00Z", item_attention: "CLEAR", needs_action: true, check_suspended: false, deficiencies: [], latest_check_id: "check-prior", latest_check_outcome: "PASSED", latest_check_at: "2026-05-31T00:00:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+  { item_id: "item-unable", item_label: "Portable monitor", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 4, obligation_state: "DUE", obligation_outcome: null, due_at: "2026-06-01T06:00:00Z", item_attention: "ATTENTION", needs_action: true, check_suspended: false, deficiencies: [{ id: "def-unable", severity_label: "Low", status: "PENDING_VERIFICATION", summary: "Synthetic monitor issue" }], latest_check_id: "check-unable", latest_check_outcome: "UNABLE_TO_INSPECT", latest_check_at: "2026-06-01T00:10:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+];
 function inspectionMarkup(userId, sessionId) {
   const config = { user_id: userId, session_id: sessionId, vehicle_id: "vehicle-a", checklist_version_id: "version-a", state: "OPEN", view: "NORMAL", needs_attention_only: false, urls: { checklist: "/api/checklist", checks: "/api/checks", odometer: "/api/odometer", preferences: "/api/preferences", reopen: "/api/reopen", vehicle: "/vehicle", socket: "/socket", suggestions: "/suggestions", deficiency_detail: "/deficiency/DEFICIENCY/" } };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body>
@@ -154,6 +160,66 @@ async function testInspectionNavigation(viewport) {
     await page.close();
   }
 }
+async function testInspectionOutcomeSemantics(viewport) {
+  const page = await browser.newPage({ viewport });
+  await page.route("http://inspection.test/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith("/api/")) {
+      const body = url.pathname === "/api/checklist"
+        ? { status: "OK", items: outcomeRows, group_progress: [
+          { key: "compartment:comp-cab", label: "Cab", total: 4, checked: 1, due: 3, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 3 },
+        ], vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
+        : { status: "OK", suggestions: [] };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "text/html", body: inspectionMarkup("emt-a", "session-outcomes") });
+  });
+  try {
+    await page.goto("http://inspection.test/outcomes", { waitUntil: "load" });
+    await page.getByRole("button", { name: /^Cab / }).click();
+    const failed = page.locator('#items > li[data-item-key="item-fail|"]');
+    assert.match(await failed.innerText(), /Window status: Due/);
+    assert.match(await failed.innerText(), /Latest recorded check: Fail by Synthetic EMT/);
+    assert.match(await failed.innerText(), /Deficiency status: Open\. Severity: High/);
+    assert.equal(await failed.locator(".pill-attention").count(), 0, `${viewport.name}: an open deficiency is not repeated as a second attention badge`);
+    const passedWithOpenDeficiency = page.locator('#items > li[data-item-key="item-pass-open|"]');
+    assert.match(await passedWithOpenDeficiency.innerText(), /Window status: Done for this window/);
+    assert.match(await passedWithOpenDeficiency.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
+    assert.match(await passedWithOpenDeficiency.innerText(), /Deficiency status: Open\. Severity: Medium/);
+    const priorPass = page.locator('#items > li[data-item-key="item-prior-pass|"]');
+    assert.match(await priorPass.innerText(), /Window status: Due/);
+    assert.match(await priorPass.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
+    const unable = page.locator('#items > li[data-item-key="item-unable|"]');
+    assert.match(await unable.innerText(), /Latest recorded check: Unable to inspect by Synthetic EMT/);
+    assert.match(await unable.innerText(), /Deficiency status: Pending verification/);
+    const actionButtons = page.locator("#items .item-controls button");
+    const count = await actionButtons.count();
+    for (let index = 0; index < count; index += 1) {
+      const button = actionButtons.nth(index);
+      assert.ok(!(await button.getAttribute("class")).split(/\s+/).includes("primary"), `${viewport.name}: outcome action looks selected`);
+      assert.match(await button.getAttribute("aria-label"), /^Record (Pass|Fail|Unable to inspect) for /, `${viewport.name}: action name does not distinguish recording from result`);
+    }
+    const failAction = failed.getByRole("button", { name: "Record Fail for Brake light" });
+    await failAction.focus();
+    assert.equal(await failAction.evaluate((element) => element === document.activeElement), true, `${viewport.name}: Fail action is not keyboard-focusable`);
+    await page.keyboard.press("Tab");
+    const unableAction = failed.getByRole("button", { name: "Record Unable to inspect for Brake light" });
+    assert.equal(await unableAction.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips the next outcome action`);
+    assert.equal(await unableAction.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: keyboard action focus indicator is missing`);
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor({ state: "visible" });
+    assert.equal(await page.getByRole("heading", { name: "Fail: Brake light" }).count(), 1, `${viewport.name}: keyboard activation did not announce the chosen action`);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+    assert.equal(await failAction.evaluate((element) => element === document.activeElement), true, `${viewport.name}: cancel did not restore focus to the Fail action`);
+    console.log(`${viewport.name}: recorded outcome, window status, deficiency and neutral keyboard actions passed`);
+  } finally {
+    await page.close();
+  }
+}
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR || path.join(os.tmpdir(), `cya-browser-smoke-${process.pid}`);
 const browser = await chromium.launch({ headless: true });
 const failures = [];
@@ -221,6 +287,7 @@ try {
         assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: focus was not returned to the current link at desktop width`);
       }
       await testInspectionNavigation(viewport);
+      await testInspectionOutcomeSemantics(viewport);
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);
       assert.equal(await page.getByRole("status").count(), 1);
