@@ -1,14 +1,16 @@
 .plain { list-style: none; margin: 0; padding: 0; }
 .vehicle-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
-.vehicle-link { display: flex; justify-content: space-between; align-items: center; gap: 1rem; min-height: 48px; padding: .75rem 1rem; border: 2px solid var(--line); border-radius: .5rem; color: var(--fg); text-decoration: none; }
-.vehicle-name { font-weight: 700; }
+.vehicle-link { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; min-height: 48px; padding: .75rem 1rem; border: 2px solid var(--line); border-radius: .5rem; color: var(--fg); text-decoration: none; }
+.vehicle-name { flex: 1 1 9rem; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.vehicle-badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; }
 .muted { color: var(--muted); }
 .pill { display: inline-flex; align-items: center; min-height: 32px; padding: 0 .75rem; border: 2px solid currentColor; border-radius: 1rem; font-weight: 700; }
+.pending-pill { background: var(--wait-bg); color: var(--wait-fg); }
+.pending-pill[data-count="0"] { background: var(--bg); color: var(--muted); }
 .status-pill[data-status="IN_SERVICE"] { background: var(--ok-bg); color: var(--ok-fg); }
 .status-pill[data-status="LIMITED_SERVICE"] { background: var(--wait-bg); color: var(--wait-fg); }
 .status-pill[data-status="OUT_OF_SERVICE"] { background: var(--bad-bg); color: var(--bad-fg); }
 .pill-attention { background: var(--bad-bg); color: var(--bad-fg); }
-.pill-failed { background: var(--bad-bg); color: var(--bad-fg); }
 .status-line { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; font-size: 1.125rem; }
 .notice { padding: .75rem 1rem; border: 2px solid var(--line); border-radius: .5rem; }
 .notice[hidden], #session-message:empty { display: none; }

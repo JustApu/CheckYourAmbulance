@@ -160,8 +160,18 @@ class ShellMarkupTests(ShellTestCase):
         self.assertIn('name="viewport" content="width=device-width, initial-scale=1"', html)
         self.assertIn('<a class="skip-link" href="#main">', html)
         self.assertIn('<nav class="site-nav" aria-label="Main">', html)
+        self.assertIn('id="site-nav-toggle"', html)
+        self.assertIn('aria-controls="site-nav-list" aria-expanded="false"', html)
+        self.assertIn('id="site-nav-list" class="site-nav-list"', html)
         self.assertEqual(html.count("<h1>"), 1)
         self.assertIn('<main id="main"', html)
+
+    def test_theme_control_offers_auto_light_and_dark(self):
+        html = self.page()
+        self.assertIn('<label class="theme-control" for="theme-select">Theme', html)
+        for theme in ("auto", "light", "dark"):
+            with self.subTest(theme=theme):
+                self.assertIn(f'<option value="{theme}">{theme.title()}</option>', html)
 
     def test_connection_banner_is_an_alert_with_text(self):
         html = self.page()

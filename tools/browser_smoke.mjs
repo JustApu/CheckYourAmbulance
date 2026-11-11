@@ -23,15 +23,17 @@ const html = `<!doctype html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic vehicle inspection</title><style>${css}</style></head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
-<header class="site-header"><a class="brand" href="#main">Check Your Ambulance</a><div class="account"><span class="account-name">Sam Example</span><form><button class="button" type="button">Sign out</button></form></div></header>
-<nav class="site-nav" aria-label="Main"><ul><li><a href="#main" aria-current="page">Inspection</a></li><li><a href="#status">Vehicle status</a></li><li><a href="#deficiency">Deficiencies</a></li></ul></nav>
+<header class="site-header"><a class="brand" href="#main">Check Your Ambulance</a><div class="header-tools"><div class="account"><span class="account-name">Sam Example</span><form><button class="button" type="button">Sign out</button></form></div><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div></header>
+<nav class="site-nav" aria-label="Main"><button id="site-nav-toggle" class="button site-nav-toggle" type="button" aria-controls="site-nav-list" aria-expanded="false" hidden>Menu</button><ul id="site-nav-list" class="site-nav-list"><li><a href="#main" aria-current="page">Inspection</a></li><li><a href="#status">Vehicle status</a></li><li><a href="#deficiency">Deficiencies</a></li></ul></nav>
 <div id="connection-banner" class="banner banner-error" role="alert" hidden><span class="indicator-icon" aria-hidden="true">&#9888;</span><strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded.</div>
 <main id="main" tabindex="-1"><h1>Unit 12 inspection</h1>
 <section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open deficiency</span></section>
+<ul class="vehicle-list"><li><a class="vehicle-link" href="#status"><span class="vehicle-name">Unit 12 — Synthetic Regional Response Ambulance</span><span class="vehicle-badges"><span class="pill pending-pill" data-count="2">2 pending requests</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span></span></a></li></ul>
 <section id="deficiency" class="item item-attention" aria-labelledby="item-title"><div class="item-head"><h2 id="item-title">Synthetic oxygen cylinder</h2><span class="pill pill-attention">Known deficiency</span></div><p>Pressure below the approved range.</p><div class="item-controls" aria-label="Inspection actions"><button class="button primary" type="button" aria-label="Record passed">Passed</button><button class="button" type="button" aria-label="Record unable to inspect">Unable to inspect</button></div><label class="panel">Inspection note<input aria-label="Inspection note" type="text" value="Synthetic check"></label><p id="save-state" class="save-state" role="status"><span class="indicator-icon" aria-hidden="true">?</span><span class="save-state-text">Unconfirmed</span></p></section>
 </main><script>${shellScript}</script></body></html>`;
 const viewports = [
   { name: "phone-375", width: 375, height: 812 },
+  { name: "large-phone-600", width: 600, height: 900 },
   { name: "tablet-portrait-768", width: 768, height: 1024 },
   { name: "tablet-landscape-1024", width: 1024, height: 768 },
   { name: "desktop-1440", width: 1440, height: 900 },
@@ -44,14 +46,38 @@ try {
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport });
     try {
-      await page.setContent(html, { waitUntil: "load" });
+      await page.route("http://synthetic.test/**", (route) => route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: html,
+      }));
+      await page.goto("http://synthetic.test/", { waitUntil: "load" });
       assert.equal(await page.title(), "Synthetic vehicle inspection");
       assert.equal(await page.getByRole("heading", { name: "Unit 12 inspection" }).count(), 1);
       assert.equal(await page.getByRole("navigation", { name: "Main" }).count(), 1);
       assert.equal(await page.getByRole("link", { name: "Inspection" }).getAttribute("aria-current"), "page");
+      const navToggle = page.getByRole("button", { name: "Menu" });
+      const navList = page.locator("#site-nav-list");
+      if (viewport.width < 768) {
+        assert.equal(await navToggle.isVisible(), true);
+        assert.equal(await navList.isVisible(), false);
+        await navToggle.click();
+        assert.equal(await navToggle.getAttribute("aria-expanded"), "true");
+        assert.equal(await page.getByRole("link", { name: "Deficiencies" }).isVisible(), true);
+        await page.keyboard.press("Escape");
+        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
+        assert.equal(await navToggle.getAttribute("aria-expanded"), "false");
+        assert.equal(await navList.isVisible(), false);
+      } else {
+        assert.equal(await navToggle.isVisible(), false);
+        assert.equal(await navList.isVisible(), true);
+      }
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);
       assert.equal(await page.getByRole("status").count(), 1);
+      assert.equal(await page.getByLabel("Theme").inputValue(), "auto");
+      assert.equal(await page.getByText("2 pending requests").count(), 1);
+      assert.equal(await page.locator('.pending-pill[data-count="2"]').isVisible(), true);
 
       const metrics = await page.evaluate(() => {
         const root = document.documentElement;
@@ -81,9 +107,20 @@ try {
       assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px");
 
       await page.emulateMedia({ colorScheme: "dark" });
+      const theme = page.getByLabel("Theme");
       const darkBackground = await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
-      assert.equal(darkBackground, "rgb(20, 24, 29)", `${viewport.name}: dark palette did not apply`);
+      assert.equal(darkBackground, "rgb(20, 24, 29)", `${viewport.name}: Auto did not follow dark system preference`);
+      await theme.selectOption("light");
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 255, 255)", `${viewport.name}: Light override did not apply`);
+      await theme.selectOption("dark");
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(20, 24, 29)", `${viewport.name}: Dark override did not apply`);
+      await page.reload({ waitUntil: "load" });
+      assert.equal(await page.getByLabel("Theme").inputValue(), "dark", `${viewport.name}: saved theme was not restored`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(20, 24, 29)", `${viewport.name}: restored Dark theme did not apply`);
+      const restoredTheme = page.getByLabel("Theme");
+      await restoredTheme.selectOption("auto");
       await page.emulateMedia({ colorScheme: "light" });
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 255, 255)", `${viewport.name}: Auto did not follow light system preference`);
 
       await page.evaluate(() => {
         const state = document.getElementById("save-state");
@@ -94,6 +131,11 @@ try {
       assert.equal(await page.getByRole("alert").isVisible(), true);
       await page.evaluate(() => window.dispatchEvent(new Event("online")));
       assert.equal(await page.getByRole("alert").isVisible(), false);
+      // Half the CSS viewport approximates 200% browser zoom and checks reflow/overflow.
+      await page.setViewportSize({ width: Math.floor(viewport.width / 2), height: viewport.height });
+      const zoomMetrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
+      assert.ok(zoomMetrics.document <= zoomMetrics.viewport, `${viewport.name} at 200%: document overflow ${JSON.stringify(zoomMetrics)}`);
+      assert.ok(zoomMetrics.body <= zoomMetrics.viewport, `${viewport.name} at 200%: body overflow ${JSON.stringify(zoomMetrics)}`);
       console.log(`${viewport.name}: passed (${metrics.viewport}px; no horizontal overflow)`);
     } catch (error) {
       mkdirSync(artifacts, { recursive: true });
