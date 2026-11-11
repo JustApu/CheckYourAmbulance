@@ -1,8 +1,9 @@
 """Crew inspection pages and session endpoints (issue 85 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/85)), over real HTTP sign-in.
 
-The browser script is not executed here: these tests cover what the server owns (authorization,
-participation, escaping, CSRF, the session and checklist contracts the script relies on) and the
-markup the script needs. Script behavior is checked by hand; see docs/crew-inspection-ui.md.
+These tests cover what the server owns (authorization, participation, escaping, CSRF, the session
+and checklist contracts the client relies on) and the markup the script needs. Rendered client
+behavior is exercised by the browser smoke and the offline script harnesses; see
+`docs/crew-inspection-ui.md`.
 """
 
 import json
@@ -251,6 +252,7 @@ class PageTests(CrewUiCase):
         self.assertEqual(page.status_code, 200)
         config = self.config(page)
         self.assertEqual(config["session_id"], session_id)
+        self.assertEqual(config["user_id"], str(self.user.pk))
         self.assertEqual(config["vehicle_id"], str(self.vehicle.pk))
         self.assertEqual(config["state"], "OPEN")
         self.assertEqual(config["view"], "NORMAL")
@@ -261,6 +263,9 @@ class PageTests(CrewUiCase):
         self.assertIn('name="csrfmiddlewaretoken"', html)
         self.assertIn('id="odometer-form"', html)
         self.assertIn('id="conflict-dialog"', html)
+        self.assertIn('id="layout-compartments"', html)
+        self.assertIn('id="layout-flat"', html)
+        self.assertIn('id="area-overview"', html)
         self.assertNotIn('id="reopen-session"', html)
         # An Unconfirmed save may have committed, so the live-loss banner must not say that
         # anything not marked Saved was not recorded (REC-4).

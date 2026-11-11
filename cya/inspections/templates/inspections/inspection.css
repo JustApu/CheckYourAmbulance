@@ -28,6 +28,15 @@ a.button { display: inline-flex; align-items: center; text-decoration: none; }
 .check { display: inline-flex; align-items: center; gap: .5rem; min-height: 48px; }
 .check input { width: 1.5rem; height: 1.5rem; }
 .items { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.items[hidden], #area-overview[hidden], #area-detail[hidden] { display: none; }
+.area-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: .75rem; }
+.area-card { display: block; width: 100%; min-height: 48px; padding: .75rem 1rem; text-align: left; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .5rem; cursor: pointer; }
+.area-card:hover { border-color: var(--accent); }
+.area-card-title { display: block; font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
+.area-card-summary { display: block; margin-top: .35rem; color: var(--muted); line-height: 1.4; }
+.kit-heading { margin: .5rem 0 0; padding: .5rem .75rem; border-bottom: 2px solid var(--line); font-size: 1rem; }
+.area-detail-heading { margin-top: .75rem; }
+@media (min-width: 48rem) { .area-cards { grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); } }
 .item { border: 2px solid var(--line); border-radius: .5rem; padding: .75rem 1rem; }
 .item-attention { border-left-width: 8px; border-color: var(--bad-fg); }
 .item-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }

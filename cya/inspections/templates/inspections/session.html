@@ -57,6 +57,21 @@
     <label class="check"><input type="checkbox" id="only-attention"> Needs Attention Only</label>
   </div>
   {% endif %}<p id="pref-state" class="muted" role="status"></p>
+  {% if not verification %}
+  <div id="layout-controls" class="view-controls" role="group" aria-label="Inspection layout">
+    <button type="button" id="layout-compartments" class="button" aria-pressed="true">Compartments</button>
+    <button type="button" id="layout-flat" class="button" aria-pressed="false">All items</button>
+  </div>
+  <section id="area-overview" aria-labelledby="area-overview-heading">
+    <h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3>
+    <p class="muted">Progress counts checks for the current inspection window. Known deficiencies remain open until resolved.</p>
+    <div id="area-cards" class="area-cards"></div>
+  </section>
+  <section id="area-detail" aria-labelledby="area-heading" hidden>
+    <button type="button" id="area-overview-button" class="button">All areas and compartments</button>
+    <h3 id="area-heading" tabindex="-1"></h3>
+  </section>
+  {% endif %}
   <p id="screen-notice" class="notice" role="status" hidden></p>
   <ol id="items" class="items" aria-live="polite"></ol>
 </section>

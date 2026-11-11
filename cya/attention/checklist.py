@@ -112,6 +112,7 @@ class VehicleChecklist:
     needs_attention_only: bool
     vehicle_status: dict
     rows: tuple
+    group_progress: tuple
 
 
 def _resolved_items(organization_id, vehicle_id, as_of):
@@ -420,6 +421,60 @@ def _priority_group(row):
     return 1 if row.needs_action else 2
 
 
+def _group_progress(rows):
+    groups, by_key = [], {}
+    for row in rows:
+        if row.compartment_id:
+            key, label = f"compartment:{row.compartment_id}", row.compartment_label
+        elif row.system_id:
+            key, label = f"system:{row.system_id}", f"Vehicle system: {row.system_label}"
+        elif row.kit_id:
+            key, label = f"kit:{row.kit_id}", f"Kit: {row.kit_label}"
+        else:
+            key, label = "vehicle", "Vehicle-wide checks"
+        group = by_key.get(key)
+        if group is None:
+            group = {
+                "key": key,
+                "label": label or "Vehicle-wide checks",
+                "total": 0,
+                "checked": 0,
+                "due": 0,
+                "due_soon": 0,
+                "overdue": 0,
+                "not_due": 0,
+                "no_obligation": 0,
+                "exceptions": 0,
+                "deficiency_ids": set(),
+            }
+            by_key[key] = group
+            groups.append(group)
+        group["total"] += 1
+        state = row.obligation_state
+        if state == State.SATISFIED:
+            group["checked"] += 1
+        elif state == State.DUE:
+            group["due"] += 1
+        elif state == State.CURRENT:
+            group["due_soon"] += 1
+        elif state == State.OVERDUE:
+            group["overdue"] += 1
+        elif state == State.UPCOMING:
+            group["not_due"] += 1
+        elif state is None:
+            group["no_obligation"] += 1
+        elif state in (State.SUSPENDED, State.EXEMPT, State.WAIVED):
+            group["exceptions"] += 1
+        group["deficiency_ids"].update(d["id"] for d in row.deficiencies if d.get("id"))
+    return tuple(
+        {
+            **{key: value for key, value in group.items() if key != "deficiency_ids"},
+            "open_deficiencies": len(group["deficiency_ids"]),
+        }
+        for group in groups
+    )
+
+
 def vehicle_checklist(
     organization_id,
     vehicle_id,
@@ -442,6 +497,7 @@ def vehicle_checklist(
     rows = _rows(
         organization_id, str(vehicle_id), instant, suspension_lookup, current=as_of is None
     )
+    group_progress = _group_progress(rows)
     if needs_attention_only:
         rows = [
             row
@@ -458,6 +514,7 @@ def vehicle_checklist(
         needs_attention_only=needs_attention_only,
         vehicle_status=_vehicle_status(organization_id, vehicle_id, instant),
         rows=tuple(rows),
+        group_progress=group_progress,
     )
 
 

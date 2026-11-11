@@ -11,8 +11,12 @@
   var entries = {};       // item key -> {status, payload, text, operationId}
   var verificationRows = {}, verificationNotice = "";
   var drafts = {};        // item key -> typed value, kept across re-renders
-  var rows = [], focusIntent = null;
+  var rows = [], groupProgressRows = [], focusIntent = null;
   var view = config.view, onlyAttention = config.needs_attention_only;
+  var pendingNavigation = readNavigation();
+  var layoutMode = pendingNavigation ? pendingNavigation.mode : "COMPARTMENTS";
+  var selectedGroupKey = pendingNavigation && pendingNavigation.mode === "COMPARTMENTS" ? pendingNavigation.groupKey : null;
+  var navigationRestored = false, navigationAnchorKey = null, navigationSaveTimer = null;
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false;
 
   function uuid4() {
@@ -407,6 +411,143 @@
     }
     return box;
   }
+  function navigationStorageKey() {
+    return config.user_id && config.session_id ?
+      "cya.inspection.navigation.v1:" + config.user_id + ":" + config.session_id : null;
+  }
+  function readNavigation() {
+    var storageKey = navigationStorageKey();
+    if (!storageKey) { return null; }
+    try {
+      var value = JSON.parse(window.localStorage.getItem(storageKey) || "null");
+      if (!value || value.version !== 1 || ["COMPARTMENTS", "FLAT"].indexOf(value.mode) === -1) { return null; }
+      return {
+        mode: value.mode,
+        groupKey: typeof value.groupKey === "string" ? value.groupKey.slice(0, 160) : null,
+        anchorKey: typeof value.anchorKey === "string" ? value.anchorKey.slice(0, 120) : null
+      };
+    } catch (_error) { return null; }
+  }
+  function saveNavigation(anchorKey) {
+    var storageKey = navigationStorageKey();
+    if (!storageKey || !navigationRestored) { return; }
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({
+        version: 1, mode: layoutMode, groupKey: selectedGroupKey, anchorKey: anchorKey || null
+      }));
+    } catch (_error) { /* Navigation remains usable when storage is unavailable. */ }
+  }
+  function groupKeyForRow(row) {
+    if (row.compartment_id) { return "compartment:" + row.compartment_id; }
+    if (row.system_id) { return "system:" + row.system_id; }
+    if (row.kit_id) { return "kit:" + row.kit_id; }
+    return "vehicle";
+  }
+  function groupLabelForRow(row) {
+    if (row.compartment_label) { return row.compartment_label; }
+    if (row.system_label) { return "Vehicle system: " + row.system_label; }
+    if (row.kit_label) { return "Kit: " + row.kit_label; }
+    return "Vehicle-wide checks";
+  }
+  function checklistRows() {
+    return rows.filter(function (row) {
+      return config.verification_for_deficiency_id || row.checklist_version_id === config.checklist_version_id;
+    });
+  }
+  function progressText(group) {
+    return group.checked + " of " + group.total + " items checked in this window · " + group.due + " due · " +
+      group.due_soon + " due soon · " + group.overdue + " overdue · " + group.not_due + " not due · " +
+      group.no_obligation + " without an obligation · " + group.exceptions + " exceptions · " + group.open_deficiencies + " open deficiencies";
+  }
+  function renderAreaCards() {
+    var cards = $("area-cards");
+    while (cards.firstChild) { cards.removeChild(cards.firstChild); }
+    groupProgressRows.forEach(function (group) {
+      var button = el("button", "area-card", "");
+      button.type = "button"; button.dataset.groupKey = group.key;
+      button.appendChild(el("span", "area-card-title", group.label));
+      button.appendChild(el("span", "area-card-summary", progressText(group)));
+      button.addEventListener("click", function () {
+        layoutMode = "COMPARTMENTS"; selectedGroupKey = group.key; navigationAnchorKey = null;
+        saveNavigation(); render(); $("area-heading").focus({preventScroll: true});
+      });
+      cards.appendChild(button);
+    });
+  }
+  function applySavedNavigation() {
+    if (navigationRestored) { return; }
+    navigationRestored = true;
+    if (pendingNavigation) {
+      layoutMode = pendingNavigation.mode;
+      if (layoutMode === "COMPARTMENTS" && pendingNavigation.groupKey &&
+          groupProgressRows.some(function (group) { return group.key === pendingNavigation.groupKey; })) {
+        selectedGroupKey = pendingNavigation.groupKey;
+        navigationAnchorKey = pendingNavigation.anchorKey;
+      } else if (layoutMode === "COMPARTMENTS") {
+        selectedGroupKey = null;
+      } else {
+        selectedGroupKey = null;
+        navigationAnchorKey = pendingNavigation.anchorKey;
+      }
+    }
+    pendingNavigation = null;
+  }
+  function restoreNavigationAnchor() {
+    if (!navigationAnchorKey) { return; }
+    var anchor = itemForKey(navigationAnchorKey);
+    navigationAnchorKey = null;
+    if (anchor && typeof anchor.scrollIntoView === "function") {
+      window.requestAnimationFrame(function () { anchor.scrollIntoView({block: "start"}); });
+    }
+  }
+  function appendItemRows(target, itemRows) {
+    var buckets = [], kits = Object.create(null), labelCounts = Object.create(null), labelIndexes = Object.create(null);
+    itemRows.forEach(function (row) {
+      if (!row.kit_id) { buckets.push({rows: [row]}); return; }
+      var kitKey = String(row.kit_id), bucket = kits[kitKey];
+      if (!bucket) { bucket = {kitId: kitKey, label: row.kit_label || "Kit", rows: []}; kits[kitKey] = bucket; buckets.push(bucket); }
+      bucket.rows.push(row);
+    });
+    buckets.forEach(function (bucket) { if (bucket.kitId) { labelCounts[bucket.label] = (labelCounts[bucket.label] || 0) + 1; } });
+    var index = 0;
+    buckets.forEach(function (bucket) {
+      if (bucket.kitId) {
+        labelIndexes[bucket.label] = (labelIndexes[bucket.label] || 0) + 1;
+        var label = "Kit instance: " + bucket.label;
+        if (labelCounts[bucket.label] > 1) { label += " (" + labelIndexes[bucket.label] + ")"; }
+        var heading = el("li", "kit-heading");
+        heading.appendChild(el("h4", "", label)); target.appendChild(heading);
+      }
+      bucket.rows.forEach(function (row) { target.appendChild(itemNode(row, index++)); });
+    });
+  }
+  function setLayout(mode) {
+    layoutMode = mode; selectedGroupKey = null; navigationAnchorKey = null;
+    saveNavigation(); render();
+    var target = mode === "COMPARTMENTS" ? $("area-overview-heading") : $("checklist-heading");
+    if (target) { target.focus({preventScroll: true}); }
+  }
+  if ($("layout-compartments")) {
+    $("layout-compartments").addEventListener("click", function () { setLayout("COMPARTMENTS"); });
+    $("layout-flat").addEventListener("click", function () { setLayout("FLAT"); });
+    $("area-overview-button").addEventListener("click", function () {
+      selectedGroupKey = null; navigationAnchorKey = null; saveNavigation(); render();
+      $("area-overview-heading").focus({preventScroll: true});
+    });
+    document.addEventListener("scroll", function () {
+      if (!navigationRestored || layoutMode === "COMPARTMENTS" && !selectedGroupKey) { return; }
+      clearTimeout(navigationSaveTimer);
+      navigationSaveTimer = setTimeout(function () {
+        var anchorKey = null;
+        for (var i = 0; i < list.children.length; i++) {
+          var item = list.children[i], rect = item.getBoundingClientRect();
+          if (item.dataset.itemKey && rect.bottom > 0 && rect.top < window.innerHeight) { anchorKey = item.dataset.itemKey; break; }
+        }
+        saveNavigation(anchorKey);
+      }, 150);
+    }, {passive: true});
+  }
+
   function itemNode(row, index) {
     var k = key(row), entry = entries[k];
     var li = el("li", "item" + (row.item_attention === "ATTENTION" ? " item-attention" : ""));
@@ -450,30 +591,60 @@
     }
     focusInList = !!focusKey;
     focusAction = focused && focused.dataset ? focused.dataset.action : null;
-    var anchor = null, anchorIndex = -1, anchorTop = null;
+    var anchor = null, anchorIndex = -1, anchorItemIndex = -1, anchorTop = null;
     for (var visible = 0; visible < list.children.length; visible++) {
       var candidate = list.children[visible], rect = candidate.getBoundingClientRect();
-      if (typeof window === "undefined" || rect.bottom > 0 && rect.top < window.innerHeight) {
+      if (candidate.dataset.itemKey && (typeof window === "undefined" || rect.bottom > 0 && rect.top < window.innerHeight)) {
         anchor = candidate; anchorIndex = visible; anchorTop = rect.top; break;
       }
     }
+    function itemIndexAt(childIndex) {
+      var index = -1;
+      for (var i = 0; i <= childIndex && i < list.children.length; i++) {
+        if (list.children[i].dataset.itemKey) { index++; }
+      }
+      return index;
+    }
+    if (anchor) { anchorItemIndex = itemIndexAt(anchorIndex); }
     if (focusKey) {
       var focusedItem = itemForKey(focusKey);
       if (focusedItem) {
         anchor = focusedItem; anchorIndex = Array.prototype.indexOf.call(list.children, focusedItem);
+        anchorItemIndex = itemIndexAt(anchorIndex);
         anchorTop = focusedItem.getBoundingClientRect().top;
       }
     }
-    var shown = rows.filter(function (r) { return (config.verification_for_deficiency_id || r.checklist_version_id === config.checklist_version_id); });
+    var allShown = checklistRows();
+    applySavedNavigation();
+    var selectedGroup = groupProgressRows.filter(function (group) { return group.key === selectedGroupKey; })[0];
+    if (layoutMode === "COMPARTMENTS" && selectedGroupKey && !selectedGroup) {
+      selectedGroupKey = null; navigationAnchorKey = null; saveNavigation();
+    }
+    var overview = !!$("area-overview") && layoutMode === "COMPARTMENTS" && !selectedGroupKey;
+    var detail = !!$("area-detail") && layoutMode === "COMPARTMENTS" && !!selectedGroupKey;
+    if ($("area-overview")) {
+      $("area-overview").hidden = !overview;
+      $("area-detail").hidden = !detail;
+      $("layout-compartments").setAttribute("aria-pressed", String(layoutMode === "COMPARTMENTS"));
+      $("layout-flat").setAttribute("aria-pressed", String(layoutMode === "FLAT"));
+      if (overview) { renderAreaCards(); }
+      if (detail && selectedGroup) { $("area-heading").textContent = selectedGroup.label; }
+    }
+    var shown = allShown;
+    if (detail) { shown = shown.filter(function (row) { return groupKeyForRow(row) === selectedGroupKey; }); }
     while (list.firstChild) { list.removeChild(list.firstChild); }
-    shown.forEach(function (row, i) { list.appendChild(itemNode(row, i)); });
+    if (!overview) {
+      if (detail) { appendItemRows(list, shown); }
+      else { shown.forEach(function (row, index) { list.appendChild(itemNode(row, index)); }); }
+    }
+    list.hidden = overview;
     var message = "";
-    if (rows.length && !shown.length) {
+    if (rows.length && !allShown.length) {
       message = "This vehicle's checklist changed after the session started. Start a new session to use the current one.";
-    } else if (!rows.length) {
+    } else if (!allShown.length) {
       message = config.verification_for_deficiency_id ? "No outstanding verification items available here. See the report for scope and status." : onlyAttention ? "Nothing needs attention right now." : "This vehicle has no checklist items.";
-    } else if (!shown.length) {
-      message = "";
+    } else if (!shown.length && !overview) {
+      message = onlyAttention ? detail ? "Nothing in this area needs attention." : "Nothing needs attention right now." : "No checklist items are available in this area.";
     }
     notice.textContent = message; notice.hidden = !message;
     var modalOpen = dialog.open || outcomeDialog.open;
@@ -491,12 +662,16 @@
     }
     if (anchor && anchorTop !== null && typeof window !== "undefined" && typeof window.scrollBy === "function") {
       var replacement = itemForKey(anchor.dataset.itemKey);
-      if (!replacement && shown.length) { replacement = list.children[Math.min(anchorIndex, list.children.length - 1)]; }
+      if (!replacement && shown.length) {
+        var itemNodes = Array.prototype.filter.call(list.children, function (node) { return !!node.dataset.itemKey; });
+        if (itemNodes.length) { replacement = itemNodes[Math.min(Math.max(anchorItemIndex, 0), itemNodes.length - 1)]; }
+      }
       if (replacement) {
         var shift = replacement.getBoundingClientRect().top - anchorTop;
         if (shift) { window.scrollBy(0, shift); }
       }
     }
+    restoreNavigationAnchor();
   }
 
   // ---- loading and live updates ----------------------------------------------------------
@@ -520,14 +695,16 @@
     if (signedOutNow) { return; }
     if (loading) { reloadAgain = true; return; }
     loading = true;
-    var q = "?view=" + encodeURIComponent(view) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
+    var listView = config.verification_for_deficiency_id || layoutMode === "FLAT" ? view : "NORMAL";
+    var q = "?view=" + encodeURIComponent(listView) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
     fetch(config.urls.checklist + q, {credentials: "same-origin", cache: "no-store"}).then(function (r) {
       if (r.status === 401) { signedOut(); return null; }
       return r.json().then(function (b) { return {ok: r.ok, body: b}; });
     }).then(function (a) {
       if (a === null) { return; }
       if (!a.ok || a.body.status !== "OK") { throw new Error("checklist"); }
-      rows = a.body.items; setStatus(a.body.vehicle_status);
+      if (!Array.isArray(a.body.group_progress)) { throw new Error("checklist groups"); }
+      rows = a.body.items; groupProgressRows = a.body.group_progress; setStatus(a.body.vehicle_status);
       if (config.verification_for_deficiency_id) {
         // An acknowledgement may be lost after the row was satisfied or removed. Keep its
         // exact request reachable until Retry resolves, even after automatic closure.

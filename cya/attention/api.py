@@ -130,6 +130,7 @@ def checklist(request, vehicle_id):
             "view": result.view,
             "needs_attention_only": result.needs_attention_only,
             "vehicle_status": {**status, "since": _stamped(status["since"])},
+            "group_progress": list(result.group_progress),
             "items": [checklist_row(row, authors.get(row.latest_check_id)) for row in result.rows],
         }
     )
