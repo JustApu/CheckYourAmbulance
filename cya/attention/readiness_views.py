@@ -26,7 +26,7 @@ from cya.authorization.policy import Role
 from cya.checks.api import _reply
 from cya.deficiencies.api import _stamp
 from cya.deficiencies.service import DeficiencyError
-from cya.deficiencies.severity import active_levels
+from cya.deficiencies.severity import levels_in_force
 from cya.inspections.views import STATUS_LABELS as VEHICLE_STATUS_LABELS
 from cya.inspections.views import _authorized, reverse_socket
 from cya.inspections.workflow_views import STATUS_LABELS
@@ -149,7 +149,8 @@ def _screen(request, template, background=False):
     picture.total_states = [
         (label, picture.totals[code]) for code, label in CATEGORIES if picture.totals[code]
     ]
-    severity_levels = active_levels(str(user.organization_id), picture.as_of)
+    severity_in_force = levels_in_force(str(user.organization_id), picture.as_of)
+    severity_levels = [level for level in severity_in_force.values() if level.active]
     top_ranks = sorted({level.rank for level in severity_levels}, reverse=True)[:2]
     severity_threshold = min(top_ranks) if top_ranks else None
     attention_severity_labels = list(
@@ -168,7 +169,13 @@ def _screen(request, template, background=False):
         for row in vehicle.deficiencies:
             row["status_label"] = STATUS_LABELS.get(row["status"], row["status"])
         vehicle.highest_severity_count = sum(
-            severity_threshold is None or row["severity"]["rank"] >= severity_threshold
+            severity_threshold is None
+            or (
+                severity_in_force[row["severity"]["code"]].rank
+                if row["severity"]["code"] in severity_in_force
+                else row["severity"]["rank"]
+            )
+            >= severity_threshold
             for row in vehicle.deficiencies
         )
         vehicle.highest_severity_label = attention_severity_label

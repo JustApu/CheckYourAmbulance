@@ -481,6 +481,24 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "Urgent / Critical shown: 1")
         self.assertContains(page, 'data-attention="true"')
 
+    def test_vehicle_summary_resolves_reordered_level_by_code_at_as_of(self):
+        self.failed(self.suction, create=self.new_fields(severity="MEDIUM"))
+        effective = self.clock.now + timedelta(minutes=1)
+        DeficiencySeverity.objects.create(
+            organization=self.org,
+            code="MEDIUM",
+            revision=2,
+            label="Serious",
+            description="Synthetic reordered medium level.",
+            rank=5,
+            active=True,
+            effective_at=effective,
+        )
+        self.clock.set(effective)
+        page = self.supervisor_client().get("/fleet/readiness/")
+        self.assertContains(page, "Serious / Critical shown: 1")
+        self.assertContains(page, 'data-attention="true"')
+
     def test_as_of_is_validated_and_shown_as_a_static_picture(self):
         sup = self.supervisor_client()
         for query in (

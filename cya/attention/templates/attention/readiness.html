@@ -13,7 +13,7 @@
 <div class="readiness-filter">
 <input class="readiness-filter-input" id="readiness-attention-only" type="checkbox" aria-describedby="readiness-filter-help">
 <div class="readiness-filter-copy"><label for="readiness-attention-only">Show vehicles needing attention</label>
-<p id="readiness-filter-help" class="readiness-filter-help">Includes non-In-Service status, failed, overdue or missed checks, active deficiencies among the top two configured severity ranks, suspensions, or a truncated deficiency list. These independent signals do not combine into a compliance or operational status.</p></div>
+<p id="readiness-filter-help" class="readiness-filter-help">Includes non-In-Service status, failed, overdue or missed checks, active deficiencies among the top two active configured severity ranks (or any active deficiency if no level is active), suspensions, or a truncated deficiency list. These independent signals do not combine into a compliance or operational status.</p></div>
 <div id="readiness-panel">{% include "attention/readiness_panel.html" %}</div>
 </div>
 </div>
