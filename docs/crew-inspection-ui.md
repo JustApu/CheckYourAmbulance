@@ -7,10 +7,14 @@
 | Route | What it shows |
 |---|---|
 | `/inspection/` | Active vehicles with their operational status. Every built-in role (SPEC §3.3); the server enforces it like the other sections. |
-| `/inspection/vehicles/{id}/` | The vehicle's status, one button per checklist template bound to it (starting joins the open session when there is one), a "start a separate one" link, and recent sessions: any open session, and the signed-in user's own ended ones to view or reopen. |
+| `/inspection/vehicles/{id}/` | A responsive vehicle-name/status heading, inspection-history and deficiency tasks, and explicit template-labelled start/join actions. The latest open session is shown with Continue or Join as appropriate; starting a separate inspection is secondary and confirmed. Active sessions and the signed-in user's own ended sessions remain visible. |
 | `/inspection/sessions/{id}/` | The checklist screen. A participant only: a session the user did not join answers 404 exactly like one that does not exist. |
 
 A vehicle in another organization, an inactive vehicle and a malformed id are all 404. A signed-out visitor is sent to sign-in and a user with no role gets 403, as for the other sections.
+
+The landing page uses the configured checklist-template label. A participant continues their open session; a nonparticipant can join the latest open vehicle session using the existing command. When an open session is shown, a separate start is available under a disclosure and asks for confirmation before creating another session. A normal start can still join a session opened concurrently after page load; the command remains authoritative.
+
+`tools/vehicle_landing_smoke.mjs` exercises the real vehicle-page script and CSS with synthetic sessions at 375, 600, 768, 1024 and 1440 CSS pixels. It checks the start/join distinction, confirmation and cancellation for a separate start, accessible task names, 48 px targets and horizontal overflow. `npm run test:browser-smoke` runs this alongside the checklist and shell smoke.
 
 ## Session endpoints
 

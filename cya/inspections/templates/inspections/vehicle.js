@@ -57,7 +57,17 @@
   Array.prototype.forEach.call(document.querySelectorAll(".start-session"), function (b) {
     b.addEventListener("click", function () { start(b.dataset.template, false, b); });
   });
+  Array.prototype.forEach.call(document.querySelectorAll(".join-session"), function (b) {
+    b.addEventListener("click", function () { start(b.dataset.template, false, b); });
+  });
   Array.prototype.forEach.call(document.querySelectorAll(".start-separate"), function (b) {
-    b.addEventListener("click", function () { start(b.dataset.template, true, b); });
+    b.addEventListener("click", function () {
+      var label = b.dataset.templateLabel || "the selected checklist";
+      var question = "Start a separate inspection using “" + label +
+        "”? This creates a second inspection instead of joining the open one.";
+      if (window.confirm(question)) {
+        start(b.dataset.template, true, b);
+      }
+    });
   });
 })();
