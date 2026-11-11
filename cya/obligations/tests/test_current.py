@@ -464,6 +464,17 @@ class CurrentProjectionTests(AttentionCase):
                 self.assertRegex(digest, r"\A[0-9a-f]{64}\Z")
                 self.assertEqual(digest, hashlib.sha256(text[oid].encode()).hexdigest())
 
+    def test_a_warm_read_decodes_no_json(self):
+        # The digest is text. A JSONField-typed digest would be json.loads-ed once per row.
+        import json
+
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        current_rows(org, [vehicle], at)  # fills the cache
+        with mock.patch("json.loads", wraps=json.loads) as loads:
+            warm = current_rows(org, [vehicle], at)
+        self.assertTrue(warm[vehicle])
+        self.assertEqual(loads.call_count, 0)
+
     def test_rows_without_a_digest_are_replayed_and_never_cached(self):
         # Where MariaDB cannot compute SHA2 it returns NULL: no identity, so never serve or cache.
         from django.db.models import Value
