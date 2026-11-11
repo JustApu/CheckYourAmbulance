@@ -25,6 +25,7 @@ Read `AGENTS.md` at the start of each task and after updating your checkout. Use
 - Read coordination procedures before claiming, reviewing, handing off, taking over, escalating, or completing work. Its sections cover labels, roadmap milestones and dependencies, signed implementation claims and race resolution, branch ownership, stale implementation claims, owner input, PR completion, and periodic workflow audits.
 - Read review procedures before owner Fresh Eyes checks, claiming or conducting review, handling review feedback, or recording merge readiness.
 - Read engineering standards before writing, reviewing, debugging, or modifying code or automation, or conducting a documentation audit (including documentation-only changes).
+- Read the CI routing record before changing lane selection, browser-smoke coverage, or test-host validation policy.
 - Read the non-normative deployment runbook before planning or performing host deployment, hardening or its server rehearsal; its draft status and pending checks do not authorize deployment.
 - Read the non-normative model-efficiency guide when tier examples, escalation guidance, or provider mappings are needed. The mandatory tier rules below suffice for routine choices.
 - `CONTRIBUTING.md` is a non-normative entry point; agents that have read this file and the applicable procedures need not read it too.
@@ -40,6 +41,7 @@ For committed content, obtain the ID from the repository root with `git rev-pars
 | [/docs/coordination.md](docs/coordination.md) | `98cd3e6510cd702208b58889ec2e04fc31033d95` | Normative |
 | [/docs/review.md](docs/review.md) | `4a0964ec9c600b5730e8b752ed97cc63f3ad8c98` | Normative |
 | [/docs/engineering-standards.md](docs/engineering-standards.md) | `6a257f572234461e028004ef6865525a97ff3f1e` | Normative |
+| [/docs/ci-routing.md](docs/ci-routing.md) | `31aa6e95be7280d23a57f6301402a8994c895d75` | Non-normative |
 | [/docs/model-efficiency.md](docs/model-efficiency.md) | `9abf40f5511a0c4996bfd78c5ca0c11f9900e476` | Non-normative |
 | [/CONTRIBUTING.md](CONTRIBUTING.md) | `9f6c3f2e78a237984932c18a2c0e92d1a8fc66d9` | Non-normative |
 | [/docs/deployment-runbook.md](docs/deployment-runbook.md) | `8fd42916e37262744869eac848744fd89b4e48f8` | Non-normative |
