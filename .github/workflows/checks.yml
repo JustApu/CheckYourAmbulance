@@ -205,19 +205,32 @@ jobs:
           set -euo pipefail
           mirrors=/etc/apt/apt-mirrors.txt
           backup="$RUNNER_TEMP/apt-mirrors.original"
+          probe_sources="$RUNNER_TEMP/apt-mirror-probe.list"
           log="$RUNNER_TEMP/apt-mirror-fallback.log"
           sudo test -r "$mirrors"
           sudo cp -p "$mirrors" "$backup"
           restore_mirrors() {
             sudo cp -p "$backup" "$mirrors"
-            rm -f "$backup"
+            rm -f "$backup" "$probe_sources" "$log"
           }
           trap restore_mirrors EXIT
 
           # Force each configured primary to a reserved, unresolvable host. The
-          # official archive mirror must serve metadata before normal install.
+          # official archive mirror must serve metadata for a single suite/component.
           sudo python3 tools/apt_mirror_fallback.py "$mirrors" --simulate-primary-failure
-          if ! sudo apt-get -o Debug::Acquire::http=true update >"$log" 2>&1; then
+          codename=$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")
+          if [ "$codename" != "noble" ]; then
+            echo "Unexpected Ubuntu release codename for this runner: ${codename}"
+            exit 1
+          fi
+          printf 'deb mirror+file:/etc/apt/apt-mirrors.txt %s main\n' "$codename" >"$probe_sources"
+          if ! timeout --kill-after=10s 120s sudo apt-get \
+            -o Dir::Etc::sourcelist="$probe_sources" \
+            -o Dir::Etc::sourceparts=- \
+            -o Acquire::Languages=none \
+            -o Acquire::Retries=0 \
+            -o Acquire::http::Timeout=20 \
+            -o Debug::Acquire::http=true update >"$log" 2>&1; then
             echo 'APT mirror fallback probe failed; check apt resolver and download errors on this runner.'
             grep -E 'Temporary failure resolving|Could not resolve|Failed to fetch' "$log" | tail -n 10 || true
             exit 1
@@ -230,6 +243,7 @@ jobs:
 
           restore_mirrors
           sudo python3 tools/apt_mirror_fallback.py "$mirrors"
+          rm -f "$probe_sources" "$log"
           trap - EXIT
 
       - name: Install pinned Chromium and system dependencies
