@@ -18,7 +18,7 @@ from threading import Lock
 
 from django.conf import settings
 from django.db import connection
-from django.db.models import CharField, Exists, OuterRef, Q
+from django.db.models import BooleanField, CharField, Exists, ExpressionWrapper, OuterRef, Q
 from django.db.models.functions import SHA256
 from django.utils import timezone
 
@@ -459,6 +459,14 @@ def status_timeline(events):
     return result
 
 
+def _due_at(facts):
+    """The obligation's due instant: from restored evidence when cached, else from its facts."""
+    evidence = getattr(facts, "evidence", None)
+    if evidence is not None:
+        return evidence[0].due_at
+    return _instant(facts["obligation"]["due_at"])
+
+
 def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
     """Return projection facts with the immutable status event applicable to this read.
 
@@ -519,7 +527,10 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
             vehicle_id__in=vehicle_ids,
         )
         .annotate(digest=facts_digest())
-        .values_list("obligation_id", "vehicle_id", "digest", "refreshed_at", "due_at", "selected")[
+        # "Refreshed after T" is decided in SQL, and the due instant comes from each row's facts:
+        # no datetime is converted per row (issue #99).
+        .annotate(newer=ExpressionWrapper(Q(refreshed_at__gt=instant), output_field=BooleanField()))
+        .values_list("obligation_id", "vehicle_id", "digest", "newer", "selected")[
             : page_limit + 1
         ],
         page_limit,
@@ -527,7 +538,7 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     source_ids = {oid for oid, _routine in source_rows}
     if {r[0] for r in rows} != source_ids:
         return None
-    newer = {r[0] for r in rows if r[3] > instant}
+    newer = {r[0] for r in rows if r[3]}
     # The projection's selected flag is maintained in the same transaction as each
     # selection event. Only re-read the immutable stream when a row refreshed after this
     # request's captured instant could contain a later selection change.
@@ -536,7 +547,7 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
         selected = selected_ids(organization_id, routine_ids, instant)
         selected.update(oid for oid, routine in source_rows if not routine)
     else:
-        selected = {row[0] for row in rows if row[5]}
+        selected = {row[0] for row in rows if row[4]}
     if not selected.issubset(source_ids):
         return None
     stored, changed, outdated = stored_facts(
@@ -578,11 +589,13 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     )
     timelines = status_timeline(statuses)
     result = {v: [] for v in vehicle_ids}
-    for oid, vehicle, _digest, _stamp, due_at, _selected in rows:
+    for oid, vehicle, _digest, _newer, _selected in rows:
         if oid not in selected:
             continue
         facts = replayed[oid] if oid in newer else stored[str(oid)]
-        result[str(vehicle)].append(attach_status_fact(facts, vehicle, due_at, instant, timelines))
+        result[str(vehicle)].append(
+            attach_status_fact(facts, vehicle, _due_at(facts), instant, timelines)
+        )
     for found in result.values():
         _bounded(found)
     return result

@@ -895,7 +895,7 @@ class CurrentQueryLimitTests(SimpleTestCase):
             if rows.model is ObligationProjection and "facts" in rows._fields:
                 return ((obligation, facts, "digest"),)  # the cache miss fetch
             if rows.model is ObligationProjection:
-                return ((obligation, vehicle, "digest", instant, instant, True),)
+                return ((obligation, vehicle, "digest", False, True),)
             if rows.model is VehicleStatusEvent:
                 return ()
             self.fail(f"unexpected bounded query for {rows.model!r}")
@@ -906,7 +906,9 @@ class CurrentQueryLimitTests(SimpleTestCase):
                 current, "selected_ids", side_effect=AssertionError("selection stream reread")
             ),
             # These minimal facts are not restorable evidence; only the query shape is tested.
-            mock.patch.object(current, "_evidence", return_value=((),) * 5),
+            mock.patch.object(
+                current, "_evidence", return_value=(SimpleNamespace(due_at=instant), *((),) * 4)
+            ),
         ):
             result = current_rows(organization, [vehicle], instant)
 
