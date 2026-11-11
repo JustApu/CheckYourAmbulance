@@ -30,6 +30,7 @@ class AptMirrorFallbackTests(unittest.TestCase):
         self.assertIn("http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n", result)
         self.assertIn("http://mirror.example/ubuntu/\tpriority:1\n", result)
         self.assertLess(result.index("priority:1"), result.index(f"{FALLBACK}\tpriority:2"))
+        self.assertEqual(configure(result), result)
 
     def test_simulation_uses_reserved_unresolvable_domain(self):
         result = configure(
