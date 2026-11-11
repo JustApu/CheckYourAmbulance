@@ -314,6 +314,7 @@
   // ---- rendering -------------------------------------------------------------------------
   function stateText(row) {
     if (config.verification_for_deficiency_id) { return "Outstanding verification"; }
+    if (!row.obligation_state) { return "No current requirement"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED") { return "Inspected — failed"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED") { return "Completed by supervisor — unable to inspect"; }
     var map = {OVERDUE: "Overdue", DUE: "Due", CURRENT: "Due soon", SATISFIED: "Done for this window",
@@ -323,17 +324,6 @@
   // The outcome this person's acknowledged tap recorded, or null when nothing was saved.
   var outcomeWords = {PASSED: "Pass", FAILED: "Fail", UNABLE_TO_INSPECT: "Unable to inspect", NOT_APPLICABLE: "Not applicable"};
   function savedOutcome(entry) { return entry && entry.status === "saved" ? entry.savedOutcome || "PASSED" : null; }
-  // The newest result recorded for the shown window, or null. This page's save counts while the
-  // row still shows the same obligation and its newest check is that save (or its basis, before
-  // the reload arrives); a satisfied window otherwise reports its newest effective check, because
-  // a later Fail does not change the earlier Pass that satisfied it (SCH-7).
-  function recordedOutcome(row, entry) {
-    var mine = savedOutcome(entry) && (row.due_at || null) === entry.dueAt &&
-      (row.latest_check_id === entry.checkId || row.latest_check_id === entry.basis);
-    if (mine) { return savedOutcome(entry); }
-    if (row.obligation_state === "SATISFIED") { return row.latest_check_outcome || row.obligation_outcome || null; }
-    return null;
-  }
   function saveIndicator(entry) {
     var p = el("p", "save-state save-state-" + entry.status);
     p.setAttribute("role", "status");
@@ -356,14 +346,12 @@
       return box;
     }
     var label = row.item_label + (row.kit_label ? " (" + row.kit_label + ")" : "");
-    // Primary styling looks like the chosen result, so Pass keeps it only while no other
-    // result is recorded for this window (issue 87); it stays available as a plain action.
-    var recorded = recordedOutcome(row, entry);
-    var button = el("button", recorded && recorded !== "PASSED" ? "button" : "button primary",
+    // Outcome buttons are actions, never a display of the saved result or window status.
+    var button = el("button", "button",
       row.kind === "QUANTITY" ? "Record count" : "Pass");
     button.type = "button"; button.disabled = !!busy;
     button.dataset.action = row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
-    button.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Record count for " : "Pass ") + label);
+    button.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Record count for " : "Record Pass for ") + label);
     if (row.kind === "QUANTITY" || row.kind === "MEASUREMENT") {
       var input = el("input", "number-input");
       input.disabled = !!busy;
@@ -397,7 +385,7 @@
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
       action.type = "button"; action.disabled = !!busy;
       action.dataset.action = outcome.toLowerCase();
-      action.setAttribute("aria-label", action.textContent + " " + label);
+      action.setAttribute("aria-label", "Record " + (outcome === "FAILED" ? "Fail" : "Unable to inspect") + " for " + label);
       action.addEventListener("click", function () { rememberFocus(row, outcome.toLowerCase()); openOutcome(row, outcome); });
       box.appendChild(action);
     });
@@ -556,11 +544,12 @@
     var head = el("div", "item-head");
     var title = el("h3", "", row.item_label + (row.kit_label ? " — " + row.kit_label : ""));
     head.appendChild(title);
-    if (row.item_attention === "ATTENTION") { head.appendChild(el("span", "pill pill-attention", "⚠ Needs attention")); }
+    // The explicit deficiency block already communicates attention for this row.
+    if (row.item_attention === "ATTENTION" && !row.deficiencies.length) { head.appendChild(el("span", "pill pill-attention", "⚠ Needs attention")); }
     var st = stateText(row);
     if (st) {
       var failed = !config.verification_for_deficiency_id && row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED";
-      head.appendChild(el("span", failed ? "pill pill-failed" : "pill", st));
+      head.appendChild(el("span", failed ? "pill pill-failed window-status" : "pill window-status", "Window status: " + st));
     }
     li.appendChild(head);
     var place = [row.compartment_label, row.system_label].filter(Boolean).join(" · ");
@@ -568,7 +557,8 @@
     if (row.instructions) { li.appendChild(el("p", "instructions", row.instructions)); }
     row.deficiencies.forEach(function (d) {
       var box = el("div", "known-deficiency");
-      box.appendChild(el("strong", "", "Known deficiency (" + d.severity_label + ", " + d.status.replace(/_/g, " ").toLowerCase() + "): "));
+      var status = d.status.replace(/_/g, " ").toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); });
+      box.appendChild(el("strong", "", "Deficiency status: " + status + ". Severity: " + d.severity_label + ". "));
       box.appendChild(document.createTextNode(d.summary));
       var historyLink = el("a", "", " View report and history");
       historyLink.href = config.urls.deficiency_detail.replace("DEFICIENCY", encodeURIComponent(d.id));
@@ -576,7 +566,8 @@
       li.appendChild(box);
     });
     if (row.latest_check_id) {
-      li.appendChild(el("p", "last-check", "Last check: " + row.latest_check_outcome.replace(/_/g, " ").toLowerCase() +
+      var outcome = outcomeWords[row.latest_check_outcome] || "Outcome unavailable";
+      li.appendChild(el("p", "last-check", "Latest recorded check: " + outcome +
         (row.latest_check_by ? " by " + row.latest_check_by : "") + " at " + when(row.latest_check_at)));
     }
     li.appendChild(controls(row, li));
