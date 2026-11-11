@@ -172,6 +172,11 @@ class ShellMarkupTests(ShellTestCase):
         for theme in ("auto", "light", "dark"):
             with self.subTest(theme=theme):
                 self.assertIn(f'<option value="{theme}">{theme.title()}</option>', html)
+        self.assertLess(
+            html.index('localStorage.getItem("cya-theme")'),
+            html.index("<style>"),
+            "saved theme must be applied before the page stylesheet can paint",
+        )
 
     def test_connection_banner_is_an_alert_with_text(self):
         html = self.page()

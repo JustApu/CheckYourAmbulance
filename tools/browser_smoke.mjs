@@ -18,9 +18,13 @@ const shellScript = readFileSync(
   path.join(root, "cya/shell/templates/shell/shell.js"),
   "utf8",
 );
+const themeBootstrap = readFileSync(
+  path.join(root, "cya/shell/templates/shell/theme_bootstrap.js"),
+  "utf8",
+);
 const html = `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic vehicle inspection</title><style>${css}</style></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic vehicle inspection</title><script>${themeBootstrap}</script><style>${css}</style></head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header"><a class="brand" href="#main">Check Your Ambulance</a><div class="header-tools"><div class="account"><span class="account-name">Sam Example</span><form><button class="button" type="button">Sign out</button></form></div><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div></header>
@@ -41,6 +45,15 @@ const viewports = [
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR || path.join(os.tmpdir(), `cya-browser-smoke-${process.pid}`);
 const browser = await chromium.launch({ headless: true });
 const failures = [];
+async function waitForNavLayout(page, narrow) {
+  await page.waitForFunction((isNarrow) => {
+    const toggle = document.getElementById("site-nav-toggle");
+    const list = document.getElementById("site-nav-list");
+    return window.matchMedia("(max-width: 47.999rem)").matches === isNarrow
+      && toggle.hidden === !isNarrow
+      && list.hidden === (isNarrow && toggle.getAttribute("aria-expanded") !== "true");
+  }, narrow);
+}
 
 try {
   for (const viewport of viewports) {
@@ -55,7 +68,6 @@ try {
       assert.equal(await page.title(), "Synthetic vehicle inspection");
       assert.equal(await page.getByRole("heading", { name: "Unit 12 inspection" }).count(), 1);
       assert.equal(await page.getByRole("navigation", { name: "Main" }).count(), 1);
-      assert.equal(await page.getByRole("link", { name: "Inspection" }).getAttribute("aria-current"), "page");
       const navToggle = page.getByRole("button", { name: "Menu" });
       const navList = page.locator("#site-nav-list");
       if (viewport.width < 768) {
@@ -63,17 +75,18 @@ try {
         assert.equal(await navList.isVisible(), false);
         await navToggle.click();
         assert.equal(await navToggle.getAttribute("aria-expanded"), "true");
+        assert.equal(await page.getByRole("link", { name: "Inspection" }).getAttribute("aria-current"), "page");
         assert.equal(await page.getByRole("link", { name: "Deficiencies" }).isVisible(), true);
         await page.keyboard.press("Escape");
         assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
         assert.equal(await navToggle.getAttribute("aria-expanded"), "false");
         assert.equal(await navList.isVisible(), false);
         await page.setViewportSize({ width: 768, height: viewport.height });
-        await page.waitForFunction(() => !window.matchMedia("(max-width: 47.999rem)").matches);
+        await waitForNavLayout(page, false);
         assert.equal(await navList.isVisible(), true);
         assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true);
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
-        await page.waitForFunction(() => window.matchMedia("(max-width: 47.999rem)").matches);
+        await waitForNavLayout(page, true);
         assert.equal(await navToggle.isVisible(), true);
         assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
       } else {
@@ -81,11 +94,11 @@ try {
         assert.equal(await navList.isVisible(), true);
         await page.getByRole("link", { name: "Inspection" }).focus();
         await page.setViewportSize({ width: 600, height: viewport.height });
-        await page.waitForFunction(() => window.matchMedia("(max-width: 47.999rem)").matches);
+        await waitForNavLayout(page, true);
         assert.equal(await navToggle.isVisible(), true);
         assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
         await page.setViewportSize({ width: viewport.width, height: viewport.height });
-        await page.waitForFunction(() => !window.matchMedia("(max-width: 47.999rem)").matches);
+        await waitForNavLayout(page, false);
         assert.equal(await navList.isVisible(), true);
         assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true);
       }
