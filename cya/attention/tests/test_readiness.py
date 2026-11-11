@@ -450,7 +450,7 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, 'data-attention="true"')
         self.assertContains(page, 'data-status="IN_SERVICE"')
         self.assertContains(page, "Failed: 1")
-        self.assertContains(page, "Critical/high shown: 1")
+        self.assertContains(page, "Critical / High shown: 1")
         self.assertContains(page, "Overdue:")
         self.assertContains(page, "Missed:")
         self.assertContains(page, "Suspensions:")
