@@ -18,6 +18,10 @@ const shellScript = readFileSync(
   path.join(root, "cya/shell/templates/shell/shell.js"),
   "utf8",
 );
+const checklistScript = readFileSync(
+  path.join(root, "cya/inspections/templates/inspections/checklist.js"),
+  "utf8",
+);
 const themeBootstrap = readFileSync(
   path.join(root, "cya/shell/templates/shell/theme_bootstrap.js"),
   "utf8",
@@ -42,6 +46,93 @@ const viewports = [
   { name: "tablet-landscape-1024", width: 1024, height: 768 },
   { name: "desktop-1440", width: 1440, height: 900 },
 ];
+const sampleRows = [
+  { item_id: "item-oxygen", item_label: "Oxygen", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 1, obligation_state: "SATISFIED", obligation_outcome: "PASSED", due_at: null, item_attention: "CLEAR", needs_action: false, check_suspended: false, deficiencies: [], latest_check_id: null, latest_check_outcome: null, latest_check_at: null, latest_check_by: null, expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+  { item_id: "item-mask", item_label: "Oxygen mask", kit_id: "kit-one", kit_label: "Airway Kit", compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 2, obligation_state: "DUE", obligation_outcome: null, due_at: null, item_attention: "ATTENTION", needs_action: true, check_suspended: false, deficiencies: [{ id: "def-a", severity_label: "Medium", status: "OPEN", summary: "Synthetic issue" }], latest_check_id: null, latest_check_outcome: null, latest_check_at: null, latest_check_by: null, expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+  { item_id: "item-mask", item_label: "Oxygen mask", kit_id: "kit-two", kit_label: "Airway Kit", compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 3, obligation_state: "OVERDUE", obligation_outcome: null, due_at: null, item_attention: "CLEAR", needs_action: true, check_suspended: false, deficiencies: [], latest_check_id: null, latest_check_outcome: null, latest_check_at: null, latest_check_by: null, expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+  { item_id: "item-radio", item_label: "Radio", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: "sys-radio", system_label: "Communications", checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 4, obligation_state: "SUSPENDED", obligation_outcome: null, due_at: null, item_attention: "ATTENTION", needs_action: false, check_suspended: true, deficiencies: [], latest_check_id: null, latest_check_outcome: null, latest_check_at: null, latest_check_by: null, expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
+];
+function inspectionMarkup(userId, sessionId) {
+  const config = { user_id: userId, session_id: sessionId, vehicle_id: "vehicle-a", checklist_version_id: "version-a", state: "OPEN", view: "NORMAL", needs_attention_only: false, urls: { checklist: "/api/checklist", checks: "/api/checks", odometer: "/api/odometer", preferences: "/api/preferences", reopen: "/api/reopen", vehicle: "/vehicle", socket: "/socket", suggestions: "/suggestions", deficiency_detail: "/deficiency/DEFICIENCY/" } };
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body>
+  <main><section><p id="op-status">In service</p><p id="op-restrictions"></p></section>
+  <div id="live-banner" hidden><span id="live-detail"></span></div><div id="stale" hidden></div><p id="session-message" role="status"></p>
+  <form id="csrf-holder"><input name="csrfmiddlewaretoken" value="synthetic"></form>
+  <section class="panel"><h2>Odometer</h2><form id="odometer-form"><input id="odo-value"><select id="odo-unit"><option value="mi">miles</option></select><input id="odo-hours"><button type="submit">Save</button></form><div id="odo-confirm" hidden><textarea id="odo-why"></textarea><button id="odo-confirm-button" type="button">Confirm</button></div><p id="odometer-state" hidden><span class="indicator-icon"></span><span class="save-state-text"></span></p></section>
+  <section><h2 id="checklist-heading" tabindex="-1">Checklist</h2><div class="view-controls"><button id="view-normal" class="button" type="button">Normal</button><button id="view-priority" class="button" type="button">Priority</button><label><input id="only-attention" type="checkbox"> Needs Attention Only</label></div><p id="pref-state" role="status"></p>
+  <div id="layout-controls" class="view-controls" role="group" aria-label="Inspection layout"><button id="layout-compartments" class="button" type="button">Compartments</button><button id="layout-flat" class="button" type="button">All items</button></div>
+  <section id="area-overview"><h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3><p class="muted">Progress counts checks for the current inspection window. Known deficiencies remain open until resolved.</p><div id="area-cards" class="area-cards"></div></section>
+  <section id="area-detail" hidden><button id="area-overview-button" class="button" type="button">All areas and compartments</button><h3 id="area-heading" tabindex="-1"></h3></section><p id="screen-notice" hidden></p><ol id="items" class="items" aria-live="polite"></ol></section>
+  <dialog id="conflict-dialog"><p id="conflict-text"></p><button id="conflict-cancel" type="button">Cancel</button><button id="conflict-proceed" type="button">Proceed</button></dialog>
+  <dialog id="outcome-dialog"><h2 id="outcome-title"></h2><form id="outcome-form"><textarea name="outcome_explanation"></textarea><select id="outcome-existing"></select><p id="outcome-matches"></p><p id="outcome-error"></p><fieldset id="outcome-create-fields"></fieldset><button id="outcome-cancel" type="button">Cancel</button></form></dialog>
+  </main><script id="cya-config" type="application/json">${JSON.stringify(config)}</script>
+  <script>window.WebSocket = class { constructor() { setTimeout(() => { if (this.onopen) this.onopen(); }, 0); } close() {} };</script><script>${checklistScript}</script></body></html>`;
+}
+async function testInspectionNavigation(viewport) {
+  const page = await browser.newPage({ viewport });
+  const configForPath = (pathname) => pathname === "/another-user"
+    ? { user: "emt-b", session: "session-a" }
+    : pathname === "/new-session"
+      ? { user: "emt-a", session: "session-b" }
+      : { user: "emt-a", session: "session-a" };
+  await page.route("http://inspection.test/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith("/api/")) {
+      const body = url.pathname === "/api/checklist"
+        ? { status: "OK", items: sampleRows, vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
+        : { status: "COMMITTED", result: {} };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      return;
+    }
+    const identity = configForPath(url.pathname);
+    await route.fulfill({ status: 200, contentType: "text/html", body: inspectionMarkup(identity.user, identity.session) });
+  });
+  try {
+    await page.goto("http://inspection.test/", { waitUntil: "load" });
+    const overview = page.getByRole("heading", { name: "Choose an area or compartment" });
+    await overview.waitFor();
+    assert.equal(await page.locator("#area-overview").isVisible(), true, `${viewport.name}: new session did not open the compartment overview`);
+    assert.equal(await page.locator("#items").isVisible(), false, `${viewport.name}: overview also rendered the flat item list`);
+    const cab = page.getByRole("button", { name: /^Cab / });
+    assert.match(await cab.innerText(), /1 of 4 items checked in this window/);
+    assert.match(await cab.innerText(), /1 due · 0 due soon · 1 overdue · 0 not due · 1 exceptions · 1 open deficiencies/);
+    const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth, cardTarget: document.querySelector(".area-card").getBoundingClientRect().height }));
+    assert.ok(metrics.document <= viewport.width, `${viewport.name}: inspection overview overflows horizontally ${JSON.stringify(metrics)}`);
+    assert.ok(metrics.body <= viewport.width, `${viewport.name}: inspection body overflows horizontally ${JSON.stringify(metrics)}`);
+    assert.ok(metrics.cardTarget >= 48, `${viewport.name}: compartment target is shorter than 48px`);
+    await cab.click();
+    await page.getByRole("heading", { name: "Cab", exact: true }).waitFor();
+    assert.equal(await page.locator("#area-overview").isVisible(), false);
+    assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (1)" }).count(), 1);
+    assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (2)" }).count(), 1);
+    await page.evaluate(() => {
+      const item = document.querySelector('#items [data-item-key]');
+      item.scrollIntoView({ block: "start" });
+      document.dispatchEvent(new Event("scroll"));
+    });
+    await page.waitForTimeout(200);
+    const savedPosition = await page.evaluate(() => JSON.parse(localStorage.getItem("cya.inspection.navigation.v1:emt-a:session-a")));
+    assert.ok(savedPosition && savedPosition.anchorKey, `${viewport.name}: item position was not saved for resume`);
+    await page.reload({ waitUntil: "load" });
+    await page.getByRole("heading", { name: "Cab", exact: true }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (2)" }).count(), 1, `${viewport.name}: the current EMT's compartment did not restore after reload`);
+    await page.getByRole("checkbox", { name: "Needs Attention Only" }).check();
+    assert.equal(await page.getByRole("heading", { name: "Radio", exact: true }).count(), 0, `${viewport.name}: suspended red row escaped the attention filter`);
+    await page.getByRole("button", { name: "All areas and compartments" }).click();
+    await page.locator("#area-overview").waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "All items" }).click();
+    assert.equal(await page.getByText("Radio", { exact: true }).count(), 1, `${viewport.name}: flat view did not show unfiltered groups`);
+    await page.goto("http://inspection.test/another-user", { waitUntil: "load" });
+    await page.locator("#area-overview").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#area-detail").isVisible(), false, `${viewport.name}: another EMT inherited navigation state`);
+    await page.goto("http://inspection.test/new-session", { waitUntil: "load" });
+    await page.locator("#area-overview").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#area-detail").isVisible(), false, `${viewport.name}: a new inspection inherited a prior session's location`);
+    console.log(`${viewport.name}: compartment overview, kit grouping and per-user resume passed`);
+  } finally {
+    await page.close();
+  }
+}
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR || path.join(os.tmpdir(), `cya-browser-smoke-${process.pid}`);
 const browser = await chromium.launch({ headless: true });
 const failures = [];
@@ -108,6 +199,7 @@ try {
         assert.equal(await navList.isVisible(), true, `${viewport.name}: navigation is not visible at desktop width`);
         assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: focus was not returned to the current link at desktop width`);
       }
+      await testInspectionNavigation(viewport);
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);
       assert.equal(await page.getByRole("status").count(), 1);

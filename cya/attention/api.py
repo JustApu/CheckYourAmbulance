@@ -61,6 +61,7 @@ def checklist_row(row, authors):
         "latest_check_at": _stamped(row.latest_check_at),
         "latest_check_by": authors,
         "needs_action": row.needs_action,
+        "check_suspended": row.check_suspended,
         "deficiencies": [{**d, "reported_at": _stamp(d["reported_at"])} for d in row.deficiencies],
         "checklist_version_id": row.checklist_version_id,
         "expected_quantity": row.expected_quantity,
