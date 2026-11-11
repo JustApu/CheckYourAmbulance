@@ -17,12 +17,12 @@
   var narrowNav = window.matchMedia("(max-width: 47.999rem)");
   function syncNav() {
     if (!navToggle || !navList) { return; }
+    var toggleHadFocus = document.activeElement === navToggle;
     navToggle.hidden = !narrowNav.matches;
     if (narrowNav.matches) {
       navList.hidden = navToggle.getAttribute("aria-expanded") !== "true";
       if (navList.hidden && navList.contains(document.activeElement)) { navToggle.focus(); }
     } else {
-      var toggleHadFocus = document.activeElement === navToggle;
       navToggle.setAttribute("aria-expanded", "false");
       navList.hidden = false;
       if (toggleHadFocus) {
