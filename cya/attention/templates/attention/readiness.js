@@ -39,7 +39,15 @@
       if (!r.ok) { throw new Error("panel"); } return r.text();
     }).then(function (html) {
       if (html === null) { return; }
-      panel.innerHTML = html; stale.hidden = true;
+      var openVehicles = Array.prototype.map.call(
+        panel.querySelectorAll(".readiness-details[open]"),
+        function (details) { return details.getAttribute("data-vehicle-id"); }
+      );
+      panel.innerHTML = html;
+      Array.prototype.forEach.call(panel.querySelectorAll(".readiness-details"), function (details) {
+        if (openVehicles.indexOf(details.getAttribute("data-vehicle-id")) !== -1) { details.open = true; }
+      });
+      stale.hidden = true;
     }).catch(function () {
       stale.hidden = false;
     }).then(function () {

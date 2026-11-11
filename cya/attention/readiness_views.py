@@ -155,6 +155,22 @@ def _screen(request, template, background=False):
         ]
         for row in vehicle.deficiencies:
             row["status_label"] = STATUS_LABELS.get(row["status"], row["status"])
+        vehicle.critical_high_count = sum(
+            row["severity"]["code"] in {"CRITICAL", "HIGH"} for row in vehicle.deficiencies
+        )
+        # This is only a filter predicate over independent attention signals, not a persisted
+        # readiness or compliance state. Operational status remains an explicitly set fact.
+        vehicle.needs_attention = any(
+            (
+                vehicle.status != "IN_SERVICE",
+                vehicle.counts["FAILED"] > 0,
+                vehicle.counts["OVERDUE"] > 0,
+                vehicle.counts["MISSED"] > 0,
+                vehicle.critical_high_count > 0,
+                vehicle.deficiencies_truncated,
+                bool(vehicle.suspensions),
+            )
+        )
     live = as_of is None
     return render(
         request,

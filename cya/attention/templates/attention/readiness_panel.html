@@ -1,14 +1,38 @@
 <p>Updated {{ picture.as_of|date:"Y-m-d H:i:s" }} UTC. Obligations due {{ picture.window_start|date:"Y-m-d H:i" }} to {{ picture.window_end|date:"Y-m-d H:i" }} UTC. Each state is counted on its own; nothing here is a single "compliant" flag.</p>
 {% if picture.truncated %}<p role="alert">Only the first {{ picture.vehicles|length }} vehicles are shown.</p>{% endif %}
-<section class="panel readiness-totals">
-<h2>Fleet totals{% if picture.truncated %} (vehicles shown){% endif %}</h2>
+<section class="panel readiness-totals" aria-labelledby="readiness-totals-heading">
+<h2 id="readiness-totals-heading">Fleet totals{% if picture.truncated %} (vehicles shown){% endif %}</h2>
 <ul>{% for label, count in picture.total_states %}<li>{{ label }}: {{ count }}</li>{% empty %}<li>No obligations in this window.</li>{% endfor %}</ul>
 </section>
 {% for vehicle in picture.vehicles %}
-<section class="panel readiness-vehicle">
-<h2>{{ vehicle.display_name }}{% if not vehicle.active %} (inactive now){% endif %}</h2>
-<p><strong>{{ vehicle.status_label }}</strong>{% if vehicle.restrictions %}: {{ vehicle.restrictions }}{% endif %}</p>
-<p>Inspection progress: {{ vehicle.progress.checked }} of {{ vehicle.progress.owed }} owed checks recorded.</p>
+<section class="panel readiness-vehicle" data-vehicle-id="{{ vehicle.vehicle_id }}" data-attention="{{ vehicle.needs_attention|yesno:'true,false' }}" aria-labelledby="readiness-vehicle-{{ forloop.counter }}">
+<div class="readiness-overview">
+<div class="readiness-identity">
+<h2 id="readiness-vehicle-{{ forloop.counter }}">{{ vehicle.display_name }}{% if not vehicle.active %} (inactive now){% endif %}</h2>
+<span class="pill status-pill" data-status="{{ vehicle.status }}">{{ vehicle.status_label }}</span>
+{% if vehicle.restrictions %}<p class="readiness-restrictions">{{ vehicle.restrictions }}</p>{% endif %}
+</div>
+<div class="readiness-measure">
+<h3>Inspection progress</h3>
+<p>{{ vehicle.progress.checked }} of {{ vehicle.progress.owed }} owed checks recorded</p>
+</div>
+<ul class="readiness-signals" aria-label="Independent attention counts">
+<li class="pill{% if vehicle.counts.FAILED %} pill-attention{% endif %}">Failed: {{ vehicle.counts.FAILED }}</li>
+<li class="pill{% if vehicle.counts.OVERDUE %} pill-attention{% endif %}">Overdue: {{ vehicle.counts.OVERDUE }}</li>
+<li class="pill{% if vehicle.counts.MISSED %} pill-attention{% endif %}">Missed: {{ vehicle.counts.MISSED }}</li>
+<li class="pill{% if vehicle.critical_high_count %} pill-attention{% endif %}">Critical/high shown: {{ vehicle.critical_high_count }}</li>
+<li class="pill{% if vehicle.suspensions %} pill-attention{% endif %}">Suspensions: {{ vehicle.suspensions|length }}{% if vehicle.suspensions_truncated %}+{% endif %}</li>
+</ul>
+<nav class="readiness-actions" aria-label="{{ vehicle.display_name }} workflows">
+<a href="{% url 'inspection-vehicle' vehicle.vehicle_id %}">Open vehicle inspection</a>
+<a href="{% url 'status-vehicle' vehicle.vehicle_id %}">Current status workflow</a>
+{% if vehicle.deficiencies %}<a href="{% url 'deficiencies-detail' vehicle.deficiencies.0.deficiency_id %}">Open a deficiency</a>{% endif %}
+</nav>
+{% if vehicle.deficiencies_truncated %}<p class="readiness-truncation">More active deficiencies exist than the details below show.</p>{% endif %}
+</div>
+<details class="readiness-details" data-vehicle-id="{{ vehicle.vehicle_id }}">
+<summary>Obligations, deficiencies and suspensions for {{ vehicle.display_name }}</summary>
+<div class="readiness-detail-content">
 <h3>Obligations by state</h3>
 <ul>{% for label, count in vehicle.states %}<li>{{ label }}: {{ count }}</li>{% empty %}<li>No obligations in this window.</li>{% endfor %}</ul>
 <h3>Deficiencies being worked</h3>
@@ -20,6 +44,8 @@
 <h3>Check suspensions in force</h3>
 <ul>{% for row in vehicle.suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended since {{ row.started_at|date:"Y-m-d H:i" }} UTC (<a href="{% url 'deficiencies-detail' row.deficiency_id %}">deficiency</a>)</li>{% empty %}<li>None.</li>{% endfor %}</ul>
 {% if vehicle.suspensions_truncated %}<p role="alert">Only the first {{ vehicle.suspensions|length }} suspensions are shown.</p>{% endif %}
+</div>
+</details>
 </section>
 {% empty %}
 <p>No vehicles.</p>

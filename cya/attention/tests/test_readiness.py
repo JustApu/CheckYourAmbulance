@@ -443,6 +443,28 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "Obligations by state")
         self.assertNotContains(page, 'compliant" flag:')
 
+    def test_vehicle_summaries_keep_attention_signals_separate_and_link_workflows(self):
+        deficiency_id = self.failed(self.suction).body["deficiency_ids"][0]
+        sup = self.supervisor_client()
+        page = sup.get("/fleet/readiness/")
+        self.assertContains(page, 'data-attention="true"')
+        self.assertContains(page, 'data-status="IN_SERVICE"')
+        self.assertContains(page, "Failed: 1")
+        self.assertContains(page, "Critical/high shown: 1")
+        self.assertContains(page, "Overdue:")
+        self.assertContains(page, "Missed:")
+        self.assertContains(page, "Suspensions:")
+        self.assertContains(page, "Obligations, deficiencies and suspensions")
+        self.assertContains(
+            page,
+            "These independent signals do not combine into a compliance or operational status.",
+        )
+        self.assertContains(page, f'href="/inspection/vehicles/{self.vehicle.pk}/"')
+        self.assertContains(page, f'href="/status/vehicles/{self.vehicle.pk}/"')
+        self.assertContains(page, f'href="/deficiencies/{deficiency_id}/"')
+        self.assertContains(page, 'id="readiness-attention-only"')
+        self.assertNotContains(page, 'data-readiness="compliant"')
+
     def test_as_of_is_validated_and_shown_as_a_static_picture(self):
         sup = self.supervisor_client()
         for query in (

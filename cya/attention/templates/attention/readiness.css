@@ -1,0 +1,21 @@
+.readiness-filter { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .5rem .75rem; margin: 1rem 0; border: 2px solid var(--line); border-radius: .5rem; }
+.readiness-filter label { display: inline-flex; align-items: center; min-height: 48px; cursor: pointer; }
+.readiness-filter-input { display: inline-block; width: 1.5rem; height: 1.5rem; min-height: auto; margin: 0; }
+.readiness-filter-help { flex-basis: 100%; margin: 0; }
+.readiness-filter #readiness-panel { flex: 1 0 100%; min-width: 0; }
+#readiness-attention-only:checked ~ #readiness-panel .readiness-vehicle[data-attention="false"] { display: none; }
+.readiness-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); align-items: start; gap: .75rem 1rem; }
+.readiness-identity h2 { margin: 0 0 .35rem; overflow-wrap: anywhere; }
+.readiness-identity .status-pill { margin-bottom: .25rem; }
+.readiness-restrictions { margin: .25rem 0; overflow-wrap: anywhere; }
+.readiness-measure h3 { margin: 0; font-size: 1rem; }
+.readiness-measure p { margin: .25rem 0; }
+.readiness-signals { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; list-style: none; margin: 0; padding: 0; }
+.readiness-signals .pill { min-height: 2rem; padding: .15rem .6rem; }
+.readiness-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; }
+.readiness-actions a { display: inline-flex; align-items: center; min-height: 48px; overflow-wrap: anywhere; }
+.readiness-details { margin-top: .75rem; border-top: 1px solid var(--line); }
+.readiness-details summary { display: flex; align-items: center; min-height: 48px; font-weight: 700; cursor: pointer; overflow-wrap: anywhere; }
+.readiness-detail-content { overflow-wrap: anywhere; }
+.readiness-detail-content h3 { margin: .75rem 0 .25rem; }
+.readiness-detail-content ul { padding-left: 1.5rem; }
