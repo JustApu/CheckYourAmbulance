@@ -129,8 +129,15 @@ async function testInspectionNavigation(viewport) {
     await page.reload({ waitUntil: "load" });
     await page.getByRole("heading", { name: "Cab", exact: true }).waitFor();
     assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (2)" }).count(), 1, `${viewport.name}: the current EMT's compartment did not restore after reload`);
+    const radio = page.getByRole("heading", { name: "Radio", exact: true });
+    const filteredChecklist = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/checklist" && url.searchParams.get("needs_attention_only") === "true";
+    });
     await page.getByRole("checkbox", { name: "Needs Attention Only" }).check();
-    assert.equal(await page.getByRole("heading", { name: "Radio", exact: true }).count(), 0, `${viewport.name}: suspended red row escaped the attention filter`);
+    await filteredChecklist;
+    await radio.waitFor({ state: "detached" });
+    assert.equal(await radio.count(), 0, `${viewport.name}: suspended red row escaped the attention filter`);
     await page.getByRole("button", { name: "All areas and compartments" }).click();
     await page.locator("#area-overview").waitFor({ state: "visible" });
     await page.getByRole("checkbox", { name: "Needs Attention Only" }).uncheck();
