@@ -138,6 +138,45 @@ class Rpt5aCountTests(AttentionCase):
         self.record(self.suction)
         self.assertEqual(self.counts(self.at(days=1, minutes=10))[0], before[0] - 1)
 
+    def test_candidates_come_from_visible_rows_and_only_unseen_ids_are_read(self):
+        # Issue #99: the later-obligation source reads ids with the unchanged filter and takes the
+        # details of visible rows from memory; only rows outside them (here an order due beyond the
+        # window) are read from the database. The candidates are the same either way.
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from cya.attention import readiness_counts
+        from cya.obligations.current import current_rows, evaluate_facts
+        from cya.obligations.state import State
+
+        for day in range(1, 3):
+            self.clock.set(self.at(days=day))
+            self.assertEqual(self.generate().failures, [])
+        self.clock.set(self.at(days=2, minutes=1))
+        far = self.order(self.at(days=5, hours=6)).body["obligation_ids"][0]  # beyond the window
+        at = self.at(days=2, hours=8)
+        self.clock.set(at)
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        states = [evaluate_facts(f, at) for f in current_rows(org, [vehicle], at)[vehicle]]
+        visible = {s.obligation.id: s for s in states}
+        floor = {}
+        for s in states:
+            if s.state == State.OVERDUE:
+                key = (s.obligation.vehicle_id, *readiness_counts._key(s.obligation))
+                floor[key] = min(floor.get(key, s.obligation.due_at), s.obligation.due_at)
+        self.assertTrue(floor)
+        unseen = readiness_counts._candidates(org, at, floor)
+        with CaptureQueriesContext(connection) as queries:
+            seen = readiness_counts._candidates(org, at, floor, visible)
+        self.assertEqual(seen, unseen)
+        found = {oid for rows in seen.values() for _due, oid in rows}
+        self.assertIn(far, found)
+        self.assertTrue(found & set(visible))
+        details = [q["sql"] for q in queries.captured_queries if "`kit_key`" in q["sql"]]
+        self.assertEqual(len(details), 1)
+        self.assertIn(far, details[0])
+        self.assertFalse([oid for oid in found & set(visible) if oid in details[0]])
+
     def test_a_check_linked_to_nothing_does_not_clear(self):
         before = self.counts(self.at(days=1, hours=4, minutes=58))
         self.clock.set(self.at(days=1, hours=4, minutes=59))  # before the 05:00 early window

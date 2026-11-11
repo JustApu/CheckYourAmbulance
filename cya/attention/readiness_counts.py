@@ -103,25 +103,47 @@ def clearing_determination(obligation, determinations, retired_ids, at):
     raise ValueError("determination history has a cycle")
 
 
-def _candidates(organization_id, at, floor):
+def _candidates(organization_id, at, floor, visible=None):
     """{key: [(due_at, obligation id), ...] newest first}: later obligations that could clear.
 
     One bounded range read for the page's vehicles (no per-key OR clause and no model
     instances): due after the page's earliest visible OVERDUE row, early window opened by T,
-    recorded by T. Rows of other keys or not after their key's floor are dropped here.
+    recorded by T. It returns ids only; the vehicle, item, kit key and due instant come from the
+    page's visible rows already in memory, and are read from the database only for the few ids
+    outside them (issue #99). The same filter decides membership, so the set is unchanged. Rows
+    of other keys or not after their key's floor are dropped here.
     """
+    visible = visible or {}
     vehicles = sorted({key[0] for key in floor})
     limit = MAX_ROWS * len(vehicles)
-    rows = _bounded(
+    ids = _bounded(
         Obligation.objects.filter(
             organization_id=organization_id,
             vehicle_id__in=vehicles,
             due_at__gt=min(floor.values()),
             early_at__lte=at,
             recorded_at__lte=at,
-        ).values_list("pk", "vehicle_id", "item_id", "kit_key", "due_at")[: limit + 1],
+        ).values_list("pk", flat=True)[: limit + 1],
         limit,
     )
+    rows, unseen = [], []
+    for oid in ids:
+        state = visible.get(str(oid))
+        if state is None:
+            unseen.append(oid)
+            continue
+        obligation = state.obligation
+        rows.append((oid, obligation.vehicle_id, *_key(obligation), obligation.due_at))
+    for offset in range(0, len(unseen), BATCH_SIZE):
+        batch = unseen[offset : offset + BATCH_SIZE]
+        rows.extend(
+            _bounded(
+                Obligation.objects.filter(
+                    organization_id=organization_id, pk__in=batch
+                ).values_list("pk", "vehicle_id", "item_id", "kit_key", "due_at")[: len(batch) + 1],
+                len(batch),
+            )
+        )
     result = {}
     for oid, vehicle_id, item_id, kit_key, due_at in rows:
         key = (str(vehicle_id), str(item_id), str(kit_key))
@@ -207,7 +229,7 @@ def latest_clearing_due(organization_id, at, overdue, *, current, visible=None):
         floor[key] = min(floor.get(key, obligation.due_at), obligation.due_at)
     if not floor:
         return {}
-    candidates = _candidates(organization_id, at, floor)
+    candidates = _candidates(organization_id, at, floor, visible)
     # Only candidates outside the visible rows can have a retirement disposition by T: a visible
     # row is selected at T (or is a non-routine order, which has no selection stream), and the
     # selection insert trigger (obligations migration 0002) refuses to select an obligation that
