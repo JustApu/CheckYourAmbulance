@@ -11,7 +11,7 @@
   var entries = {};       // item key -> {status, payload, text, operationId}
   var verificationRows = {}, verificationNotice = "";
   var drafts = {};        // item key -> typed value, kept across re-renders
-  var rows = [], focusIntent = null;
+  var rows = [], groupProgressRows = [], focusIntent = null;
   var view = config.view, onlyAttention = config.needs_attention_only;
   var pendingNavigation = readNavigation();
   var layoutMode = pendingNavigation ? pendingNavigation.mode : "COMPARTMENTS";
@@ -454,48 +454,19 @@
       return config.verification_for_deficiency_id || row.checklist_version_id === config.checklist_version_id;
     });
   }
-  function visibleRows(source) {
-    if (!onlyAttention) { return source; }
-    return source.filter(function (row) {
-      return !row.check_suspended && (row.item_attention === "ATTENTION" || row.needs_action);
-    });
+  function progressText(group) {
+    return group.checked + " of " + group.total + " items checked in this window · " + group.due + " due · " +
+      group.due_soon + " due soon · " + group.overdue + " overdue · " + group.not_due + " not due · " +
+      group.no_obligation + " without an obligation · " + group.exceptions + " exceptions · " + group.open_deficiencies + " open deficiencies";
   }
-  function areaGroups(source) {
-    var groups = [], byKey = Object.create(null);
-    source.forEach(function (row) {
-      var groupKey = groupKeyForRow(row), group = byKey[groupKey];
-      if (!group) {
-        group = {key: groupKey, label: groupLabelForRow(row), rows: []};
-        byKey[groupKey] = group; groups.push(group);
-      }
-      group.rows.push(row);
-    });
-    return groups;
-  }
-  function groupProgress(groupRows) {
-    var checked = 0, due = 0, dueSoon = 0, overdue = 0, notDue = 0, exceptions = 0, deficiencies = Object.create(null);
-    groupRows.forEach(function (row) {
-      if (row.obligation_state === "SATISFIED") { checked += 1; }
-      if (row.obligation_state === "DUE") { due += 1; }
-      if (row.obligation_state === "CURRENT") { dueSoon += 1; }
-      if (row.obligation_state === "OVERDUE") { overdue += 1; }
-      if (row.obligation_state === "UPCOMING") { notDue += 1; }
-      if (["SUSPENDED", "EXEMPT", "WAIVED"].indexOf(row.obligation_state) !== -1) { exceptions += 1; }
-      (row.deficiencies || []).forEach(function (deficiency) { deficiencies[deficiency.id] = true; });
-    });
-    var deficiencyCount = Object.keys(deficiencies).length;
-    return checked + " of " + groupRows.length + " items checked in this window · " + due + " due · " +
-      dueSoon + " due soon · " + overdue + " overdue · " + notDue + " not due · " +
-      exceptions + " exceptions · " + deficiencyCount + " open deficiencies";
-  }
-  function renderAreaCards(source) {
+  function renderAreaCards() {
     var cards = $("area-cards");
     while (cards.firstChild) { cards.removeChild(cards.firstChild); }
-    areaGroups(source).forEach(function (group) {
+    groupProgressRows.forEach(function (group) {
       var button = el("button", "area-card", "");
       button.type = "button"; button.dataset.groupKey = group.key;
       button.appendChild(el("span", "area-card-title", group.label));
-      button.appendChild(el("span", "area-card-summary", groupProgress(group.rows)));
+      button.appendChild(el("span", "area-card-summary", progressText(group)));
       button.addEventListener("click", function () {
         layoutMode = "COMPARTMENTS"; selectedGroupKey = group.key; navigationAnchorKey = null;
         saveNavigation(); render(); $("area-heading").focus({preventScroll: true});
@@ -503,14 +474,13 @@
       cards.appendChild(button);
     });
   }
-  function applySavedNavigation(source) {
+  function applySavedNavigation() {
     if (navigationRestored) { return; }
     navigationRestored = true;
     if (pendingNavigation) {
       layoutMode = pendingNavigation.mode;
-      var groups = areaGroups(source);
       if (layoutMode === "COMPARTMENTS" && pendingNavigation.groupKey &&
-          groups.some(function (group) { return group.key === pendingNavigation.groupKey; })) {
+          groupProgressRows.some(function (group) { return group.key === pendingNavigation.groupKey; })) {
         selectedGroupKey = pendingNavigation.groupKey;
         navigationAnchorKey = pendingNavigation.anchorKey;
       } else if (layoutMode === "COMPARTMENTS") {
@@ -636,8 +606,8 @@
       }
     }
     var allShown = checklistRows();
-    applySavedNavigation(allShown);
-    var selectedGroup = areaGroups(allShown).filter(function (group) { return group.key === selectedGroupKey; })[0];
+    applySavedNavigation();
+    var selectedGroup = groupProgressRows.filter(function (group) { return group.key === selectedGroupKey; })[0];
     if (layoutMode === "COMPARTMENTS" && selectedGroupKey && !selectedGroup) {
       selectedGroupKey = null; navigationAnchorKey = null; saveNavigation();
     }
@@ -648,10 +618,10 @@
       $("area-detail").hidden = !detail;
       $("layout-compartments").setAttribute("aria-pressed", String(layoutMode === "COMPARTMENTS"));
       $("layout-flat").setAttribute("aria-pressed", String(layoutMode === "FLAT"));
-      if (overview) { renderAreaCards(allShown); }
+      if (overview) { renderAreaCards(); }
       if (detail && selectedGroup) { $("area-heading").textContent = selectedGroup.label; }
     }
-    var shown = visibleRows(allShown);
+    var shown = allShown;
     if (detail) { shown = shown.filter(function (row) { return groupKeyForRow(row) === selectedGroupKey; }); }
     while (list.firstChild) { list.removeChild(list.firstChild); }
     if (!overview) {
@@ -714,14 +684,15 @@
     if (loading) { reloadAgain = true; return; }
     loading = true;
     var listView = config.verification_for_deficiency_id || layoutMode === "FLAT" ? view : "NORMAL";
-    var q = "?view=" + encodeURIComponent(listView) + "&needs_attention_only=false";
+    var q = "?view=" + encodeURIComponent(listView) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
     fetch(config.urls.checklist + q, {credentials: "same-origin", cache: "no-store"}).then(function (r) {
       if (r.status === 401) { signedOut(); return null; }
       return r.json().then(function (b) { return {ok: r.ok, body: b}; });
     }).then(function (a) {
       if (a === null) { return; }
       if (!a.ok || a.body.status !== "OK") { throw new Error("checklist"); }
-      rows = a.body.items; setStatus(a.body.vehicle_status);
+      if (!Array.isArray(a.body.group_progress)) { throw new Error("checklist groups"); }
+      rows = a.body.items; groupProgressRows = a.body.group_progress; setStatus(a.body.vehicle_status);
       if (config.verification_for_deficiency_id) {
         // An acknowledgement may be lost after the row was satisfied or removed. Keep its
         // exact request reachable until Retry resolves, even after automatic closure.

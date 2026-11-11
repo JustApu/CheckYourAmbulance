@@ -187,7 +187,12 @@ class PreferenceApiTests(AttentionCase):
         self.assertEqual((saved["view"], saved["needs_attention_only"]), ("PRIORITY", True))
         self.assertEqual([i["item_id"] for i in saved["items"]], [str(self.siren.pk)])
         self.assertEqual(saved["items"][0]["item_attention"], "ATTENTION")
+        self.assertGreater(
+            sum(group["total"] for group in saved["group_progress"]), len(saved["items"])
+        )
+        self.assertEqual(sum(group["open_deficiencies"] for group in saved["group_progress"]), 1)
         wide = self.checklist("?view=NORMAL&needs_attention_only=false").json()
+        self.assertEqual(saved["group_progress"], wide["group_progress"])
         self.assertEqual((wide["view"], wide["needs_attention_only"]), ("NORMAL", False))
         self.assertGreater(len(wide["items"]), 1)
         self.assertEqual(wide["vehicle_status"]["status"], "IN_SERVICE")

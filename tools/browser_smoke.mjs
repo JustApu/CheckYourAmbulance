@@ -79,7 +79,16 @@ async function testInspectionNavigation(viewport) {
     const url = new URL(route.request().url());
     if (url.pathname.startsWith("/api/")) {
       const body = url.pathname === "/api/checklist"
-        ? { status: "OK", items: sampleRows, vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
+        ? {
+          status: "OK",
+          items: url.searchParams.get("needs_attention_only") === "true"
+            ? sampleRows.filter((row) => !row.check_suspended && (row.item_attention === "ATTENTION" || row.needs_action))
+            : sampleRows,
+          group_progress: [
+            { key: "compartment:comp-cab", label: "Cab", total: 4, checked: 1, due: 1, due_soon: 0, overdue: 1, not_due: 0, no_obligation: 0, exceptions: 1, open_deficiencies: 1 },
+          ],
+          vehicle_status: { status: "IN_SERVICE", restrictions: "" },
+        }
         : { status: "COMMITTED", result: {} };
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
       return;
@@ -95,7 +104,7 @@ async function testInspectionNavigation(viewport) {
     assert.equal(await page.locator("#items").isVisible(), false, `${viewport.name}: overview also rendered the flat item list`);
     const cab = page.getByRole("button", { name: /^Cab / });
     assert.match(await cab.innerText(), /1 of 4 items checked in this window/);
-    assert.match(await cab.innerText(), /1 due · 0 due soon · 1 overdue · 0 not due · 1 exceptions · 1 open deficiencies/);
+    assert.match(await cab.innerText(), /1 due · 0 due soon · 1 overdue · 0 not due · 0 without an obligation · 1 exceptions · 1 open deficiencies/);
     const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth, cardTarget: document.querySelector(".area-card").getBoundingClientRect().height }));
     assert.ok(metrics.document <= viewport.width, `${viewport.name}: inspection overview overflows horizontally ${JSON.stringify(metrics)}`);
     assert.ok(metrics.body <= viewport.width, `${viewport.name}: inspection body overflows horizontally ${JSON.stringify(metrics)}`);
@@ -120,6 +129,7 @@ async function testInspectionNavigation(viewport) {
     assert.equal(await page.getByRole("heading", { name: "Radio", exact: true }).count(), 0, `${viewport.name}: suspended red row escaped the attention filter`);
     await page.getByRole("button", { name: "All areas and compartments" }).click();
     await page.locator("#area-overview").waitFor({ state: "visible" });
+    await page.getByRole("checkbox", { name: "Needs Attention Only" }).uncheck();
     await page.getByRole("button", { name: "All items" }).click();
     assert.equal(await page.getByText("Radio", { exact: true }).count(), 1, `${viewport.name}: flat view did not show unfiltered groups`);
     await page.goto("http://inspection.test/another-user", { waitUntil: "load" });

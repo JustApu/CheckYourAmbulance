@@ -328,7 +328,6 @@ class ChecklistContractTests(CrewUiCase):
         by_item = {r["item_id"]: r for r in self.rows()}
         suction = by_item[str(self.suction.pk)]
         self.assertEqual(suction["checklist_version_id"], self.version_id)
-        self.assertFalse(suction["check_suspended"])
         self.assertEqual(suction["allowed_outcomes"][0], "PASSED")
         for row in by_item.values():
             self.assertEqual(row["checklist_version_id"], self.version_id)

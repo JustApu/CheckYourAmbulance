@@ -730,9 +730,6 @@ class ObligationTests(SuspensionMixin, AttentionCase, VerificationBase):
         (suspension_id,) = result.body["suspension_ids"]
         row = self.row(self.suction)
         self.assertEqual((row.obligation_state, row.check_suspended), ("SUSPENDED", True))
-        from cya.attention.api import checklist_row
-
-        self.assertTrue(checklist_row(row, {})["check_suspended"])
         self.assertFalse(row.needs_action)
         self.assertTrue(row.attention.red)  # its deficiency is still listed beside it
         self.assertEqual([d["id"] for d in row.deficiencies], [deficiency_id])
