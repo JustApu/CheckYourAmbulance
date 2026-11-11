@@ -18,8 +18,7 @@ from threading import Lock
 
 from django.conf import settings
 from django.db import connection
-from django.db.models import BooleanField, CharField, Exists, ExpressionWrapper, OuterRef, Q
-from django.db.models.functions import SHA256
+from django.db.models import BooleanField, Exists, ExpressionWrapper, F, OuterRef, Q
 from django.utils import timezone
 
 from cya.checks.state import effective_checks
@@ -165,14 +164,14 @@ FETCH_BATCH = 2000  # stored facts fetched per query on a cache miss
 
 
 def facts_digest():
-    """The content identity of a stored facts row: SHA-256 of its text, computed by MariaDB.
+    """The content identity of a stored facts row: SHA-256 of its text, stored by MariaDB.
 
     A collision-resistant hash, so a changed row cannot share its old key (PR #116 review). MariaDB
     returns NULL where SHA2 is unavailable; stored_facts then replays those rows and caches none.
     """
-    # A text result: the digest takes its input's JSONField type otherwise, and every row's hex
-    # string would then go through json.loads (about 1 s per 40,000-row read on Rocky).
-    return SHA256("facts", output_field=CharField(max_length=64))
+    # The stored generated column (migration 0014): MariaDB hashes each row once when it is
+    # written, so a read no longer hashes every row in its window (issue #99).
+    return F("facts_digest")
 
 
 def stored_facts(organization_id, digests):
