@@ -1,0 +1,12 @@
+{
+  "name": "checkyourambulance-ui-smoke",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned browser tooling for deterministic UI smoke checks",
+  "scripts": {
+    "test:browser-smoke": "node tools/browser_smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}
