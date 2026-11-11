@@ -1,40 +1,71 @@
 {% extends "shell/base.html" %}
 {% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
+{% block page_heading %}
+<div class="vehicle-page-heading">
+  <h1>{{ vehicle.display_name }}</h1>
+  <p class="status-line"><span class="visually-hidden">Vehicle operational status: </span><span class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>{% if status.restrictions %}<span class="muted">{{ status.restrictions }}</span>{% endif %}</p>
+</div>
+{% endblock %}
 {% block content %}
-<p class="status-line"><span class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>{% if status.restrictions %} <span class="muted">{{ status.restrictions }}</span>{% endif %}</p>
+<nav class="vehicle-actions" aria-label="Vehicle tasks">
+  <a href="{% url 'inspection-check-history' vehicle.pk %}">Inspection history</a>
+  <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Report a deficiency</a>
+</nav>
 <p id="vehicle-message" class="notice" role="status" hidden></p>
 <form id="csrf-holder">{% csrf_token %}</form>
-<p><a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Report a deficiency</a> · <a href="{% url 'inspection-check-history' vehicle.pk %}">Checks, corrections and supervisor completion</a></p>
 
-<section aria-labelledby="start-heading">
-  <h2 id="start-heading">Start or join an inspection</h2>
+<section class="panel inspection-start" aria-labelledby="start-heading">
+  <h2 id="start-heading">Inspection</h2>
+  {% if active_session %}
+  <div class="active-inspection">
+    <p><strong>Open inspection:</strong> {{ active_session.template_label }} · started <time datetime="{{ active_session.opened_at.isoformat }}">{{ active_session.opened_at|date:"Y-m-d H:i" }} UTC</time></p>
+    {% if active_session.participant %}
+    <a class="button primary" href="{{ active_session.url }}">Continue inspection</a>
+    {% elif join_template_id %}
+    <button type="button" class="button primary join-session" data-template="{{ join_template_id }}">Join latest open inspection</button>
+    {% else %}
+    <p class="muted">A current checklist is not configured, so this page cannot join the open inspection.</p>
+    {% endif %}
+  </div>
   {% if templates %}
-  <ul class="plain">
+  <details class="separate-inspection">
+    <summary>Start a separate inspection</summary>
+    <p>Use this when another workstream needs its own checklist. It creates a second inspection instead of joining the open one.</p>
+    <ul class="plain inspection-options">
+    {% for t in templates %}
+      <li><button type="button" class="button start-separate" data-template="{{ t.id }}" data-template-label="{{ t.label }}">Start separate {{ t.label }} inspection</button></li>
+    {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  {% elif templates %}
+  <p>Choose a configured inspection. If a crew member opens one first, you will join the latest open inspection.</p>
+  <ul class="plain inspection-options">
   {% for t in templates %}
-    <li>
-      <button type="button" class="button primary start-session" data-template="{{ t.id }}">{{ t.label }}</button>
-    </li>
+    <li><button type="button" class="button primary start-session" data-template="{{ t.id }}">Start or join {{ t.label }} inspection</button></li>
   {% endfor %}
   </ul>
-  <p class="muted">If a crew member already has an inspection open on this vehicle, you join it. You can also <button type="button" class="link-button start-separate" data-template="{{ templates.0.id }}">start a separate one</button>.</p>
   {% else %}
-  <p>No checklist is set up for this vehicle yet.</p>
+  <p>No inspection checklist is configured for this vehicle.</p>
   {% endif %}
 </section>
 
 <section aria-labelledby="sessions-heading">
-  <h2 id="sessions-heading">Recent sessions</h2>
+  <h2 id="sessions-heading">Active and recent inspections</h2>
   {% if sessions %}
   <ul class="plain">
   {% for s in sessions %}
     <li class="session-row">
-      <span>{{ s.state_label }} · opened <time datetime="{{ s.opened_at.isoformat }}">{{ s.opened_at|date:"Y-m-d H:i" }} UTC</time></span>
-      {% if s.participant %}<a class="button" href="{{ s.url }}">{% if s.state == "OPEN" %}Continue{% else %}View{% endif %}</a>{% endif %}
+      <span class="session-row-status"><strong>{{ s.template_label }}</strong> · {{ s.state_label }} · opened <time datetime="{{ s.opened_at.isoformat }}">{{ s.opened_at|date:"Y-m-d H:i" }} UTC</time></span>
+      {% if s.participant and s.state == "OPEN" %}<a class="button" href="{{ s.url }}">Continue inspection</a>
+      {% elif s.participant and s.state == "INCOMPLETE" %}<a class="button" href="{{ s.url }}">Resume incomplete inspection</a>
+      {% elif s.participant and s.state == "CLOSED" %}<a class="button" href="{{ s.url }}">Open closed inspection</a>
+      {% elif s.state == "OPEN" %}<span class="muted">The primary action above joins the latest open inspection.</span>{% endif %}
     </li>
   {% endfor %}
   </ul>
   {% else %}
-  <p>No sessions yet.</p>
+  <p>No inspection sessions yet.</p>
   {% endif %}
 </section>
 {{ config|json_script:"cya-config" }}

@@ -11,10 +11,11 @@ import re
 from uuid import uuid4
 
 from django.test import Client, override_settings
+from django.utils.html import strip_tags
 
 from cya.accounts.returns import sign_in_location
 from cya.attention.tests.support import AttentionCase
-from cya.checklists.models import Vehicle
+from cya.checklists.models import ChecklistTemplate, Vehicle
 from cya.inspections.models import InspectionSession
 from cya.testing.role_http import RoleHttpHarness, real_collaborator_settings
 
@@ -222,14 +223,68 @@ class PageTests(CrewUiCase):
         self.assertEqual(page.status_code, 404)
 
     def test_the_vehicle_page_offers_the_bound_template_and_keeps_the_section_current(self):
+        Vehicle.objects.filter(pk=self.vehicle.pk).update(display_name="Medic 6 — North Crew")
+        ChecklistTemplate.objects.filter(pk=self.template.pk).update(
+            label="Night Shift Vehicle Safety Checklist"
+        )
         page = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/")
         html = page.content.decode()
         self.assertEqual(page.status_code, 200)
+        self.assertRegex(
+            html,
+            r'<div class="vehicle-page-heading">\s*<h1>Medic 6 — North Crew</h1>\s*'
+            r'<p class="status-line"><span class="visually-hidden">Vehicle operational status: </span>',
+        )
         self.assertIn(f'data-template="{self.template.pk}"', html)
+        self.assertIn("Start or join Night Shift Vehicle Safety Checklist inspection", html)
+        self.assertIn("Inspection history", html)
+        self.assertIn("Report a deficiency", html)
         self.assertIn('aria-current="page"', html)
         self.assertIn("X-CSRFToken", html)
+        self.assertNotIn("Checks, corrections and supervisor completion", html)
+        self.assertNotIn('class="button start-separate"', html)
         config = self.config(page)
         self.assertEqual(config["vehicle_id"], str(self.vehicle.pk))
+
+    def test_an_open_inspection_is_explicitly_joinable_and_separate_start_is_explained(self):
+        ChecklistTemplate.objects.filter(pk=self.template.pk).update(
+            label="Night Shift Vehicle Safety Checklist"
+        )
+        other, _user, token = self.second_user()
+        session_id = self.open(other, token).json()["result"]["session_id"]
+
+        html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+
+        self.assertIn("Open inspection: Night Shift Vehicle Safety Checklist", strip_tags(html))
+        self.assertIn('class="button primary join-session"', html)
+        self.assertIn('class="active-inspection"', html)
+        self.assertIn('class="session-row-status"', html)
+        self.assertIn("Join latest open inspection", html)
+        self.assertNotIn(f"/inspection/sessions/{session_id}/", html)
+        self.assertIn("Start a separate inspection", html)
+        self.assertIn("creates a second inspection instead of joining the open one", html)
+        self.assertIn("Start separate Night Shift Vehicle Safety Checklist inspection", html)
+
+    def test_all_open_nonparticipant_rows_explain_that_join_selects_the_latest(self):
+        other, _user, token = self.second_user()
+        self.open(other, token)
+        self.open(other, token, separate=True)
+
+        html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+
+        self.assertEqual(
+            html.count("The primary action above joins the latest open inspection."), 2
+        )
+
+    def test_a_participant_gets_a_continue_action_and_ended_sessions_are_labeled(self):
+        session_id = self.open().json()["result"]["session_id"]
+        open_html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+        self.assertIn("Continue inspection", open_html)
+        self.assertNotIn("Join latest open inspection", open_html)
+
+        self.post(f"{SESSIONS}/{session_id}/end", {"operation_id": str(uuid4())})
+        ended_html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+        self.assertIn("Open closed inspection", ended_html)
 
     def test_unknown_and_malformed_vehicle_ids_are_404(self):
         for value in (str(uuid4()), "not-a-uuid"):

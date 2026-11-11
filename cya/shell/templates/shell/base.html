@@ -44,7 +44,7 @@
   <strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded: use its Retry button, not a new tap.
 </div>
 <main id="main" tabindex="-1">
-  <h1>{{ title }}</h1>
+  {% block page_heading %}<h1>{{ title }}</h1>{% endblock %}
   {% block content %}{{ body }}{% endblock %}
 </main>
 <script>{% include "shell/shell.js" %}</script>

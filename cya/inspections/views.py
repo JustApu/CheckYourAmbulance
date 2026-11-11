@@ -122,9 +122,11 @@ def _templates(user, vehicle, instant):
 
 def _session_rows(user, vehicle, instant):
     """Open sessions anyone may join, and the user's own ended ones they may reopen."""
-    found = InspectionSession.objects.filter(
-        organization_id=user.organization_id, vehicle=vehicle
-    ).order_by("-opened_at", "-pk")[:MAX_SESSIONS]
+    found = (
+        InspectionSession.objects.filter(organization_id=user.organization_id, vehicle=vehicle)
+        .select_related("checklist_version__template")
+        .order_by("-opened_at", "-pk")[:MAX_SESSIONS]
+    )
     mine = set(
         SessionParticipant.objects.filter(session__in=[s.pk for s in found], user=user).values_list(
             "session_id", flat=True
@@ -144,6 +146,7 @@ def _session_rows(user, vehicle, instant):
                 "id": str(session.pk),
                 "state": shown,
                 "state_label": STATE_LABELS[shown],
+                "template_label": session.checklist_version.template.label,
                 "opened_at": session.opened_at,
                 "participant": participant,
                 "url": reverse("inspection-session", args=[session.pk]) if participant else None,
@@ -160,12 +163,18 @@ def vehicle(request, vehicle_id):
         return refusal
     found = _vehicle(user, vehicle_id)
     now = timezone.now()
+    templates = _templates(user, found, now)
+    sessions = _session_rows(user, found, now)
     context = {
         "title": found.display_name,
         "vehicle": found,
         "status": _status(user, found, now),
-        "templates": _templates(user, found, now),
-        "sessions": _session_rows(user, found, now),
+        "templates": templates,
+        "sessions": sessions,
+        # Session commands join the latest open session for the vehicle by default. The list
+        # uses the same descending order and effective-state filter as the command.
+        "active_session": next((row for row in sessions if row["state"] == "OPEN"), None),
+        "join_template_id": templates[0]["id"] if templates else None,
         "config": {
             "vehicle_id": str(found.pk),
             "sessions_url": reverse("api-inspection-sessions"),
