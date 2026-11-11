@@ -20,9 +20,15 @@
     navToggle.hidden = !narrowNav.matches;
     if (narrowNav.matches) {
       navList.hidden = navToggle.getAttribute("aria-expanded") !== "true";
+      if (navList.hidden && navList.contains(document.activeElement)) { navToggle.focus(); }
     } else {
+      var toggleHadFocus = document.activeElement === navToggle;
       navToggle.setAttribute("aria-expanded", "false");
       navList.hidden = false;
+      if (toggleHadFocus) {
+        var currentLink = navList.querySelector('[aria-current="page"]') || navList.querySelector("a");
+        if (currentLink) { currentLink.focus(); }
+      }
     }
   }
   if (navToggle && navList) {

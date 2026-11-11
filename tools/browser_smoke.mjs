@@ -68,9 +68,26 @@ try {
         assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
         assert.equal(await navToggle.getAttribute("aria-expanded"), "false");
         assert.equal(await navList.isVisible(), false);
+        await page.setViewportSize({ width: 768, height: viewport.height });
+        await page.waitForFunction(() => !window.matchMedia("(max-width: 47.999rem)").matches);
+        assert.equal(await navList.isVisible(), true);
+        assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true);
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.waitForFunction(() => window.matchMedia("(max-width: 47.999rem)").matches);
+        assert.equal(await navToggle.isVisible(), true);
+        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
       } else {
         assert.equal(await navToggle.isVisible(), false);
         assert.equal(await navList.isVisible(), true);
+        await page.getByRole("link", { name: "Inspection" }).focus();
+        await page.setViewportSize({ width: 600, height: viewport.height });
+        await page.waitForFunction(() => window.matchMedia("(max-width: 47.999rem)").matches);
+        assert.equal(await navToggle.isVisible(), true);
+        assert.equal(await navToggle.evaluate((element) => element === document.activeElement), true);
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.waitForFunction(() => !window.matchMedia("(max-width: 47.999rem)").matches);
+        assert.equal(await navList.isVisible(), true);
+        assert.equal(await page.getByRole("link", { name: "Inspection" }).evaluate((element) => element === document.activeElement), true);
       }
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);
