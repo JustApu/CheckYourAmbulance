@@ -248,6 +248,16 @@ existing `obligation_projection` rows still hold facts version 1: current reader
 as a missing cache and replay, which is correct but slower, until the projection is rebuilt
 (next section).
 
+Migration `cya_obligations.0014_projection_facts_digest` ([issue #99](https://github.com/JustApu/CheckYourAmbulance/issues/99))
+adds a stored generated `facts_digest` column (`SHA2(facts, 256)`) to the disposable
+`obligation_projection`, so current reads stop hashing every row on each read. MariaDB
+computes it for existing rows while adding the column, which rebuilds that table; no other
+table or data changes. In the Rocky rehearsal on MariaDB 10.11.18 with 160,500 projection
+rows (NFS-backed disk): apply 33 s (27–30 s without command start-up), reversal to 0013 4 s,
+reapply 27 s; every row's digest matched `SHA2(facts, 256)`. It was not rehearsed at that
+scale on 11.8; CI applies and reverses it on both versions. Keep traffic stopped as for
+every schema change. No projection rebuild is needed afterwards.
+
 After the DBA creates the runtime account, preview grants, inspect the target
 and apply using the actual account name and account host. These synthetic
 examples assume the DBA created exactly this account; the host is the MariaDB
