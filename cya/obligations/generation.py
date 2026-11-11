@@ -31,6 +31,7 @@ from cya.checklists.models import (
     ChecklistTemplate,
     Vehicle,
 )
+from cya.checks.linking import captured_late_seconds
 from cya.conditions.evaluator import latest_obligation_determination
 from cya.conditions.models import ObligationDetermination
 from cya.core.audit_commands import Actor, CommandDenied, run_command
@@ -232,6 +233,7 @@ def _apply(receipt, actor, plan, trigger, publication_id):
         if a.old_obligation_id
     }
     obligations = {a.key: new_id() for a in plan.actions if a.desired is not None}
+    late_seconds = captured_late_seconds()  # SCH-3: pinned once per command, for every row
     Obligation.objects.bulk_create(
         Obligation(
             id=obligations[a.key],
@@ -244,6 +246,7 @@ def _apply(receipt, actor, plan, trigger, publication_id):
             due_at=plan.due_at,
             early_at=a.desired.early_at,
             grace_at=a.desired.grace_at,
+            late_seconds=late_seconds,
             routine=True,
             basis_at=a.cutoff or receipt.recorded_at,
             **evidence,
@@ -279,6 +282,7 @@ def _apply(receipt, actor, plan, trigger, publication_id):
             due_at=o.due_at,
             early_at=o.early_at,
             grace_at=o.grace_at,
+            late_seconds=late_seconds,
             **evidence,
         )
         for o in plan.odometers

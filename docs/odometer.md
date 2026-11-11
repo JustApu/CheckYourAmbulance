@@ -59,8 +59,9 @@ confirmed lower value shares the one `confirm_anomaly` flag.
 
 The reading links to the **earliest-due unsatisfied** odometer obligation of its vehicle whose
 window contains the instant (`early ≤ t ≤ grace`; SCH-6). Only if none does, it completes the
-earliest-due obligation past grace by at most `w_late` (a late completion, SCH-2; 12 hours by
-default, `CYA_LATE_COMPLETION_HOURS`); one further past stays missed (amendment 1.26.0). An
+earliest-due obligation past grace but not past its pinned late limit `L` (a late completion,
+SCH-2; `w_late` is captured on the odometer obligation when it is created, 12 hours by default
+through `CYA_LATE_COMPLETION_HOURS`, SPEC 1.31.0); one further past stays missed. An
 obligation whose early window has not opened is never linked, and a reading with nothing to
 satisfy is still stored as history. The link table retains voided historical links; its insert
 guard permits a new link only when no effective link remains. Vehicle locking serializes the

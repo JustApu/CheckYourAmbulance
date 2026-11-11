@@ -43,8 +43,19 @@ from cya.obligations.state import (
 from cya.operations.models import VehicleStatusEvent
 
 BATCH_SIZE = 250
+# Version 2 adds the obligation's pinned late limit (issue #80); version-1 rows need a rebuild.
+FACTS_VERSION = 2
 DATE_FIELDS = frozenset(
-    ("recorded_at", "early_at", "due_at", "grace_at", "voided_at", "effective_at", "ended_at")
+    (
+        "recorded_at",
+        "early_at",
+        "due_at",
+        "grace_at",
+        "late_limit_at",
+        "voided_at",
+        "effective_at",
+        "ended_at",
+    )
 )
 
 
@@ -66,7 +77,7 @@ def _restore(kind, values):
 
 def evaluate_facts(facts, instant):
     """Use the SAME pure evaluator as historical replay, without replaying check chains."""
-    if facts.get("version") != 1:
+    if facts.get("version") != FACTS_VERSION:
         raise ValueError("unsupported obligation projection; rebuild required")
     if not any(facts[key] for key in ("checks", "determinations", "statuses", "suspensions")):
         return evaluate_obligation(_restore(ObligationEvidence, facts["obligation"]), instant)
@@ -132,7 +143,7 @@ def compile_history(history, instant):
         )
         result[obligation.id] = _json(
             {
-                "version": 1,
+                "version": FACTS_VERSION,
                 "obligation": asdict(obligation),
                 "checks": [asdict(c) for c in by_check.get(obligation.id, ())],
                 "determinations": [asdict(d) for d in determinations.get(obligation.id, ())],
@@ -306,7 +317,7 @@ def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
 
 
 def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False):
-    """Read current facts, or return None for a missing/partially selected cache.
+    """Read current facts, or return None for a missing, partially selected or outdated cache.
 
     Comparing all in-scope source IDs protects first deployment/recovery from a partial
     cache. Selection flags are transactional projection facts; the immutable selection stream
@@ -343,6 +354,11 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     )
     source_ids = {oid for oid, _routine in source_rows}
     if {r[0] for r in rows} != source_ids:
+        return None
+    # Rows written by an older facts version (for example before the pinned late limit of
+    # issue #80) are treated like a missing cache: the caller replays the immutable events.
+    # A reader never rebuilds rows; that remains the writers' and the rebuild command's job.
+    if any(not isinstance(r[2], dict) or r[2].get("version") != FACTS_VERSION for r in rows):
         return None
     newer = {r[0] for r in rows if r[3] > instant}
     # The projection's selected flag is maintained in the same transaction as each

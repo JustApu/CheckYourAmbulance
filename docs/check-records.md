@@ -139,10 +139,12 @@ All of it runs server-side; the UI is never the enforcement point.
 - A check links to the earliest-due eligible obligation, with obligation ID breaking due-time
   ties. An on-time eligible obligation takes precedence over late linking. Late linking is
   considered only when no unsatisfied on-time obligation exists for the same vehicle, item and kit
-  instance, and only for obligations whose grace deadline passed within `w_late` (SCH-2/SCH-3,
-  amendment 1.26.0: `CYA_LATE_COMPLETION_HOURS`, default 12); an older unsatisfied obligation
-  stays missed. Both lookups read obligations by grace deadline, never the item's settled
-  history (issue #61). Superseded or retired obligations are excluded. Repeated checks are retained; the
+  instance, and only for obligations past their grace deadline but not past their pinned late
+  limit `L` (`late_limit_at`: `G` plus the `w_late` captured when the obligation was created;
+  SCH-2/SCH-3, SPEC 1.31.0; `CYA_LATE_COMPLETION_HOURS`, default 12, applies to obligations
+  created after it is set); a later unsatisfied obligation stays missed. The on-time lookup reads
+  obligations by grace deadline and the late lookup by late limit, never the item's settled
+  history (issues #61, #80). Superseded or retired obligations are excluded. Repeated checks are retained; the
   earliest valid qualifying linked check satisfies the obligation. Kit checks never link across
   kit instances.
 - As-of obligation projections read immutable links from the database by default and ignore links

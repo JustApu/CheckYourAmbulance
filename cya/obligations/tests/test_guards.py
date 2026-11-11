@@ -133,6 +133,7 @@ class GuardCase(ObligationCase):
             "due_at": self.due,
             "early_at": self.due - timedelta(hours=1),
             "grace_at": self.due + timedelta(hours=1),
+            "late_seconds": 43200,
             "routine": True,
             "basis_at": receipt.recorded_at,
         }
@@ -187,6 +188,7 @@ class GuardCase(ObligationCase):
             "due_at": existing.due_at,
             "early_at": existing.early_at,
             "grace_at": existing.grace_at,
+            "late_seconds": existing.late_seconds,
         }
         fields.update(overrides)
         evidence = self.evidence(receipt)
@@ -409,6 +411,7 @@ class AttributionTests(GuardCase):
                     due_at=self.due + timedelta(days=5),
                     early_at=self.due + timedelta(days=5) - timedelta(hours=1),
                     grace_at=self.due + timedelta(days=5) + timedelta(hours=1),
+                    late_seconds=43200,
                     routine=True,
                     basis_at=receipt.recorded_at,
                     **self.evidence(receipt, **overrides(receipt)),
@@ -535,6 +538,7 @@ class UniquenessAndShapeTests(GuardCase):
                 due_at=self.due + timedelta(days=9),
                 early_at=self.due + timedelta(days=9),
                 grace_at=self.due + timedelta(days=9),
+                late_seconds=43200,
                 routine=True,
                 basis_at=receipt.recorded_at,
                 **self.evidence(receipt),

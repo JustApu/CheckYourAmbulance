@@ -30,6 +30,7 @@
     "each shows the Missed count: the page per vehicle and in the fleet totals, the API in its response, and the reports as a summarized count (the report list and formats stay open, OQ-61)",
     "the earlier obligation is counted neither as Overdue nor as Missed before L and at L; after L it is counted as Missed and still not as Overdue (RPT-5a (a), amendment 1.29.0)"
   ],
-  "status": "contract",
-  "notes": "Language-neutral behavioral contract for SPEC amendment 1.28.0 (issue #77), with case (9) from amendment 1.29.0 (issue #91) and the due-instant age anchor from amendment 1.30.0 (issue #94); runner implementation is deferred like the other contracts."
+  "status": "bound",
+  "notes": "Language-neutral behavioral contract for SPEC amendment 1.28.0 (issue #77), with case (9) from amendment 1.29.0 (issue #91) and the due-instant age anchor from amendment 1.30.0 (issue #94); bound to the real commands by issue #80 (cya/attention/scenario_steps.py).",
+  "database": "commit"
 }

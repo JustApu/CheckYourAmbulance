@@ -12,7 +12,8 @@ items with Attention first, then items that need action (Overdue, Due, Current),
 each group in Normal order.
 
 Each row shows its most urgent obligation in the window. An obligation still unsatisfied after
-its late-completion limit L = G + w_late is missed (SPEC SCH-2, 1.26.0): no check can complete
+its late-completion limit L (G plus the w_late pinned when it was created; SPEC SCH-2, issue
+#80) is missed: no check can complete
 it, so it stays in history and reports but no longer decides the row, which shows the item's
 next obligation instead. Until L it shows Overdue and stays actionable.
 
@@ -38,7 +39,6 @@ from cya.attention.facts import deficiency_facts, latest_effective_checks
 from cya.attention.state import Attention, applies, attention_states, latest_checks
 from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
 from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, resolve_checklist
-from cya.checks.linking import late_window
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
 from cya.obligations.models import Obligation, RequirementVersion
@@ -177,20 +177,19 @@ def _rank(state):
     return STATE_RANK.index(state.state)
 
 
-def _missed(state, as_of, late):
-    """Unsatisfied past its late-completion limit L = G + w_late at as_of (SPEC SCH-2, 1.26.0).
+def _missed(state, as_of):
+    """Unsatisfied past its pinned late-completion limit L at as_of (SPEC SCH-2, issue #80).
 
     No check can complete it any more, so it stays Overdue (missed) in history and reports but
     no longer decides the row: only a later obligation of the item can be checked. The limit is
     inclusive, as in linking (a check at exactly L still completes it).
     """
-    return state.state == State.OVERDUE and as_of > state.obligation.grace_at + late
+    return state.state == State.OVERDUE and as_of > state.obligation.late_limit()
 
 
 def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *, current=False):
     """The most urgent obligation state per (item_id, kit_key), leaving out missed ones."""
     best = {}
-    late = late_window()
     states = None
     if current and suspension_lookup is None:
         from cya.obligations.current import current_rows, evaluate_facts
@@ -215,7 +214,7 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *,
             include_all_ad_hoc=True,
         )
     for state in states:
-        if _missed(state, as_of, late):
+        if _missed(state, as_of):
             continue
         key = (state.obligation.item_id, state.obligation.kit_instance_id or NO_KIT)
         current = best.get(key)

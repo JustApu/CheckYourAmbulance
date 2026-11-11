@@ -117,6 +117,7 @@ def api(request):
             "categories": [{"code": c, "label": label} for c, label in CATEGORIES],
             "vehicles": [_json_vehicle(v) for v in picture.vehicles],
             "vehicles_truncated": picture.truncated,
+            "totals": picture.totals,
         }
     )
 
@@ -144,6 +145,9 @@ def _screen(request, template, background=False):
             },
             status=503,
         )
+    picture.total_states = [
+        (label, picture.totals[code]) for code, label in CATEGORIES if picture.totals[code]
+    ]
     for vehicle in picture.vehicles:
         vehicle.status_label = VEHICLE_STATUS_LABELS.get(vehicle.status, vehicle.status)
         vehicle.states = [

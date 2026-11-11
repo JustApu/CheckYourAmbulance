@@ -30,7 +30,6 @@ from cya.authorization.locking import locked_identities
 from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import Role
 from cya.checks.commands import CheckError, _explanation, _id, _operation_id, _vehicle
-from cya.checks.linking import late_window
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
 from cya.obligations.queries import odometer_obligations
 from cya.odometer.models import (
@@ -210,7 +209,7 @@ def _obligation_to_satisfy(organization_id, vehicle_id, now):
     """The unsatisfied odometer obligation this reading satisfies, or None (ODO-2).
 
     The earliest-due one whose window contains the instant (SCH-6). Only when none does, the
-    earliest-due one past grace by at most w_late (a late completion, SCH-2, amendment 1.26.0);
+    earliest-due one past grace but not past its pinned late limit L (a late completion, SCH-2);
     one further past stays missed. An obligation whose early window has not opened is never
     eligible.
     """
@@ -235,7 +234,8 @@ def _obligation_to_satisfy(organization_id, vehicle_id, now):
     )
     open_ = [o for o in candidates if o.pk not in satisfied]
     on_time = [o for o in open_ if now <= o.grace_at]
-    late = [o for o in open_ if now - late_window() <= o.grace_at < now]
+    # SCH-2: up to the obligation's pinned late limit L, inclusive (issue #80).
+    late = [o for o in open_ if o.grace_at < now <= o.late_limit_at]
     chosen = on_time or late
     return chosen[0] if chosen else None
 

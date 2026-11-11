@@ -1,5 +1,9 @@
 <p>Updated {{ picture.as_of|date:"Y-m-d H:i:s" }} UTC. Obligations due {{ picture.window_start|date:"Y-m-d H:i" }} to {{ picture.window_end|date:"Y-m-d H:i" }} UTC. Each state is counted on its own; nothing here is a single "compliant" flag.</p>
 {% if picture.truncated %}<p role="alert">Only the first {{ picture.vehicles|length }} vehicles are shown.</p>{% endif %}
+<section class="panel readiness-totals">
+<h2>Fleet totals{% if picture.truncated %} (vehicles shown){% endif %}</h2>
+<ul>{% for label, count in picture.total_states %}<li>{{ label }}: {{ count }}</li>{% empty %}<li>No obligations in this window.</li>{% endfor %}</ul>
+</section>
 {% for vehicle in picture.vehicles %}
 <section class="panel readiness-vehicle">
 <h2>{{ vehicle.display_name }}{% if not vehicle.active %} (inactive now){% endif %}</h2>

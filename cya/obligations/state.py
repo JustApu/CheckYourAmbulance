@@ -57,12 +57,25 @@ class ObligationEvidence:
     explanation: str | None = None
     actor_user_id: str | None = None
     command_id: str | None = None
+    # L = G + the w_late pinned at creation (SCH-2, issue #80). None only for evidence built
+    # without it; anything that needs L refuses such evidence rather than assuming a window.
+    late_limit_at: datetime | None = None
 
     def __post_init__(self):
         for field in ("recorded_at", "early_at", "due_at", "grace_at"):
             aware(getattr(self, field), field)
         if not self.early_at <= self.due_at <= self.grace_at:
             raise ValueError("obligation window must satisfy E <= D <= G")
+        if self.late_limit_at is not None:
+            aware(self.late_limit_at, "late_limit_at")
+            if self.late_limit_at < self.grace_at:
+                raise ValueError("obligation late limit must not precede its grace deadline")
+
+    def late_limit(self):
+        """The pinned late limit L; refuses evidence that does not carry it."""
+        if self.late_limit_at is None:
+            raise ValueError("obligation evidence has no pinned late limit; rebuild required")
+        return self.late_limit_at
 
 
 @dataclass(frozen=True)

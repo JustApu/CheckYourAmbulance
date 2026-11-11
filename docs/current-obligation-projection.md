@@ -45,7 +45,9 @@ writing. Selection flags come from the projection, which writers refresh
 transactionally with append-only selection events, avoiding a per-read walk of the
 selection stream. If any projection row was refreshed after the request captured
 its instant, the reader re-reads selection history at that instant and replays only
-the affected selected rows. Invalid fact versions fail visibly.
+the affected selected rows. A row with another facts version is treated like a missing
+cache, so current readers replay until the projection is rebuilt (version 2 carries the pinned
+late limit, issue #80); evaluating such facts directly still fails visibly.
 Evidence queries carry their page cap into SQL before queryset evaluation, and
 per-vehicle caps still refuse an incomplete answer. Attention/known deficiencies remain separate from obligation satisfaction and
 use their existing readers; they are not copied into obligation projections.

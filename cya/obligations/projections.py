@@ -94,6 +94,7 @@ def _obligation(row):
         row.explanation,
         str(row.actor_user_id) if row.actor_user_id else None,
         str(row.command_id),
+        late_limit_at=row.late_limit_at,
     )
 
 

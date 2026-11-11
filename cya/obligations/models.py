@@ -18,6 +18,9 @@ from cya.checklists.models import non_blank, organization_fk
 from cya.obligations.state import NO_KIT
 
 BINDING_ACTIONS = ("BIND", "UNBIND")
+# SCH-3: w_late is captured on each inspection and odometer obligation when it is created. The
+# setting's range is 0 to 168 hours, so a stored value outside it is refused.
+MAX_LATE_SECONDS = 168 * 3600
 SELECTION_TYPES = ("SELECT", "REPLACE", "RETIRE")
 
 
@@ -25,6 +28,33 @@ SELECTION_TYPES = ("SELECT", "REPLACE", "RETIRE")
 # table kit_instance is the real foreign key (null for an item outside a kit) and kit_key is the
 # same id, or NO_KIT, as a NOT NULL value that unique keys and composite foreign keys can compare,
 # because MariaDB UNIQUE treats NULLs as distinct. kit_key_matches keeps the two in step.
+
+
+class TimestampAddSeconds(models.Func):
+    """TIMESTAMPADD(SECOND, seconds, instant): deterministic, so a stored generated column may use it."""
+
+    template = "TIMESTAMPADD(SECOND, %(expressions)s)"
+    output_field = models.DateTimeField()
+
+
+def late_window_fields():
+    """The captured w_late (SCH-3) and its fixed late limit L = G + w_late (SCH-2, issue #80).
+
+    late_limit_at is a stored generated column, so existing rows get their limit from the
+    migration without an UPDATE (the tables are append-only) and new rows cannot disagree.
+    """
+    return (
+        models.PositiveIntegerField(),
+        models.GeneratedField(
+            expression=TimestampAddSeconds(models.F("late_seconds"), models.F("grace_at")),
+            output_field=models.DateTimeField(),
+            db_persist=True,
+        ),
+    )
+
+
+def late_seconds_range(name):
+    return models.CheckConstraint(condition=models.Q(late_seconds__lte=MAX_LATE_SECONDS), name=name)
 
 
 def kit_key_matches(name):
@@ -303,6 +333,7 @@ class Obligation(Evidence):
     # late repair resolves from the records before the cutoff it was judged against. Together
     # with early_at it fixes the instant after which changes can no longer reach this anchor.
     basis_at = models.DateTimeField()
+    late_seconds, late_limit_at = late_window_fields()
 
     class Meta:
         db_table = "obligation"
@@ -343,6 +374,7 @@ class Obligation(Evidence):
                 condition=models.Q(routine__in=[True, False]), name="obligation_bool"
             ),
             actor_kind("obligation_actor_kind"),
+            late_seconds_range("obligation_late_seconds"),
         ]
         indexes = [
             # Window reads by due instant, without the vehicle's older rows (issue #63).
@@ -359,6 +391,11 @@ class Obligation(Evidence):
             # (issue #74).
             models.Index(
                 fields=["organization", "vehicle", "routine"], name="obligation_vehicle_routine"
+            ),
+            # Late linking reads by the pinned late limit (SCH-2, issue #80).
+            models.Index(
+                fields=["organization", "vehicle", "item", "kit_key", "late_limit_at"],
+                name="obligation_item_late_limit",
             ),
         ]
 
@@ -478,6 +515,7 @@ class OdometerObligation(Evidence):
     due_at = models.DateTimeField()
     early_at = models.DateTimeField()
     grace_at = models.DateTimeField()
+    late_seconds, late_limit_at = late_window_fields()
 
     class Meta:
         db_table = "odometer_obligation"
@@ -495,6 +533,7 @@ class OdometerObligation(Evidence):
                 condition=non_blank("scheduled_inspection_key"), name="odometer_ob_key"
             ),
             actor_kind("odometer_ob_actor_kind"),
+            late_seconds_range("odometer_ob_late_seconds"),
         ]
 
     def __str__(self):

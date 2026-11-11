@@ -323,6 +323,27 @@ class CurrentProjectionTests(AttentionCase):
         historical = fleet_readiness(org, now=at, as_of=at)
         self.assertEqual(live, historical)
 
+    def test_an_outdated_facts_version_falls_back_to_replay_without_reader_writes(self):
+        # PR #96 review 6761273052: rows written before facts version 2 (issue #80) must not
+        # fail current reads after the migration; the readers replay and never rebuild.
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        self.assertIsNotNone(current_rows(org, [vehicle], at))
+        row = ObligationProjection.objects.filter(organization_id=org, vehicle_id=vehicle).first()
+        row.facts = {**row.facts, "version": 1}
+        row.save(update_fields=["facts"])
+        before = list(ObligationProjection.objects.order_by("pk").values())
+        self.assertIsNone(current_rows(org, [vehicle], at))
+        self.assertEqual(fleet_readiness(org, now=at), fleet_readiness(org, now=at, as_of=at))
+
+        def plain(states):
+            return {k: replace(v, attention=None, deficiencies=()) for k, v in states.items()}
+
+        self.assertEqual(
+            plain(_obligation_by_key(org, vehicle, at, None, current=True)),
+            plain(_obligation_by_key(org, vehicle, at, None)),
+        )
+        self.assertEqual(before, list(ObligationProjection.objects.order_by("pk").values()))
+
     def test_projection_does_not_take_a_foreign_key_lock_on_the_mutable_vehicle(self):
         from django.db import connection
 
@@ -687,7 +708,7 @@ class CurrentQueryLimitTests(SimpleTestCase):
         vehicle = "00000000-0000-0000-0000-000000000002"
         obligation = "00000000-0000-0000-0000-000000000003"
         instant = datetime(2026, 6, 1, tzinfo=UTC)
-        facts = {"version": 1, "obligation": {"id": obligation}}
+        facts = {"version": current.FACTS_VERSION, "obligation": {"id": obligation}}
 
         def capture(rows, limit=None):
             if not isinstance(rows, QuerySet):

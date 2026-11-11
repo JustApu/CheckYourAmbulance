@@ -181,7 +181,8 @@ rule pins are null for these explicit orders; publication, overlay, definition a
 physical-kit assignment pins remain immutable. The window is `E = recorded_at`,
 `D = G = requested due_at`. Before creation the order is absent; after the deadline
 it is Overdue until qualifying linked evidence satisfies it, which a check can do only
-until `L = D + w_late` (SCH-2, 1.26.0); after that it stays Overdue (missed). Out-of-Service does
+until `L = D + w_late`, with `w_late` captured when the order is created (SCH-2/SCH-3,
+SPEC 1.31.0); after that it stays Overdue (missed). Out-of-Service does
 not exempt a non-routine order, and carry-over does not waive it. Later publications
 or kit changes do not erase the order. Normal check-link allocation still applies:
 one primary link, earliest eligible due time (stable ID breaks ties), additional

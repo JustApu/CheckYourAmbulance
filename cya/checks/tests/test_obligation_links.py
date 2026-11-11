@@ -933,15 +933,30 @@ class CheckObligationLinkTests(ObligationLinkCleanupMixin, ObligationCase):
         missed = [s for s in self.suction_states() if s.obligation.due_at == self.at(hours=6)]
         self.assertEqual([s.state for s in missed], [State.OVERDUE])
 
-    def test_w_late_is_the_configured_agency_wide_setting(self):
-        with override_settings(CYA_LATE_COMPLETION_HOURS=2):
-            self.clock.set(self.at(hours=9, minutes=1))  # G + 2 h 1 min
-            self.assertEqual(self.record_suction().body["obligation_links"], [])
-        with override_settings(CYA_LATE_COMPLETION_HOURS=0):  # no late completion at all
-            self.clock.set(self.at(hours=9, minutes=2))
-            self.assertEqual(self.record_suction().body["obligation_links"], [])
-        self.clock.set(self.at(hours=18, minutes=58))  # the default again: still within 12 h
-        self.assertEqual(self.record_suction().body["obligation_links"][0]["timing"], "LATE")
+    def test_w_late_is_pinned_when_the_obligation_is_created(self):
+        # SCH-2/SCH-3 (issue #80): the setting captured at creation fixes L; changing the setting
+        # later never makes an existing obligation linkable or unlinkable.
+        def suction(due):
+            return Obligation.objects.get(item_id=self.suction.pk, due_at=due, routine=True)
+
+        today = suction(self.at(hours=6))
+        self.assertEqual((today.late_seconds, today.late_limit_at), (43200, self.at(hours=19)))
+        with override_settings(CYA_LATE_COMPLETION_HOURS=2):  # lowered after creation
+            self.clock.set(self.at(hours=18, minutes=59))
+            (link,) = self.record_suction().body["obligation_links"]
+            self.assertEqual((link["timing"], link["obligation_id"]), ("LATE", str(today.pk)))
+            self.clock.set(self.at(days=1))
+            self.assertEqual(self.generate().failures, [])  # day 2 is created under 2 h
+        later = suction(self.at(days=2, hours=6))
+        self.assertEqual(
+            (later.late_seconds, later.late_limit_at), (7200, self.at(days=2, hours=9))
+        )
+        with override_settings(CYA_LATE_COMPLETION_HOURS=0):  # day 1 keeps its 12 h
+            self.clock.set(self.at(days=1, hours=18, minutes=59))
+            (link,) = self.record_suction().body["obligation_links"]
+            self.assertEqual(link["obligation_id"], str(suction(self.at(days=1, hours=6)).pk))
+        self.clock.set(self.at(days=2, hours=9, minutes=1))  # the default again; day 2 has 2 h
+        self.assertEqual(self.record_suction().body["obligation_links"], [])
 
     def test_a_later_repeated_check_is_retained_but_does_not_replace_first_satisfaction(self):
         self.clock.set(self.at(hours=5, minutes=15))

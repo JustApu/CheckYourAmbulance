@@ -224,6 +224,29 @@ start. Expect the time to grow with row count and a busy disk, and record the ac
 time from the rehearsal on a copy. Reversal drops the two indexes (under 4 s in the
 same rehearsals) and changes no data.
 
+Migrations `cya_obligations.0012_pin_late_window` and `0013_late_window_no_default`
+([issue #80](https://github.com/JustApu/CheckYourAmbulance/issues/80), SPEC 1.31.0) add
+`late_seconds` and a stored generated `late_limit_at` to `obligation` and
+`odometer_obligation`, plus a late-linking index. Existing rows take 12 hours through a
+temporary database default, which 0013 removes; no row is updated, and the append-only
+triggers are unchanged. Adding the stored generated column rebuilds the table. In
+owner-approved rehearsals on disposable copies of the synthetic 129,000-obligation set
+(NFS-backed disk):
+
+| | MariaDB 10.11.18 | MariaDB 11.8.6 |
+|---|---|---|
+| 0012 | 74 s | 49 s |
+| 0013 | 3 s | 3 s |
+| Longest write wait during 0012 | about 32 s | about 0.1 s |
+| Reversal to 0011 (drops the columns, index and checks; no data change) | 7 s | 6 s |
+
+Keep application traffic stopped for this migration, as for every schema change; on 10.11
+writers to `obligation` wait for most of the rebuild. Expect the time to grow with row count
+and disk load, and record the actual figures from a rehearsal on a copy. After it, the
+existing `obligation_projection` rows still hold facts version 1: current readers treat them
+as a missing cache and replay, which is correct but slower, until the projection is rebuilt
+(next section).
+
 After the DBA creates the runtime account, preview grants, inspect the target
 and apply using the actual account name and account host. These synthetic
 examples assume the DBA created exactly this account; the host is the MariaDB
@@ -317,6 +340,11 @@ contention can change the duration. The separate verify-only pass had not
 completed when this result was recorded. Keep traffic closed until the actual
 rebuild and `--verify` both complete successfully; if either fails, inspect the
 reported group and rerun the command after resolving the cause.
+
+The migrations of issue #80 also require this rebuild: projection facts move to
+version 2, which carries each obligation's pinned late limit. In the 5-vehicle synthetic
+rehearsal on the same Rocky host, one 25,800-obligation vehicle rebuilt in 952 seconds,
+consistent with the rate above.
 
 If application code is rolled back to a version that does not refresh this
 projection, the event records may advance while cached facts remain stale. On a

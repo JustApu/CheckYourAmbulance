@@ -258,17 +258,24 @@ class MissedObligationTests(AttentionCase):
         self.assertEqual((row.obligation_state, row.due_at), ("OVERDUE", self.at(hours=6)))
         self.assertEqual(self.row(self.suction).obligation_state, "CURRENT")
 
-    def test_the_limit_follows_the_setting_including_no_late_completion(self):
+    def test_the_limit_is_pinned_at_creation_including_no_late_completion(self):
+        # SCH-2/SCH-3 (issue #80): day 0 was created with the default 12 h, so changing the
+        # setting later does not move its limit; day 2 onwards is created with no late window.
         self.clock.set(self.at(days=1))
         nine = self.at(hours=9)
-        for hours, state in ((2, "OVERDUE"), (1, "UPCOMING"), (0, "UPCOMING")):
+        for hours in (2, 1, 0):
             with self.subTest(hours=hours), override_settings(CYA_LATE_COMPLETION_HOURS=hours):
-                self.assertEqual(self.row(self.suction, as_of=nine).obligation_state, state)
+                self.assertEqual(self.row(self.suction, as_of=nine).obligation_state, "OVERDUE")
         with override_settings(CYA_LATE_COMPLETION_HOURS=0):
-            at_g = self.row(self.suction, as_of=self.at(hours=7))  # exactly G: Due, not missed
-            self.assertEqual(at_g.obligation_state, "DUE")
-            after_g = self.row(self.suction, as_of=self.at(hours=7) + self.TICK)
-            self.assertEqual(after_g.obligation_state, "UPCOMING")
+            self.clock.set(self.at(days=1, hours=7))
+            self.assertEqual(self.generate().failures, [])  # days 2 and 3 pin 0 h
+        self.clock.set(self.at(days=3))
+        g = self.at(days=2, hours=7)
+        self.assertEqual(self.row(self.suction, as_of=g).obligation_state, "DUE")  # exactly G
+        after_g = self.row(self.suction, as_of=g + self.TICK)  # missed: shows day 3 instead
+        self.assertEqual(
+            (after_g.obligation_state, after_g.due_at), ("UPCOMING", self.at(days=3, hours=6))
+        )
 
     def test_an_unable_check_past_the_limit_leaves_the_row_but_keeps_it_red(self):
         # Assumption recorded on issue #66: an Unable-to-Inspect obligation waits for supervisor
