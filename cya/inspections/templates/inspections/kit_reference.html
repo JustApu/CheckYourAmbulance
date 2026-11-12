@@ -3,7 +3,7 @@
 The kit reference (issue #9 Part A): what a complete kit contains, printed once per checklist
 revision and laminated. Standalone like the outage sheet, so it carries no personal data.
 {% endcomment %}
-<html lang="en">
+{% load station_time %}<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,7 +19,7 @@ revision and laminated. Standalone like the outage sheet, so it carries no perso
 <main>
 <header class="sheet-header">
   <h1>Kit reference: what a complete kit contains</h1>
-  <p class="sheet-meta">From the checklists in force at <time datetime="{{ as_of|date:'c' }}">{{ as_of|date:"Y-m-d H:i" }} UTC</time>. Check each revision below against the revision on the outage checklist.</p>
+  <p class="sheet-meta">From the checklists in force at <time datetime="{{ as_of|date:'c' }}">{{ as_of|station_time }}</time>. Check each revision below against the revision on the outage checklist.</p>
 </header>
 {% for template in templates %}
 <section class="kit-reference" aria-labelledby="template-{{ forloop.counter }}">

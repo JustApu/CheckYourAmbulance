@@ -4,7 +4,7 @@ Standalone on purpose: the shell header shows the signed-in user's name, and a p
 carry no personal data (issue #9). Repeated <thead> rows put the vehicle and checklist version on
 every printed page so loose pages can be matched up. Kit contents live on the kit reference.
 {% endcomment %}
-<html lang="en">
+{% load station_time %}<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -22,7 +22,7 @@ every printed page so loose pages can be matched up. Kit contents live on the ki
 <header class="sheet-header">
   <h1>{{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}: paper inspection checklist</h1>
   <p class="sheet-meta">Checklist{{ versions|length|pluralize }}: {% for v in versions %}{{ v.label }}{% if not forloop.last %}; {% endif %}{% empty %}none configured{% endfor %}</p>
-  <p class="sheet-meta">Printed from the checklist in force at <time datetime="{{ as_of|date:'c' }}">{{ as_of|date:"Y-m-d H:i" }} UTC</time>. Version ID{{ versions|length|pluralize }}: {% for v in versions %}<span class="version-id">{{ v.id }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+  <p class="sheet-meta">Printed from the checklist in force at <time datetime="{{ as_of|date:'c' }}">{{ as_of|station_time }}</time>. Version ID{{ versions|length|pluralize }}: {% for v in versions %}<span class="version-id">{{ v.id }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
   <p class="sheet-fill">Date <span class="blank wide"></span> Shift <span class="blank"></span></p>
   <p class="sheet-rule">Use only during an app outage. Keep this sheet until its results are entered into the app, then shred it.</p>
 </header>

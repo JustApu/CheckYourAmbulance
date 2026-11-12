@@ -107,6 +107,17 @@ class PrintPageTests(CrewUiCase):
         self.assertIn("then shred it", text)
         self.assertIn('href="/inspection/kit-reference/"', html)
 
+    def test_the_printed_instant_uses_the_station_zone_with_its_offset(self):
+        self.org.station_zone = "America/New_York"
+        self.org.save(update_fields=["station_zone"])
+        for url in (self.url(), "/inspection/kit-reference/"):
+            with self.subTest(url=url):
+                text = strip_tags(self.client.get(url).content.decode())
+                self.assertRegex(
+                    text, r"in force at \d{4}-\d{2}-\d{2} \d{2}:\d{2} E[SD]T \(-0[45]00\)"
+                )
+                self.assertNotIn(" UTC", text.split("in force at", 1)[1][:40])
+
     def test_the_sheet_carries_no_personal_data_or_results(self):
         self.open()  # a session and participant exist; neither may appear on paper
         html = self.client.get(self.url()).content.decode()
