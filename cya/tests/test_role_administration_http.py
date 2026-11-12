@@ -83,6 +83,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
             URL,
             {
                 "csrfmiddlewaretoken": client.cookies["csrftoken"].value,
+                "stage": "confirm",
                 "operation_id": str(uuid4()),
                 "target": str(crew.pk),
                 "role": "ADMINISTRATOR",
@@ -261,6 +262,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
                 token, fresh_id = self.form(admin_client)
                 data = {
                     "csrfmiddlewaretoken": token,
+                    "stage": "confirm",
                     "operation_id": fresh_id,
                     "target": target,
                     "role": "SUPERVISOR",
@@ -276,6 +278,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         client.get("/")
         base = {
             "csrfmiddlewaretoken": client.cookies["csrftoken"].value,
+            "stage": "confirm",
             "operation_id": str(uuid4()),
             "role": "SUPERVISOR",
             "action": "GRANT",
