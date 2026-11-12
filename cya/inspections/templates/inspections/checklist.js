@@ -325,10 +325,12 @@
   function stateText(row) {
     if (config.verification_for_deficiency_id) { return "Outstanding verification"; }
     if (!row.obligation_state) { return "No current requirement"; }
-    if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED") { return "Inspected — failed"; }
-    if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED") { return "Completed by supervisor — unable to inspect"; }
-    var map = {OVERDUE: "Overdue", DUE: "Due", CURRENT: "Due soon", SATISFIED: "Done for this window",
-               UPCOMING: "Not due yet", SUSPENDED: "Known Deficiency — Check Suspended", EXEMPT: "Exempt", WAIVED: "Waived"};
+    if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "PASSED") { return "Passed"; }
+    if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED") { return "Failed"; }
+    if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "UNABLE_TO_INSPECT") { return "Unable to inspect"; }
+    if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED") { return "Supervisor completed: unable to inspect"; }
+    var map = {OVERDUE: "Overdue", DUE: "Due", CURRENT: "Due soon", SATISFIED: "Complete",
+               UPCOMING: "Not due", SUSPENDED: "Check suspended", EXEMPT: "Exempt", WAIVED: "Waived"};
     return map[row.obligation_state] || "";
   }
   // The outcome this person's acknowledged tap recorded, or null when nothing was saved.
@@ -552,18 +554,22 @@
     li.id = "item-" + index;
     li.dataset.itemKey = k; li.tabIndex = -1;
     var head = el("div", "item-head");
-    var title = el("h3", "", row.item_label + (row.kit_label ? " — " + row.kit_label : ""));
+    var titleText = row.item_label;
+    if (row.kit_label && (layoutMode === "FLAT" || config.verification_for_deficiency_id)) { titleText += " — " + row.kit_label; }
+    var title = el("h3", "", titleText);
     head.appendChild(title);
     // The explicit deficiency block already communicates attention for this row.
     if (row.item_attention === "ATTENTION" && !row.deficiencies.length) { head.appendChild(el("span", "pill pill-attention", "⚠ Needs attention")); }
     var st = stateText(row);
     if (st) {
-      var failed = !config.verification_for_deficiency_id && row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED";
-      head.appendChild(el("span", failed ? "pill pill-failed window-status" : "pill window-status", "Window status: " + st));
+      var status = el("span", "window-status", st);
+      status.setAttribute("aria-label", (config.verification_for_deficiency_id ? "Verification state: " : "Current-window state: ") + st);
+      status.dataset.state = row.obligation_state || "NONE";
+      head.appendChild(status);
     }
     li.appendChild(head);
     var place = [row.compartment_label, row.system_label].filter(Boolean).join(" · ");
-    if (place) { li.appendChild(el("p", "muted", place)); }
+    if (place && (layoutMode === "FLAT" || config.verification_for_deficiency_id)) { li.appendChild(el("p", "muted item-location", place)); }
     if (row.instructions) { li.appendChild(el("p", "instructions", row.instructions)); }
     row.deficiencies.forEach(function (d) {
       var box = el("div", "known-deficiency");

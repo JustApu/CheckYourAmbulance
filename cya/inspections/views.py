@@ -171,6 +171,9 @@ def vehicle(request, vehicle_id):
     now = timezone.now()
     templates = _templates(user, found, now)
     sessions = _session_rows(user, found, now)
+    resume_session = next(
+        (row for row in sessions if row["participant"] and row["state"] == "INCOMPLETE"), None
+    )
     context = {
         "title": found.display_name,
         "vehicle": found,
@@ -180,6 +183,7 @@ def vehicle(request, vehicle_id):
         # Session commands join the latest open session for the vehicle by default. The list
         # uses the same descending order and effective-state filter as the command.
         "active_session": next((row for row in sessions if row["state"] == "OPEN"), None),
+        "resume_session": resume_session,
         "join_template_id": templates[0]["id"] if templates else None,
         "config": {
             "vehicle_id": str(found.pk),

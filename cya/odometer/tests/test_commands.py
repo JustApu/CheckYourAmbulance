@@ -152,7 +152,22 @@ class ReadingTests(OdometerCase):
         self.assertEqual(self.counts(), before)
 
     def test_malformed_input_is_refused_before_anything_is_stored(self):
-        bad_values = (None, 1.5, True, -1, "-1", "1e3", "12.34", "abc", "", 10**7, "12345678")
+        bad_values = (
+            None,
+            1.5,
+            True,
+            -1,
+            "-1",
+            "1e3",
+            "1.",
+            ".",
+            "1e",
+            "12.34",
+            "abc",
+            "",
+            10**7,
+            "12345678",
+        )
         for value in bad_values:
             with self.subTest(value=value):
                 self.rejected("INVALID_OBSERVATION", value)

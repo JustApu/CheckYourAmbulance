@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { captureBrowserEvidence } from "./capture_browser_evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const css = [
@@ -34,8 +35,9 @@ const html = `<!doctype html><html lang="en"><head>
         <span>Engine hours (optional)</span>
         <input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off">
       </label>
-      <button type="submit" class="button primary">Save readings</button>
+      <button type="submit" class="button primary">Record readings</button>
     </div></form>
+    <p class="muted readings-save-note">Audited history: select Record after entering complete values.</p>
   </section></main></body></html>`;
 
 const browser = await chromium.launch({ headless: true });
@@ -55,8 +57,9 @@ try {
         saveHeight: document.querySelector("#odometer-form button").getBoundingClientRect().height,
       }));
       assert.ok(metrics.documentWidth <= viewport.width, `${viewport.name}: horizontal overflow ${JSON.stringify(metrics)}`);
-      assert.ok(metrics.cardHeight <= 170, `${viewport.name}: readings card is not compact ${JSON.stringify(metrics)}`);
+      assert.ok(metrics.cardHeight <= 210, `${viewport.name}: readings card is not compact ${JSON.stringify(metrics)}`);
       assert.ok(metrics.saveHeight >= 48, `${viewport.name}: save target is too small ${JSON.stringify(metrics)}`);
+      await captureBrowserEvidence(page, `vehicle-readings-${viewport.name}.png`);
       console.log(`${viewport.name}: compact readings layout passed`);
     } finally {
       await page.close();

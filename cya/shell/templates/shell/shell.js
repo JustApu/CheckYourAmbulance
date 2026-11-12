@@ -50,6 +50,13 @@
         syncNav();
       }
     });
+    navToggle.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && navToggle.getAttribute("aria-expanded") === "true") {
+        navToggle.setAttribute("aria-expanded", "false");
+        syncNav();
+        navToggle.focus();
+      }
+    });
     narrowNav.addEventListener("change", syncNav);
     syncNav();
   }

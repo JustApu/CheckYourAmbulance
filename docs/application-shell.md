@@ -5,6 +5,7 @@
 ## What it provides
 
 - **Layout:** `cya/shell/templates/shell/base.html` is the one page frame (skip link, header with the signed-in user and a CSRF-protected sign-out, main navigation, connection banner, `<main>`). The sign-in, callback, status and sign-out pages use it. Feature pages extend it.
+- **Compact navigation:** below 48rem, the Menu toggle stays in the header and expands the navigation list below it; wider layouts show the list directly.
 - **Responsive and touch-friendly:** one stylesheet, mobile first, with a wider layout from 48rem. Every control is at least 48 px tall. It follows the light/dark preference and reduced motion.
 - **Status never by color alone:** the current section is bold, underlined and marked `aria-current="page"`. Every save state has an icon and words.
 - **Navigation:** Fleet, Inspection, Vehicle status and Deficiencies (every built-in role) and Administration (Administrator only), per SPEC §3.3. Fleet, Deficiencies and Administration are placeholder pages; Inspection is built in [issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85) (see [crew inspection screens](crew-inspection-ui.md)) and Vehicle status in [issue #148](https://github.com/JustApu/CheckYourAmbulance-archive/issues/148) (see [vehicle status](vehicle-status.md#http-endpoints-and-screens)). Feature pages add `{% block head %}` and `{% block scripts %}` content to the frame.

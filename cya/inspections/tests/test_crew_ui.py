@@ -236,7 +236,8 @@ class PageTests(CrewUiCase):
             r'<p class="status-line"><span class="visually-hidden">Vehicle operational status: </span>',
         )
         self.assertIn(f'data-template="{self.template.pk}"', html)
-        self.assertIn("Start or join Night Shift Vehicle Safety Checklist inspection", html)
+        self.assertIn("Start Night Shift Vehicle Safety Checklist inspection", html)
+        self.assertNotIn("Choose a configured inspection", html)
         self.assertIn("Inspection history", html)
         self.assertIn("Report a deficiency", html)
         self.assertIn('aria-current="page"', html)
@@ -259,7 +260,7 @@ class PageTests(CrewUiCase):
         self.assertIn('class="button primary join-session"', html)
         self.assertIn('class="active-inspection"', html)
         self.assertIn('class="session-row-status"', html)
-        self.assertIn("Join latest open inspection", html)
+        self.assertIn("Join Night Shift Vehicle Safety Checklist inspection", html)
         self.assertNotIn(f"/inspection/sessions/{session_id}/", html)
         self.assertIn("Start a separate inspection", html)
         self.assertIn("creates a second inspection instead of joining the open one", html)
@@ -279,12 +280,29 @@ class PageTests(CrewUiCase):
     def test_a_participant_gets_a_continue_action_and_ended_sessions_are_labeled(self):
         session_id = self.open().json()["result"]["session_id"]
         open_html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
-        self.assertIn("Continue inspection", open_html)
+        self.assertIn("Continue " + self.template.label + " inspection", open_html)
+        self.assertEqual(open_html.count(f'href="/inspection/sessions/{session_id}/"'), 1)
         self.assertNotIn("Join latest open inspection", open_html)
 
         self.post(f"{SESSIONS}/{session_id}/end", {"operation_id": str(uuid4())})
         ended_html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
         self.assertIn("Open closed inspection", ended_html)
+
+    def test_incomplete_participant_session_is_the_primary_resume_action(self):
+        session_id = self.open().json()["result"]["session_id"]
+        ended = self.post(
+            f"{SESSIONS}/{session_id}/end",
+            {"operation_id": str(uuid4()), "state": "INCOMPLETE"},
+        )
+        self.assertEqual(ended.status_code, 200, ended.content)
+
+        html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+
+        self.assertIn("Incomplete inspection:", strip_tags(html))
+        self.assertIn(f"Resume incomplete {self.template.label} inspection", strip_tags(html))
+        self.assertEqual(html.count(f'href="/inspection/sessions/{session_id}/"'), 1)
+        self.assertIn("Start a new inspection", html)
+        self.assertIn("Your incomplete inspection stays available", html)
 
     def test_unknown_and_malformed_vehicle_ids_are_404(self):
         for value in (str(uuid4()), "not-a-uuid"):
@@ -322,6 +340,11 @@ class PageTests(CrewUiCase):
         self.assertIn("Vehicle readings", html)
         self.assertIn("Mileage", html)
         self.assertIn("Engine hours (optional)", html)
+        self.assertIn("Record readings", html)
+        self.assertIn("Audited history", html)
+        self.assertIn('aria-describedby="readings-save-help"', html)
+        self.assertIn("after entering complete values", html)
+        self.assertNotIn(">Save</button>", html)
         self.assertIn('inputmode="decimal"', html)
         self.assertIn('id="odo-unit"', html)
         self.assertIn("Distance unit", html)
