@@ -353,7 +353,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         page = self.detail(pk).content.decode()
         self.assertIn("<dt>Deadline</dt><dd>Not set</dd>", page)
         self.assertIn("<dt>Governing deadline</dt><dd>Not set</dd>", page)
-        deadline = page.split("<dt>Deadline</dt>")[1].split("</dd>", 1)[0]
+        deadline = page.split("<dt>Deadline</dt><dd>")[1].split("</dd>", 1)[0]
         self.assertEqual(deadline, "Not set")
         set_deadline(
             deficiency_id=pk,
