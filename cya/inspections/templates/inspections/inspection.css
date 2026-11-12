@@ -67,7 +67,7 @@ a.button { display: inline-flex; align-items: center; text-decoration: none; }
 .panel .vehicle-reading-field { display: grid; align-content: start; gap: .25rem; margin: 0; }
 .vehicle-reading-field input, .vehicle-reading-field select { margin: 0; }
 .vehicle-readings-fields .button { min-height: 48px; margin: 0; }
-.readings-save-note { margin: .25rem 0 0; font-size: .875rem; }
+.readings-save-note { margin: .25rem 0 0; font-size: .75rem; line-height: 1.25; }
 .panel input[type=hidden] { display: none; }
 @media (max-width: 30rem) {
   .vehicle-readings-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: .25rem; }

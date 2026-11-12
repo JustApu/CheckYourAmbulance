@@ -7,8 +7,8 @@ from uuid import uuid4
 from django.db import DatabaseError, connection
 from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
-from django.utils.html import strip_tags
 from django.utils import timezone
+from django.utils.html import strip_tags
 
 from cya.accounts.models import Organization
 from cya.accounts.returns import sign_in_location
