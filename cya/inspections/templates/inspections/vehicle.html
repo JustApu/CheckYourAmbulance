@@ -11,6 +11,7 @@
 <nav class="vehicle-actions" aria-label="Vehicle tasks">
   <a href="{% url 'inspection-check-history' vehicle.pk %}">Inspection history</a>
   <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Report a deficiency</a>
+  <a href="{% url 'inspection-vehicle-print' vehicle.pk %}">Paper checklist for outages</a>
 </nav>
 <p id="vehicle-message" class="notice" role="status" hidden></p>
 <form id="csrf-holder">{% csrf_token %}</form>

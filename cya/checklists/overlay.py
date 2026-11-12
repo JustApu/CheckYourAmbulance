@@ -169,6 +169,18 @@ def _latest_publication(queryset, as_of, revision_field, recorded_before=None):
     )
 
 
+def effective_template_version(organization_id, template_id, as_of):
+    """The template version effective at as_of, without any vehicle override, or None."""
+    publication = _latest_publication(
+        ChecklistPublication.objects.filter(
+            organization_id=organization_id, checklist_version__template_id=template_id
+        ),
+        as_of,
+        "checklist_version__revision",
+    )
+    return publication.checklist_version if publication else None
+
+
 def governing_versions(organization_id, vehicle_id, template_id, as_of, recorded_before=None):
     """Return (template version, override version or None) effective at as_of.
 

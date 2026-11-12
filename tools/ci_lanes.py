@@ -79,6 +79,7 @@ BROWSER_CSS = frozenset(
         "cya/shell/templates/shell/shell.css",
         "cya/inspections/templates/inspections/inspection.css",
         "cya/attention/templates/attention/readiness.css",
+        "cya/inspections/templates/inspections/vehicle_print.css",
     }
 )
 
@@ -98,6 +99,7 @@ BROWSER_TEST_PATHS = frozenset(
         "tools/browser_smoke.mjs",
         "tools/vehicle_landing_smoke.mjs",
         "tools/vehicle_readings_smoke.mjs",
+        "tools/vehicle_print_smoke.mjs",
     }
 )
 

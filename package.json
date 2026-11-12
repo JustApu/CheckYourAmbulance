@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Pinned browser tooling for deterministic UI smoke checks",
   "scripts": {
-    "test:browser-smoke": "node tools/browser_smoke.mjs && node tools/vehicle_landing_smoke.mjs && node tools/vehicle_readings_smoke.mjs"
+    "test:browser-smoke": "node tools/browser_smoke.mjs && node tools/vehicle_landing_smoke.mjs && node tools/vehicle_readings_smoke.mjs && node tools/vehicle_print_smoke.mjs"
   },
   "devDependencies": {
     "playwright": "1.65.0"
