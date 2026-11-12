@@ -37,7 +37,7 @@ const html = `<!doctype html><html lang="en"><head>
       </label>
       <button type="submit" class="button primary">Record readings</button>
     </div></form>
-    <p class="muted readings-save-note">Audited history entry: select Record when complete; typing alone never saves. Incomplete values are not sent.</p>
+    <p class="muted readings-save-note">Audited history: select Record after entering complete values.</p>
   </section></main></body></html>`;
 
 const browser = await chromium.launch({ headless: true });
