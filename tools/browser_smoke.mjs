@@ -85,7 +85,9 @@ async function testChecklistTimezoneFallback(viewport) {
     const url = new URL(route.request().url());
     if (url.pathname.startsWith("/api/")) {
       const body = url.pathname === "/api/checklist"
-        ? { status: "OK", items: [outcomeRows[0]], group_progress: [], vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
+        ? { status: "OK", items: [outcomeRows[0]], group_progress: [
+          { key: "compartment:comp-cab", label: "Cab", total: 1, checked: 0, due: 1, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 1 },
+        ], vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
         : { status: "COMMITTED", result: {} };
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
       return;
@@ -94,6 +96,7 @@ async function testChecklistTimezoneFallback(viewport) {
   });
   try {
     await page.goto("http://inspection.test/fallback", { waitUntil: "load" });
+    await page.getByRole("button", { name: /^Cab / }).click();
     const row = page.locator('#items > li[data-item-key="item-fail|"]');
     await row.waitFor();
     assert.match(await row.innerText(), /2026-06-01 00:00:00 UTC/, `${viewport.name}: timestamp fallback did not state UTC`);
