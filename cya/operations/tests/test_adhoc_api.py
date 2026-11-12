@@ -84,7 +84,7 @@ class AdHocHttpTests(StatusHttpCase):
         client, _token = self.as_role("SUPERVISOR", "adhoc-page")
         html = client.get(f"/status/vehicles/{self.vehicle.pk}/").content.decode()
         self.assertIn('data-kind="adhoc"', html)
-        self.assertIn("Due at (UTC)", html)
+        self.assertIn("Due at (agency local time, UTC)", html)
         self.assertIn(str(self.suction.pk), html)
         self.assertNotIn(
             'data-kind="adhoc"',
