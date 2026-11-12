@@ -6,6 +6,7 @@ permission policy and the deficiency's status; every command still rechecks both
 """
 
 import logging
+from datetime import date, timedelta
 from functools import wraps
 from urllib.parse import urlencode
 
@@ -26,6 +27,7 @@ from cya.authorization.backend import canonical_id
 from cya.authorization.models import RoleGrant
 from cya.authorization.policy import ResourceContext, Role, permitted
 from cya.checklists.models import Item, KitInstance, Vehicle
+from cya.checks.models import CheckRecord
 from cya.deficiencies import acknowledgement, overdue, service, suspension
 from cya.deficiencies.commands import ASSIGNEE_ROLES
 from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
@@ -41,6 +43,7 @@ from cya.deficiencies.transitions import (
 )
 from cya.inspections.views import _authorized, _status, _vehicle, reverse_socket
 from cya.inspections.workflows import (
+    OUTCOME_LABELS,
     check_history,
     deficiency_history,
     report_options,
@@ -748,13 +751,132 @@ def checks(request, user, vehicle_id):
     ).first()
     if vehicle is None:
         raise Http404
+    instant = timezone.now()
+    params, errors = {}, []
+    for field in ("q", "outcome", "actor", "after", "before"):
+        supplied = request.GET.getlist(field)
+        if len(supplied) > 1:
+            errors.append("A filter was supplied more than once. Remove the duplicate and retry.")
+            params[field] = ""
+            continue
+        value = supplied[0].strip() if supplied else ""
+        if len(value) > SEARCH_LIMIT:
+            errors.append(f"Filter text is limited to {SEARCH_LIMIT} characters.")
+            value = ""
+        params[field] = value
+
+    detail_id = None
+    supplied_detail = request.GET.getlist("check")
+    if len(supplied_detail) > 1:
+        errors.append("That check link is invalid.")
+    elif supplied_detail and supplied_detail[0]:
+        detail_id = _identity(supplied_detail[0])
+        selected = CheckRecord.objects.filter(
+            organization_id=user.organization_id,
+            vehicle_id=vehicle.pk,
+            pk=detail_id,
+            recorded_at__lte=instant,
+        ).first()
+        if (
+            selected is None
+            or not CheckRecord.objects.filter(
+                organization_id=user.organization_id,
+                vehicle_id=vehicle.pk,
+                root_check_id=selected.root_check_id,
+                recorded_at__gte=instant - timedelta(days=14),
+                recorded_at__lte=instant,
+            ).exists()
+        ):
+            raise Http404
+
+    all_checks = check_history(
+        user,
+        vehicle,
+        roles_for(user),
+        instant,
+        root_ids={selected.root_check_id} if detail_id else None,
+        include_obligations=bool(detail_id),
+    )
+    if detail_id:
+        checks_for_page = all_checks
+        actors = []
+        filter_query = urlencode({k: v for k, v in params.items() if v})
+        page_context = {}
+    else:
+        # One compact row per immutable chain. Its newest recorded entry is the list summary.
+        summaries = []
+        seen = set()
+        for entry in all_checks:
+            root = str(entry["record"].root_check_id)
+            if root not in seen:
+                seen.add(root)
+                entry["detail_url"] = (
+                    f"{request.path}?{urlencode({'check': entry['record'].pk, **{k: v for k, v in params.items() if v}, 'history_page': request.GET.get('history_page', '1')})}"
+                )
+                summaries.append(entry)
+        actors = sorted(
+            {
+                str(row["record"].actor_user_id): row["record"].actor_user.display_name
+                for row in summaries
+            }.items(),
+            key=lambda option: option[1].casefold(),
+        )
+        if params["q"]:
+            needle = params["q"].casefold()
+            summaries = [
+                row
+                for row in summaries
+                if needle in row["record"].item.label.casefold()
+                or (row["record"].kit and needle in row["record"].kit.label.casefold())
+            ]
+        if params["outcome"]:
+            if params["outcome"] not in OUTCOME_LABELS:
+                errors.append("Choose a valid result.")
+            else:
+                summaries = [row for row in summaries if row["record"].outcome == params["outcome"]]
+        if params["actor"]:
+            if params["actor"] not in dict(actors):
+                errors.append("Choose an actor shown in these recent results.")
+            else:
+                summaries = [
+                    row for row in summaries if str(row["record"].actor_user_id) == params["actor"]
+                ]
+        for field, predicate in (
+            ("after", lambda day, value: day >= value),
+            ("before", lambda day, value: day <= value),
+        ):
+            if params[field]:
+                try:
+                    bound = date.fromisoformat(params[field])
+                    summaries = [
+                        row
+                        for row in summaries
+                        if predicate(timezone.localtime(row["record"].recorded_at).date(), bound)
+                    ]
+                except ValueError:
+                    errors.append("Enter dates in YYYY-MM-DD format.")
+        if errors:
+            summaries = []
+        filter_query = urlencode({k: v for k, v in params.items() if v})
+        page_context = _paginated_page(request, summaries, filter_query=filter_query, key="history")
+        checks_for_page = page_context.pop("rows")
     return render(
         request,
         "inspections/check_history.html",
         {
             "title": "Check history",
             "vehicle": vehicle,
-            "checks": check_history(user, vehicle, roles_for(user), timezone.now()),
+            "checks": checks_for_page,
+            "detail": bool(detail_id),
+            "filters": params,
+            "actors": actors,
+            "outcomes": OUTCOME_LABELS,
+            "filter_errors": errors,
+            "filter_query": filter_query,
+            "page": page_context,
+            "detail_return": f"{request.path}?{urlencode({**{k: v for k, v in params.items() if v}, 'history_page': request.GET.get('history_page', '1')})}#check-{selected.root_check_id}"
+            if detail_id
+            else "",
             "config": {},
         },
     )

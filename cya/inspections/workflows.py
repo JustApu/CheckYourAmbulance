@@ -98,16 +98,19 @@ def deficiency_history(deficiency):
     return events, related
 
 
-def _chains(organization_id, vehicle_id, instant):
-    recent = list(
-        CheckRecord.objects.filter(
-            organization_id=organization_id,
-            vehicle_id=vehicle_id,
-            recorded_at__lte=instant,
-            recorded_at__gte=instant - timedelta(days=14),
-        ).order_by("-recorded_at", "-id")[:MAX_RECENT_CHECKS]
-    )
-    roots = {r.root_check_id for r in recent}
+def _chains(organization_id, vehicle_id, instant, *, root_ids=None):
+    if root_ids is None:
+        recent = list(
+            CheckRecord.objects.filter(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                recorded_at__lte=instant,
+                recorded_at__gte=instant - timedelta(days=14),
+            ).order_by("-recorded_at", "-id")[:MAX_RECENT_CHECKS]
+        )
+        roots = {r.root_check_id for r in recent}
+    else:
+        roots = set(root_ids)
     rows = bounded(
         CheckRecord.objects.filter(
             organization_id=organization_id,
@@ -210,9 +213,12 @@ def _determination_leaves(rows):
     return result
 
 
-def check_history(user, vehicle, roles, instant):
-    rows, states = _chains(user.organization_id, vehicle.pk, instant)
-    linked = _linked_obligations(user.organization_id, rows, instant)
+def check_history(user, vehicle, roles, instant, *, root_ids=None, include_obligations=True):
+    rows, states = _chains(user.organization_id, vehicle.pk, instant, root_ids=root_ids)
+    if root_ids is not None:
+        wanted = {str(root_id) for root_id in root_ids}
+        rows = [row for row in rows if str(row.root_check_id) in wanted]
+    linked = _linked_obligations(user.organization_id, rows, instant) if include_obligations else {}
     result = []
     for row in rows:
         state = states[str(row.root_check_id)]
@@ -251,7 +257,9 @@ def check_history(user, vehicle, roles, instant):
                         effective and row.outcome == "UNABLE_TO_INSPECT",
                     )
                     for obligation, determination, history in linked.get(str(row.pk), ())
-                ],
+                ]
+                if include_obligations
+                else [],
             }
         )
     return result

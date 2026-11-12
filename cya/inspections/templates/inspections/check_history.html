@@ -5,14 +5,43 @@
 <a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Deficiencies</a>
 </p>
 <p>Complete chains for the 200 most recent entries recorded in the last 14 days. Original entries remain in history.</p>
+{% if detail %}
+<p><a class="button" href="{{ detail_return }}">← Back to check results</a></p>
+<h2>Full check chain history</h2>
+{% else %}
 <p>
-<a class="button" href="{% url 'inspection-vehicle' vehicle.pk %}">Record a fresh independent check</a> Start or join an inspection to record your own result. You cannot correct another person’s check.</p>
+<a class="button" href="{% url 'inspection-vehicle' vehicle.pk %}">Record a new check</a> A new check is independent. A correction revises an accidental entry in the same chain.</p>
+<form method="get" class="panel" aria-label="Filter check history">
+<label>Item or kit <input type="search" name="q" maxlength="100" value="{{ filters.q }}"></label>
+<label>Result <select name="outcome"><option value="">All results</option>{% for code,label in outcomes.items %}<option value="{{ code }}"{% if filters.outcome == code %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Actor <select name="actor"><option value="">All crew members</option>{% for actor_id,name in actors %}<option value="{{ actor_id }}"{% if filters.actor == actor_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label>From <input type="date" name="after" value="{{ filters.after }}"></label>
+<label>Through <input type="date" name="before" value="{{ filters.before }}"></label>
+<button class="button" type="submit">Filter history</button> <a href="{% url 'inspection-check-history' vehicle.pk %}">Clear filters</a>
+</form>
+{% for error in filter_errors %}<p class="notice" role="alert">{{ error }}</p>{% endfor %}
+<p>{{ page.total }} matching check chains</p>
+<ul class="plain">
 {% for check in checks %}
-<section class="panel" id="check-{{ check.record.pk }}">
+<li class="panel" id="check-{{ check.record.root_check_id }}">
+<h2>{{ check.record.item.label }}{% if check.record.kit %} — {{ check.record.kit.label }}{% endif %}</h2>
+<p>{{ check.label }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time }} · {{ check.state }}</p>
+{% if check.record.explanation %}<p>{{ check.record.explanation }}</p>{% endif %}
+<a class="button" href="{{ check.detail_url }}">View full chain and authorized actions</a>
+</li>
+{% empty %}<li class="panel">{% if filter_errors %}No results because one or more filters are invalid.{% elif filter_query %}No checks match these filters. Adjust or clear the filters.{% else %}No recent checks.{% endif %}</li>
+{% endfor %}
+</ul>
+{% include "inspections/deficiency_pagination.html" with pagination_label="Check history result pages" %}
+{% endif %}
+{% if detail %}
+{% for check in checks %}
+<section class="panel" id="check-{{ check.record.root_check_id }}">
 <h2>{{ check.record.item.label }}{% if check.record.kit %} — {{ check.record.kit.label }}{% endif %}
 </h2>
 <p>
 <strong>{{ check.label }}</strong> · {{ check.state }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time }}</p>
+{% if check.record.predecessor_check_id %}<p>This is a correction within the same check chain. The earlier entry remains in the audit history.</p>{% endif %}
 {% if check.record.explanation %}
 <p>{{ check.record.explanation }}</p>
 {% endif %}
@@ -110,4 +139,5 @@
 {% empty %}
 <p>No recent checks.</p>
 {% endfor %}
+{% endif %}
 {% endblock %}
