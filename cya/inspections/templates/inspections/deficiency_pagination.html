@@ -1,0 +1,6 @@
+{% if page.previous_url or page.next_url %}
+<nav class="deficiency-pagination" aria-label="{{ pagination_label }}">
+{% if page.previous_url %}<a class="button" href="{{ page.previous_url }}">Newer results</a>{% else %}<span></span>{% endif %}
+{% if page.next_url %}<a class="button" href="{{ page.next_url }}">Older results</a>{% endif %}
+</nav>
+{% endif %}

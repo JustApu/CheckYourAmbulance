@@ -31,6 +31,30 @@ adds [Awaiting External Dependency and progress notes](#awaiting-external-depend
 | `deficiency_age_rule` | A | Administrator-set revisions of the age-highlight rule: thresholds in days and the long-running test; none until configured (SPEC DEF-6, [issue #150](https://github.com/JustApu/CheckYourAmbulance-archive/issues/150)) |
 | `deficiency_acknowledgement_rule` | A | Administrator-set maximum acknowledgement period; no default (SPEC DEF-7, [issue #151](https://github.com/JustApu/CheckYourAmbulance-archive/issues/151)) |
 
+## Deficiency list and supervisor queue
+
+`GET /deficiencies/` is the read-only organization-wide list available to each built-in role.
+It defaults to active deficiencies and offers GET filters for summary/description text, vehicle
+name or number, configured severity code, assignee name, lifecycle status, and the
+governing deadline being overdue. Choose **All statuses, including closed and Reported in Error**
+to search history; the default outstanding view does not remove those records. Text search is
+case-insensitive, treats `%` and `_` as literal characters, and is limited to 100 characters.
+Unknown lifecycle values, duplicate filter parameters, overlong text, and invalid overdue values
+show a notice and return no matches. Result totals use the same filters as the rows. Newest reports
+are first, with stable keyset links showing 25 rows at a time; the cursor is tied to report time and
+id so new reports do not shift the page being read. Invalid cursors show a notice and restart at
+the first page.
+
+`GET /deficiencies/queue/` remains Supervisor/Administrator-only. Its bounded, searchable active
+case groups put extension requests waiting for a decision first, then overdue deficiencies, cases
+among the organization's two highest active severity ranks, and unassigned cases. Severity labels
+and matching codes come from organization configuration, not fixed codes. Each group shows the
+filtered total, a next-action prompt, and stable 25-row newer/older links; cases may appear in more
+than one group when they need more than one action. Overdue uses the governing deadline, including
+approved extensions. Both pages only read the current deficiency projection and related records;
+they do not alter status or lifecycle history. The detail link opens the existing role-checked
+workflow, where commands continue to enforce authorization.
+
 ## Explicit deficiency closure and reopening
 
 `POST /api/v1/deficiencies/{id}/administrator-closures` closes any active deficiency as

@@ -1,18 +1,20 @@
 {% extends "inspections/workflow_base.html" %}
 {% block content %}
 <p><a href="{% url 'deficiencies' %}">All deficiencies</a></p>
-<p>Deficiencies still being worked that need a supervisor. The page is a snapshot at load: refresh to see changes. Overdue uses the deadline in force, including approved extensions.</p>
-{% for heading, rows, more in lists %}
+<p>Active cases that may need a supervisor action. The page is a snapshot at load: refresh to see changes. Overdue uses the deadline in force, including approved extensions.</p>
+{% include "inspections/deficiency_filters.html" %}
+{% for group in lists %}
 <section class="panel">
-<h2>{{ heading }} ({{ rows|length }}{% if more %}+{% endif %})</h2>
-{% if more %}<p>Only the first {{ rows|length }} are listed.</p>{% endif %}
+<h2>{{ group.heading }} ({{ group.page.total }})</h2>
+{% if group.page.total %}<p class="deficiency-queue-next-action">Next action: {{ group.page.rows.0.queue_action }}.</p>{% endif %}
 <ul class="plain">
-{% for row in rows %}
-<li><a href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.assignee.display_name|default:"Unassigned" }}{% if row.governing %} · deadline {{ row.governing|date:"Y-m-d H:i" }} UTC{% endif %}{% if row.requested_at %} · requested {{ row.requested_at|date:"Y-m-d H:i" }} UTC{% endif %}</p></li>
+{% for row in group.page.rows %}
+<li class="deficiency-list-entry"><a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">Review {{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}{% if row.governing %} · governing deadline {{ row.governing|date:"Y-m-d H:i" }} UTC{% endif %}{% if row.requested_at %} · requested {{ row.requested_at|date:"Y-m-d H:i" }} UTC{% endif %}</p></li>
 {% empty %}
 <li>None.</li>
 {% endfor %}
 </ul>
+{% with page=group.page %}{% include "inspections/deficiency_pagination.html" %}{% endwith %}
 </section>
 {% endfor %}
 {% endblock %}

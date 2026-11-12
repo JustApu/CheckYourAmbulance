@@ -85,3 +85,16 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .workflow-refresh[hidden], fieldset[hidden] { display: none; }
 .workflow-write input[type=hidden] { display: none; }
 .status-result:empty { display: none; }
+
+.deficiency-filter-form > .deficiency-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); align-items: end; gap: .5rem .75rem; }
+.deficiency-filter-grid > label { min-width: 0; overflow-wrap: anywhere; }
+.deficiency-filter-grid input, .deficiency-filter-grid select { width: 100%; }
+.deficiency-filter-grid .check { display: flex; align-items: center; gap: .5rem; min-height: 48px; margin-top: .5rem; }
+.deficiency-filter-grid .check input { width: 1.5rem; height: 1.5rem; min-height: 1.5rem; margin: 0; }
+.deficiency-filter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .75rem; }
+.deficiency-filter-actions .button { display: inline-flex; align-items: center; justify-content: center; }
+.deficiency-applied-filters, .deficiency-results-count, .deficiency-queue-next-action { overflow-wrap: anywhere; }
+.deficiency-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; margin: .75rem 0 1rem; }
+.deficiency-pagination .button { display: inline-flex; align-items: center; justify-content: center; }
+.deficiency-filter-form input, .deficiency-filter-form select { max-width: 100%; }
+.deficiency-list-entry, .deficiency-summary-link { overflow-wrap: anywhere; }

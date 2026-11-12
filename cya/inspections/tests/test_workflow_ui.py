@@ -4,8 +4,9 @@ from datetime import timedelta
 from unittest import mock
 from uuid import uuid4
 
-from django.db import DatabaseError
+from django.db import DatabaseError, connection
 from django.test import Client, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from cya.accounts.models import Organization
@@ -487,3 +488,193 @@ class WorkflowUiTests(CrewUiCase):
             self.assertNotContains(response, "History temporarily unavailable", status_code=503)
             self.assertNotContains(response, "Synthetic unavailable configuration", status_code=503)
             self.assertNotIn("Synthetic unavailable configuration", " ".join(logs.output))
+
+
+class DeficiencyListTests(CrewUiCase):
+    def create_deficiency(self, *, vehicle=None, summary="Synthetic list case", severity="HIGH"):
+        result = self.failed(
+            actor=self.user,
+            vehicle=vehicle,
+            create=self.new_fields(summary=summary, severity=severity),
+        )
+        return result.body["deficiency_ids"][0], result.body["check_id"]
+
+    @staticmethod
+    def latest_event(deficiency_id):
+        return str(
+            DeficiencyEvent.objects.filter(deficiency_id=deficiency_id).latest("sequence").pk
+        )
+
+    def test_default_is_active_and_history_includes_reported_in_error(self):
+        deficiency_id, check_id = self.create_deficiency(summary="Synthetic corrected pump")
+        self.assertContains(self.client.get("/deficiencies/"), "Synthetic corrected pump")
+        corrected = self.post(
+            f"/api/v1/checks/{check_id}/corrections",
+            {
+                "operation_id": str(uuid4()),
+                "expected_tip_check_id": check_id,
+                "outcome": "PASSED",
+            },
+        )
+        self.assertEqual(corrected.status_code, 201, corrected.content)
+        active = self.client.get("/deficiencies/")
+        self.assertNotContains(active, "Synthetic corrected pump")
+        self.assertContains(active, "Outstanding only")
+        history = self.client.get("/deficiencies/", {"status": "all"})
+        self.assertContains(history, "Synthetic corrected pump")
+        self.assertContains(history, "Reported in Error")
+        self.assertEqual(history.context["page"]["total"], 1)
+        selected = self.client.get("/deficiencies/", {"status": "REPORTED_IN_ERROR"})
+        self.assertEqual(selected.context["page"]["total"], 1)
+        self.assertEqual(str(selected.context["page"]["rows"][0].deficiency_id), str(deficiency_id))
+
+    def test_text_vehicle_severity_assignee_and_overdue_filters_narrow_results(self):
+        self.bind(vehicle=self.vehicles[1], reconcile=False)
+        target, _check = self.create_deficiency(
+            vehicle=self.vehicles[1], summary="Synthetic pump 100%_ready", severity="HIGH"
+        )
+        other, _check = self.create_deficiency(summary="Synthetic pump other", severity="MEDIUM")
+        self.vehicles[1].number = "R-204"
+        self.vehicles[1].save(update_fields=["number"])
+        assign_deficiency(
+            deficiency_id=target,
+            assignee_id=str(self.supervisor.pk),
+            expected_event_id=self.latest_event(target),
+            **self.context(self.admin),
+        )
+        filtered = self.client.get(
+            "/deficiencies/",
+            {
+                "q": "%_",
+                "vehicle": "R-204",
+                "severity": "HIGH",
+                "assignee": "User supervisor",
+                "status": "active",
+            },
+        )
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(filtered.context["page"]["total"], 1)
+        self.assertEqual(str(filtered.context["page"]["rows"][0].deficiency_id), str(target))
+        self.assertContains(
+            filtered, '<option value="HIGH" selected>High (HIGH)</option>', html=True
+        )
+        self.assertContains(filtered, "Applied filters:")
+        self.assertContains(filtered, "1 matching deficiencies; showing 1")
+        self.assertNotContains(filtered, "Synthetic pump other")
+
+        no_match = self.client.get("/deficiencies/", {"severity": "UNCONFIGURED"})
+        self.assertEqual(no_match.context["page"]["total"], 0)
+        self.assertContains(no_match, "Choose a configured severity.")
+        self.assertContains(no_match, "No deficiencies match these filters.")
+
+        set_deadline(
+            deficiency_id=other,
+            deadline=self.now + timedelta(hours=1),
+            expected_event_id=self.latest_event(other),
+            **self.context(self.admin),
+        )
+        self.clock.set(self.now + timedelta(hours=2))
+        late = self.client.get("/deficiencies/", {"overdue": "1"})
+        self.assertEqual(late.context["page"]["total"], 1)
+        self.assertEqual(str(late.context["page"]["rows"][0].deficiency_id), str(other))
+
+    def test_overdue_filter_and_supervisor_queue_use_approved_governing_extension(self):
+        extended, _check = self.create_deficiency(summary="Synthetic extended deadline case")
+        overdue_id, _check = self.create_deficiency(summary="Synthetic overdue deadline case")
+        for identity in (extended, overdue_id):
+            set_deadline(
+                deficiency_id=identity,
+                deadline=self.now + timedelta(days=1),
+                expected_event_id=self.latest_event(identity),
+                **self.context(self.admin),
+            )
+        requested = request_extension(
+            deficiency_id=extended,
+            reason="Synthetic supplier delay.",
+            proposed_deadline=self.now + timedelta(days=5),
+            expected_event_id=self.latest_event(extended),
+            **self.context(self.admin),
+        )
+        decide_extension(
+            deficiency_id=extended,
+            request_event_id=requested.body["event_id"],
+            decision="APPROVED",
+            explanation="Synthetic extension approved.",
+            deadline=None,
+            expected_event_id=self.latest_event(extended),
+            **self.context(self.admin),
+        )
+        self.clock.set(self.now + timedelta(days=2))
+        filtered = self.client.get("/deficiencies/", {"overdue": "1"})
+        self.assertEqual(filtered.context["page"]["total"], 1)
+        self.assertEqual(str(filtered.context["page"]["rows"][0].deficiency_id), str(overdue_id))
+
+        supervisor, user, _token = self.harness.sign_in("extension-queue-supervisor")
+        self.grant(user, "SUPERVISOR")
+        queue_response = supervisor.get("/deficiencies/queue/", {"overdue": "1"})
+        overdue_group = next(
+            group for group in queue_response.context["lists"] if group["heading"] == "Overdue"
+        )
+        self.assertEqual(overdue_group["page"]["total"], 1)
+        self.assertEqual(
+            str(overdue_group["page"]["rows"][0].deficiency_id), str(overdue_id)
+        )
+
+    def test_invalid_filters_fail_closed_with_a_visible_message(self):
+        self.create_deficiency()
+        invalid = self.client.get("/deficiencies/", {"status": "UNKNOWN"})
+        self.assertEqual(invalid.status_code, 200)
+        self.assertEqual(invalid.context["page"]["total"], 0)
+        self.assertContains(invalid, "Choose a valid lifecycle status.")
+        overlong = self.client.get("/deficiencies/", {"q": "x" * 101})
+        self.assertEqual(overlong.context["page"]["total"], 0)
+        self.assertContains(overlong, "Filter text is limited to 100 characters.")
+        bad_overdue = self.client.get("/deficiencies/", {"overdue": "true-ish"})
+        self.assertEqual(bad_overdue.context["page"]["total"], 0)
+        self.assertContains(bad_overdue, "Choose a valid overdue filter value.")
+        malformed_cursor = self.client.get("/deficiencies/", {"results_after": "not-a-cursor"})
+        self.assertEqual(malformed_cursor.status_code, 200)
+        self.assertEqual(malformed_cursor.context["page"]["total"], 1)
+        self.assertContains(malformed_cursor, "results-page link was invalid")
+
+    def test_keyset_pagination_preserves_filters_and_does_not_shift_for_new_reports(self):
+        identities = {
+            self.create_deficiency(summary=f"Synthetic pagination marker {index}")[0]
+            for index in range(3)
+        }
+        with mock.patch("cya.inspections.workflow_views.DEFICIENCY_PAGE_SIZE", 2):
+            first = self.client.get("/deficiencies/", {"q": "pagination marker"})
+            first_ids = {str(row.deficiency_id) for row in first.context["page"]["rows"]}
+            self.assertEqual(len(first_ids), 2)
+            self.assertIn("q=pagination+marker", first.context["page"]["next_url"])
+            self.clock.set(self.now + timedelta(seconds=1))
+            self.create_deficiency(summary="Synthetic pagination marker new")
+            second = self.client.get(first.context["page"]["next_url"])
+            second_ids = {str(row.deficiency_id) for row in second.context["page"]["rows"]}
+            self.assertEqual(first.context["page"]["total"], 3)
+            self.assertEqual(second.context["page"]["total"], 4)
+            self.assertEqual(first_ids | second_ids, {str(value) for value in identities})
+            self.assertTrue(second.context["page"]["has_previous"])
+            previous = self.client.get(second.context["page"]["previous_url"])
+            self.assertEqual(
+                {str(row.deficiency_id) for row in previous.context["page"]["rows"]}, first_ids
+            )
+
+    def test_list_and_queue_query_counts_do_not_grow_with_rows(self):
+        for index in range(5):
+            self.create_deficiency(summary=f"Synthetic query-count case {index}")
+
+        def captured(path, client=None):
+            with CaptureQueriesContext(connection) as queries:
+                response = (client or self.client).get(path)
+                self.assertEqual(response.status_code, 200)
+            return len(queries)
+
+        list_one = captured("/deficiencies/")
+        supervisor, _user, _token = self.harness.sign_in("list-supervisor")
+        self.grant(_user, "SUPERVISOR")
+        queue_five = captured("/deficiencies/queue/", supervisor)
+        for index in range(5, 30):
+            self.create_deficiency(summary=f"Synthetic query-count case {index}")
+        self.assertEqual(captured("/deficiencies/"), list_one)
+        self.assertEqual(captured("/deficiencies/queue/", supervisor), queue_five)

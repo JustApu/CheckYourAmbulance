@@ -20,7 +20,7 @@ from cya.deficiencies.commands import (
     start_work,
 )
 from cya.deficiencies.extensions import decide_extension
-from cya.deficiencies.models import DeficiencyProjection
+from cya.deficiencies.models import DeficiencyProjection, DeficiencySeverity
 from cya.inspections.tests import test_deficiency_actions_ui as crew_actions
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 
@@ -408,8 +408,8 @@ class QueueTests(SupervisorUiCase):
 
     def lists(self, response):
         return {
-            heading: [str(row.deficiency_id) for row in rows]
-            for heading, rows, _more in response.context["lists"]
+            group["heading"]: [str(row.deficiency_id) for row in group["page"]["rows"]]
+            for group in response.context["lists"]
         }
 
     def test_queue_is_for_supervisors_and_administrators(self):
@@ -482,6 +482,60 @@ class QueueTests(SupervisorUiCase):
         with mock.patch("cya.inspections.workflow_views.QUEUE_LIMIT", 1):
             found = self.lists(sup[0].get(self.URL))
         self.assertEqual(found["Extension requests waiting for a decision"], [waiting])
+
+    def test_queue_adds_configured_high_severity_group_with_next_actions(self):
+        urgent = self.report(summary="Synthetic configured urgent case", severity="HIGH")
+        sup = self.signed_in("queue-priority-supervisor", "SUPERVISOR")
+        response = sup[0].get(self.URL)
+        self.assertEqual(response.status_code, 200)
+        groups = {group["heading"]: group["page"] for group in response.context["lists"]}
+        heading = next(name for name in groups if name.startswith("Top configured severity:"))
+        self.assertIn("Critical / High", heading)
+        self.assertEqual(groups[heading]["total"], 1)
+        self.assertContains(response, "Next action: Review the active high-severity issue.")
+        self.assertContains(response, 'href="/deficiencies/' + urgent + '/"')
+
+    def test_queue_severity_priority_tracks_custom_active_levels(self):
+        DeficiencySeverity.objects.create(
+            organization=self.org,
+            code="URGENT",
+            revision=1,
+            label="Urgent",
+            description="Synthetic highest configured level.",
+            rank=5,
+            active=True,
+            effective_at=self.now - timedelta(days=1),
+        )
+        self.report(summary="Synthetic urgent queue case", severity="URGENT")
+        sup = self.signed_in("queue-urgent-supervisor", "SUPERVISOR")
+        response = sup[0].get(self.URL)
+        headings = [group["heading"] for group in response.context["lists"]]
+        self.assertIn("Top configured severity: Urgent / Critical", headings)
+        self.assertNotIn("Top configured severity: Critical / High", headings)
+
+    def test_queue_keyset_pagination_preserves_filters_and_total_counts(self):
+        first = self.report(summary="Synthetic queue marker first")
+        self.report(summary="Synthetic queue marker second")
+        sup = self.signed_in("queue-page-supervisor", "SUPERVISOR")
+        with mock.patch("cya.inspections.workflow_views.DEFICIENCY_PAGE_SIZE", 1):
+            response = sup[0].get(self.URL, {"q": "queue marker"})
+            unassigned = next(
+                group
+                for group in response.context["lists"]
+                if group["heading"] == "Unassigned"
+            )["page"]
+            self.assertEqual(unassigned["total"], 2)
+            self.assertEqual(len(unassigned["rows"]), 1)
+            self.assertIn("q=queue+marker", unassigned["next_url"])
+            next_page = sup[0].get(unassigned["next_url"])
+            next_unassigned = next(
+                group
+                for group in next_page.context["lists"]
+                if group["heading"] == "Unassigned"
+            )["page"]
+            self.assertEqual(next_unassigned["total"], 2)
+            self.assertEqual(len(next_unassigned["rows"]), 1)
+            self.assertNotEqual(str(next_unassigned["rows"][0].deficiency_id), str(first))
 
 
 class EmptyScopeCloseUiTests(SupervisorUiCase):
