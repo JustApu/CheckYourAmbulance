@@ -60,6 +60,9 @@ class WorkflowUiTests(CrewUiCase):
         self.assertEqual(filtered.context["page"]["total"], 1)
         self.assertEqual(str(filtered.context["checks"][0]["record"].pk), failed)
         self.assertEqual(self.history(q="suction").context["page"]["total"], 1)
+        day = timezone.localtime(CheckRecord.objects.get(pk=passed).recorded_at).date().isoformat()
+        self.assertEqual(self.history(after=day, before=day).context["page"]["total"], 2)
+        self.assertTrue(self.history(after="not-a-date").context["filter_errors"])
 
         detail = self.history(check=passed, outcome="PASSED", history_page="1")
         self.assertTrue(detail.context["detail"])
