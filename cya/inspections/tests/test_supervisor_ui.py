@@ -553,7 +553,7 @@ class QueueTests(SupervisorUiCase):
             active=True,
             effective_at=self.now - timedelta(days=1),
         )
-        self.report(summary="Synthetic urgent grade", severity="URGENT")
+        urgent_grade = self.report(summary="Synthetic urgent grade", severity="URGENT")
         sup = self.signed_in("queue-retired-supervisor", "SUPERVISOR")
         response = sup[0].get(self.URL)
         severity_group = next(
@@ -561,9 +561,9 @@ class QueueTests(SupervisorUiCase):
             for group in response.context["lists"]
             if group["heading"] == "Top configured severity: Urgent / High"
         )
-        self.assertIn(
-            str(retired_grade),
+        self.assertEqual(
             [str(row.deficiency_id) for row in severity_group["page"]["rows"]],
+            [str(urgent_grade), str(retired_grade)],
         )
 
     def test_queue_pagination_preserves_filters_and_total_counts(self):

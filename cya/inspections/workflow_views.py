@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 
 from django.core.paginator import Paginator
 from django.db import DatabaseError
-from django.db.models import Exists, OuterRef, Q, Subquery
+from django.db.models import Case, Exists, IntegerField, OuterRef, Q, Subquery, When
 from django.http import Http404, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -662,8 +662,20 @@ def queue(request, user):
             for level in sorted(top_levels, key=lambda level: (-level.rank, level.code))
         )
     )
-    high_severity = active.filter(severity_version__code__in=top_codes).order_by(
-        "deficiency__reported_at", "deficiency_id"
+    severity_priority = Case(
+        *[
+            When(severity_version__code=level.code, then=position)
+            for position, level in enumerate(
+                sorted(severity_levels, key=lambda level: (-level.rank, level.code))
+            )
+        ],
+        default=len(severity_levels),
+        output_field=IntegerField(),
+    )
+    high_severity = (
+        active.filter(severity_version__code__in=top_codes)
+        .annotate(severity_priority=severity_priority)
+        .order_by("severity_priority", "deficiency__reported_at", "deficiency_id")
     )
     unassigned = active.filter(assignee__isnull=True).order_by(
         "deficiency__reported_at", "deficiency_id"
