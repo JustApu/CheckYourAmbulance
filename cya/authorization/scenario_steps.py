@@ -53,6 +53,7 @@ def crew_attempts_role_change(ctx):
         URL,
         {
             "csrfmiddlewaretoken": crew_client.cookies["csrftoken"].value,
+            "stage": "confirm",
             "operation_id": str(uuid4()),
             "target": str(crew.pk),
             "role": "ADMINISTRATOR",
