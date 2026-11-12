@@ -34,8 +34,8 @@ from cya.inspections.workflows import bounded
 
 
 class WorkflowUiTests(CrewUiCase):
-    def history(self):
-        return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/check-history/")
+    def history(self, **params):
+        return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/check-history/", params)
 
     def test_routine_check_history_uses_station_local_time_without_seconds(self):
         self.org.station_zone = "America/New_York"
@@ -46,6 +46,54 @@ class WorkflowUiTests(CrewUiCase):
         shown = strip_tags(page.content.decode())
         self.assertRegex(shown, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:EDT|EST) \(-0[45]00\)")
         self.assertNotRegex(shown, r"\b\d{2}:\d{2}:\d{2}\b")
+
+    def test_check_history_is_compact_filterable_and_detail_returns_to_the_chain(self):
+        passed = self.record(self.suction, actor=self.user).body["check_id"]
+        failed = self.failed(self.siren, actor=self.crew).body["check_id"]
+        listing = self.history()
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(len(listing.context["checks"]), 2)
+        self.assertNotIn('data-kind="correction"', listing.content.decode())
+        self.assertContains(listing, "Filter history")
+
+        filtered = self.history(outcome="FAILED", actor=str(self.crew.pk))
+        self.assertEqual(filtered.context["page"]["total"], 1)
+        self.assertEqual(str(filtered.context["checks"][0]["record"].pk), failed)
+        self.assertEqual(self.history(q="suction").context["page"]["total"], 1)
+        day = timezone.localtime(CheckRecord.objects.get(pk=passed).recorded_at).date().isoformat()
+        self.assertEqual(self.history(after=day, before=day).context["page"]["total"], 2)
+        self.assertTrue(self.history(after="not-a-date").context["filter_errors"])
+
+        detail = self.history(check=passed, outcome="PASSED", history_page="1")
+        self.assertTrue(detail.context["detail"])
+        self.assertContains(detail, "Full check chain history")
+        self.assertContains(
+            detail, f"history_page=1#check-{detail.context['checks'][0]['record'].root_check_id}"
+        )
+
+    def test_check_history_rejects_malformed_filters_and_hides_actions_on_list(self):
+        check_id = self.failed(actor=self.crew).body["check_id"]
+        listing = self.history(q=["one", "two"])
+        self.assertEqual(listing.status_code, 200)
+        self.assertTrue(listing.context["filter_errors"])
+        self.assertEqual(listing.context["page"]["total"], 0)
+        self.assertNotIn('data-kind="correction"', listing.content.decode())
+        self.assertNotIn('data-kind="explanation"', listing.content.decode())
+
+        unauthorized = self.history(check=check_id)
+        self.assertFalse(unauthorized.context["checks"][0]["can_correct"])
+        self.assertNotIn('data-kind="correction"', unauthorized.content.decode())
+        self.assertEqual(self.history(check="not-a-uuid").status_code, 404)
+
+    def test_check_history_list_query_count_does_not_grow_per_chain(self):
+        self.record(self.suction)
+        with CaptureQueriesContext(connection) as few_queries:
+            self.assertEqual(self.history().status_code, 200)
+        for _ in range(5):
+            self.record(self.suction)
+        with CaptureQueriesContext(connection) as more_queries:
+            self.assertEqual(self.history().status_code, 200)
+        self.assertEqual(len(few_queries), len(more_queries))
 
     def report_page(self):
         return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/deficiencies/new/")
@@ -132,13 +180,15 @@ class WorkflowUiTests(CrewUiCase):
         own = self.failed(actor=self.user).body["check_id"]
         other = self.record(self.siren, actor=self.crew).body["check_id"]
         page = self.history()
-        controls = {str(row["record"].pk): row for row in page.context["checks"]}
-        self.assertTrue(controls[own]["can_correct"])
-        self.assertFalse(controls[own]["can_invalidate"])
-        self.assertFalse(controls[other]["can_correct"])
-        self.assertFalse(controls[other]["can_invalidate"])
-        self.assertIn("not repair or verification", page.content.decode())
-        self.assertIn("Record a fresh independent check", page.content.decode())
+        self.assertNotIn('data-kind="correction"', page.content.decode())
+        own_detail = self.history(check=own)
+        other_detail = self.history(check=other)
+        self.assertTrue(own_detail.context["checks"][0]["can_correct"])
+        self.assertFalse(own_detail.context["checks"][0]["can_invalidate"])
+        self.assertFalse(other_detail.context["checks"][0]["can_correct"])
+        self.assertFalse(other_detail.context["checks"][0]["can_invalidate"])
+        self.assertIn("not repair or verification", own_detail.content.decode())
+        self.assertIn("Record a new check", page.content.decode())
         denied = self.correction(other)
         self.assertEqual((denied.status_code, denied.json()["code"]), (403, "AUTHOR_REQUIRED"))
 
@@ -147,7 +197,7 @@ class WorkflowUiTests(CrewUiCase):
         check_id, deficiency_id = first.body["check_id"], first.body["deficiency_ids"][0]
         corrected = self.correction(check_id)
         self.assertEqual(corrected.status_code, 201, corrected.content)
-        rows = self.history().context["checks"]
+        rows = self.history(check=check_id).context["checks"]
         self.assertEqual({r["state"] for r in rows}, {"Effective", "Superseded"})
         self.assertEqual(CheckRecord.objects.get(pk=check_id).outcome, "FAILED")
         detail = self.client.get(f"/deficiencies/{deficiency_id}/").content.decode()
@@ -307,14 +357,14 @@ class WorkflowUiTests(CrewUiCase):
         )
         self.assertEqual(denied.status_code, 403)
         self.grant(self.user, "ADMINISTRATOR")
-        self.assertTrue(self.history().context["checks"][0]["can_invalidate"])
+        self.assertTrue(self.history(check=root).context["checks"][0]["can_invalidate"])
         missing = self.post(endpoint, {"operation_id": str(uuid4()), "explanation": ""})
         self.assertEqual(missing.status_code, 422)
         accepted = self.post(
             endpoint, {"operation_id": str(uuid4()), "explanation": "Synthetic reason."}
         )
         self.assertEqual(accepted.status_code, 201, accepted.content)
-        self.assertEqual(self.history().context["checks"][0]["state"], "Invalidated")
+        self.assertEqual(self.history(check=root).context["checks"][0]["state"], "Invalidated")
         self.assertEqual(DeficiencyProjection.objects.get().status, "OPEN")
 
     def test_unable_completion_is_distinct_from_pass_and_does_not_close_deficiency(self):
@@ -325,7 +375,7 @@ class WorkflowUiTests(CrewUiCase):
             outcome="UNABLE_TO_INSPECT",
             explanation="Synthetic access restriction.",
         )
-        control = self.history().context["checks"][0]["obligations"][0]
+        control = self.history(check=unable.body["check_id"]).context["checks"][0]["obligations"][0]
         self.assertTrue(control["can_complete"])
         body = {
             "operation_id": str(uuid4()),
@@ -334,7 +384,7 @@ class WorkflowUiTests(CrewUiCase):
         }
         completed = self.post(control["complete_url"], body)
         self.assertEqual(completed.status_code, 201, completed.content)
-        history = self.history()
+        history = self.history(check=unable.body["check_id"])
         self.assertIn("Completed by supervisor — unable to inspect", history.content.decode())
         self.assertIn("self-completed", history.content.decode())
         self.assertFalse(history.context["checks"][0]["obligations"][0]["can_complete"])
@@ -343,7 +393,7 @@ class WorkflowUiTests(CrewUiCase):
         row = next(r for r in checklist["items"] if r["item_id"] == str(self.suction.pk))
         self.assertEqual(row["obligation_outcome"], "SUPERVISOR_COMPLETED")
         self.grant(self.user, "ADMINISTRATOR")
-        control = self.history().context["checks"][0]["obligations"][0]
+        control = self.history(check=unable.body["check_id"]).context["checks"][0]["obligations"][0]
         invalidated = self.post(
             control["invalidate_url"],
             {
@@ -352,8 +402,10 @@ class WorkflowUiTests(CrewUiCase):
             },
         )
         self.assertEqual(invalidated.status_code, 201, invalidated.content)
-        history = self.history()
-        events = history.context["checks"][0]["obligations"][0]["history"]
+        history = self.history(check=unable.body["check_id"])
+        events = self.history(check=unable.body["check_id"]).context["checks"][0]["obligations"][0][
+            "history"
+        ]
         self.assertEqual(
             [event.determination_type for event in events], ["SUPERVISOR_COMPLETED", "INVALIDATED"]
         )
@@ -365,7 +417,7 @@ class WorkflowUiTests(CrewUiCase):
         unable = self.failed(
             actor=self.user, outcome="UNABLE_TO_INSPECT", explanation="Synthetic restriction."
         )
-        control = self.history().context["checks"][0]["obligations"][0]
+        control = self.history(check=unable.body["check_id"]).context["checks"][0]["obligations"][0]
         self.assertFalse(control["can_complete"])
         response = self.post(
             control["complete_url"],

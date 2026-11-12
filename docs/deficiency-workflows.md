@@ -18,7 +18,7 @@ All mutations use the existing audited [check](check-records.md) and
 | `/deficiencies/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. A deficiency that is not Pending Verification answers 409 with its current status and a link back to it, not the 503 outage page (issue #20). |
 | `/deficiencies/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. Without a session it answers 401 (the verification screen then stops re-reading; issue #37). |
 | `/inspection/vehicles/{id}/deficiencies/new/` | Independent item, compartment or selected vehicle-systems report. |
-| `/inspection/vehicles/{id}/check-history/` | Complete chains for the 200 most recent check entries recorded in the last 14 days; own corrections, administrator invalidation and supervisor Unable completion. |
+| `/inspection/vehicles/{id}/check-history/` | Searchable, paginated summaries of recent check chains, with a per-chain detail view for complete history; own corrections, administrator invalidation and supervisor Unable completion. |
 
 Pages require an active signed-in user with an organization role, like the shell. Missing,
 malformed and other-organization resources answer 404. A user without a permitted role gets
@@ -75,9 +75,13 @@ crew extension requests, dependency updates, notes, repairs and verification are
 
 ## Corrections, invalidation and supervisor completion
 
-History retains every row of the selected chains with Effective, Superseded or Invalidated
-state. Only the author gets Correct entry. It is labelled as fixing accidental data entry,
-never repair or verification. The form sends the expected current tip and only correction
+The check-history list shows one compact summary per chain, with filters for item/kit, result,
+station-local date and actor. It covers chains touched by the 200 most recent entries in the
+last 14 days and paginates the filtered results. Opening a chain shows every row with Effective,
+Superseded or Invalidated state and its linked obligation history. The list contains no write
+forms. Only the author gets Correct entry in chain detail. A correction revises an accidental
+entry in that same chain; it is separate from recording a new independent check, and is never
+repair or verification. The form sends the expected current tip and only correction
 outcomes the existing command supports: Passed, plus Unable-to-Inspect to Failed. Quantity
 and measurement corrections take an explicit corrected observation. A stale tip is a refusal
 requiring a refresh. Other users have a link to start/join an inspection and record a fresh
