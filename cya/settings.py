@@ -198,7 +198,7 @@ DATABASES = {
     }
 }
 
-# Store and compute in UTC; the station display zone is a later decision (OQ-25).
+# Store and compute in UTC; authenticated requests use the configured station zone for display.
 USE_TZ = True
 TIME_ZONE = "UTC"
 LANGUAGE_CODE = "en-us"

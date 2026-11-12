@@ -1,8 +1,9 @@
+{% load station_time %}
 <section class="panel" aria-labelledby="current-heading">
 <h2 id="current-heading">Current status</h2>
 {% if current %}
 <p class="status-line"><span class="pill status-pill" data-status="{{ current.status }}">{{ current.status_label }}</span>
-<span class="muted">since <time datetime="{{ current.recorded_at.isoformat }}">{{ current.recorded_at|date:"Y-m-d H:i T (O)" }}</time> · set by {{ current.actor }}</span></p>
+<span class="muted">since <time datetime="{{ current.recorded_at.isoformat }}">{{ current.recorded_at|station_time }}</time> · set by {{ current.actor }}</span></p>
 {% if current.restrictions %}<p>Restrictions: {{ current.restrictions }}</p>{% endif %}
 <p>{{ current.explanation }}</p>
 {% else %}
@@ -37,7 +38,7 @@
 <h2 id="pending-heading">Pending requests</h2>
 {% for r in pending %}
 <div class="panel">
-<p><strong>{{ r.label }}</strong> requested by {{ r.requested_by }} <span class="muted">{{ r.recorded_at|date:"Y-m-d H:i T (O)" }}</span></p>
+<p><strong>{{ r.label }}</strong> requested by {{ r.requested_by }} <span class="muted">{{ r.recorded_at|station_time }}</span></p>
 <p>{{ r.reason }}</p>
 {% if can_set %}
 <form class="status-write" data-kind="decide" data-decision="APPROVE" data-request="{{ r.request_id }}">
@@ -65,7 +66,7 @@
 <h2 id="history-heading">History</h2>
 <ol>
 {% for e in history %}
-<li>{{ e.recorded_at|date:"Y-m-d H:i T (O)" }} · {{ e.actor }} · {{ e.status_label }}{% if e.restrictions %} — {{ e.restrictions }}{% endif %}
+<li>{{ e.recorded_at|station_time }} · {{ e.actor }} · {{ e.status_label }}{% if e.restrictions %} — {{ e.restrictions }}{% endif %}
 <p>{{ e.explanation }}</p></li>
 {% empty %}
 <li>No status changes have been recorded.</li>

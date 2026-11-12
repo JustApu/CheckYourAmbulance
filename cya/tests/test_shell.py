@@ -2,12 +2,15 @@
 
 import re
 import time
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 from django.http import HttpResponse
+from django.template import Context, Template
 from django.template.loader import render_to_string
-from django.test import Client, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from cya.accounts.middleware import (
@@ -22,6 +25,25 @@ from cya.shell import navigation
 
 ROLES = {}  # user id -> role names, read by the injected lookup below
 LOOKUP = "cya.tests.test_shell.lookup"
+
+
+class StationTimeFilterTests(SimpleTestCase):
+    def test_both_fall_back_instants_keep_distinct_zone_and_offset(self):
+        first = datetime(2025, 11, 2, 5, 30, tzinfo=UTC)
+        second = datetime(2025, 11, 2, 6, 30, tzinfo=UTC)
+        template = Template("{% load station_time %}{{ instant|station_time }}")
+        seconds_template = Template('{% load station_time %}{{ instant|station_time:"seconds" }}')
+        with timezone.override(ZoneInfo("America/New_York")):
+            self.assertEqual(
+                template.render(Context({"instant": first})), "2025-11-02 01:30 EDT (-0400)"
+            )
+            self.assertEqual(
+                template.render(Context({"instant": second})), "2025-11-02 01:30 EST (-0500)"
+            )
+            self.assertEqual(
+                seconds_template.render(Context({"instant": first})),
+                "2025-11-02 01:30:00 EDT (-0400)",
+            )
 
 
 class OrganizationTimezoneMiddlewareTests(TestCase):

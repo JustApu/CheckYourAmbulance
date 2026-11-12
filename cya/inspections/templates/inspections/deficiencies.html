@@ -1,4 +1,5 @@
 {% extends "inspections/workflow_base.html" %}
+{% load station_time %}
 {% block content %}
 {% if can_view_queue %}<p><a class="button primary" href="{% url 'deficiency-queue' %}">Supervisor queue</a> <a class="button" href="{% url 'fleet-readiness' %}">Fleet readiness</a></p>{% endif %}
 <section class="panel">
@@ -20,7 +21,7 @@
 <ul class="plain">
 {% for row in page.rows %}
 <li class="panel deficiency-list-entry">
-<a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · {{ row.deficiency.reported_at|date:"Y-m-d H:i T (O)" }}</p>
+<a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · {{ row.deficiency.reported_at|station_time }}</p>
 <p>Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}</p>
 </li>
 {% empty %}

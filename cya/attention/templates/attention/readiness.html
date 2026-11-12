@@ -1,4 +1,5 @@
 {% extends "shell/base.html" %}
+{% load station_time %}
 {% block head %}
 <style>
 {% include "inspections/inspection.css" %}
@@ -21,7 +22,7 @@
 <p id="readiness-live-state" role="status">Connecting to live updates…</p>
 <p id="readiness-stale" role="alert" hidden>Could not refresh. What you see may be out of date; the page keeps trying.</p>
 {% else %}
-<p role="status">As of {{ picture.as_of|date:"Y-m-d H:i:s T (O)" }}. This past picture does not update.</p>
+<p role="status">As of {{ picture.as_of|station_time:"seconds" }}. This past picture does not update.</p>
 {% endif %}
 {% endblock %}
 {% block scripts %}{% if live %}{{ config|json_script:"readiness-config" }}<script>

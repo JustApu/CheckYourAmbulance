@@ -1,4 +1,5 @@
 {% extends "inspections/workflow_base.html" %}
+{% load station_time %}
 {% block content %}
 <p>
 <a href="{% url 'deficiencies' %}">All deficiencies</a> · <a href="{% url 'inspection-check-history' deficiency.vehicle_id %}">Check history</a>
@@ -7,19 +8,19 @@
 <h2>{{ deficiency.vehicle.display_name }}</h2>
 <p>{{ status }} · {{ severity.label }} · {{ deficiency.category_version.label }}</p>
 <p>{{ deficiency.description }}</p>
-<p>Reported by {{ deficiency.reporter.display_name }} at {{ deficiency.reported_at|date:"Y-m-d H:i T (O)" }}</p>
+<p>Reported by {{ deficiency.reporter.display_name }} at {{ deficiency.reported_at|station_time }}</p>
 <dl>
 <dt>Assignee</dt><dd>{{ assignee.display_name|default:"Unassigned" }}</dd>
-<dt>Deadline</dt><dd>{% if deadline.base_deadline %}{{ deadline.base_deadline|date:"Y-m-d H:i T (O)" }}{% else %}Not set{% endif %}</dd>
-<dt>Governing deadline</dt><dd>{% if deadline.governing_deadline %}{{ deadline.governing_deadline|date:"Y-m-d H:i T (O)" }}{% else %}Not set{% endif %}{% if deadline.overdue %} · Overdue{% endif %}</dd>
+<dt>Deadline</dt><dd>{% if deadline.base_deadline %}{{ deadline.base_deadline|station_time }}{% else %}Not set{% endif %}</dd>
+<dt>Governing deadline</dt><dd>{% if deadline.governing_deadline %}{{ deadline.governing_deadline|station_time }}{% else %}Not set{% endif %}{% if deadline.overdue %} · Overdue{% endif %}</dd>
 <dt>Age since original report</dt><dd>{{ age_days }} days · {{ deadline.extension_count }} extension requests{% if deadline.long_running %} · Long-running{% endif %}</dd>
 </dl>
-{% if dependency %}<p>Current dependency: {{ dependency.explanation }}</p><p>Follow-up: {% if dependency.follow_up_at %}{{ dependency.follow_up_at|date:"Y-m-d H:i T (O)" }}{% else %}Not set{% endif %}. No automatic reminder.</p>{% endif %}
+{% if dependency %}<p>Current dependency: {{ dependency.explanation }}</p><p>Follow-up: {% if dependency.follow_up_at %}{{ dependency.follow_up_at|station_time }}{% else %}Not set{% endif %}. No automatic reminder.</p>{% endif %}
 </section>
 {% if scope %}
 <section class="panel"><h2>Verification scope</h2>
 <p>Each outstanding item and physical kit needs its own verification Pass. A routine Pass does not verify this repair.</p>
-<ul>{% for row in scope %}<li>{{ row.item.label }}{% if row.kit_instance %} — {{ row.kit_instance.label }}{% endif %}: {% if row.satisfied %}Verified{% else %}Outstanding{% endif %} · after {{ row.required_after|date:"Y-m-d H:i:s T (O)" }}</li>{% endfor %}</ul>
+<ul>{% for row in scope %}<li>{{ row.item.label }}{% if row.kit_instance %} — {{ row.kit_instance.label }}{% endif %}: {% if row.satisfied %}Verified{% else %}Outstanding{% endif %} · after {{ row.required_after|station_time:"seconds" }}</li>{% endfor %}</ul>
 <a class="button primary" href="{% url 'deficiency-verification' deficiency.pk %}">Perform verification checks</a>
 </section>
 {% endif %}
@@ -63,7 +64,7 @@
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="dependency" data-url="{% url 'api-deficiency-dependency-revisions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Update dependency</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
-{% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|date:"Y-m-d H:i T (O)" }} has passed; set a new one or leave it empty.</p>{% endif %}
+{% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
 <label>Follow-up date and time (agency local time, {{ cya_user.organization.station_zone }}, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
 <button type="submit" class="button primary">Update dependency</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
@@ -78,7 +79,7 @@
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="dependency" data-url="{% url 'api-deficiency-dependencies' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Awaiting External Dependency</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
-{% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|date:"Y-m-d H:i T (O)" }} has passed; set a new one or leave it empty.</p>{% endif %}
+{% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
 <label>Follow-up date and time (agency local time, {{ cya_user.organization.station_zone }}, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
 <button type="submit" class="button primary">Record dependency</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
@@ -88,7 +89,7 @@
 {% if suspensions %}
 <section class="panel"><h2>Check suspensions</h2>
 <p>A suspended check is never a Pass. Suspensions end automatically when the deficiency is closed or Reported in Error. A supervisor or administrator may also end one early while the deficiency is open; the check is then required again on its normal schedule.</p>
-<ul>{% for row in suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended from {{ row.started_at|date:"Y-m-d H:i T (O)" }}{% if row.ended_at %}; ended {{ row.ended_at|date:"Y-m-d H:i T (O)" }} ({{ row.end_label }}){% else %}; in force{% endif %}{% if row.explanation %}<p>{{ row.explanation }}</p>{% endif %}{% if not row.ended_at and supervisor.can_end_suspensions %}
+<ul>{% for row in suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended from {{ row.started_at|station_time }}{% if row.ended_at %}; ended {{ row.ended_at|station_time }} ({{ row.end_label }}){% else %}; in force{% endif %}{% if row.explanation %}<p>{{ row.explanation }}</p>{% endif %}{% if not row.ended_at and supervisor.can_end_suspensions %}
 <form class="workflow-write" data-kind="end-suspension" data-url="{% url 'api-deficiency-check-suspension-ends' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}" data-suspension="{{ row.suspension_id }}">
 {% csrf_token %}<label>Why end it now (optional) <textarea name="explanation" maxlength="4000"></textarea></label>
 <button type="submit" class="button">End suspension</button>
@@ -133,7 +134,7 @@
 {% for request in supervisor.pending_extensions %}
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="extension-decision" data-url="{% url 'api-deficiency-extension-decisions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Decide extension request</h2>
-<p>Requested {{ request.requested_at|date:"Y-m-d H:i T (O)" }} for {{ request.proposed_deadline|date:"Y-m-d H:i T (O)" }}: {{ request.reason }}</p>
+<p>Requested {{ request.requested_at|station_time }} for {{ request.proposed_deadline|station_time }}: {{ request.reason }}</p>
 <input type="hidden" name="request_event_id" value="{{ request.request_event_id }}">
 <label>Decision <select name="decision" required><option value="">Choose a decision</option><option value="APPROVED">Approve the proposed date</option><option value="DIFFERENT_DATE">Approve a different date</option><option value="DENIED">Deny</option></select></label>
 <label>Different date (agency local time, {{ cya_user.organization.station_zone }}, only for a different date) <input name="deadline" type="datetime-local"></label>
@@ -146,7 +147,7 @@
 {% if supervisor.acknowledgement.maximum_days %}
 <form class="panel workflow-write" data-kind="acknowledge" data-url="{% url 'api-deficiency-escalation-acknowledgements' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Acknowledge escalation</h2>
-{% with current=supervisor.acknowledgement.acknowledgement %}{% if current and current.active %}<p>Acknowledged until {{ current.acknowledgement_until|date:"Y-m-d H:i T (O)" }}. A new acknowledgement replaces it from now.</p>{% endif %}{% endwith %}
+{% with current=supervisor.acknowledgement.acknowledgement %}{% if current and current.active %}<p>Acknowledged until {{ current.acknowledgement_until|station_time }}. A new acknowledgement replaces it from now.</p>{% endif %}{% endwith %}
 <p>While acknowledged, the overdue notice is held back. It never changes the deadline.</p>
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
 <label>Action plan <textarea name="action_plan" required maxlength="4000"></textarea></label>
@@ -212,16 +213,16 @@
 <p>Correct entry fixes an accidental check entry. It is never a repair or verification.</p>
 <ol>
 {% for event in events %}
-<li>{{ event.recorded_at|date:"Y-m-d H:i T (O)" }} · {{ event.actor_user.display_name }} · {{ event.type_label }} → {{ event.status_label }}{% if event.explanation %}
+<li>{{ event.recorded_at|station_time }} · {{ event.actor_user.display_name }} · {{ event.type_label }} → {{ event.status_label }}{% if event.explanation %}
 <p>{{ event.explanation }}</p>
 {% endif %}
 {% if event.assignee %}<p>Assignee: {{ event.assignee.display_name }}</p>{% endif %}
-{% if event.deadline %}<p>Deadline: {{ event.deadline|date:"Y-m-d H:i T (O)" }}</p>{% endif %}
-{% if event.proposed_deadline %}<p>Proposed deadline: {{ event.proposed_deadline|date:"Y-m-d H:i T (O)" }}</p>{% endif %}
+{% if event.deadline %}<p>Deadline: {{ event.deadline|station_time }}</p>{% endif %}
+{% if event.proposed_deadline %}<p>Proposed deadline: {{ event.proposed_deadline|station_time }}</p>{% endif %}
 {% if event.decision %}<p>Decision: {{ event.decision_label }}</p>{% endif %}
 {% if event.action_plan %}<p>Action plan: {{ event.action_plan }}</p>{% endif %}
-{% if event.acknowledgement_until %}<p>Acknowledged until: {{ event.acknowledgement_until|date:"Y-m-d H:i T (O)" }}</p>{% endif %}
-{% if event.follow_up_at %}<p>Follow-up: {{ event.follow_up_at|date:"Y-m-d H:i T (O)" }}</p>{% endif %}
+{% if event.acknowledgement_until %}<p>Acknowledged until: {{ event.acknowledgement_until|station_time }}</p>{% endif %}
+{% if event.follow_up_at %}<p>Follow-up: {{ event.follow_up_at|station_time }}</p>{% endif %}
 {% if event.suspensions_ended %}<p>Check suspensions ended: {{ event.suspensions_ended|length }}</p>{% endif %}
 </li>
 {% endfor %}
