@@ -36,10 +36,15 @@ function itemRow(index) {
     <td class="time" data-label="Time"><span class="blank short"></span></td></tr>`;
 }
 
+const sealCells = (contents) => `<td class="outcomes" data-label="Seal or contents">${tick("Seal intact")}<span class="tick wrap"><span class="box" aria-hidden="true"></span>No seal or broken: ${contents}</span><span class="exceptions">Exceptions <span class="blank wide"></span></span></td>
+    <td class="value" data-label="Written on seal"><span class="seal-field">Crew ID <span class="blank short"></span></span><span class="seal-field">Earliest exp. <span class="blank short"></span></span></td>`;
+
+// Kits 1 and 2 are designated sealed; kit 3 is not, so it is checked by its contents (issue #131).
 function kitRow(index) {
-  return `<tr><th scope="row" class="item">Synthetic trauma kit ${index}<span class="instructions">Synthetic cabinet ${index}</span></th>
-    <td class="outcomes" data-label="Seal or contents">${tick("Seal intact")}<span class="tick wrap"><span class="box" aria-hidden="true"></span>No seal or broken: contents checked</span><span class="exceptions">Exceptions <span class="blank wide"></span></span></td>
-    <td class="value" data-label="Written on seal"><span class="seal-field">Crew ID <span class="blank short"></span></span><span class="seal-field">Earliest exp. <span class="blank short"></span></span></td>
+  const cells = index < 3 ? sealCells("contents checked") : `<td class="outcomes" data-label="Contents"><span class="tick wrap"><span class="box" aria-hidden="true"></span>Contents checked against the kit reference</span><span class="exceptions">Exceptions <span class="blank wide"></span></span></td>
+    <td class="value" data-label="Written on seal">Not a sealed kit</td>`;
+  return `<tr${index < 3 ? ' class="sealed-kit"' : ""}><th scope="row" class="item">Synthetic trauma kit ${index}<span class="instructions">Synthetic cabinet ${index}</span></th>
+    ${cells}
     <td class="initials" data-label="Initials"><span class="blank short"></span></td>
     <td class="time" data-label="Time"><span class="blank short"></span></td></tr>`;
 }
@@ -58,7 +63,12 @@ const kits = [1, 2, 3].map(kitRow).join("");
 const outageHeader = `<header class="sheet-header"><h1>Synthetic Medic 6: paper inspection checklist</h1>
   <p class="sheet-meta">Checklist: ${versions}</p><p class="sheet-fill">Date <span class="blank wide"></span> Shift <span class="blank"></span></p>
   <p class="sheet-rule">Use only during an app outage. Keep this sheet until its results are entered into the app, then shred it.</p></header>
-  <section class="sheet-section"><table>${cols}${head("Synthetic cab compartment", ["Item", "Result", "Count or value", "Initials", "Time"])}<tbody>${items}</tbody></table></section>`;
+  <section class="sheet-section"><table>${cols}${head("Synthetic cab compartment", ["Item", "Result", "Count or value", "Initials", "Time"])}<tbody>${items}</tbody></table></section>
+  <section class="sheet-section"><table>${cols}${head("Synthetic sealed drug cabinet", ["Item", "Result", "Count or value", "Initials", "Time"])}<tbody>
+  <tr class="sealed-compartment"><th scope="row" class="item">Sealed cabinet<span class="instructions">An intact seal covers every item and kit inside. If the seal is broken or missing, check all contents and reseal.</span></th>
+    ${sealCells("all contents checked")}
+    <td class="initials" data-label="Initials"><span class="blank short"></span></td>
+    <td class="time" data-label="Time"><span class="blank short"></span></td></tr></tbody></table></section>`;
 const kitSection = `<section class="sheet-section kits"><table>${cols}${head("Kits: confirm the seal, or check the contents against the kit reference", ["Kit", "Seal or contents", "Written on seal", "Initials", "Time"])}<tbody>${kits}</tbody></table></section>`;
 const outage = page("Synthetic Medic 6 paper checklist", outageHeader + kitSection);
 // The same sheet without kits: page counts depend on the runner's fonts, so the kit check compares
