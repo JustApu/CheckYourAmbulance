@@ -400,12 +400,18 @@ class WorkflowUiTests(CrewUiCase):
             **self.context(self.supervisor),
         )
         detail = self.client.get(f"/deficiencies/{pk}/").content.decode()
-        listing = self.client.get("/deficiencies/").content.decode()
+        listing_response = self.client.get("/deficiencies/")
+        listing = listing_response.content.decode()
         self.assertIn("Low", detail)
         self.assertNotIn("SEVERITY_CHANGED", detail)
         self.assertIn("Severity changed", detail)
         self.assertIn("Low", listing)
-        self.assertNotIn("High", listing)
+        row = next(
+            row
+            for row in listing_response.context["page"]["rows"]
+            if str(row.deficiency_id) == str(pk)
+        )
+        self.assertEqual(row.severity_version.code, "LOW")
 
     def test_inactive_vehicle_history_remains_readable(self):
         self.record(actor=self.user)
@@ -609,16 +615,14 @@ class DeficiencyListTests(CrewUiCase):
         self.assertEqual(filtered.context["page"]["total"], 1)
         self.assertEqual(str(filtered.context["page"]["rows"][0].deficiency_id), str(overdue_id))
 
-        supervisor, user, _token = self.harness.sign_in("extension-queue-supervisor")
+        supervisor, user = self.harness.sign_in("extension-queue-supervisor")
         self.grant(user, "SUPERVISOR")
         queue_response = supervisor.get("/deficiencies/queue/", {"overdue": "1"})
         overdue_group = next(
             group for group in queue_response.context["lists"] if group["heading"] == "Overdue"
         )
         self.assertEqual(overdue_group["page"]["total"], 1)
-        self.assertEqual(
-            str(overdue_group["page"]["rows"][0].deficiency_id), str(overdue_id)
-        )
+        self.assertEqual(str(overdue_group["page"]["rows"][0].deficiency_id), str(overdue_id))
 
     def test_invalid_filters_fail_closed_with_a_visible_message(self):
         self.create_deficiency()
@@ -672,7 +676,7 @@ class DeficiencyListTests(CrewUiCase):
             return len(queries)
 
         list_one = captured("/deficiencies/")
-        supervisor, _user, _token = self.harness.sign_in("list-supervisor")
+        supervisor, _user = self.harness.sign_in("list-supervisor")
         self.grant(_user, "SUPERVISOR")
         queue_five = captured("/deficiencies/queue/", supervisor)
         for index in range(5, 30):

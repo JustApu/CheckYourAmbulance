@@ -29,8 +29,8 @@ from cya.checklists.models import Item, KitInstance, Vehicle
 from cya.deficiencies import acknowledgement, overdue, service, suspension
 from cya.deficiencies.commands import ASSIGNEE_ROLES
 from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
-from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.deficiencies.service import DeficiencyError, suggest_related
+from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.deficiencies.transitions import (
     ACTIVE_STATUSES,
     CLOSED_ADMINISTRATOR,
@@ -181,8 +181,7 @@ def _deficiency_filters(
     if values["q"]:
         query = values["q"]
         queryset = queryset.filter(
-            Q(deficiency__summary__icontains=query)
-            | Q(deficiency__description__icontains=query)
+            Q(deficiency__summary__icontains=query) | Q(deficiency__description__icontains=query)
         )
     if values["vehicle"]:
         vehicle = values["vehicle"]
@@ -658,8 +657,7 @@ def queue(request, user):
     }
     severity_label = " / ".join(
         dict.fromkeys(
-            level.label
-            for level in sorted(top_levels, key=lambda level: (-level.rank, level.code))
+            level.label for level in sorted(top_levels, key=lambda level: (-level.rank, level.code))
         )
     )
     severity_priority = Case(

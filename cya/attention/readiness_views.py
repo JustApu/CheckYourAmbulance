@@ -152,9 +152,7 @@ def _screen(request, template, background=False):
     severity_in_force = levels_in_force(str(user.organization_id), picture.as_of)
     top_levels = top_active_levels(severity_in_force)
     severity_threshold = min((level.rank for level in top_levels), default=None)
-    attention_severity_labels = list(
-        dict.fromkeys(level.label for level in top_levels)
-    )
+    attention_severity_labels = list(dict.fromkeys(level.label for level in top_levels))
     attention_severity_label = " / ".join(attention_severity_labels) or "Active deficiencies"
     for vehicle in picture.vehicles:
         vehicle.status_label = VEHICLE_STATUS_LABELS.get(vehicle.status, vehicle.status)

@@ -594,9 +594,7 @@ class QueueTests(SupervisorUiCase):
         with mock.patch("cya.inspections.workflow_views.DEFICIENCY_PAGE_SIZE", 1):
             response = sup[0].get(self.URL, {"q": "queue marker"})
             unassigned = next(
-                group
-                for group in response.context["lists"]
-                if group["heading"] == "Unassigned"
+                group for group in response.context["lists"] if group["heading"] == "Unassigned"
             )["page"]
             self.assertEqual(unassigned["total"], 2)
             self.assertEqual(len(unassigned["rows"]), 1)
@@ -604,9 +602,7 @@ class QueueTests(SupervisorUiCase):
             self.assertIn("unassigned_page=2", unassigned["next_url"])
             next_page = sup[0].get(unassigned["next_url"])
             next_unassigned = next(
-                group
-                for group in next_page.context["lists"]
-                if group["heading"] == "Unassigned"
+                group for group in next_page.context["lists"] if group["heading"] == "Unassigned"
             )["page"]
             self.assertEqual(next_unassigned["total"], 2)
             self.assertEqual(len(next_unassigned["rows"]), 1)
