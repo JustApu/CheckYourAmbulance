@@ -12,6 +12,9 @@ the database on each command (SPEC 3.2).
 
 import time
 import uuid
+from zoneinfo import ZoneInfo
+
+from django.utils import timezone
 
 from cya.accounts.models import User
 
@@ -57,4 +60,19 @@ class CurrentUserMiddleware:
         from django.conf import settings
 
         request.cya_user = session_user(request, settings.CYA_SESSION_MAX_AGE)
+        return self.get_response(request)
+
+
+class OrganizationTimezoneMiddleware:
+    """Render human-facing timestamps in the signed-in user's station zone."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        user = getattr(request, "cya_user", None)
+        if user is None:
+            timezone.deactivate()
+        else:
+            timezone.activate(ZoneInfo(user.organization.station_zone))
         return self.get_response(request)

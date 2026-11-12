@@ -1,4 +1,5 @@
 {% extends "shell/base.html" %}
+{% load station_time %}
 {% block head %}
 <style>
 {% include "inspections/inspection.css" %}
@@ -7,7 +8,7 @@
 {% endblock %}
 {% block content %}
 <form class="panel" method="get" action="">
-<label>Show the picture as of a past instant (UTC, for example 2026-11-01T08:00:00+00:00) <input name="as_of" maxlength="40" value="{% if not live %}{{ picture.as_of|date:'c' }}{% endif %}"></label>
+<label>Show the picture as of a past date and time (agency local time, {{ cya_user.organization.station_zone }}) <input name="as_of" type="datetime-local" value="{% if not live %}{{ picture.as_of|date:'Y-m-d\\TH:i' }}{% endif %}"></label>
 <button type="submit" class="button">Show</button>{% if not live %} <a class="button" href="{% url 'fleet-readiness' %}">Back to now</a>{% endif %}
 </form>
 <div class="readiness-filter">
@@ -21,7 +22,7 @@
 <p id="readiness-live-state" role="status">Connecting to live updates…</p>
 <p id="readiness-stale" role="alert" hidden>Could not refresh. What you see may be out of date; the page keeps trying.</p>
 {% else %}
-<p role="status">As of {{ picture.as_of|date:"Y-m-d H:i:s" }} UTC. This past picture does not update.</p>
+<p role="status">As of {{ picture.as_of|station_time:"seconds" }}. This past picture does not update.</p>
 {% endif %}
 {% endblock %}
 {% block scripts %}{% if live %}{{ config|json_script:"readiness-config" }}<script>

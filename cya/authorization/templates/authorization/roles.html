@@ -1,4 +1,5 @@
 {% extends "shell/base.html" %}
+{% load station_time %}
 {% block content %}
 {% if saved %}{% include "shell/save_state.html" with state="saved" %}{% endif %}
 {% if error %}<p class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ error }}</p>{% endif %}
@@ -22,11 +23,11 @@
 <h2>Role history</h2>
 {% if history %}
 <table>
-  <thead><tr><th scope="col">When (UTC)</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead>
+  <thead><tr><th scope="col">When (agency local time, {{ cya_user.organization.station_zone }})</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead>
   <tbody>
   {% for event in history %}
     <tr>
-      <td>{{ event.recorded_at|date:"Y-m-d H:i:s" }}</td>
+      <td>{{ event.recorded_at|station_time:"seconds" }}</td>
       <td>{{ event.user.email }}</td>
       <td>{{ event.action }}</td>
       <td>{{ event.role }}</td>

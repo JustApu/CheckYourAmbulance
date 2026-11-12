@@ -515,6 +515,18 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "This past picture does not update.")
         self.assertNotContains(page, "readiness-config")
 
+    def test_screen_as_of_uses_station_local_time_and_spec_dst_resolution(self):
+        self.org.station_zone = "America/New_York"
+        self.org.save(update_fields=["station_zone"])
+        sup = self.supervisor_client()
+        gap = sup.get("/fleet/readiness/", {"as_of": "2025-03-09T02:30"})
+        self.assertEqual(gap.status_code, 200)
+        self.assertContains(gap, "As of 2025-03-09 03:00:00 EDT (-0400)")
+        self.assertContains(gap, 'name="as_of" type="datetime-local" value="2025-03-09T03:00"')
+        fold = sup.get("/fleet/readiness/", {"as_of": "2025-11-02T01:30"})
+        self.assertEqual(fold.status_code, 200)
+        self.assertContains(fold, "As of 2025-11-02 01:30:00 EDT (-0400)")
+
 
 class ReadinessScriptTests(SimpleTestCase):
     @skipUnless(shutil.which("node"), "optional Node client harness is unavailable")

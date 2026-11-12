@@ -191,6 +191,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertNotContains(screen, 'id="odometer-form"')
         config = self.config(screen)
         self.assertEqual(config["verification_for_deficiency_id"], pk)
+        self.assertEqual(config["time_zone"], self.org.station_zone)
         self.assertNotIn("session_id", config)
         items = self.client.get(config["urls"]["checklist"]).json()
         self.assertEqual(len(items["items"]), 1)
@@ -330,7 +331,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertNotContains(page, prefilled)
         self.assertContains(page, 'name="follow_up_at" type="datetime-local" value=""')
         self.assertContains(
-            page, f"The follow-up set for {follow_up:%Y-%m-%d %H:%M} UTC has passed"
+            page, f"The follow-up set for {follow_up:%Y-%m-%d %H:%M} UTC (+0000) has passed"
         )
         # What the form now sends: the new explanation and an empty follow-up.
         revised = self.change(
@@ -345,12 +346,15 @@ class DeficiencyActionsUiTests(CrewUiCase):
         )
         self.assertEqual(stale.json()["code"], "INVALID_FOLLOW_UP")
 
-    def test_deadline_display_puts_utc_only_on_a_set_value(self):
+    def test_deadline_display_puts_station_zone_only_on_a_set_value(self):
+        self.org.station_zone = "America/New_York"
+        self.org.save(update_fields=["station_zone"])
         pk = self.report()
         page = self.detail(pk).content.decode()
         self.assertIn("<dt>Deadline</dt><dd>Not set</dd>", page)
         self.assertIn("<dt>Governing deadline</dt><dd>Not set</dd>", page)
-        self.assertNotIn("Not set UTC", page)
+        deadline = page.split("<dt>Deadline</dt><dd>")[1].split("</dd>", 1)[0]
+        self.assertEqual(deadline, "Not set")
         set_deadline(
             deficiency_id=pk,
             deadline=self.now + timedelta(days=2),
@@ -358,7 +362,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
             **self.context(self.admin),
         )
         page = self.detail(pk).content.decode()
-        self.assertIn("<dt>Deadline</dt><dd>2026-06-03 00:00 UTC</dd>", page)
+        self.assertIn("<dt>Deadline</dt><dd>2026-06-02 20:00 EDT (-0400)</dd>", page)
         self.assertNotIn("Not set", page.split("<dt>Age since")[0].split("<dt>Deadline</dt>")[1])
 
     def test_removed_current_checklist_rows_remain_outstanding(self):

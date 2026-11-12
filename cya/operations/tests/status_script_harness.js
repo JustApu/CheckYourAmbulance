@@ -30,7 +30,7 @@ class Element {
 
 function form(kind, fields, dataset = {}) {
   const f = new Element();
-  f.dataset = {kind, ...dataset};
+  f.dataset = {kind, timeZone: "UTC", ...dataset};
   for (const [name, value] of Object.entries(fields)) { const e = new Element(); e.value = value; f.fields[name] = e; }
   f.fields.csrfmiddlewaretoken = Object.assign(new Element(), {value: "token"});
   f.querySelector('button[type="submit"]').textContent = "Save";
@@ -50,7 +50,8 @@ function run(forms, replies) {
   };
   ids["status-live"].querySelectorAll = (s) => (s === ".status-write" ? ids["status-live"].forms || [] : []);
   const context = {
-    document, crypto, location: {protocol: "https:", host: "example.test"}, console, Uint8Array, JSON, Promise,
+    document, crypto, window: {CyaTimezones: {toUtc(text) { return new Date(text + "Z").toISOString(); }}},
+    location: {protocol: "https:", host: "example.test"}, console, Uint8Array, JSON, Promise,
     WebSocket: function (url) { sockets.push(this); this.url = url; this.close = () => { this.closed = true; }; },
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {},
     fetch: (url, options = {}) => {

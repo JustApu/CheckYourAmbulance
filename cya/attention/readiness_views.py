@@ -30,6 +30,7 @@ from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.inspections.views import STATUS_LABELS as VEHICLE_STATUS_LABELS
 from cya.inspections.views import _authorized, reverse_socket
 from cya.inspections.workflow_views import STATUS_LABELS
+from cya.schedules.engine import resolve_local
 from cya.shell.navigation import roles_for
 from cya.shell.views import deny_section
 
@@ -38,18 +39,24 @@ READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})
 LIVE_SOCKETS = 3  # one fewer than the default per-user socket limit, leaving room for one tab
 
 
-def _as_of(request):
+def _as_of(request, station_zone=None):
     """(instant or None, error) from ?as_of=, the only query parameter."""
     if set(request.GET) - {"as_of"} or len(request.GET.getlist("as_of")) > 1:
         return None, "INVALID_FIELDS"
     text = request.GET.get("as_of")
     if text is None:
         return None, None
+    if text == "" and station_zone is not None:
+        return None, None
     try:
         value = datetime.fromisoformat(text)
     except ValueError:
         return None, "INVALID_AS_OF"
-    if value.utcoffset() is None or value > timezone.now():
+    if value.utcoffset() is None:
+        if station_zone is None:
+            return None, "INVALID_AS_OF"
+        value = resolve_local(value.date(), value.time(), station_zone)
+    if value > timezone.now():
         return None, "INVALID_AS_OF"
     return value, None
 
@@ -130,7 +137,7 @@ def _screen(request, template, background=False):
     roles = roles_for(user)
     if not roles & READERS:
         return deny_section(request, user, roles, "VIEW_FLEET_READINESS")
-    as_of, error = _as_of(request)
+    as_of, error = _as_of(request, user.organization.station_zone)
     if error:
         raise Http404
     try:

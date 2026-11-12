@@ -27,6 +27,10 @@ const themeBootstrap = readFileSync(
   path.join(root, "cya/shell/templates/shell/theme_bootstrap.js"),
   "utf8",
 );
+const timezoneScript = readFileSync(
+  path.join(root, "cya/shell/templates/shell/timezone.js"),
+  "utf8",
+);
 const html = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic vehicle inspection</title><script>${themeBootstrap}</script><script>window.__themeBeforeStyles = document.documentElement.getAttribute("data-theme");</script><style>${css}</style></head>
@@ -59,8 +63,8 @@ const outcomeRows = [
   { item_id: "item-prior-pass", item_label: "Suction unit", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 3, obligation_state: "DUE", obligation_outcome: null, due_at: "2026-06-01T06:00:00Z", item_attention: "CLEAR", needs_action: true, check_suspended: false, deficiencies: [], latest_check_id: "check-prior", latest_check_outcome: "PASSED", latest_check_at: "2026-05-31T00:00:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
   { item_id: "item-unable", item_label: "Portable monitor", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 4, obligation_state: "DUE", obligation_outcome: null, due_at: "2026-06-01T06:00:00Z", item_attention: "ATTENTION", needs_action: true, check_suspended: false, deficiencies: [{ id: "def-unable", severity_label: "Low", status: "PENDING_VERIFICATION", summary: "Synthetic monitor issue" }], latest_check_id: "check-unable", latest_check_outcome: "UNABLE_TO_INSPECT", latest_check_at: "2026-06-01T00:10:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
 ];
-function inspectionMarkup(userId, sessionId) {
-  const config = { user_id: userId, session_id: sessionId, vehicle_id: "vehicle-a", checklist_version_id: "version-a", state: "OPEN", view: "NORMAL", needs_attention_only: false, urls: { checklist: "/api/checklist", checks: "/api/checks", odometer: "/api/odometer", preferences: "/api/preferences", reopen: "/api/reopen", vehicle: "/vehicle", socket: "/socket", suggestions: "/suggestions", deficiency_detail: "/deficiency/DEFICIENCY/" } };
+function inspectionMarkup(userId, sessionId, timeZone = "America/New_York") {
+  const config = { user_id: userId, session_id: sessionId, vehicle_id: "vehicle-a", checklist_version_id: "version-a", time_zone: timeZone, state: "OPEN", view: "NORMAL", needs_attention_only: false, urls: { checklist: "/api/checklist", checks: "/api/checks", odometer: "/api/odometer", preferences: "/api/preferences", reopen: "/api/reopen", vehicle: "/vehicle", socket: "/socket", suggestions: "/suggestions", deficiency_detail: "/deficiency/DEFICIENCY/" } };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body>
   <main><section><p id="op-status">In service</p><p id="op-restrictions"></p></section>
   <div id="live-banner" hidden><span id="live-detail"></span></div><div id="stale" hidden></div><p id="session-message" role="status"></p>
@@ -73,7 +77,32 @@ function inspectionMarkup(userId, sessionId) {
   <dialog id="conflict-dialog"><p id="conflict-text"></p><button id="conflict-cancel" type="button">Cancel</button><button id="conflict-proceed" type="button">Proceed</button></dialog>
   <dialog id="outcome-dialog"><h2 id="outcome-title"></h2><form id="outcome-form"><textarea name="outcome_explanation"></textarea><select id="outcome-existing"></select><p id="outcome-matches"></p><p id="outcome-error"></p><fieldset id="outcome-create-fields"></fieldset><button id="outcome-cancel" type="button">Cancel</button></form></dialog>
   </main><script id="cya-config" type="application/json">${JSON.stringify(config)}</script>
-  <script>window.WebSocket = class { constructor() { setTimeout(() => { if (this.onopen) this.onopen(); }, 0); } close() {} };</script><script>${checklistScript}</script></body></html>`;
+  <script>${timezoneScript}</script><script>window.WebSocket = class { constructor() { setTimeout(() => { if (this.onopen) this.onopen(); }, 0); } close() {} };</script><script>${checklistScript}</script></body></html>`;
+}
+async function testChecklistTimezoneFallback(viewport) {
+  const page = await browser.newPage({ viewport, timezoneId: "Pacific/Auckland" });
+  await page.route("http://inspection.test/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith("/api/")) {
+      const body = url.pathname === "/api/checklist"
+        ? { status: "OK", items: [outcomeRows[0]], group_progress: [
+          { key: "compartment:comp-cab", label: "Cab", total: 1, checked: 0, due: 1, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 1 },
+        ], vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
+        : { status: "COMMITTED", result: {} };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "text/html", body: inspectionMarkup("emt-a", "session-a", "Invalid/Zone") });
+  });
+  try {
+    await page.goto("http://inspection.test/fallback", { waitUntil: "load" });
+    await page.getByRole("button", { name: /^Cab / }).click();
+    const row = page.locator('#items > li[data-item-key="item-fail|"]');
+    await row.waitFor();
+    assert.match(await row.innerText(), /2026-06-01 00:00:00 UTC/, `${viewport.name}: timestamp fallback did not state UTC`);
+  } finally {
+    await page.close();
+  }
 }
 async function testInspectionNavigation(viewport) {
   const page = await browser.newPage({ viewport });
@@ -224,6 +253,44 @@ async function testInspectionOutcomeSemantics(viewport) {
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR || path.join(os.tmpdir(), `cya-browser-smoke-${process.pid}`);
 const browser = await chromium.launch({ headless: true });
 const failures = [];
+async function testAgencyTimezoneConversion() {
+  for (const deviceZone of ["UTC", "America/Los_Angeles", "Pacific/Auckland"]) {
+    const context = await browser.newContext({timezoneId: deviceZone});
+    const page = await context.newPage();
+    try {
+      await page.setContent(`<script>${timezoneScript}</script>`);
+      const actual = await page.evaluate(() => ({
+        regular: window.CyaTimezones.toUtc("2026-06-01T12:00", "America/New_York"),
+        fold: window.CyaTimezones.toUtc("2026-11-01T01:30", "America/New_York"),
+        gap: window.CyaTimezones.toUtc("2026-03-08T02:30", "America/New_York"),
+        southernFold: window.CyaTimezones.toUtc("2026-04-05T01:45", "Australia/Lord_Howe"),
+        southernGap: window.CyaTimezones.toUtc("2026-10-04T02:15", "Australia/Lord_Howe"),
+        savedCheck: window.CyaTimezones.formatUtc("2026-06-01T16:00:00Z", "America/New_York"),
+      }));
+      assert.deepEqual(actual, {
+        regular: "2026-06-01T16:00:00.000Z",
+        fold: "2026-11-01T05:30:00.000Z",
+        gap: "2026-03-08T07:00:00.000Z",
+        southernFold: "2026-04-04T14:45:00.000Z",
+        southernGap: "2026-10-03T15:30:00.000Z",
+        savedCheck: "2026-06-01 12:00:00 EDT (GMT-4)",
+      }, `device timezone ${deviceZone}: agency-zone conversion changed`);
+      const invalid = await page.evaluate(() => {
+        const errors = [];
+        for (const [value, zone] of [["not-a-date", "America/New_York"], ["2026-06-01T12:00", "Invalid/Zone"]]) {
+          try { window.CyaTimezones.toUtc(value, zone); }
+          catch (error) { errors.push(error.message); }
+        }
+        return errors;
+      });
+      assert.match(invalid[0], /valid agency-local date and time/);
+      assert.match(invalid[1], /agency time zone is unavailable/);
+      console.log(`device ${deviceZone}: station-local normal, DST fold and DST gap conversion passed`);
+    } finally {
+      await context.close();
+    }
+  }
+}
 async function waitForNavLayout(page, narrow) {
   await page.waitForFunction((isNarrow) => {
     const toggle = document.getElementById("site-nav-toggle");
@@ -332,6 +399,8 @@ async function testDeficiencyFilters(viewport) {
 }
 
 try {
+  await testAgencyTimezoneConversion();
+  await testChecklistTimezoneFallback(viewports[0]);
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport });
     try {

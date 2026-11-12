@@ -2,12 +2,22 @@
 
 import re
 import time
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest import mock
+from zoneinfo import ZoneInfo
 
+from django.http import HttpResponse
+from django.template import Context, Template
 from django.template.loader import render_to_string
-from django.test import Client, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
-from cya.accounts.middleware import SESSION_AUTH_TIME_KEY, SESSION_USER_KEY
+from cya.accounts.middleware import (
+    SESSION_AUTH_TIME_KEY,
+    SESSION_USER_KEY,
+    OrganizationTimezoneMiddleware,
+)
 from cya.accounts.models import Organization, User
 from cya.accounts.returns import sign_in_location
 from cya.authorization.tests.stubs import configure_backend
@@ -15,6 +25,37 @@ from cya.shell import navigation
 
 ROLES = {}  # user id -> role names, read by the injected lookup below
 LOOKUP = "cya.tests.test_shell.lookup"
+
+
+class StationTimeFilterTests(SimpleTestCase):
+    def test_both_fall_back_instants_keep_distinct_zone_and_offset(self):
+        first = datetime(2025, 11, 2, 5, 30, tzinfo=UTC)
+        second = datetime(2025, 11, 2, 6, 30, tzinfo=UTC)
+        template = Template("{% load station_time %}{{ instant|station_time }}")
+        seconds_template = Template('{% load station_time %}{{ instant|station_time:"seconds" }}')
+        with timezone.override(ZoneInfo("America/New_York")):
+            self.assertEqual(
+                template.render(Context({"instant": first})), "2025-11-02 01:30 EDT (-0400)"
+            )
+            self.assertEqual(
+                template.render(Context({"instant": second})), "2025-11-02 01:30 EST (-0500)"
+            )
+            self.assertEqual(
+                seconds_template.render(Context({"instant": first})),
+                "2025-11-02 01:30:00 EDT (-0400)",
+            )
+
+
+class OrganizationTimezoneMiddlewareTests(TestCase):
+    def test_station_zone_is_activated_and_anonymous_requests_reset_to_utc(self):
+        middleware = OrganizationTimezoneMiddleware(
+            lambda _request: HttpResponse(timezone.get_current_timezone_name())
+        )
+        signed_in = SimpleNamespace(
+            cya_user=SimpleNamespace(organization=SimpleNamespace(station_zone="America/New_York"))
+        )
+        self.assertEqual(middleware(signed_in).content, b"America/New_York")
+        self.assertEqual(middleware(SimpleNamespace(cya_user=None)).content, b"UTC")
 
 
 def lookup(user):

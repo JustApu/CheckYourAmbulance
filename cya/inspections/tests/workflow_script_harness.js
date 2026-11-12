@@ -67,6 +67,10 @@ function field(form, name, value = "", type = "text") {
 function environment(config, forms = []) {
   const elements = {}, requests = [], sockets = [], timers = [];
   const window = {scrollY: 0, innerHeight: 200, simulateListJump: false,
+    CyaTimezones: {
+      toUtc(text) { return new Date(text + "Z").toISOString(); },
+      formatUtc(text) { const date = new Date(text); return isNaN(date) ? "" : date.toISOString(); },
+    },
     localStorage: {getItem(key) { return key.endsWith(":user:session") ? JSON.stringify({version: 1, mode: "FLAT"}) : null; }, setItem() {}},
     scrollBy(_x, y) { this.scrollY += y; }};
   const document = {
@@ -114,7 +118,7 @@ function environment(config, forms = []) {
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
-  const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version",
+  const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
     urls: {checks: "/checks", checklist: "/checklist", suggestions: "/suggestions", deficiency_detail: "/deficiencies/DEFICIENCY/", socket: "/live", odometer: "/odometer"}};
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
@@ -280,6 +284,20 @@ function generic(kind) {
     run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "theirs", latest_check_outcome: "FAILED"}]);
     run.context.testUI.render();
     assert(!isPrimary(findAction(item(), "pass")), "the server's recorded Fail outranks this page's earlier saved Pass");
+  }
+  {
+    // A display-zone failure must not make the checklist unusable; keep an explicit UTC timestamp.
+    const run = checklist(), item = () => run.elements.items.children[0], warnings = [];
+    run.window.console = {error: (message) => warnings.push(message)};
+    run.window.CyaTimezones.formatUtc = () => { throw new Error("synthetic timezone failure"); };
+    run.context.testUI.setRows([row]); run.context.testUI.render(); run.context.testUI.render();
+    assert.equal(run.elements.items.children.length, 1);
+    assert(findClass(item(), "last-check").textContent.includes("2026-06-01 00:00:00 UTC"), findClass(item(), "last-check").textContent);
+    assert.deepEqual(warnings, ["Agency time zone display is unavailable; showing this timestamp in UTC."]);
+    const missingHelper = checklist();
+    delete missingHelper.window.CyaTimezones;
+    missingHelper.context.testUI.setRows([row]); missingHelper.context.testUI.render();
+    assert.equal(missingHelper.elements.items.children.length, 1, "missing shared formatter hid the checklist row");
   }
   {
     // Issue 104: window status, latest recorded result and deficiency lifecycle remain separate.

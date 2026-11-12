@@ -222,6 +222,7 @@ def session(request, session_id):
         "session_id": str(found.pk),
         "user_id": str(user.pk),
         "vehicle_id": str(found.vehicle_id),
+        "time_zone": user.organization.station_zone,
         "checklist_version_id": str(found.checklist_version_id),
         "state": shown,
         "view": saved["preferred_view"],
