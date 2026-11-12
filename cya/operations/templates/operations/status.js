@@ -34,7 +34,7 @@
       if (!body.items.length || body.items.length > 200) { throw new Error("Choose 1–200 items."); }
       body.due_at = window.CyaTimezones.toUtc(
         required(value(form, "due_at"), "Choose the due time in agency local time."),
-        form.dataset.timeZone || "UTC"
+        form.dataset.timeZone
       ).replace(".000Z", "Z");
       body.explanation = required(value(form, "explanation"), "An explanation is required.");
     }

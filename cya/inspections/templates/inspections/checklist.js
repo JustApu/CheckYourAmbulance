@@ -33,7 +33,7 @@
     return e;
   }
   function when(iso) {
-    return window.CyaTimezones.formatUtc(iso, config.time_zone || "UTC");
+    return window.CyaTimezones.formatUtc(iso, config.time_zone);
   }
   function key(row) { return row.item_id + "|" + (row.kit_id || ""); }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }

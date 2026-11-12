@@ -118,7 +118,7 @@ function environment(config, forms = []) {
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
-  const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version",
+  const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
     urls: {checks: "/checks", checklist: "/checklist", suggestions: "/suggestions", deficiency_detail: "/deficiencies/DEFICIENCY/", socket: "/live", odometer: "/odometer"}};
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);

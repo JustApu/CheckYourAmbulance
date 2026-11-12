@@ -82,7 +82,7 @@
   function required(text, message) { if (!text) { throw new Error(message); } return text; }
   function utcInstant(text, form) {
     required(text, "Choose an agency-local date and time.");
-    return window.CyaTimezones.toUtc(text, form.dataset.timeZone || "UTC");
+    return window.CyaTimezones.toUtc(text, form.dataset.timeZone);
   }
   function build(form) {
     var body = {operation_id: uuid4()}, kind = form.dataset.kind;
