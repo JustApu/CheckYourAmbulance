@@ -574,7 +574,7 @@ def deficiency(request, user, deficiency_id):
             "scope": scope,
             "verification_progress": verification_progress,
             "suspensions": suspensions,
-            "active_suspension_count": sum(not row.ended_at for row in suspensions),
+            "active_suspension_count": sum(not row["ended_at"] for row in suspensions),
             "supervisor": _supervisor_controls(
                 user,
                 found,
