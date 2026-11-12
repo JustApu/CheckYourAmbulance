@@ -14,6 +14,7 @@ from cya.attention.checklist import vehicle_checklist
 from cya.checklists.models import ChecklistTemplate, ChecklistVersion, Vehicle
 from cya.inspections import printable
 from cya.inspections.tests.test_crew_ui import CrewUiCase, PageTests
+from cya.kits.sealable import designate_compartment_sealable, designate_kit_sealable
 
 
 def row(**over):
@@ -98,6 +99,48 @@ class OutageSheetTests(SimpleTestCase):
     def test_no_rows_means_nothing_to_print(self):
         self.assertEqual(printable.outage_sheet([]), ([], []))
 
+    def test_a_sealable_compartment_prints_one_sealed_section_and_marks_its_kits(self):
+        rows = [
+            row(item_label="Cab light", compartment_id="c1", compartment_label="Cab"),
+            row(item_label="Drug box", compartment_id="c2", compartment_label="Locker"),
+            row(
+                item_label="Kit gauze",
+                kit_id="k1",
+                kit_label="Trauma 1",
+                compartment_id="c2",
+                compartment_label="Locker",
+            ),
+            row(
+                item_label="Kit gauze",
+                kit_id="k2",
+                kit_label="Trauma 2",
+                compartment_id="c3",
+                compartment_label="Shelf",
+            ),
+            row(
+                item_label="Kit tape",
+                kit_id="k3",
+                kit_label="Airway",
+                compartment_id="c4",
+                compartment_label="Bench",
+            ),
+        ]
+        sections, kits = printable.outage_sheet(
+            rows, sealable_compartments=frozenset({"c2", "c4"}), sealed_kits=frozenset({"k2"})
+        )
+        self.assertEqual(
+            [(s.heading, s.sealed, [r.label for r in s.rows]) for s in sections],
+            [
+                ("Cab", False, ["Cab light"]),
+                ("Locker", True, []),  # its items are covered by the cabinet seal (CAB-9)
+                ("Bench", True, []),  # a sealable compartment holding only a kit still prints
+            ],
+        )
+        self.assertEqual(
+            [(k.label, k.sealed, k.in_sealed_compartment) for k in kits],
+            [("Trauma 1", False, True), ("Trauma 2", True, False), ("Airway", False, True)],
+        )
+
 
 @override_settings(LOGGING_CONFIG=None)
 class PrintPageTests(CrewUiCase):
@@ -124,7 +167,9 @@ class PrintPageTests(CrewUiCase):
         self.assertIn(self.masks.label, text)
         # Each kit instance is one row; its contents are on the kit reference instead.
         self.assertNotIn(self.kit_item.label, text)
-        self.assertEqual(html.count("No seal or broken: contents checked"), 2)
+        # With no designations, kits are not sealed: each is one contents-checked row.
+        self.assertEqual(html.count("Contents checked against the kit reference"), 2)
+        self.assertNotIn("Sealed cabinet", html)
         self.assertIn("Reference", text)
         self.assertIn("then shred it", text)
         self.assertIn('href="/inspection/kit-reference/"', html)
@@ -133,6 +178,27 @@ class PrintPageTests(CrewUiCase):
         self.assertGreaterEqual(len(repeated), 2)  # one per printed table: each section, and kits
         for row in repeated:
             self.assertIn(str(version.pk), row)
+
+    def test_designated_cabinets_and_kits_print_seal_rows(self):
+        designate_kit_sealable(kit_id=self.kit_b, sealable=True, **self.context(self.supervisor))
+        html = self.client.get(self.url()).content.decode()
+        self.assertEqual(html.count('class="sealed-kit"'), 1)  # kit B only
+        self.assertEqual(html.count("Contents checked against the kit reference"), 1)
+        self.assertNotIn("Inside a sealed cabinet", html)
+
+        designate_compartment_sealable(
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(self.cabinet.pk),
+            sealable=True,
+            **self.context(self.supervisor),
+        )
+        html = self.client.get(self.url()).content.decode()
+        text = strip_tags(html)
+        self.assertEqual(html.count('class="sealed-compartment"'), 1)
+        self.assertIn("An intact seal covers every item and kit inside", text)
+        self.assertNotIn(self.suction.label, text)  # the cabinet's items are covered by its seal
+        self.assertIn(self.siren.label, text)  # a vehicle-system item is not in the cabinet
+        self.assertEqual(text.count("Inside a sealed cabinet"), 2)  # both kits are in it
 
     def test_the_printed_instant_uses_the_station_zone_with_its_offset(self):
         self.org.station_zone = "America/New_York"
