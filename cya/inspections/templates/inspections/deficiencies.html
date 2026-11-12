@@ -20,7 +20,7 @@
 <ul class="plain">
 {% for row in page.rows %}
 <li class="panel deficiency-list-entry">
-<a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · {{ row.deficiency.reported_at|date:"Y-m-d H:i" }} UTC</p>
+<a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · {{ row.deficiency.reported_at|date:"Y-m-d H:i T (O)" }}</p>
 <p>Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}</p>
 </li>
 {% empty %}

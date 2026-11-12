@@ -67,6 +67,10 @@ function field(form, name, value = "", type = "text") {
 function environment(config, forms = []) {
   const elements = {}, requests = [], sockets = [], timers = [];
   const window = {scrollY: 0, innerHeight: 200, simulateListJump: false,
+    CyaTimezones: {
+      toUtc(text) { return new Date(text + "Z").toISOString(); },
+      formatUtc(text) { const date = new Date(text); return isNaN(date) ? "" : date.toISOString(); },
+    },
     localStorage: {getItem(key) { return key.endsWith(":user:session") ? JSON.stringify({version: 1, mode: "FLAT"}) : null; }, setItem() {}},
     scrollBy(_x, y) { this.scrollY += y; }};
   const document = {

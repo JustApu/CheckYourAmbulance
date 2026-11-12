@@ -774,6 +774,7 @@ def verification(request, user, deficiency_id):
     verification_scope(found)
     config = {
         "vehicle_id": str(found.vehicle_id),
+        "time_zone": user.organization.station_zone,
         "verification_for_deficiency_id": str(found.pk),
         "state": "OPEN",
         "view": "NORMAL",

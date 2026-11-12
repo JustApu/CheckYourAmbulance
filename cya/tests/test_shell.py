@@ -2,12 +2,19 @@
 
 import re
 import time
+from types import SimpleNamespace
 from unittest import mock
 
+from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import Client, TestCase, override_settings
+from django.utils import timezone
 
-from cya.accounts.middleware import SESSION_AUTH_TIME_KEY, SESSION_USER_KEY
+from cya.accounts.middleware import (
+    OrganizationTimezoneMiddleware,
+    SESSION_AUTH_TIME_KEY,
+    SESSION_USER_KEY,
+)
 from cya.accounts.models import Organization, User
 from cya.accounts.returns import sign_in_location
 from cya.authorization.tests.stubs import configure_backend
@@ -15,6 +22,20 @@ from cya.shell import navigation
 
 ROLES = {}  # user id -> role names, read by the injected lookup below
 LOOKUP = "cya.tests.test_shell.lookup"
+
+
+class OrganizationTimezoneMiddlewareTests(TestCase):
+    def test_station_zone_is_activated_and_anonymous_requests_reset_to_utc(self):
+        middleware = OrganizationTimezoneMiddleware(
+            lambda _request: HttpResponse(timezone.get_current_timezone_name())
+        )
+        signed_in = SimpleNamespace(
+            cya_user=SimpleNamespace(
+                organization=SimpleNamespace(station_zone="America/New_York")
+            )
+        )
+        self.assertEqual(middleware(signed_in).content, b"America/New_York")
+        self.assertEqual(middleware(SimpleNamespace(cya_user=None)).content, b"UTC")
 
 
 def lookup(user):

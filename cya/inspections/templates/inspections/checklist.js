@@ -33,8 +33,7 @@
     return e;
   }
   function when(iso) {
-    var d = new Date(iso);
-    return isNaN(d) ? "" : d.toLocaleString();
+    return window.CyaTimezones.formatUtc(iso, config.time_zone || "UTC");
   }
   function key(row) { return row.item_id + "|" + (row.kit_id || ""); }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }

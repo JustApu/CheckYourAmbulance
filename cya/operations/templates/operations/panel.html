@@ -2,7 +2,7 @@
 <h2 id="current-heading">Current status</h2>
 {% if current %}
 <p class="status-line"><span class="pill status-pill" data-status="{{ current.status }}">{{ current.status_label }}</span>
-<span class="muted">since <time datetime="{{ current.recorded_at.isoformat }}">{{ current.recorded_at|date:"Y-m-d H:i" }} UTC</time> · set by {{ current.actor }}</span></p>
+<span class="muted">since <time datetime="{{ current.recorded_at.isoformat }}">{{ current.recorded_at|date:"Y-m-d H:i T (O)" }}</time> · set by {{ current.actor }}</span></p>
 {% if current.restrictions %}<p>Restrictions: {{ current.restrictions }}</p>{% endif %}
 <p>{{ current.explanation }}</p>
 {% else %}
@@ -15,14 +15,14 @@
 <p role="status">Inspection choices could not be loaded. Refresh this screen before requiring an inspection.</p>
 {% else %}
 <details><summary>Require an ad hoc inspection</summary>
-<form class="status-write" data-kind="adhoc">
+<form class="status-write" data-kind="adhoc" data-time-zone="{{ cya_user.organization.station_zone }}">
 {% csrf_token %}
 <fieldset><legend>Items to inspect (choose up to 200)</legend>
 {% for item in inspection_items %}
 <label><input type="checkbox" name="inspection_item" value="{{ item.item_id }}" data-kit="{{ item.kit_id|default_if_none:'' }}"> {{ item.item_label }}{% if item.kit_label %} · {{ item.kit_label }}{% endif %}</label>
 {% endfor %}
 </fieldset>
-<label>Due at (UTC) <input type="datetime-local" name="due_at" required></label>
+<label>Due at (agency local time, {{ cya_user.organization.station_zone }}) <input type="datetime-local" name="due_at" required></label>
 <label>Explanation <textarea name="explanation" maxlength="4000" required></textarea></label>
 <p>Checks are required from now until the due time, with no extra grace. Each kit instance is separate.</p>
 <button type="submit" class="button primary">Require inspection</button>
@@ -37,7 +37,7 @@
 <h2 id="pending-heading">Pending requests</h2>
 {% for r in pending %}
 <div class="panel">
-<p><strong>{{ r.label }}</strong> requested by {{ r.requested_by }} <span class="muted">{{ r.recorded_at|date:"Y-m-d H:i" }} UTC</span></p>
+<p><strong>{{ r.label }}</strong> requested by {{ r.requested_by }} <span class="muted">{{ r.recorded_at|date:"Y-m-d H:i T (O)" }}</span></p>
 <p>{{ r.reason }}</p>
 {% if can_set %}
 <form class="status-write" data-kind="decide" data-decision="APPROVE" data-request="{{ r.request_id }}">
@@ -65,7 +65,7 @@
 <h2 id="history-heading">History</h2>
 <ol>
 {% for e in history %}
-<li>{{ e.recorded_at|date:"Y-m-d H:i" }} UTC · {{ e.actor }} · {{ e.status_label }}{% if e.restrictions %} — {{ e.restrictions }}{% endif %}
+<li>{{ e.recorded_at|date:"Y-m-d H:i T (O)" }} · {{ e.actor }} · {{ e.status_label }}{% if e.restrictions %} — {{ e.restrictions }}{% endif %}
 <p>{{ e.explanation }}</p></li>
 {% empty %}
 <li>No status changes have been recorded.</li>

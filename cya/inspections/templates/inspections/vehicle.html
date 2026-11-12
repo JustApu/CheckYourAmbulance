@@ -18,7 +18,7 @@
   <h2 id="start-heading">Inspection</h2>
   {% if active_session %}
   <div class="active-inspection">
-    <p><strong>Open inspection:</strong> {{ active_session.template_label }} · started <time datetime="{{ active_session.opened_at.isoformat }}">{{ active_session.opened_at|date:"Y-m-d H:i" }} UTC</time></p>
+    <p><strong>Open inspection:</strong> {{ active_session.template_label }} · started <time datetime="{{ active_session.opened_at.isoformat }}">{{ active_session.opened_at|date:"Y-m-d H:i T (O)" }}</time></p>
     {% if active_session.participant %}
     <a class="button primary" href="{{ active_session.url }}">Continue inspection</a>
     {% elif join_template_id %}
@@ -56,7 +56,7 @@
   <ul class="plain">
   {% for s in sessions %}
     <li class="session-row">
-      <span class="session-row-status"><strong>{{ s.template_label }}</strong> · {{ s.state_label }} · opened <time datetime="{{ s.opened_at.isoformat }}">{{ s.opened_at|date:"Y-m-d H:i" }} UTC</time></span>
+      <span class="session-row-status"><strong>{{ s.template_label }}</strong> · {{ s.state_label }} · opened <time datetime="{{ s.opened_at.isoformat }}">{{ s.opened_at|date:"Y-m-d H:i T (O)" }}</time></span>
       {% if s.participant and s.state == "OPEN" %}<a class="button" href="{{ s.url }}">Continue inspection</a>
       {% elif s.participant and s.state == "INCOMPLETE" %}<a class="button" href="{{ s.url }}">Resume incomplete inspection</a>
       {% elif s.participant and s.state == "CLOSED" %}<a class="button" href="{{ s.url }}">Open closed inspection</a>

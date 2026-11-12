@@ -309,6 +309,7 @@ class PageTests(CrewUiCase):
         self.assertEqual(config["session_id"], session_id)
         self.assertEqual(config["user_id"], str(self.user.pk))
         self.assertEqual(config["vehicle_id"], str(self.vehicle.pk))
+        self.assertEqual(config["time_zone"], self.org.station_zone)
         self.assertEqual(config["state"], "OPEN")
         self.assertEqual(config["view"], "NORMAL")
         self.assertFalse(config["needs_attention_only"])

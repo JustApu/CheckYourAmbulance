@@ -80,11 +80,9 @@
   function field(form, name) { return form.querySelector('[name="' + name + '"]'); }
   function value(form, name) { var input = field(form, name); return input ? input.value.trim() : ""; }
   function required(text, message) { if (!text) { throw new Error(message); } return text; }
-  function utcInstant(text) {
-    required(text, "Choose a date and time in UTC.");
-    var date = new Date(text + "Z");
-    if (isNaN(date.getTime())) { throw new Error("Enter a valid date and time in UTC."); }
-    return date.toISOString();
+  function utcInstant(text, form) {
+    required(text, "Choose an agency-local date and time.");
+    return window.CyaTimezones.toUtc(text, form.dataset.timeZone || "UTC");
   }
   function build(form) {
     var body = {operation_id: uuid4()}, kind = form.dataset.kind;
@@ -95,20 +93,20 @@
     }
     if (kind === "extension") {
       body.reason = required(value(form, "reason"), "A reason is required.");
-      body.proposed_deadline = utcInstant(value(form, "proposed_deadline"));
+      body.proposed_deadline = utcInstant(value(form, "proposed_deadline"), form);
     }
     if (kind === "note") { body.note = required(value(form, "note"), "A note is required."); }
     if (kind === "dependency") {
       body.explanation = required(value(form, "explanation"), "An explanation is required.");
-      if (value(form, "follow_up_at")) { body.follow_up_at = utcInstant(value(form, "follow_up_at")); }
+      if (value(form, "follow_up_at")) { body.follow_up_at = utcInstant(value(form, "follow_up_at"), form); }
     }
     if (kind === "dependency-exit" && value(form, "return_to")) { body.return_to = value(form, "return_to"); }
     if (kind === "assign") { body.assignee_id = required(value(form, "assignee_id"), "Choose a person."); }
-    if (kind === "deadline") { body.deadline = utcInstant(value(form, "deadline")); }
+    if (kind === "deadline") { body.deadline = utcInstant(value(form, "deadline"), form); }
     if (kind === "extension-decision") {
       body.request_event_id = form.querySelector('[name="request_event_id"]').value;
       body.decision = required(value(form, "decision"), "Choose a decision.");
-      if (body.decision === "DIFFERENT_DATE") { body.deadline = utcInstant(value(form, "deadline")); }
+      if (body.decision === "DIFFERENT_DATE") { body.deadline = utcInstant(value(form, "deadline"), form); }
       else if (value(form, "deadline")) { throw new Error("Leave the different date empty unless you approve a different date."); }
     }
     if (kind === "acknowledge") {
@@ -128,7 +126,7 @@
         return entry;
       });
       if (!body.items.length) { throw new Error("Choose at least one item."); }
-      if (kind === "add-verification") { body.deadline = utcInstant(value(form, "deadline")); }
+      if (kind === "add-verification") { body.deadline = utcInstant(value(form, "deadline"), form); }
       if (kind === "suspend" && value(form, "explanation")) { body.explanation = value(form, "explanation"); }
     }
     if (["extension-decision", "acknowledge", "regrade", "expand", "add-verification", "admin-close", "admin-reopen", "empty-scope-close"].indexOf(kind) !== -1) {

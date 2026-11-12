@@ -27,6 +27,10 @@ const themeBootstrap = readFileSync(
   path.join(root, "cya/shell/templates/shell/theme_bootstrap.js"),
   "utf8",
 );
+const timezoneScript = readFileSync(
+  path.join(root, "cya/shell/templates/shell/timezone.js"),
+  "utf8",
+);
 const html = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic vehicle inspection</title><script>${themeBootstrap}</script><script>window.__themeBeforeStyles = document.documentElement.getAttribute("data-theme");</script><style>${css}</style></head>
@@ -224,6 +228,44 @@ async function testInspectionOutcomeSemantics(viewport) {
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR || path.join(os.tmpdir(), `cya-browser-smoke-${process.pid}`);
 const browser = await chromium.launch({ headless: true });
 const failures = [];
+async function testAgencyTimezoneConversion() {
+  for (const deviceZone of ["UTC", "America/Los_Angeles", "Pacific/Auckland"]) {
+    const context = await browser.newContext({timezoneId: deviceZone});
+    const page = await context.newPage();
+    try {
+      await page.setContent(`<script>${timezoneScript}</script>`);
+      const actual = await page.evaluate(() => ({
+        regular: window.CyaTimezones.toUtc("2026-06-01T12:00", "America/New_York"),
+        fold: window.CyaTimezones.toUtc("2026-11-01T01:30", "America/New_York"),
+        gap: window.CyaTimezones.toUtc("2026-03-08T02:30", "America/New_York"),
+        southernFold: window.CyaTimezones.toUtc("2026-04-05T01:45", "Australia/Lord_Howe"),
+        southernGap: window.CyaTimezones.toUtc("2026-10-04T02:15", "Australia/Lord_Howe"),
+        savedCheck: window.CyaTimezones.formatUtc("2026-06-01T16:00:00Z", "America/New_York"),
+      }));
+      assert.deepEqual(actual, {
+        regular: "2026-06-01T16:00:00.000Z",
+        fold: "2026-11-01T05:30:00.000Z",
+        gap: "2026-03-08T07:00:00.000Z",
+        southernFold: "2026-04-04T14:45:00.000Z",
+        southernGap: "2026-10-03T15:30:00.000Z",
+        savedCheck: "2026-06-01 12:00:00 EDT (GMT-4)",
+      }, `device timezone ${deviceZone}: agency-zone conversion changed`);
+      const invalid = await page.evaluate(() => {
+        const errors = [];
+        for (const [value, zone] of [["not-a-date", "America/New_York"], ["2026-06-01T12:00", "Invalid/Zone"]]) {
+          try { window.CyaTimezones.toUtc(value, zone); }
+          catch (error) { errors.push(error.message); }
+        }
+        return errors;
+      });
+      assert.match(invalid[0], /valid agency-local date and time/);
+      assert.match(invalid[1], /agency time zone is unavailable/);
+      console.log(`device ${deviceZone}: station-local normal, DST fold and DST gap conversion passed`);
+    } finally {
+      await context.close();
+    }
+  }
+}
 async function waitForNavLayout(page, narrow) {
   await page.waitForFunction((isNarrow) => {
     const toggle = document.getElementById("site-nav-toggle");
@@ -332,6 +374,7 @@ async function testDeficiencyFilters(viewport) {
 }
 
 try {
+  await testAgencyTimezoneConversion();
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport });
     try {

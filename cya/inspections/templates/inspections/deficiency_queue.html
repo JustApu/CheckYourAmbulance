@@ -9,7 +9,7 @@
 {% if group.page.total %}<p class="deficiency-queue-next-action">Next action: {{ group.page.rows.0.queue_action }}.</p>{% endif %}
 <ul class="plain">
 {% for row in group.page.rows %}
-<li class="deficiency-list-entry"><a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">Review {{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}{% if row.governing %} · governing deadline {{ row.governing|date:"Y-m-d H:i" }} UTC{% endif %}{% if row.requested_at %} · requested {{ row.requested_at|date:"Y-m-d H:i" }} UTC{% endif %}</p></li>
+<li class="deficiency-list-entry"><a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">Review {{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}{% if row.governing %} · governing deadline {{ row.governing|date:"Y-m-d H:i T (O)" }}{% endif %}{% if row.requested_at %} · requested {{ row.requested_at|date:"Y-m-d H:i T (O)" }}{% endif %}</p></li>
 {% empty %}
 <li>None.</li>
 {% endfor %}

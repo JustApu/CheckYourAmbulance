@@ -191,6 +191,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertNotContains(screen, 'id="odometer-form"')
         config = self.config(screen)
         self.assertEqual(config["verification_for_deficiency_id"], pk)
+        self.assertEqual(config["time_zone"], self.org.station_zone)
         self.assertNotIn("session_id", config)
         items = self.client.get(config["urls"]["checklist"]).json()
         self.assertEqual(len(items["items"]), 1)

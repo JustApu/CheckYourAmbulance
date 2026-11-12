@@ -84,6 +84,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "cya.accounts.middleware.CurrentUserMiddleware",
+    "cya.accounts.middleware.OrganizationTimezoneMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 

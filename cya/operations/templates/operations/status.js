@@ -17,7 +17,7 @@
     NO_CHANGE: "The vehicle already has that status. Refresh to see the current status.",
     ALREADY_DECIDED: "Someone already decided this request. Refresh to see the outcome.",
     VEHICLE_INACTIVE: "This vehicle is no longer active.",
-    INVALID_DUE_AT: "Choose a future due time in UTC.", INVALID_SCOPE: "The selected items changed. Refresh and choose again.",
+    INVALID_DUE_AT: "Choose a future due time in agency local time.", INVALID_SCOPE: "The selected items changed. Refresh and choose again.",
     MALFORMED_REQUEST: "Check the entries and try again.",
     CSRF_REJECTED: "Refresh the page to renew its security token.",
     OPERATION_REUSED: "This operation has different content. Refresh before trying again."
@@ -32,7 +32,10 @@
         return {item_id: input.value, kit_instance_id: input.dataset.kit || null};
       });
       if (!body.items.length || body.items.length > 200) { throw new Error("Choose 1–200 items."); }
-      body.due_at = required(value(form, "due_at"), "Choose the due time in UTC.") + ":00Z";
+      body.due_at = window.CyaTimezones.toUtc(
+        required(value(form, "due_at"), "Choose the due time in agency local time."),
+        form.dataset.timeZone || "UTC"
+      ).replace(".000Z", "Z");
       body.explanation = required(value(form, "explanation"), "An explanation is required.");
     }
     if (kind === "set") {
