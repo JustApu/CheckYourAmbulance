@@ -189,7 +189,11 @@ try {
       page = incomplete.page;
       await checkLayout(page, viewport);
       assert.equal(await page.getByRole("link", { name: "Resume incomplete Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
-      assert.equal(await page.getByRole("button", { name: "Start Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
+      await page.getByText("Start a new inspection", { exact: true }).click();
+      const startNew = page.getByRole("button", { name: "Start Night Shift Vehicle Safety Checklist inspection" });
+      assert.equal(await startNew.count(), 1);
+      assert.equal(await startNew.getAttribute("class").then((value) => value.split(/\s+/).includes("start-session")), true);
+      assert.equal(await startNew.getAttribute("class").then((value) => value.split(/\s+/).includes("start-separate")), false);
       assert.equal(await page.getByRole("link", { name: "Resume incomplete inspection" }).count(), 0, `${viewport.name}: incomplete resume action is duplicated`);
       await captureBrowserEvidence(page, `vehicle-resume-${viewport.name}.png`);
       console.log(`${viewport.name}: landing actions, session choice, target size and layout passed`);

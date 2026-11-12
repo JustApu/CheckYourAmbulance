@@ -35,7 +35,6 @@ a { color: var(--accent); }
 .site-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; padding: .5rem 1rem; border-bottom: 1px solid var(--line); }
 .brand { font-weight: 700; font-size: 1.125rem; color: var(--fg); text-decoration: none; display: inline-flex; align-items: center; min-height: 48px; }
 .header-tools { display: flex; align-items: center; gap: .75rem 1rem; flex-wrap: wrap; }
-.site-nav-toggle { display: none; }
 .account { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .account form { margin: 0; }
 .theme-control { display: inline-flex; align-items: center; gap: .5rem; }

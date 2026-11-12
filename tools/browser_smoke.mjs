@@ -428,7 +428,7 @@ try {
       const skipBox = await skipLink.boundingBox();
       assert.ok(skipBox && skipBox.y >= 0, `${viewport.name}: focused skip link is not visible`);
       assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: skip link focus indicator is missing`);
-      const navToggle = page.getByRole("button", { name: "Menu" });
+      const navToggle = page.locator("#site-nav-toggle");
       const navList = page.locator("#site-nav-list");
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-header") !== null), true, `${viewport.name}: menu is outside the compact header`);
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-nav") === null), true, `${viewport.name}: menu remains in its own navigation row`);
