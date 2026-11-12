@@ -490,7 +490,15 @@ def _supervisor_controls(user, found, status, roles, context, deadline, assignee
 def deficiency(request, user, deficiency_id):
     found = (
         Deficiency.objects.filter(organization_id=user.organization_id, pk=_identity(deficiency_id))
-        .select_related("vehicle", "reporter", "severity_version", "category_version")
+        .select_related(
+            "vehicle",
+            "reporter",
+            "severity_version",
+            "category_version",
+            "item",
+            "kit",
+            "compartment",
+        )
         .first()
     )
     if found is None:
@@ -524,6 +532,19 @@ def deficiency(request, user, deficiency_id):
     # The server refuses a past follow-up (INVALID_FOLLOW_UP), so a passed one is not prefilled.
     follow_up = dependency.get("follow_up_at") if dependency else None
     follow_up_passed = follow_up is not None and follow_up <= timezone.now()
+    can_close_empty_scope = status.status in EMPTY_SCOPE_CLOSURE_STATUSES and allowed(
+        "close_empty_scope_deficiency"
+    )
+    empty_scope_available = can_close_empty_scope and not service.correction_scope(
+        str(user.organization_id), found, timezone.now()
+    )
+    scope = verification_scope(found) if status.status == "PENDING_VERIFICATION" else []
+    verification_progress = {
+        "total": len(scope),
+        "verified": sum(row.satisfied for row in scope),
+        "outstanding": sum(not row.satisfied for row in scope),
+    }
+    suspensions = _suspensions(str(user.organization_id), str(found.pk))
     return render(
         request,
         "inspections/deficiency.html",
@@ -543,8 +564,8 @@ def deficiency(request, user, deficiency_id):
             and allowed("record_deficiency_correction"),
             # With no deadline the server answers NO_DEADLINE, so the form is not offered.
             # Issue 21: Supervisors and Administrators, only while the closure is a valid move.
-            "can_close_empty_scope": status.status in EMPTY_SCOPE_CLOSURE_STATUSES
-            and allowed("close_empty_scope_deficiency"),
+            "can_close_empty_scope": can_close_empty_scope,
+            "empty_scope_available": empty_scope_available,
             "can_request_extension": allowed("request_extension")
             and deadline["governing_deadline"] is not None,
             "can_update_dependency": allowed("update_external_dependency"),
@@ -556,8 +577,10 @@ def deficiency(request, user, deficiency_id):
             "deadline": deadline,
             "age_days": deadline["age_seconds"] // 86400,
             "assignee": status.assignee,
-            "scope": verification_scope(found) if status.status == "PENDING_VERIFICATION" else [],
-            "suspensions": _suspensions(str(user.organization_id), str(found.pk)),
+            "scope": scope,
+            "verification_progress": verification_progress,
+            "suspensions": suspensions,
+            "active_suspension_count": sum(not row["ended_at"] for row in suspensions),
             "supervisor": _supervisor_controls(
                 user,
                 found,

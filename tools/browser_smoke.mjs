@@ -43,6 +43,9 @@ const html = `<!doctype html>
 <section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open deficiency</span></section>
 <ul class="vehicle-list"><li><a class="vehicle-link" href="#status"><span class="vehicle-name">Unit 12 — Synthetic Regional Response Ambulance</span><span class="vehicle-badges"><span class="pill pending-pill" data-count="2">2 pending requests</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span></span></a></li></ul>
 <section id="deficiency" class="item item-attention" aria-labelledby="item-title"><div class="item-head"><h2 id="item-title">Synthetic oxygen cylinder</h2><span class="pill pill-attention">Known deficiency</span></div><p>Pressure below the approved range.</p><div class="item-controls" aria-label="Inspection actions"><button class="button primary" type="button" aria-label="Record passed">Passed</button><button class="button" type="button" aria-label="Record unable to inspect">Unable to inspect</button></div><label class="panel">Inspection note<input aria-label="Inspection note" type="text" value="Synthetic check"></label><p id="save-state" class="save-state" role="status"><span class="indicator-icon" aria-hidden="true">?</span><span class="save-state-text">Unconfirmed</span></p></section>
+<section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title"><h2 id="deficiency-overview-title">Synthetic oxygen cylinder pressure issue</h2><p class="deficiency-state"><strong>In Progress</strong> · High severity</p><p>Synthetic Ambulance 12</p><dl class="deficiency-facts"><dt>Affected scope</dt><dd>Synthetic oxygen cylinder</dd><dt>Assignee</dt><dd>Sam Example</dd><dt>Governing deadline</dt><dd>2026-11-15 12:00 UTC · Overdue</dd></dl></section>
+<section class="panel deficiency-next-action" aria-labelledby="next-action-title"><h2 id="next-action-title">Next action</h2><form class="workflow-write"><p>Record that the repair is complete and request verification.</p><button class="button primary" type="button">Record repair</button></form></section>
+<details class="panel deficiency-details" id="deficiency-work-updates"><summary>Work updates and dependencies</summary><form class="panel workflow-write"><h2>Add progress note</h2><label>Progress note<textarea aria-label="Progress note"></textarea></label><button class="button" type="button">Add note</button></form></details>
 </main><script>${shellScript}</script></body></html>`;
 const viewports = [
   { name: "phone-375", width: 375, height: 812 },
@@ -463,6 +466,26 @@ try {
       assert.equal(await page.getByLabel("Theme").inputValue(), "auto");
       assert.equal(await page.getByText("2 pending requests").count(), 1);
       assert.equal(await page.locator('.pending-pill[data-count="2"]').isVisible(), true);
+      assert.equal(await page.getByRole("heading", { name: "Next action" }).isVisible(), true);
+      assert.equal(await page.getByRole("button", { name: "Record repair" }).isVisible(), true);
+      const deficiencyDetails = page.locator("#deficiency-work-updates");
+      const deficiencySummary = deficiencyDetails.locator("summary");
+      assert.equal(await deficiencyDetails.evaluate((element) => element.open), false, `${viewport.name}: secondary deficiency actions should start collapsed`);
+      assert.equal(await deficiencySummary.count(), 1, `${viewport.name}: disclosure summary is missing`);
+      const disclosureBox = await deficiencySummary.boundingBox();
+      assert.ok(disclosureBox && disclosureBox.height >= 48, `${viewport.name}: disclosure target is shorter than 48 CSS pixels`);
+      await deficiencySummary.focus();
+      assert.equal(
+        await deficiencySummary.evaluate((element) => document.activeElement === element),
+        true,
+        `${viewport.name}: disclosure summary is not keyboard reachable`,
+      );
+      await page.keyboard.press("Enter");
+      assert.equal(await deficiencyDetails.evaluate((element) => element.open), true, `${viewport.name}: Enter did not expand secondary actions`);
+      assert.equal(await page.getByLabel("Progress note").isVisible(), true, `${viewport.name}: expanded disclosure content is not visible`);
+      await page.keyboard.press("Space");
+      assert.equal(await deficiencyDetails.evaluate((element) => element.open), false, `${viewport.name}: Space did not collapse secondary actions`);
+      assert.equal(await page.getByLabel("Progress note").isVisible(), false, `${viewport.name}: collapsed disclosure content remains visible`);
 
       const metrics = await page.evaluate(() => {
         const root = document.documentElement;

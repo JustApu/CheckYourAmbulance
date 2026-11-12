@@ -307,7 +307,8 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertContains(page, "Check suspension ended early")  # the history entry
         self.assertContains(page, "Synthetic &lt;b&gt;back&lt;/b&gt;.")
         self.assertNotContains(page, marker)
-        self.assertNotContains(page, "in force")
+        self.assertContains(page, "Check suspensions — 0 in force")
+        self.assertNotContains(page, "; in force")
         again = self.act(self.sup, pk, "check-suspension-ends", suspension_id=suspension_id)
         self.assertEqual(
             (again.status_code, again.json()["code"]), (422, "SUSPENSION_ALREADY_ENDED")
@@ -338,7 +339,8 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertNotContains(page, "Synthetic <i>close</i>.")
         self.assertContains(page, "Known Deficiency — Check Suspended")
         self.assertContains(page, "(Closed by administrator)")  # the suspension's end label
-        self.assertNotContains(page, "in force")
+        self.assertContains(page, "Check suspensions — 0 in force")
+        self.assertNotContains(page, "; in force")
 
         reopened = self.act(
             admin, pk, "administrator-reopenings", explanation="Synthetic <b>reopen</b>."
@@ -661,6 +663,21 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
         self.assertIn("Close: no current verification items", form)
         self.assertIn("only an Administrator can reopen it", form)
         self.assertIn('name="explanation" required', form)
+
+    def test_empty_scope_surfaces_its_closure_action_instead_of_an_invalid_repair(self):
+        pk = self.report()
+        open_page = self.page(self.sup, pk)
+        self.assertContains(open_page, "Start work")
+        self.assertNotContains(open_page, "No current verification items remain.")
+        self.assertNotContains(open_page, 'id="empty-scope-closure" open')
+        start_work(deficiency_id=pk, expected_event_id=self.latest(pk), **self.context(self.admin))
+        self.published_version([s for s in self.items if s["item_id"] != str(self.suction.pk)])
+        page = self.page(self.sup, pk)
+        self.assertContains(page, "No current verification items remain.")
+        self.assertContains(page, 'href="#empty-scope-closure"')
+        self.assertContains(page, 'id="empty-scope-closure" open')
+        self.assertNotContains(page, 'data-kind="repair"')
+        self.assertNotContains(page, "Record repair")
 
     def change(self, pk, action, **fields):
         return self.post(

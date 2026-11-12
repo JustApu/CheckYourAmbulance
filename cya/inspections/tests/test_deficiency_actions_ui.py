@@ -95,6 +95,41 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertEqual(self.change(pk, "dependency-exits").status_code, 201)
         self.assertContains(self.detail(pk), "Dependency ended")
 
+    def test_detail_summary_and_next_repair_action_precede_secondary_controls(self):
+        pk = self.report(summary="Synthetic pump issue")
+        opened = self.detail(pk)
+        self.assertContains(opened, "Synthetic pump issue")
+        self.assertContains(opened, "Affected scope")
+        self.assertContains(opened, self.suction.label)
+        self.assertContains(opened, "Next action")
+        self.assertContains(opened, "Work updates and dependencies")
+        self.assertContains(opened, 'data-kind="note"')
+        self.assertContains(
+            opened, '<details class="panel deficiency-details" id="work-updates">', html=False
+        )
+        with mock.patch("cya.inspections.workflow_views.roles_for", return_value={"SUPERVISOR"}):
+            supervisor_open = self.detail(pk)
+        self.assertContains(supervisor_open, "Start work")
+        self.assertLess(
+            supervisor_open.content.decode().index("Next action"),
+            supervisor_open.content.decode().index('data-kind="start-work"'),
+        )
+
+        start_work(
+            deficiency_id=pk,
+            expected_event_id=self.latest(pk),
+            **self.context(self.admin),
+        )
+        page = self.detail(pk)
+        markup = page.content.decode()
+        self.assertContains(page, "In Progress")
+        self.assertContains(page, "Record repair")
+        self.assertEqual(markup.count('data-kind="repair"'), 1)
+        self.assertLess(markup.index("Next action"), markup.index('data-kind="repair"'))
+        self.assertLess(
+            markup.index('data-kind="repair"'), markup.index("Work updates and dependencies")
+        )
+
     def test_role_union_supply_context_and_assignee_control_visibility(self):
         pk = self.report()
         # Without a deadline the server answers NO_DEADLINE, so no role is offered the form.
@@ -186,6 +221,12 @@ class DeficiencyActionsUiTests(CrewUiCase):
         page = self.detail(pk)
         self.assertContains(page, "Outstanding")
         self.assertContains(page, "Perform verification checks")
+        self.assertContains(page, "0 of 1 checks verified")
+        self.assertContains(page, "0 of 1 verified · 1 outstanding")
+        self.assertEqual(
+            page.context["verification_progress"],
+            {"total": 1, "verified": 0, "outstanding": 1},
+        )
         screen = self.client.get(f"/deficiencies/{pk}/verification/")
         self.assertEqual(screen.status_code, 200)
         self.assertNotContains(screen, 'id="odometer-form"')
@@ -228,6 +269,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         suspend(verified, self.suction)
         page = self.detail(verified)
         self.assertContains(page, "Routine checks suspended")
+        self.assertContains(page, "Check suspensions — 1 in force")
         self.assertNotContains(page, "Check suspensions ended")
         row = self.client.get(f"/deficiencies/{verified}/verification-items/").json()["items"][0]
         saved = self.post(
@@ -244,7 +286,9 @@ class DeficiencyActionsUiTests(CrewUiCase):
             },
         )
         self.assertEqual(saved.json()["result"]["verification"]["status"], "CLOSED_VERIFIED")
-        self.assertContains(self.detail(verified), "Check suspensions ended: 1", count=1)
+        verified_closed = self.detail(verified)
+        self.assertContains(verified_closed, "Check suspensions — 0 in force")
+        self.assertContains(verified_closed, "Check suspensions ended: 1", count=1)
 
         closed = self.report()
         suspend(closed, self.suction)
@@ -254,7 +298,9 @@ class DeficiencyActionsUiTests(CrewUiCase):
             explanation="Synthetic closure.",
             **self.context(self.admin),
         )
-        self.assertContains(self.detail(closed), "Check suspensions ended: 1", count=1)
+        closed_detail = self.detail(closed)
+        self.assertContains(closed_detail, "Check suspensions — 0 in force")
+        self.assertContains(closed_detail, "Check suspensions ended: 1", count=1)
 
     def test_scope_keeps_each_physical_kit_and_routine_pass_does_not_verify(self):
         pk = self.pending(self.kit_item, summary="Synthetic kit deficiency")
