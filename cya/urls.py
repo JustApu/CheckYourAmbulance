@@ -35,6 +35,11 @@ urlpatterns = [
         name="inspection-vehicle-print",
     ),
     path(
+        "inspection/kit-reference/",
+        inspection_views.kit_reference,
+        name="inspection-kit-reference",
+    ),
+    path(
         "inspection/sessions/<str:session_id>/",
         inspection_views.session,
         name="inspection-session",

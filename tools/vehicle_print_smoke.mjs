@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Phone-width and US Letter print smoke for the paper outage checklist (issue #9 Part A).
-// Uses the real print CSS with synthetic markup; Django-rendered structure is asserted in
-// cya/inspections/tests/test_print.py.
+// Phone-width and US Letter print smoke for the paper outage checklist and the kit reference
+// (issue #9 Part A). Uses the real print CSS with synthetic markup; Django-rendered structure is
+// asserted in cya/inspections/tests/test_print.py.
 
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,90 +18,136 @@ const css = readFileSync(
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR ||
   path.join(os.tmpdir(), `cya-vehicle-print-smoke-${process.pid}`);
 const versions = "Synthetic Daily Checklist, revision 3";
+const cols = '<colgroup><col class="col-item"><col class="col-result"><col class="col-value"><col class="col-initials"><col class="col-time"></colgroup>';
+const tick = (label) => `<span class="tick"><span class="box" aria-hidden="true"></span>${label}</span>`;
+
+function head(heading, columns) {
+  return `<thead><tr class="repeat-identity"><th colspan="5">Synthetic Medic 6 · ${versions}</th></tr>
+    <tr class="section-heading"><th colspan="5" scope="colgroup">${heading}</th></tr>
+    <tr class="column-heads">${columns.map((c) => `<th scope="col">${c}</th>`).join("")}</tr></thead>`;
+}
 
 function itemRow(index) {
   const quantity = index % 3 === 0;
   return `<tr><th scope="row" class="item">Synthetic item ${index} with a longer descriptive label${quantity ? ' <span class="expected">Expected: 6 masks</span>' : ""}<span class="instructions">Synthetic instruction text for item ${index}.</span></th>
-    <td class="outcomes" data-label="Result"><span class="tick"><span class="box" aria-hidden="true"></span>Pass</span><span class="tick"><span class="box" aria-hidden="true"></span>Fail</span><span class="tick"><span class="box" aria-hidden="true"></span>Unable</span><span class="tick"><span class="box" aria-hidden="true"></span>N/A</span></td>
+    <td class="outcomes" data-label="Result">${["Pass", "Fail", "Unable", "N/A"].map(tick).join("")}</td>
     <td class="value" data-label="Count or value">${quantity ? '<span class="blank"></span> masks' : ""}</td>
     <td class="initials" data-label="Initials"><span class="blank short"></span></td>
     <td class="time" data-label="Time"><span class="blank short"></span></td></tr>`;
 }
 
-function section(heading, kit, count, start) {
-  const rows = Array.from({ length: count }, (_, offset) => itemRow(start + offset)).join("");
-  return `<section class="sheet-section${kit ? " kit-section" : ""}"><table><colgroup><col class="col-item"><col class="col-result"><col class="col-value"><col class="col-initials"><col class="col-time"></colgroup><thead>
-    <tr class="repeat-identity"><th colspan="5">Synthetic Medic 6 · ${versions}</th></tr>
-    <tr class="section-heading"><th colspan="5" scope="colgroup">${heading}</th></tr>
-    <tr class="column-heads"><th scope="col">Item</th><th scope="col">Result</th><th scope="col">Count or value</th><th scope="col">Initials</th><th scope="col">Time</th></tr>
-    </thead><tbody>${rows}</tbody></table></section>`;
+function kitRow(index) {
+  return `<tr><th scope="row" class="item">Synthetic trauma kit ${index}<span class="instructions">Synthetic cabinet ${index}</span></th>
+    <td class="outcomes" data-label="Seal or contents">${tick("Seal intact")}<span class="tick wrap"><span class="box" aria-hidden="true"></span>No seal or broken: contents checked</span><span class="exceptions">Exceptions <span class="blank wide"></span></span></td>
+    <td class="value" data-label="Written on seal"><span class="seal-field">Crew ID <span class="blank short"></span></span><span class="seal-field">Earliest exp. <span class="blank short"></span></span></td>
+    <td class="initials" data-label="Initials"><span class="blank short"></span></td>
+    <td class="time" data-label="Time"><span class="blank short"></span></td></tr>`;
 }
 
-const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic Medic 6 paper checklist</title>
-  <style>${css}</style></head><body>
-  <div class="screen-only print-tools"><a href="/back">Back to Synthetic Medic 6</a><button type="button" class="print-button" id="print-sheet">Print</button><p>Prints on US Letter paper.</p></div>
-  <main><header class="sheet-header"><h1>Synthetic Medic 6: paper inspection checklist</h1>
+function page(title, body) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>
+    <style>${css}</style></head><body>
+    <div class="screen-only print-tools"><a href="/back">Back</a><button type="button" class="print-button" id="print-sheet">Print</button><p>Prints on US Letter paper.</p></div>
+    <main>${body}</main></body></html>`;
+}
+
+const items = Array.from({ length: 40 }, (_, offset) => itemRow(offset + 1)).join("");
+const kits = [1, 2, 3].map(kitRow).join("");
+const outage = page("Synthetic Medic 6 paper checklist", `<header class="sheet-header"><h1>Synthetic Medic 6: paper inspection checklist</h1>
   <p class="sheet-meta">Checklist: ${versions}</p><p class="sheet-fill">Date <span class="blank wide"></span> Shift <span class="blank"></span></p>
   <p class="sheet-rule">Use only during an app outage. Keep this sheet until its results are entered into the app, then shred it.</p></header>
-  ${section("Synthetic cab compartment", false, 40, 1)}${section("Kit: Synthetic trauma kit 1", true, 6, 41)}${section("Kit: Synthetic trauma kit 2", true, 6, 47)}
-  </main></body></html>`;
+  <section class="sheet-section"><table>${cols}${head("Synthetic cab compartment", ["Item", "Result", "Count or value", "Initials", "Time"])}<tbody>${items}</tbody></table></section>
+  <section class="sheet-section kits"><table>${cols}${head("Kits: confirm the seal, or check the contents against the kit reference", ["Kit", "Seal or contents", "Written on seal", "Initials", "Time"])}<tbody>${kits}</tbody></table></section>`);
+
+const kitTypes = Array.from({ length: 12 }, (_, kit) => `<section class="kit-type"><h3>Synthetic kit type ${kit + 1}</h3><ul>${
+  Array.from({ length: 8 }, (_, item) => `<li>Synthetic supply ${item + 1}, size ${kit + 1} (${item + 1})</li>`).join("")
+}</ul></section>`).join("");
+const reference = page("Kit reference", `<header class="sheet-header"><h1>Kit reference: what a complete kit contains</h1></header>
+  <section class="kit-reference"><h2>${versions} <span class="version-id">synthetic-version-id</span></h2><div class="kit-columns">${kitTypes}</div></section>`);
 
 // PDF page objects are "/Type /Page" (the page-tree node is "/Type /Pages").
 function pageCount(pdf) {
   return (pdf.toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
 }
 
+async function checkScreen(browser, name, html, viewport) {
+  const tab = await browser.newPage({ viewport });
+  try {
+    await tab.setContent(html, { waitUntil: "load" });
+    const screen = await tab.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      printButton: document.getElementById("print-sheet").getBoundingClientRect().height,
+    }));
+    assert.ok(screen.documentWidth <= viewport.width, `${name} ${viewport.width}: horizontal overflow ${JSON.stringify(screen)}`);
+    assert.ok(screen.printButton >= 48, `${name} ${viewport.width}: print button below 48px`);
+  } finally {
+    await tab.close();
+  }
+}
+
+async function printPdf(browser, html, probe) {
+  const tab = await browser.newPage({ viewport: { width: 816, height: 1056 } });
+  try {
+    await tab.setContent(html, { waitUntil: "load" });
+    await tab.emulateMedia({ media: "print" });
+    const printed = await tab.evaluate(probe);
+    return { printed, pdf: await tab.pdf({ preferCSSPageSize: true }) };
+  } finally {
+    await tab.close();
+  }
+}
+
+function keep(name, pdf) {
+  if (!process.env.BROWSER_SMOKE_OUTPUT_DIR) { return; }
+  mkdirSync(artifacts, { recursive: true });
+  writeFileSync(path.join(artifacts, name), pdf);
+}
+
 const browser = await chromium.launch({ headless: true });
 const failures = [];
 try {
-  for (const viewport of [{ name: "phone-375", width: 375, height: 812 }, { name: "desktop-1440", width: 1440, height: 900 }]) {
-    const page = await browser.newPage({ viewport });
-    try {
-      await page.setContent(html, { waitUntil: "load" });
-      const screen = await page.evaluate(() => ({
-        documentWidth: document.documentElement.scrollWidth,
-        printButton: document.getElementById("print-sheet").getBoundingClientRect().height,
-        identityShown: getComputedStyle(document.querySelector(".repeat-identity")).display !== "none",
-      }));
-      assert.ok(screen.documentWidth <= viewport.width, `${viewport.name}: horizontal overflow ${JSON.stringify(screen)}`);
-      assert.ok(screen.printButton >= 48, `${viewport.name}: print button below 48px`);
-      assert.equal(screen.identityShown, false, `${viewport.name}: repeated print header shown on screen`);
-      console.log(`${viewport.name}: screen layout passed`);
-    } catch (error) {
-      failures.push(`${viewport.name}: ${error.message}`);
-    } finally {
-      await page.close();
+  for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 }]) {
+    for (const [name, html] of [["outage sheet", outage], ["kit reference", reference]]) {
+      try {
+        await checkScreen(browser, name, html, viewport);
+        console.log(`${name} ${viewport.width}: screen layout passed`);
+      } catch (error) {
+        failures.push(error.message);
+      }
     }
   }
-
-  const page = await browser.newPage({ viewport: { width: 816, height: 1056 } });
   try {
-    await page.setContent(html, { waitUntil: "load" });
-    await page.emulateMedia({ media: "print" });
-    const printed = await page.evaluate(() => ({
+    const { printed, pdf } = await printPdf(browser, outage, () => ({
       toolsHidden: getComputedStyle(document.querySelector(".print-tools")).display === "none",
       identityShown: getComputedStyle(document.querySelector(".repeat-identity")).display !== "none",
-      kitBreak: getComputedStyle(document.querySelector(".kit-section")).breakBefore,
+      kitBreak: getComputedStyle(document.querySelector(".kits")).breakBefore,
       headerGroup: getComputedStyle(document.querySelector("thead")).display,
     }));
-    assert.equal(printed.toolsHidden, true, "print: screen tools are printed");
-    assert.equal(printed.identityShown, true, "print: vehicle and version header missing");
-    assert.equal(printed.kitBreak, "page", "print: a kit does not start on a new page");
-    assert.equal(printed.headerGroup, "table-header-group", "print: header rows will not repeat");
-    const pdf = await page.pdf({ preferCSSPageSize: true });
+    assert.equal(printed.toolsHidden, true, "outage print: screen tools are printed");
+    assert.equal(printed.identityShown, true, "outage print: vehicle and version header missing");
+    assert.equal(printed.headerGroup, "table-header-group", "outage print: header rows will not repeat");
+    assert.equal(printed.kitBreak, "auto", "outage print: kits force a new page and waste paper");
     const pages = pageCount(pdf);
-    // 40 cab rows overflow one Letter page, and each of the two kits starts its own page.
-    assert.ok(pages >= 4, `print: expected at least 4 Letter pages, got ${pages}`);
-    if (process.env.BROWSER_SMOKE_OUTPUT_DIR) {
-      mkdirSync(artifacts, { recursive: true });
-      writeFileSync(path.join(artifacts, "vehicle-print-letter.pdf"), pdf);
-    }
-    console.log(`print: ${pages} US Letter pages, repeated header, kit page breaks passed`);
+    assert.ok(pages >= 2 && pages <= 4, `outage print: expected 2-4 Letter pages for 40 items and 3 kits, got ${pages}`);
+    keep("outage-letter.pdf", pdf);
+    console.log(`outage print: ${pages} US Letter pages, repeated header, kits without page breaks passed`);
   } catch (error) {
-    failures.push(`print: ${error.message}`);
-  } finally {
-    await page.close();
+    failures.push(`outage print: ${error.message}`);
+  }
+  try {
+    const { printed, pdf } = await printPdf(browser, reference, () => ({
+      columns: getComputedStyle(document.querySelector(".kit-columns")).columnCount,
+      keepTogether: getComputedStyle(document.querySelector(".kit-type")).breakInside,
+    }));
+    assert.equal(printed.columns, "3", "reference print: not three columns");
+    assert.equal(printed.keepTogether, "avoid", "reference print: a kit may split across columns");
+    const pages = pageCount(pdf);
+    assert.equal(pages, 1, `reference print: 12 kits of 8 items should fit one Letter page, got ${pages}`);
+    keep("kit-reference-letter.pdf", pdf);
+    console.log("reference print: 12 kit types on one three-column US Letter page passed");
+  } catch (error) {
+    failures.push(`reference print: ${error.message}`);
   }
 } finally {
   await browser.close();

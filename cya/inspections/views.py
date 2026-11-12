@@ -201,6 +201,7 @@ def vehicle_print(request, vehicle_id):
     try:
         result = vehicle_checklist(organization_id, str(found.pk))
         listed = printable.versions(organization_id, result.rows)
+        sections, kits = printable.outage_sheet(result.rows)
     except (DatabaseError, ValueError) as failure:
         # ChecklistQueryError is a ValueError; the sheet must never print a partial checklist.
         logger.error("printable checklist unavailable (%s)", type(failure).__name__)
@@ -218,9 +219,35 @@ def vehicle_print(request, vehicle_id):
         "vehicle": found,
         "as_of": result.as_of,
         "versions": listed,
-        "sections": printable.sections(result.rows),
+        "sections": sections,
+        "kits": kits,
     }
     return render(request, "inspections/vehicle_print.html", context)
+
+
+@never_cache
+@require_GET
+def kit_reference(request):
+    """What a complete kit contains, per checklist revision: printed once and laminated."""
+    user, refusal = _authorized(request)
+    if refusal:
+        return refusal
+    now = timezone.now()
+    try:
+        templates = printable.kit_reference(str(user.organization_id), now)
+    except (DatabaseError, ValueError) as failure:
+        logger.error("kit reference unavailable (%s)", type(failure).__name__)
+        return render(
+            request,
+            "inspections/workflow_unavailable.html",
+            {
+                "title": "Kit reference temporarily unavailable",
+                "unavailable_content": "The kit reference",
+            },
+            status=503,
+        )
+    context = {"title": "Kit reference", "as_of": now, "templates": templates}
+    return render(request, "inspections/kit_reference.html", context)
 
 
 def _odometer_unit(user, vehicle):

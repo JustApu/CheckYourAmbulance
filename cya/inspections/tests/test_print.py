@@ -34,31 +34,32 @@ def row(**over):
     return SimpleNamespace(**(base | over))
 
 
-class SectionTests(SimpleTestCase):
-    def test_rows_group_by_place_in_order_and_kits_come_last_one_section_each(self):
+class OutageSheetTests(SimpleTestCase):
+    def test_rows_group_by_place_in_order_and_each_kit_is_one_row(self):
         rows = [
             row(item_label="Kit gauze", kit_id="k1", kit_label="Trauma 1", compartment_label="C2"),
             row(item_label="Cab light", compartment_id="c1", compartment_label="Cab"),
+            row(item_label="Kit tape", kit_id="k1", kit_label="Trauma 1", compartment_label="C2"),
             row(item_label="Siren", system_id="s1", system_label="Lights and sirens"),
             row(item_label="Kit gauze", kit_id="k2", kit_label="Trauma 2"),
             row(item_label="Cab mirror", compartment_id="c1", compartment_label="Cab"),
             row(item_label="Odometer", kind="VEHICLE_READING", allowed_outcomes=()),
         ]
-        found = printable.sections(rows)
+        sections, kits = printable.outage_sheet(rows)
         self.assertEqual(
-            [(s.heading, s.kit, [r.label for r in s.rows]) for s in found],
+            [(s.heading, [r.label for r in s.rows]) for s in sections],
             [
-                ("Cab", False, ["Cab light", "Cab mirror"]),
-                ("Lights and sirens", False, ["Siren"]),
-                ("Vehicle-wide", False, ["Odometer"]),
-                ("Kit: Trauma 1 (C2)", True, ["Kit gauze"]),
-                ("Kit: Trauma 2", True, ["Kit gauze"]),
+                ("Cab", ["Cab light", "Cab mirror"]),
+                ("Lights and sirens", ["Siren"]),
+                ("Vehicle-wide", ["Odometer"]),
             ],
         )
+        # A kit's contents are on the kit reference, not the outage sheet.
+        self.assertEqual([(k.label, k.place) for k in kits], [("Trauma 1", "C2"), ("Trauma 2", "")])
 
     def test_each_kind_gets_the_right_blank_and_expected_quantity(self):
         presence, quantity, measurement, reading = (
-            printable.sections([r])[0].rows[0]
+            printable.outage_sheet([r])[0][0].rows[0]
             for r in (
                 row(),
                 row(kind="QUANTITY", expected_quantity=6, unit="masks"),
@@ -72,8 +73,8 @@ class SectionTests(SimpleTestCase):
         self.assertEqual((measurement.outcomes, measurement.value_unit), (("Pass", "Fail"), "psi"))
         self.assertEqual((reading.outcomes, reading.value_unit, reading.expected), ((), "", ""))
 
-    def test_no_rows_means_no_sections(self):
-        self.assertEqual(printable.sections([]), [])
+    def test_no_rows_means_nothing_to_print(self):
+        self.assertEqual(printable.outage_sheet([]), ([], []))
 
 
 @override_settings(LOGGING_CONFIG=None)
@@ -98,12 +99,13 @@ class PrintPageTests(CrewUiCase):
         for heading in ("Item", "Result", "Count or value", "Initials", "Time"):
             self.assertIn(f'<th scope="col">{heading}</th>', html)
         text = strip_tags(html)
-        for item in (self.masks, self.kit_item):
-            self.assertIn(item.label, text)
-        self.assertEqual(html.count('class="sheet-section kit-section"'), 2)  # one per kit instance
-        self.assertIn("Kit: Reference", text)
-        self.assertIn("Kit: B", text)
+        self.assertIn(self.masks.label, text)
+        # Each kit instance is one row; its contents are on the kit reference instead.
+        self.assertNotIn(self.kit_item.label, text)
+        self.assertEqual(html.count("No seal or broken: contents checked"), 2)
+        self.assertIn("Reference", text)
         self.assertIn("then shred it", text)
+        self.assertIn('href="/inspection/kit-reference/"', html)
 
     def test_the_sheet_carries_no_personal_data_or_results(self):
         self.open()  # a session and participant exist; neither may appear on paper
@@ -154,3 +156,56 @@ class PrintPageTests(CrewUiCase):
         stray = SimpleNamespace(**{**vars(row()), "checklist_version_id": str(uuid4())})
         with self.assertRaises(ValueError):
             printable.versions(str(self.org.pk), [stray])
+
+
+@override_settings(LOGGING_CONFIG=None)
+class KitReferencePageTests(CrewUiCase):
+    URL = "/inspection/kit-reference/"
+
+    def test_the_reference_lists_each_kit_type_once_with_its_revision(self):
+        page = self.client.get(self.URL)
+        self.assertEqual(page.status_code, 200)
+        html = page.content.decode()
+        text = strip_tags(html)
+        template = ChecklistTemplate.objects.get(pk=self.template.pk)
+        version = ChecklistVersion.objects.get(
+            pk=vehicle_checklist(str(self.org.pk), str(self.vehicle.pk))
+            .rows[0]
+            .checklist_version_id
+        )
+        self.assertIn(f"{template.label}, revision {version.revision}", text)
+        self.assertIn(str(version.pk), html)
+        # Two kit instances share one kit type, so its contents appear once.
+        self.assertEqual(text.count(self.kit_item.label), 1)
+        self.assertNotIn(self.masks.label, text)  # loose items are not kit contents
+        self.assertIn("laminate", text)
+        self.assertNotIn(self.user.display_name, html)
+        self.assertNotIn("Sign out", html)
+
+    def test_a_template_without_a_version_in_force_is_left_out(self):
+        ChecklistTemplate.objects.create(organization=self.org, label="Synthetic unpublished")
+        text = strip_tags(self.client.get(self.URL).content.decode())
+        self.assertNotIn("Synthetic unpublished", text)
+        self.assertEqual(text.count(self.kit_item.label), 1)
+
+    def test_with_no_kit_contents_in_force_there_is_nothing_to_print(self):
+        with mock.patch("cya.inspections.printable.kit_reference", return_value=[]):
+            text = strip_tags(self.client.get(self.URL).content.decode())
+        self.assertIn("nothing to print", text)
+
+    def test_signed_out_and_no_role_are_refused(self):
+        anonymous = Client().get(self.URL)
+        self.assertEqual(
+            (anonymous.status_code, anonymous["Location"]), (302, sign_in_location(self.URL))
+        )
+        with override_settings(CYA_ROLE_LOOKUP=None):
+            self.assertEqual(self.client.get(self.URL).status_code, 403)
+
+    def test_a_failed_read_prints_nothing(self):
+        with (
+            mock.patch("cya.inspections.printable.kit_reference", side_effect=DatabaseError("x")),
+            self.assertLogs("cya.inspections.views", "ERROR"),
+        ):
+            page = self.client.get(self.URL)
+        self.assertEqual(page.status_code, 503)
+        self.assertNotIn("laminate", page.content.decode())

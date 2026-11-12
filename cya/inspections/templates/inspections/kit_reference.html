@@ -1,0 +1,50 @@
+<!doctype html>
+{% comment %}
+The kit reference (issue #9 Part A): what a complete kit contains, printed once per checklist
+revision and laminated. Standalone like the outage sheet, so it carries no personal data.
+{% endcomment %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} - Check Your Ambulance</title>
+<style>{% include "inspections/vehicle_print.css" %}</style>
+</head>
+<body>
+<div class="screen-only print-tools">
+  <a href="{% url 'inspection' %}">Back to inspection</a>
+  <button type="button" class="print-button" id="print-sheet">Print</button>
+  <p>Print once per checklist revision and laminate. Reprint when a revision changes. Prints on US Letter paper.</p>
+</div>
+<main>
+<header class="sheet-header">
+  <h1>Kit reference: what a complete kit contains</h1>
+  <p class="sheet-meta">From the checklists in force at <time datetime="{{ as_of|date:'c' }}">{{ as_of|date:"Y-m-d H:i" }} UTC</time>. Check each revision below against the revision on the outage checklist.</p>
+</header>
+{% for template in templates %}
+<section class="kit-reference" aria-labelledby="template-{{ forloop.counter }}">
+<h2 id="template-{{ forloop.counter }}">{{ template.label }} <span class="version-id">{{ template.id }}</span></h2>
+<div class="kit-columns">
+{% for name, rows in template.kit_types %}
+<section class="kit-type" aria-labelledby="kit-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
+<h3 id="kit-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">{{ name }}</h3>
+<ul>
+{% for row in rows %}<li>{{ row.label }}{% if row.expected %} ({{ row.expected }}){% endif %}{% if row.instructions %} <span class="kit-note">{{ row.instructions }}</span>{% endif %}</li>
+{% endfor %}</ul>
+</section>
+{% endfor %}
+</div>
+</section>
+{% empty %}
+<p>No checklist in force lists any kit contents, so there is nothing to print.</p>
+{% endfor %}
+</main>
+<script>
+(function () {
+  "use strict";
+  var button = document.getElementById("print-sheet");
+  if (button) { button.addEventListener("click", function () { window.print(); }); }
+})();
+</script>
+</body>
+</html>

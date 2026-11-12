@@ -25,6 +25,13 @@ tr { break-inside: avoid; }
 .col-result { width: 26%; }
 .col-value { width: 12%; }
 .col-initials, .col-time { width: 9%; }
+.kit-reference h2 { font-size: 1.1rem; margin: 1rem 0 .5rem; border-bottom: 2px solid #000000; overflow-wrap: anywhere; }
+.kit-columns { column-width: 15rem; column-gap: 1.5rem; }
+.kit-type { break-inside: avoid; margin: 0 0 .75rem; }
+.kit-type h3 { font-size: 1rem; margin: 0 0 .2rem; text-transform: uppercase; text-decoration: underline; }
+.kit-type ul { margin: 0; padding-left: 1.1rem; }
+.kit-type li { overflow-wrap: anywhere; }
+.kit-note { font-size: .85em; }
 .item { font-weight: 700; }
 .expected { display: block; font-weight: 400; }
 .instructions { display: block; font-weight: 400; font-size: .9em; }
@@ -33,6 +40,8 @@ tr { break-inside: avoid; }
 .blank { display: inline-block; min-width: 5em; height: 1.2em; border-bottom: 1px solid #000000; vertical-align: bottom; }
 .blank.short { min-width: 3em; }
 .blank.wide { min-width: 9em; }
+.tick.wrap { white-space: normal; align-items: flex-start; }
+.exceptions, .seal-field { display: block; margin-top: .25rem; }
 @media screen {
   .repeat-identity { display: none; }
 }
@@ -49,6 +58,7 @@ tr { break-inside: avoid; }
   main { max-width: none; }
   .screen-only { display: none; }
   h1 { font-size: 14pt; }
-  .kit-section { break-before: page; }
+  .kit-columns { column-count: 3; column-width: auto; }
+  .kit-type li { font-size: 9.5pt; }
   .section-heading th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
