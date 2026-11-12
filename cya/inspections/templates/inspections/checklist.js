@@ -32,8 +32,19 @@
     if (text !== undefined) { e.textContent = text; }
     return e;
   }
+  var timezoneDisplayWarningLogged = false;
   function when(iso) {
-    return window.CyaTimezones.formatUtc(iso, config.time_zone);
+    try {
+      return window.CyaTimezones.formatUtc(iso, config.time_zone);
+    } catch (_error) {
+      if (!timezoneDisplayWarningLogged && window.console && typeof window.console.error === "function") {
+        timezoneDisplayWarningLogged = true;
+        window.console.error("Agency time zone display is unavailable; showing this timestamp in UTC.");
+      }
+      var instant = typeof iso === "string" && iso ? new Date(iso) : null;
+      return !instant || isNaN(instant.getTime()) ? String(iso || "") :
+        instant.toISOString().replace(/\.000Z$/, " UTC").replace(/Z$/, " UTC").replace("T", " ");
+    }
   }
   function key(row) { return row.item_id + "|" + (row.kit_id || ""); }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }

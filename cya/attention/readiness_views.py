@@ -30,9 +30,9 @@ from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.inspections.views import STATUS_LABELS as VEHICLE_STATUS_LABELS
 from cya.inspections.views import _authorized, reverse_socket
 from cya.inspections.workflow_views import STATUS_LABELS
+from cya.schedules.engine import resolve_local
 from cya.shell.navigation import roles_for
 from cya.shell.views import deny_section
-from cya.schedules.engine import resolve_local
 
 logger = logging.getLogger(__name__)
 READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})

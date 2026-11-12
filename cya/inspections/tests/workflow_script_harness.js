@@ -286,6 +286,20 @@ function generic(kind) {
     assert(!isPrimary(findAction(item(), "pass")), "the server's recorded Fail outranks this page's earlier saved Pass");
   }
   {
+    // A display-zone failure must not make the checklist unusable; keep an explicit UTC timestamp.
+    const run = checklist(), item = () => run.elements.items.children[0], warnings = [];
+    run.window.console = {error: (message) => warnings.push(message)};
+    run.window.CyaTimezones.formatUtc = () => { throw new Error("synthetic timezone failure"); };
+    run.context.testUI.setRows([row]); run.context.testUI.render(); run.context.testUI.render();
+    assert.equal(run.elements.items.children.length, 1);
+    assert(findClass(item(), "last-check").textContent.includes("2026-06-01 00:00:00 UTC"), findClass(item(), "last-check").textContent);
+    assert.deepEqual(warnings, ["Agency time zone display is unavailable; showing this timestamp in UTC."]);
+    const missingHelper = checklist();
+    delete missingHelper.window.CyaTimezones;
+    missingHelper.context.testUI.setRows([row]); missingHelper.context.testUI.render();
+    assert.equal(missingHelper.elements.items.children.length, 1, "missing shared formatter hid the checklist row");
+  }
+  {
     // Issue 104: window status, latest recorded result and deficiency lifecycle remain separate.
     const run = checklist(), item = () => run.elements.items.children[0];
     const dueFail = {...row, obligation_state: "DUE", obligation_outcome: null, item_attention: "ATTENTION",

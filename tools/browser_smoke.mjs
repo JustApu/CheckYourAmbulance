@@ -63,8 +63,8 @@ const outcomeRows = [
   { item_id: "item-prior-pass", item_label: "Suction unit", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 3, obligation_state: "DUE", obligation_outcome: null, due_at: "2026-06-01T06:00:00Z", item_attention: "CLEAR", needs_action: true, check_suspended: false, deficiencies: [], latest_check_id: "check-prior", latest_check_outcome: "PASSED", latest_check_at: "2026-05-31T00:00:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
   { item_id: "item-unable", item_label: "Portable monitor", kit_id: null, kit_label: null, compartment_id: "comp-cab", compartment_label: "Cab", system_id: null, system_label: null, checklist_version_id: "version-a", kind: "PRESENCE", instructions: "", display_order: 4, obligation_state: "DUE", obligation_outcome: null, due_at: "2026-06-01T06:00:00Z", item_attention: "ATTENTION", needs_action: true, check_suspended: false, deficiencies: [{ id: "def-unable", severity_label: "Low", status: "PENDING_VERIFICATION", summary: "Synthetic monitor issue" }], latest_check_id: "check-unable", latest_check_outcome: "UNABLE_TO_INSPECT", latest_check_at: "2026-06-01T00:10:00Z", latest_check_by: "Synthetic EMT", expected_quantity: null, unit: null, allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"] },
 ];
-function inspectionMarkup(userId, sessionId) {
-  const config = { user_id: userId, session_id: sessionId, vehicle_id: "vehicle-a", checklist_version_id: "version-a", state: "OPEN", view: "NORMAL", needs_attention_only: false, urls: { checklist: "/api/checklist", checks: "/api/checks", odometer: "/api/odometer", preferences: "/api/preferences", reopen: "/api/reopen", vehicle: "/vehicle", socket: "/socket", suggestions: "/suggestions", deficiency_detail: "/deficiency/DEFICIENCY/" } };
+function inspectionMarkup(userId, sessionId, timeZone = "America/New_York") {
+  const config = { user_id: userId, session_id: sessionId, vehicle_id: "vehicle-a", checklist_version_id: "version-a", time_zone: timeZone, state: "OPEN", view: "NORMAL", needs_attention_only: false, urls: { checklist: "/api/checklist", checks: "/api/checks", odometer: "/api/odometer", preferences: "/api/preferences", reopen: "/api/reopen", vehicle: "/vehicle", socket: "/socket", suggestions: "/suggestions", deficiency_detail: "/deficiency/DEFICIENCY/" } };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body>
   <main><section><p id="op-status">In service</p><p id="op-restrictions"></p></section>
   <div id="live-banner" hidden><span id="live-detail"></span></div><div id="stale" hidden></div><p id="session-message" role="status"></p>
@@ -77,7 +77,29 @@ function inspectionMarkup(userId, sessionId) {
   <dialog id="conflict-dialog"><p id="conflict-text"></p><button id="conflict-cancel" type="button">Cancel</button><button id="conflict-proceed" type="button">Proceed</button></dialog>
   <dialog id="outcome-dialog"><h2 id="outcome-title"></h2><form id="outcome-form"><textarea name="outcome_explanation"></textarea><select id="outcome-existing"></select><p id="outcome-matches"></p><p id="outcome-error"></p><fieldset id="outcome-create-fields"></fieldset><button id="outcome-cancel" type="button">Cancel</button></form></dialog>
   </main><script id="cya-config" type="application/json">${JSON.stringify(config)}</script>
-  <script>window.WebSocket = class { constructor() { setTimeout(() => { if (this.onopen) this.onopen(); }, 0); } close() {} };</script><script>${checklistScript}</script></body></html>`;
+  <script>${timezoneScript}</script><script>window.WebSocket = class { constructor() { setTimeout(() => { if (this.onopen) this.onopen(); }, 0); } close() {} };</script><script>${checklistScript}</script></body></html>`;
+}
+async function testChecklistTimezoneFallback(viewport) {
+  const page = await browser.newPage({ viewport, timezoneId: "Pacific/Auckland" });
+  await page.route("http://inspection.test/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith("/api/")) {
+      const body = url.pathname === "/api/checklist"
+        ? { status: "OK", items: [outcomeRows[0]], group_progress: [], vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
+        : { status: "COMMITTED", result: {} };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "text/html", body: inspectionMarkup("emt-a", "session-a", "Invalid/Zone") });
+  });
+  try {
+    await page.goto("http://inspection.test/fallback", { waitUntil: "load" });
+    const row = page.locator('#items > li[data-item-key="item-fail|"]');
+    await row.waitFor();
+    assert.match(await row.innerText(), /2026-06-01 00:00:00 UTC/, `${viewport.name}: timestamp fallback did not state UTC`);
+  } finally {
+    await page.close();
+  }
 }
 async function testInspectionNavigation(viewport) {
   const page = await browser.newPage({ viewport });
@@ -375,6 +397,7 @@ async function testDeficiencyFilters(viewport) {
 
 try {
   await testAgencyTimezoneConversion();
+  await testChecklistTimezoneFallback(viewports[0]);
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport });
     try {
