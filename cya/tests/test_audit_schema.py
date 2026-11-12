@@ -57,6 +57,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "check_suspension",
                     "shared_satisfaction_rule_member",
                     "kit_assignment_event",
+                    "kit_seal_designation",
                 },
             )
 
