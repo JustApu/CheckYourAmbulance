@@ -54,11 +54,15 @@ function page(title, body) {
 
 const items = Array.from({ length: 40 }, (_, offset) => itemRow(offset + 1)).join("");
 const kits = [1, 2, 3].map(kitRow).join("");
-const outage = page("Synthetic Medic 6 paper checklist", `<header class="sheet-header"><h1>Synthetic Medic 6: paper inspection checklist</h1>
+const outageHeader = `<header class="sheet-header"><h1>Synthetic Medic 6: paper inspection checklist</h1>
   <p class="sheet-meta">Checklist: ${versions}</p><p class="sheet-fill">Date <span class="blank wide"></span> Shift <span class="blank"></span></p>
   <p class="sheet-rule">Use only during an app outage. Keep this sheet until its results are entered into the app, then shred it.</p></header>
-  <section class="sheet-section"><table>${cols}${head("Synthetic cab compartment", ["Item", "Result", "Count or value", "Initials", "Time"])}<tbody>${items}</tbody></table></section>
-  <section class="sheet-section kits"><table>${cols}${head("Kits: confirm the seal, or check the contents against the kit reference", ["Kit", "Seal or contents", "Written on seal", "Initials", "Time"])}<tbody>${kits}</tbody></table></section>`);
+  <section class="sheet-section"><table>${cols}${head("Synthetic cab compartment", ["Item", "Result", "Count or value", "Initials", "Time"])}<tbody>${items}</tbody></table></section>`;
+const kitSection = `<section class="sheet-section kits"><table>${cols}${head("Kits: confirm the seal, or check the contents against the kit reference", ["Kit", "Seal or contents", "Written on seal", "Initials", "Time"])}<tbody>${kits}</tbody></table></section>`;
+const outage = page("Synthetic Medic 6 paper checklist", outageHeader + kitSection);
+// The same sheet without kits: page counts depend on the runner's fonts, so the kit check compares
+// against this baseline instead of a fixed number of pages.
+const outageWithoutKits = page("Synthetic Medic 6 paper checklist", outageHeader);
 
 const kitTypes = Array.from({ length: 12 }, (_, kit) => `<section class="kit-type"><h3>Synthetic kit type ${kit + 1}</h3><ul>${
   Array.from({ length: 8 }, (_, item) => `<li>Synthetic supply ${item + 1}, size ${kit + 1} (${item + 1})</li>`).join("")
@@ -129,9 +133,12 @@ try {
     assert.equal(printed.headerGroup, "table-header-group", "outage print: header rows will not repeat");
     assert.equal(printed.kitBreak, "auto", "outage print: kits force a new page and waste paper");
     const pages = pageCount(pdf);
-    assert.ok(pages >= 2 && pages <= 4, `outage print: expected 2-4 Letter pages for 40 items and 3 kits, got ${pages}`);
+    const baseline = pageCount((await printPdf(browser, outageWithoutKits, () => null)).pdf);
+    assert.ok(baseline >= 2, `outage print: 40 items should continue onto a second Letter page, got ${baseline}`);
+    // Three compact kit rows fit within one more page; a page break per kit would add three.
+    assert.ok(pages <= baseline + 1, `outage print: 3 kit rows added ${pages - baseline} pages to ${baseline}`);
     keep("outage-letter.pdf", pdf);
-    console.log(`outage print: ${pages} US Letter pages, repeated header, kits without page breaks passed`);
+    console.log(`outage print: ${pages} US Letter pages (${baseline} without kits), repeated header, kits without page breaks passed`);
   } catch (error) {
     failures.push(`outage print: ${error.message}`);
   }
