@@ -1,0 +1,36 @@
+<form class="panel deficiency-filter-form" method="get" action="{{ filter_action }}">
+<div class="deficiency-filter-grid">
+<label for="deficiency-search">Search deficiency text
+<input id="deficiency-search" type="search" name="q" maxlength="100" value="{{ filters.q }}" autocomplete="off">
+</label>
+<label for="deficiency-vehicle">Vehicle name or number
+<input id="deficiency-vehicle" type="search" name="vehicle" maxlength="100" value="{{ filters.vehicle }}" autocomplete="off">
+</label>
+<label for="deficiency-severity">Severity
+<select id="deficiency-severity" name="severity">
+<option value="">Any severity</option>
+{% for code, label in filter_severity_options %}<option value="{{ code }}"{% if filters.severity == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+</select>
+</label>
+<label for="deficiency-assignee">Assigned to
+<input id="deficiency-assignee" type="search" name="assignee" maxlength="100" value="{{ filters.assignee }}" autocomplete="off">
+</label>
+<label for="deficiency-status">Lifecycle status
+<select id="deficiency-status" name="status">
+<option value="active"{% if filters.status == "active" %} selected{% endif %}>Outstanding only</option>
+<option value="all"{% if filters.status == "all" %} selected{% endif %}>{{ filter_all_statuses_label }}</option>
+{% for code, label in filter_status_options %}
+<option value="{{ code }}"{% if filters.status == code %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+</label>
+<label class="check" for="deficiency-overdue"><input id="deficiency-overdue" type="checkbox" name="overdue" value="1"{% if filters.overdue %} checked{% endif %}> Overdue only</label>
+</div>
+<div class="deficiency-filter-actions">
+<button type="submit" class="button primary">Apply filters</button>
+<a class="button" href="{{ filter_action }}">Clear filters</a>
+</div>
+</form>
+{% for error in filter_errors %}<p class="notice" role="alert">{{ error }}</p>{% endfor %}
+{% if applied_filters %}<p class="deficiency-applied-filters"><strong>Applied filters:</strong> {% for label, value in applied_filters %}{{ label }}: {{ value }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+{% if page %}<p class="deficiency-results-count">{{ page.total }} {{ filter_total_label }}; showing {{ page.rows|length }} on this page.</p>{% endif %}

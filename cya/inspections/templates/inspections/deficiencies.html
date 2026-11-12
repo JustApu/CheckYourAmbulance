@@ -14,15 +14,18 @@
 {% endfor %}
 </ul>
 </section>
-<h2>Recent deficiencies</h2>
-<p>Up to 100 most recent reports, including Reported in Error history.</p>
+<h2>Deficiencies</h2>
+<p>Outstanding cases are shown by default. Choose all statuses to include closed and Reported in Error history.</p>
+{% include "inspections/deficiency_filters.html" %}
 <ul class="plain">
-{% for row in deficiencies %}
-<li class="panel">
-<a href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · {{ row.deficiency.reported_at|date:"Y-m-d H:i" }} UTC</p>
+{% for row in page.rows %}
+<li class="panel deficiency-list-entry">
+<a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">{{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · {{ row.deficiency.reported_at|date:"Y-m-d H:i" }} UTC</p>
+<p>Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}</p>
 </li>
 {% empty %}
-<li>No deficiency reports yet.</li>
+<li class="panel">{% if applied_filters or filter_errors %}No deficiencies match these filters. Clear filters or adjust the search.{% else %}No outstanding deficiencies.{% endif %}</li>
 {% endfor %}
 </ul>
+{% include "inspections/deficiency_pagination.html" %}
 {% endblock %}

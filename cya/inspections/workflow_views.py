@@ -7,9 +7,11 @@ permission policy and the deficiency's status; every command still rechecks both
 
 import logging
 from functools import wraps
+from urllib.parse import urlencode
 
+from django.core.paginator import Paginator
 from django.db import DatabaseError
-from django.db.models import Exists, OuterRef, Subquery
+from django.db.models import Case, Exists, IntegerField, OuterRef, Q, Subquery, When
 from django.http import Http404, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -28,12 +30,14 @@ from cya.deficiencies import acknowledgement, overdue, service, suspension
 from cya.deficiencies.commands import ASSIGNEE_ROLES
 from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
 from cya.deficiencies.service import DeficiencyError, suggest_related
+from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.deficiencies.transitions import (
     ACTIVE_STATUSES,
     CLOSED_ADMINISTRATOR,
     CLOSED_UNVERIFIABLE,
     CLOSED_VERIFIED,
     EMPTY_SCOPE_CLOSURE_STATUSES,
+    STATUSES,
 )
 from cya.inspections.views import _authorized, _status, _vehicle, reverse_socket
 from cya.inspections.workflows import (
@@ -84,6 +88,9 @@ STATUS_LABELS = {
     "CLOSED_UNVERIFIABLE": "Closed — No current verification items",
     "REPORTED_IN_ERROR": "Reported in Error",
 }
+DEFICIENCY_PAGE_SIZE = 25
+SEARCH_LIMIT = 100
+FILTER_FIELDS = ("q", "vehicle", "severity", "assignee", "status", "overdue")
 
 
 def page(view):
@@ -130,17 +137,173 @@ def _identity(value):
         raise Http404 from None
 
 
+def _severity_levels(organization_id, now):
+    return sorted(
+        levels_in_force(organization_id, now).values(),
+        key=lambda level: (-level.rank, level.code),
+    )
+
+
+def _deficiency_filters(
+    request, organization_id, queryset, *, now, allowed_statuses=STATUSES, severity_options=()
+):
+    """Apply bounded, organization-scoped GET filters to a current projection query."""
+    values, errors = {}, []
+    for field in FILTER_FIELDS:
+        supplied = request.GET.getlist(field)
+        if len(supplied) > 1:
+            errors.append("A filter was supplied more than once. Remove the duplicate and retry.")
+            values[field] = ""
+            continue
+        value = supplied[0].strip() if supplied else ""
+        if field != "overdue" and len(value) > SEARCH_LIMIT:
+            errors.append(f"Filter text is limited to {SEARCH_LIMIT} characters.")
+            values[field] = ""
+        else:
+            values[field] = value
+
+    status = values["status"] or "active"
+    valid_statuses = {*allowed_statuses, "active", "all"}
+    if status not in valid_statuses:
+        errors.append("Choose a valid lifecycle status.")
+    elif status == "active":
+        queryset = queryset.filter(status__in=ACTIVE_STATUSES)
+    elif status != "all":
+        queryset = queryset.filter(status=status)
+
+    overdue_only = values["overdue"] in ("1", "true", "on")
+    if values["overdue"] and not overdue_only:
+        errors.append("Choose a valid overdue filter value.")
+    if overdue_only:
+        candidates = overdue.candidates(organization_id, now).values("pk")
+        queryset = queryset.filter(pk__in=candidates)
+
+    if values["q"]:
+        query = values["q"]
+        queryset = queryset.filter(
+            Q(deficiency__summary__icontains=query) | Q(deficiency__description__icontains=query)
+        )
+    if values["vehicle"]:
+        vehicle = values["vehicle"]
+        queryset = queryset.filter(
+            Q(deficiency__vehicle__display_name__icontains=vehicle)
+            | Q(deficiency__vehicle__number__icontains=vehicle)
+        )
+    if values["severity"]:
+        configured_codes = {code for code, _label in severity_options}
+        if values["severity"] not in configured_codes:
+            errors.append("Choose a configured severity.")
+        else:
+            queryset = queryset.filter(severity_version__code=values["severity"])
+    if values["assignee"]:
+        queryset = queryset.filter(assignee__display_name__icontains=values["assignee"])
+
+    if errors:
+        queryset = queryset.none()
+
+    status_options = [(code, STATUS_LABELS[code]) for code in allowed_statuses]
+    applied = []
+    for field, label in (
+        ("q", "Text"),
+        ("vehicle", "Vehicle"),
+        ("severity", "Severity"),
+        ("assignee", "Assigned to"),
+    ):
+        if values[field]:
+            applied.append((label, values[field]))
+    if status != "active" and status in valid_statuses:
+        applied.append(("Status", "All statuses" if status == "all" else STATUS_LABELS[status]))
+    if overdue_only:
+        applied.append(("Overdue", "Yes"))
+    query_values = {field: values[field] for field in FILTER_FIELDS if values[field]}
+    if not values["status"]:
+        query_values["status"] = "active"
+    return queryset, {
+        "filters": values | {"status": status, "overdue": overdue_only},
+        "filter_errors": errors,
+        "filter_status_options": status_options,
+        "filter_severity_options": severity_options,
+        "applied_filters": applied,
+        "filter_query": urlencode(query_values),
+    }
+
+
+def _page_url(request, filter_query, key, number):
+    query = f"{filter_query}&" if filter_query else ""
+    return f"{request.path}?{query}{key}_page={number}"
+
+
+def _paginated_page(request, queryset, *, filter_query, key="results"):
+    """Return one bounded page and its filtered total in deterministic queryset order."""
+    page_values = request.GET.getlist(f"{key}_page")
+    page_error = ""
+    if len(page_values) > 1:
+        requested = 1
+        page_error = "That results-page link was invalid. Showing the first page instead."
+    elif page_values:
+        try:
+            requested = int(page_values[0])
+            if requested < 1:
+                requested = 1
+                page_error = "That results-page link was invalid. Showing the first page instead."
+        except ValueError:
+            requested = 1
+            page_error = "That results-page link was invalid. Showing the first page instead."
+    else:
+        requested = 1
+
+    paginator = Paginator(queryset, DEFICIENCY_PAGE_SIZE)
+    if requested > paginator.num_pages:
+        requested = paginator.num_pages
+        page_error = "That results-page link was out of range. Showing the last page instead."
+    result_page = paginator.page(requested)
+    previous_url = (
+        _page_url(request, filter_query, key, result_page.previous_page_number())
+        if result_page.has_previous()
+        else None
+    )
+    next_url = (
+        _page_url(request, filter_query, key, result_page.next_page_number())
+        if result_page.has_next()
+        else None
+    )
+    return {
+        "rows": list(result_page.object_list),
+        "total": paginator.count,
+        "has_previous": previous_url is not None,
+        "has_next": next_url is not None,
+        "previous_url": previous_url,
+        "next_url": next_url,
+        "page_error": page_error,
+    }
+
+
 @page
 def deficiencies(request, user):
-    rows = list(
-        DeficiencyProjection.objects.filter(organization_id=user.organization_id)
-        .select_related(
-            "deficiency__vehicle",
-            "severity_version",
-        )
-        .order_by("-deficiency__reported_at", "-deficiency_id")[:100]
+    org, now = str(user.organization_id), timezone.now()
+    severity_levels = _severity_levels(org, now)
+    queryset = DeficiencyProjection.objects.filter(organization_id=org).select_related(
+        "deficiency__vehicle", "severity_version", "assignee"
     )
-    for row in rows:
+    queryset, filter_context = _deficiency_filters(
+        request,
+        org,
+        queryset,
+        now=now,
+        allowed_statuses=STATUSES,
+        severity_options=[
+            (
+                level.code,
+                f"{level.label} ({level.code})"
+                if level.active
+                else f"{level.label} ({level.code}, retired)",
+            )
+            for level in severity_levels
+        ],
+    )
+    queryset = queryset.order_by("-deficiency__reported_at", "-deficiency_id")
+    page_data = _paginated_page(request, queryset, filter_query=filter_context["filter_query"])
+    for row in page_data["rows"]:
         row.status_label = STATUS_LABELS[row.status]
     vehicles = Vehicle.objects.filter(organization_id=user.organization_id, active=True).order_by(
         "display_name", "id"
@@ -151,7 +314,12 @@ def deficiencies(request, user):
         {
             "title": "Deficiencies",
             "can_view_queue": permitted("decide_extension", str(user.pk), roles_for(user)),
-            "deficiencies": rows,
+            "page": page_data,
+            "filter_action": reverse("deficiencies"),
+            "filter_all_statuses_label": "All statuses, including closed and Reported in Error",
+            "filter_total_label": "matching deficiencies",
+            "pagination_label": "Deficiency result pages",
+            **filter_context,
             "vehicles": vehicles,
         },
     )
@@ -407,34 +575,49 @@ def deficiency(request, user, deficiency_id):
     )
 
 
-QUEUE_LIMIT = 200  # rows per queue list; a longer list says it is cut short
-
-
-def _queue_rows(projections):
-    rows = list(projections[: QUEUE_LIMIT + 1])
-    for row in rows:
+def _queue_rows(request, projections, *, filter_query, key):
+    page_data = _paginated_page(request, projections, filter_query=filter_query, key=key)
+    for row in page_data["rows"]:
         row.status_label = STATUS_LABELS[row.status]
-    return rows[:QUEUE_LIMIT], len(rows) > QUEUE_LIMIT
+        row.queue_action = {
+            "pending": "Decide the requested deadline change",
+            "overdue": "Review the current deadline",
+            "severity": "Review the active high-severity issue",
+            "unassigned": "Assign an owner",
+        }[key]
+    return page_data
 
 
 @page
 def queue(request, user):
-    """Unassigned, overdue and pending-extension deficiencies (issue 16), from existing readers."""
+    """Prioritized, searchable active deficiencies for Supervisors and Administrators."""
     roles = roles_for(user)
     if not permitted("decide_extension", str(user.pk), roles):
         return deny_section(request, user, roles, "VIEW_DEFICIENCY_QUEUE")
     org, now = str(user.organization_id), timezone.now()
-    active = DeficiencyProjection.objects.filter(
-        organization_id=org, status__in=ACTIVE_STATUSES
-    ).select_related("deficiency__vehicle", "assignee")
-    unassigned, unassigned_more = _queue_rows(
-        active.filter(assignee__isnull=True).order_by("deficiency__reported_at", "deficiency_id")
+    severity_levels = _severity_levels(org, now)
+    active = DeficiencyProjection.objects.filter(organization_id=org).select_related(
+        "deficiency__vehicle", "assignee", "severity_version"
     )
-    late, late_more = _queue_rows(
-        overdue.candidates(org, now)
-        .select_related("deficiency__vehicle", "assignee")
-        .order_by("governing", "deficiency_id")
+    active, filter_context = _deficiency_filters(
+        request,
+        org,
+        active,
+        now=now,
+        allowed_statuses=ACTIVE_STATUSES,
+        severity_options=[
+            (
+                level.code,
+                f"{level.label} ({level.code})"
+                if level.active
+                else f"{level.label} ({level.code}, retired)",
+            )
+            for level in severity_levels
+        ],
     )
+    active = active.filter(status__in=ACTIVE_STATUSES)
+    active = active.order_by("-deficiency__reported_at", "-deficiency_id")
+
     # A request is waiting while no decision answers it and no later deadline revision (an event
     # carrying a deadline that is not a decision) has superseded it: deadlines.deadline_state's rule.
     waiting = (
@@ -450,7 +633,7 @@ def queue(request, user):
             )
         )
     )
-    pending, pending_more = _queue_rows(
+    pending = (
         active.annotate(
             requested_at=Subquery(
                 waiting.filter(deficiency_id=OuterRef("deficiency_id"))
@@ -461,16 +644,76 @@ def queue(request, user):
         .filter(requested_at__isnull=False)
         .order_by("requested_at", "deficiency_id")
     )
+    late = overdue.candidates(org, now).filter(pk__in=active.values("pk"))
+    late = late.select_related("deficiency__vehicle", "assignee", "severity_version").order_by(
+        "governing", "deficiency_id"
+    )
+    top_levels = top_active_levels({level.code: level for level in severity_levels})
+    severity_threshold = min((level.rank for level in top_levels), default=None)
+    top_codes = {
+        level.code
+        for level in severity_levels
+        if severity_threshold is not None and level.rank >= severity_threshold
+    }
+    severity_label = " / ".join(
+        dict.fromkeys(
+            level.label for level in sorted(top_levels, key=lambda level: (-level.rank, level.code))
+        )
+    )
+    severity_priority = Case(
+        *[
+            When(severity_version__code=level.code, then=position)
+            for position, level in enumerate(
+                sorted(severity_levels, key=lambda level: (-level.rank, level.code))
+            )
+        ],
+        default=len(severity_levels),
+        output_field=IntegerField(),
+    )
+    high_severity = (
+        active.filter(severity_version__code__in=top_codes)
+        .annotate(severity_priority=severity_priority)
+        .order_by("severity_priority", "deficiency__reported_at", "deficiency_id")
+    )
+    unassigned = active.filter(assignee__isnull=True).order_by(
+        "deficiency__reported_at", "deficiency_id"
+    )
+    groups = [
+        ("pending", "Extension requests waiting for a decision", pending),
+        ("overdue", "Overdue", late),
+    ]
+    if top_codes:
+        groups.append(
+            (
+                "severity",
+                f"Top configured severity: {severity_label}",
+                high_severity,
+            )
+        )
+    groups.append(("unassigned", "Unassigned", unassigned))
+    lists = [
+        {
+            "heading": heading,
+            "page": _queue_rows(
+                request,
+                rows.select_related("deficiency__vehicle", "assignee", "severity_version"),
+                filter_query=filter_context["filter_query"],
+                key=key,
+            ),
+        }
+        for key, heading, rows in groups
+    ]
     return render(
         request,
         "inspections/deficiency_queue.html",
         {
             "title": "Supervisor queue",
-            "lists": [
-                ("Unassigned", unassigned, unassigned_more),
-                ("Overdue", late, late_more),
-                ("Extension requests waiting for a decision", pending, pending_more),
-            ],
+            "lists": lists,
+            "filter_action": reverse("deficiency-queue"),
+            "filter_all_statuses_label": "All active statuses",
+            "filter_total_label": "matching active deficiencies",
+            "pagination_label": "Supervisor queue result pages",
+            **filter_context,
         },
     )
 

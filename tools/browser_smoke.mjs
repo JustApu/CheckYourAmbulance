@@ -285,11 +285,58 @@ async function testReadinessSummary(viewport) {
   }
 }
 
+async function testDeficiencyFilters(viewport) {
+  const page = await browser.newPage({ viewport });
+  const listing = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Deficiencies</title>
+    <style>${css}</style></head><body><main id="main"><h1>Deficiencies</h1>
+    <form class="panel deficiency-filter-form" method="get" action="/deficiencies/">
+      <div class="deficiency-filter-grid">
+        <label for="deficiency-search">Search deficiency text<input id="deficiency-search" type="search" name="q" value="brake" maxlength="100"></label>
+        <label for="deficiency-vehicle">Vehicle name or number<input id="deficiency-vehicle" type="search" name="vehicle" value="Medic 6" maxlength="100"></label>
+        <label for="deficiency-severity">Severity<select id="deficiency-severity" name="severity"><option value="">Any severity</option><option value="URGENT" selected>Urgent (URGENT)</option><option value="RETIRED">Legacy (RETIRED, retired)</option></select></label>
+        <label for="deficiency-assignee">Assigned to<input id="deficiency-assignee" type="search" name="assignee" value="Sam Example" maxlength="100"></label>
+        <label for="deficiency-status">Lifecycle status<select id="deficiency-status" name="status"><option value="active">Outstanding only</option><option value="all">All statuses, including closed and Reported in Error</option><option value="OPEN">Open</option><option value="REPORTED_IN_ERROR">Reported in Error</option></select></label>
+        <label class="check" for="deficiency-overdue"><input id="deficiency-overdue" type="checkbox" name="overdue" value="1"> Overdue only</label>
+      </div><div class="deficiency-filter-actions"><button class="button primary" type="submit">Apply filters</button><a class="button" href="/deficiencies/">Clear filters</a></div>
+    </form><p class="deficiency-applied-filters"><strong>Applied filters:</strong> Text: brake · Vehicle: Medic 6</p>
+    <p class="deficiency-results-count">42 matching deficiencies; showing 25 on this page.</p>
+    <ul class="plain"><li class="panel"><a href="/deficiencies/one/">Synthetic brake warning</a> — Medic 6 (North County Regional Ambulance)</li></ul>
+    <nav class="deficiency-pagination" aria-label="Deficiency result pages"><a class="button" href="/deficiencies/?q=brake&amp;results_page=1">Newer results</a><a class="button" href="/deficiencies/?q=brake&amp;results_page=2">Older results</a></nav>
+    </main></body></html>`;
+  try {
+    await page.route("http://deficiencies.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: listing }));
+    await page.goto("http://deficiencies.test/", { waitUntil: "load" });
+    assert.equal(await page.getByRole("heading", { name: "Deficiencies" }).count(), 1);
+    assert.equal(await page.getByRole("searchbox", { name: "Search deficiency text" }).inputValue(), "brake");
+    assert.equal(await page.getByLabel("Lifecycle status").locator('option[value="REPORTED_IN_ERROR"]').textContent(), "Reported in Error");
+    assert.equal(await page.getByLabel("Severity").inputValue(), "URGENT");
+    assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/deficiencies/?q=brake&results_page=2");
+    assert.match(await page.getByText("42 matching deficiencies").innerText(), /showing 25/);
+    for (const label of ["Search deficiency text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
+      const control = page.getByLabel(label);
+      const box = await control.boundingBox();
+      assert.ok(box && box.height >= 48, `${viewport.name}: ${label} target is shorter than 48 CSS pixels`);
+    }
+    const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
+    assert.ok(metrics.document <= viewport.width, `${viewport.name}: deficiency list overflows horizontally ${JSON.stringify(metrics)}`);
+    assert.ok(metrics.body <= viewport.width, `${viewport.name}: deficiency body overflows horizontally ${JSON.stringify(metrics)}`);
+    await page.setViewportSize({ width: Math.max(320, Math.floor(viewport.width / 2)), height: viewport.height });
+    const zoom = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
+    assert.ok(zoom.document <= zoom.viewport, `${viewport.name} at 200%: deficiency list overflows ${JSON.stringify(zoom)}`);
+    assert.ok(zoom.body <= zoom.viewport, `${viewport.name} at 200%: deficiency body overflows ${JSON.stringify(zoom)}`);
+    console.log(`${viewport.name}: deficiency filters, result count, pagination and responsive layout passed`);
+  } finally {
+    await page.close();
+  }
+}
+
 try {
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport });
     try {
       await testReadinessSummary(viewport);
+      await testDeficiencyFilters(viewport);
       await page.route("http://synthetic.test/**", (route) => route.fulfill({
         status: 200,
         contentType: "text/html",
