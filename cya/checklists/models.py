@@ -82,8 +82,18 @@ class SlotRevision(models.Model):
 
 
 class Compartment(SlotRevision):
+    # SPEC 10.2 CAB-1: a compartment may be designated sealable. The flag belongs to the
+    # revision, so a change is a new effective-dated revision and history keeps the old value.
+    sealable = models.BooleanField(default=False)
+
     class Meta(SlotRevision.Meta):
         db_table = "compartment"
+        constraints = [
+            *SlotRevision.Meta.constraints,
+            models.CheckConstraint(
+                condition=models.Q(sealable__in=[True, False]), name="compartment_sealable_bool"
+            ),
+        ]
 
     def __str__(self):
         return f"Compartment {self.pk}"
