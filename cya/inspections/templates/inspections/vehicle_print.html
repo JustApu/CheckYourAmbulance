@@ -42,6 +42,15 @@ every printed page so loose pages can be matched up. Kit contents live on the ki
     </tr>
   </thead>
   <tbody>
+  {% if section.sealed %}
+    <tr class="sealed-compartment">
+      <th scope="row" class="item">Sealed cabinet<span class="instructions">An intact seal covers every item and kit inside. If the seal is broken or missing, check all contents and reseal.</span></th>
+      <td class="outcomes" data-label="Seal or contents"><span class="tick"><span class="box" aria-hidden="true"></span>Seal intact</span><span class="tick wrap"><span class="box" aria-hidden="true"></span>No seal or broken: all contents checked</span><span class="exceptions">Exceptions <span class="blank wide"></span></span></td>
+      <td class="value" data-label="Written on seal"><span class="seal-field">Crew ID <span class="blank short"></span></span><span class="seal-field">Earliest exp. <span class="blank short"></span></span></td>
+      <td class="initials" data-label="Initials"><span class="blank short"></span></td>
+      <td class="time" data-label="Time"><span class="blank short"></span></td>
+    </tr>
+  {% endif %}
   {% for row in section.rows %}
     <tr>
       <th scope="row" class="item">{{ row.label }}{% if row.expected %} <span class="expected">Expected: {{ row.expected }}</span>{% endif %}{% if row.instructions %}<span class="instructions">{{ row.instructions }}</span>{% endif %}</th>
@@ -72,10 +81,15 @@ every printed page so loose pages can be matched up. Kit contents live on the ki
   </thead>
   <tbody>
   {% for kit in kits %}
-    <tr>
-      <th scope="row" class="item">{{ kit.label }}{% if kit.place %}<span class="instructions">{{ kit.place }}</span>{% endif %}</th>
+    <tr{% if kit.sealed %} class="sealed-kit"{% endif %}>
+      <th scope="row" class="item">{{ kit.label }}{% if kit.place %}<span class="instructions">{{ kit.place }}</span>{% endif %}{% if kit.in_sealed_compartment %}<span class="instructions">Inside a sealed cabinet: covered by the cabinet seal while it is intact.</span>{% endif %}</th>
+      {% if kit.sealed %}
       <td class="outcomes" data-label="Seal or contents"><span class="tick"><span class="box" aria-hidden="true"></span>Seal intact</span><span class="tick wrap"><span class="box" aria-hidden="true"></span>No seal or broken: contents checked</span><span class="exceptions">Exceptions <span class="blank wide"></span></span></td>
       <td class="value" data-label="Written on seal"><span class="seal-field">Crew ID <span class="blank short"></span></span><span class="seal-field">Earliest exp. <span class="blank short"></span></span></td>
+      {% else %}
+      <td class="outcomes" data-label="Contents"><span class="tick wrap"><span class="box" aria-hidden="true"></span>Contents checked against the kit reference</span><span class="exceptions">Exceptions <span class="blank wide"></span></span></td>
+      <td class="value" data-label="Written on seal">Not a sealed kit</td>
+      {% endif %}
       <td class="initials" data-label="Initials"><span class="blank short"></span></td>
       <td class="time" data-label="Time"><span class="blank short"></span></td>
     </tr>

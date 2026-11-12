@@ -12,8 +12,14 @@ from dataclasses import dataclass, field
 
 from django.utils.safestring import mark_safe
 
-from cya.checklists.models import ChecklistItemDef, ChecklistTemplate, ChecklistVersion
+from cya.checklists.models import (
+    ChecklistItemDef,
+    ChecklistTemplate,
+    ChecklistVersion,
+    Compartment,
+)
 from cya.checklists.overlay import effective_template_version
+from cya.kits.sealable import kit_sealable
 
 OUTCOME_LABELS = {
     "PASSED": "Pass",
@@ -40,12 +46,18 @@ class PrintRow:
 class PrintSection:
     heading: str
     rows: list = field(default_factory=list)
+    # A sealable compartment (SPEC 10.2 CAB-9) prints one seal-or-contents row, not its items.
+    sealed: bool = False
 
 
 @dataclass
 class KitRow:
     label: str
     place: str
+    # Designated sealed (SEAL-1): the row offers the seal; otherwise contents are checked.
+    sealed: bool = False
+    # Inside a sealable compartment, whose intact seal covers the kit (CAB-2).
+    in_sealed_compartment: bool = False
 
 
 def _expected(kind, quantity, unit):
@@ -80,20 +92,55 @@ def _section_key(row):
     return ("vehicle", None), "Vehicle-wide"
 
 
-def outage_sheet(rows):
+def outage_sheet(rows, sealable_compartments=frozenset(), sealed_kits=frozenset()):
     """(sections, kits): the vehicle's own rows by place in checklist order, and one row per kit
-    instance in order of first appearance. A kit's contents are on the kit reference instead."""
+    instance in order of first appearance. A kit's contents are on the kit reference instead.
+
+    sealable_compartments holds the compartment ids (as rows name them) designated sealable at
+    the sheet's instant; sealed_kits the kit ids designated sealed then. A sealable compartment
+    becomes one sealed section with no item rows, including one that holds only kits.
+    """
     found, kits = {}, {}
     for row in rows:
+        sealed_place = bool(row.compartment_id) and str(row.compartment_id) in sealable_compartments
+        if sealed_place and ("compartment", row.compartment_id) not in found:
+            found[("compartment", row.compartment_id)] = PrintSection(
+                heading=row.compartment_label, sealed=True
+            )
         if row.kit_id:
             if row.kit_id not in kits:
-                kits[row.kit_id] = KitRow(label=row.kit_label, place=row.compartment_label or "")
+                kits[row.kit_id] = KitRow(
+                    label=row.kit_label,
+                    place=row.compartment_label or "",
+                    sealed=str(row.kit_id) in sealed_kits,
+                    in_sealed_compartment=sealed_place,
+                )
             continue
         key, heading = _section_key(row)
         if key not in found:
             found[key] = PrintSection(heading=heading)
-        found[key].rows.append(_print_row(row))
+        if not found[key].sealed:
+            found[key].rows.append(_print_row(row))
     return list(found.values()), list(kits.values())
+
+
+def sealable_designations(organization_id, checklist):
+    """(sealable compartment ids, sealed kit ids) for a vehicle checklist, at its instant.
+
+    A row's compartment id is the slot revision in force at that instant (vehicle_slots), so
+    its sealable flag is the designation then (CAB-1). Kit designations come from the
+    append-only kit_seal_designation history (SEAL-1).
+    """
+    compartment_ids = {str(r.compartment_id) for r in checklist.rows if r.compartment_id}
+    sealable = {
+        str(pk)
+        for pk in Compartment.objects.filter(
+            organization_id=organization_id, pk__in=compartment_ids, sealable=True
+        ).values_list("pk", flat=True)
+    }
+    kit_ids = {str(r.kit_id) for r in checklist.rows if r.kit_id}
+    sealed = set(kit_sealable(organization_id, kit_ids, checklist.as_of))
+    return frozenset(sealable), frozenset(sealed)
 
 
 def versions(organization_id, rows):

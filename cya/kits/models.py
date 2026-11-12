@@ -64,3 +64,45 @@ class KitAssignmentEvent(Evidence):
 
     def __str__(self):
         return f"KitAssignmentEvent {self.pk}"
+
+
+class KitSealDesignation(Evidence):
+    """Append-only history of whether a kit instance is sealed (SPEC 10.1 SEAL-1, issue #131).
+
+    Kept apart from kit_assignment_event, which drives obligation generation: designating a kit
+    sealed changes nothing about where it is or which checks it owes. A designation takes
+    effect when recorded (effective_at = recorded_at). The latest row recorded by an instant is
+    the kit's designation then; a kit with no row is not sealed.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    kit = models.ForeignKey(KitInstance, on_delete=models.PROTECT, related_name="+")
+    sequence = models.PositiveBigIntegerField()
+    prior_designation = models.OneToOneField(
+        "self", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    sealable = models.BooleanField()
+    effective_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "kit_seal_designation"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitsealdes_org_id"),
+            models.UniqueConstraint(fields=["kit", "sequence"], name="kitsealdes_sequence"),
+            models.CheckConstraint(condition=models.Q(sequence__gte=1), name="kitsealdes_seq_min"),
+            models.CheckConstraint(
+                condition=models.Q(sealable__in=[True, False]), name="kitsealdes_sealable_bool"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(prior_designation__isnull=False) | models.Q(sequence=1),
+                name="kitsealdes_first",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(effective_at=models.F("recorded_at")),
+                name="kitsealdes_effective_when_recorded",
+            ),
+        ]
+
+    def __str__(self):
+        return f"KitSealDesignation {self.pk}"

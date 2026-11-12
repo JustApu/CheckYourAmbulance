@@ -205,7 +205,8 @@ def vehicle_print(request, vehicle_id):
     try:
         result = vehicle_checklist(organization_id, str(found.pk))
         listed = printable.versions(organization_id, result.rows)
-        sections, kits = printable.outage_sheet(result.rows)
+        sealable, sealed = printable.sealable_designations(organization_id, result)
+        sections, kits = printable.outage_sheet(result.rows, sealable, sealed)
     except (DatabaseError, ValueError) as failure:
         # ChecklistQueryError is a ValueError; the sheet must never print a partial checklist.
         logger.error("printable checklist unavailable (%s)", type(failure).__name__)

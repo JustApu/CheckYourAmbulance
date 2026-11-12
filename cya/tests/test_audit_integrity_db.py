@@ -197,6 +197,7 @@ class AuditIntegrityTests(TestCase):
             # issue 97 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/97): classified now so the contracts catalogue and the manifest agree; the
             # table, its guards and grants arrive with the implementation (issue 92 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/92))
             "kit_assignment_event",
+            "kit_seal_designation",  # issue #131: Supervisor- or Administrator-set kit seal designation
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
             "deficiency_age_rule",  # issue 150 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/150): administrator-set age highlighting revisions
@@ -289,6 +290,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "check_suspension",
                         "shared_satisfaction_rule_member",
                         "kit_assignment_event",
+                        "kit_seal_designation",
                     },
                 )
             finally:
@@ -382,6 +384,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "check_suspension",
                     "shared_satisfaction_rule_member",
                     "kit_assignment_event",
+                    "kit_seal_designation",
                 },
             )
             cursor.execute(

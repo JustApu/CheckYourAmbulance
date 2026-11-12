@@ -111,3 +111,17 @@ separately; none owing nothing; add, remove, return, move and temporary absence;
 instance; as-of history; idempotent regeneration; the database guards attacked directly; the
 reverse-migration refusal; command authorization, validation, replay and a concurrent-move race;
 and, with `CYA_DB_SECURITY_TESTS=1`, the real runtime account.
+
+## Sealable designations
+
+Issue #131 slice 1 records which cabinets and kits are sealed (SPEC §10.1 SEAL-1, §10.2 CAB-1). Both commands are in `cya/kits/sealable.py`. They run through `run_command` (operation-id receipt and replay, success or failure audit) under the policy action `designate_sealable` (Supervisors and Administrators; §3.3).
+
+| Command | Writes | Rules |
+|---|---|---|
+| `designate_compartment_sealable(vehicle_id, compartment_id, sealable, effective_at=None)` | a new `compartment` revision of the same slot, label copied, `sealable` set | Compartment rows are immutable, so the old value stays in history. `compartment_id` may name any revision of the slot on that vehicle. The change takes effect when recorded or at a later `effective_at`, never before the slot's latest revision; a value equal to that revision is refused. |
+| `designate_kit_sealable(kit_id, sealable)` | a `kit_seal_designation` row (append-only; next in the kit's sequence) | Effective when recorded. A kit with no row is not sealed. A value equal to the kit's current designation is refused. |
+
+`kit_sealable(organization_id, kit_ids, at)` answers which kits were sealed at an instant, from `kit_seal_designation` only, for at most 2000 kits per call. A compartment's designation at an instant is the `sealable` flag of the revision `vehicle_slots` returns for that instant.
+
+Designations do not change obligations, checks or kit assignment history. Substituting an intact seal for checking contents (SEAL-4, CAB-4), and breaking and resealing, are a later slice built on one shared seal model (OQ-66). The paper checklist already prints seal rows from the designations; see [crew inspection screens](crew-inspection-ui.md#paper-checklists-for-outages). There is no designation screen yet; setting up compartments and kits is issue #130.
+
