@@ -283,6 +283,11 @@ async function testRoleHistoryResponsive(page, viewport) {
   if (viewport.width <= 768) {
     assert.ok(metrics.scrollWidth > metrics.clientWidth, `${viewport.name}: long history row does not scroll horizontally`);
     await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(
+      () => document.querySelector(".role-history-scroll").scrollLeft > 0,
+      null,
+      { timeout: 2000 },
+    );
     assert.ok(await region.evaluate((element) => element.scrollLeft > 0), `${viewport.name}: keyboard cannot scroll the history region`);
   }
 }
