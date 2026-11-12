@@ -22,9 +22,9 @@
   <div class="active-inspection">
     <p><strong>Open inspection:</strong> {{ active_session.template_label }} · started <time datetime="{{ active_session.opened_at.isoformat }}">{{ active_session.opened_at|station_time }}</time></p>
     {% if active_session.participant %}
-    <a class="button primary" href="{{ active_session.url }}">Continue inspection</a>
+    <a class="button primary" href="{{ active_session.url }}">Continue {{ active_session.template_label }} inspection</a>
     {% elif join_template_id %}
-    <button type="button" class="button primary join-session" data-template="{{ join_template_id }}">Join latest open inspection</button>
+    <button type="button" class="button primary join-session" data-template="{{ join_template_id }}">Join {{ active_session.template_label }} inspection</button>
     {% else %}
     <p class="muted">A current checklist is not configured, so this page cannot join the open inspection.</p>
     {% endif %}
@@ -40,11 +40,31 @@
     </ul>
   </details>
   {% endif %}
+  {% elif resume_session %}
+  <div class="active-inspection">
+    <p><strong>Incomplete inspection:</strong> {{ resume_session.template_label }} · opened <time datetime="{{ resume_session.opened_at.isoformat }}">{{ resume_session.opened_at|station_time }}</time></p>
+    <a class="button primary" href="{{ resume_session.url }}">Resume incomplete {{ resume_session.template_label }} inspection</a>
+  </div>
+  {% if templates %}
+  <details class="separate-inspection">
+    <summary>Start a new inspection</summary>
+    <p>This starts a new inspection. Your incomplete inspection stays available in the list below.</p>
+    <ul class="plain inspection-options">
+    {% for t in templates %}
+      <li><button type="button" class="button start-session" data-template="{{ t.id }}">Start {{ t.label }} inspection</button></li>
+    {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
   {% elif templates %}
-  <p>Choose a configured inspection. If a crew member opens one first, you will join the latest open inspection.</p>
+  {% if templates|length == 1 %}
+  <p>Start the configured inspection when you are ready. Other crew members can join it.</p>
+  {% else %}
+  <p>Choose an inspection type to start. Other crew members can join the open inspection.</p>
+  {% endif %}
   <ul class="plain inspection-options">
   {% for t in templates %}
-    <li><button type="button" class="button primary start-session" data-template="{{ t.id }}">Start or join {{ t.label }} inspection</button></li>
+    <li><button type="button" class="button primary start-session" data-template="{{ t.id }}">Start {{ t.label }} inspection</button></li>
   {% endfor %}
   </ul>
   {% else %}
@@ -59,8 +79,8 @@
   {% for s in sessions %}
     <li class="session-row">
       <span class="session-row-status"><strong>{{ s.template_label }}</strong> · {{ s.state_label }} · opened <time datetime="{{ s.opened_at.isoformat }}">{{ s.opened_at|station_time }}</time></span>
-      {% if s.participant and s.state == "OPEN" %}<a class="button" href="{{ s.url }}">Continue inspection</a>
-      {% elif s.participant and s.state == "INCOMPLETE" %}<a class="button" href="{{ s.url }}">Resume incomplete inspection</a>
+      {% if s.participant and s.state == "OPEN" %}{% if active_session.id != s.id %}<a class="button" href="{{ s.url }}">Continue {{ s.template_label }} inspection</a>{% endif %}
+      {% elif s.participant and s.state == "INCOMPLETE" %}{% if resume_session.id != s.id %}<a class="button" href="{{ s.url }}">Resume incomplete inspection</a>{% endif %}
       {% elif s.participant and s.state == "CLOSED" %}<a class="button" href="{{ s.url }}">Open closed inspection</a>
       {% elif s.state == "OPEN" %}<span class="muted">The primary action above joins the latest open inspection.</span>{% endif %}
     </li>

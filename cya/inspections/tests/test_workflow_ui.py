@@ -7,6 +7,7 @@ from uuid import uuid4
 from django.db import DatabaseError, connection
 from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
+from django.utils.html import strip_tags
 from django.utils import timezone
 
 from cya.accounts.models import Organization
@@ -35,6 +36,14 @@ from cya.inspections.workflows import bounded
 class WorkflowUiTests(CrewUiCase):
     def history(self):
         return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/check-history/")
+
+    def test_routine_check_history_uses_station_local_time_without_seconds(self):
+        self.record(self.suction)
+        page = self.history()
+        self.assertEqual(page.status_code, 200)
+        shown = strip_tags(page.content.decode())
+        self.assertRegex(shown, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:EDT|EST) \(-0[45]00\)")
+        self.assertNotRegex(shown, r"\b\d{2}:\d{2}:\d{2}\b")
 
     def report_page(self):
         return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/deficiencies/new/")

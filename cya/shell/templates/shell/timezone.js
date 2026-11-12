@@ -105,19 +105,21 @@
     throw new Error("That agency-local time could not be resolved. Check the date and time zone.");
   }
 
-  function formatUtc(iso, zone) {
+  function formatUtc(iso, zone, precision) {
     var date = new Date(iso);
     if (isNaN(date.getTime())) { return ""; }
     if (typeof zone !== "string" || !zone.trim()) {
       throw new Error("The agency time zone is unavailable. Contact an administrator.");
     }
     try {
-      var fields = {};
-      new Intl.DateTimeFormat("en-CA-u-ca-gregory-nu-latn", {
+      var fields = {}, showSeconds = precision === "seconds";
+      var formatOptions = {
         timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23",
         timeZoneName: "short"
-      }).formatToParts(date).forEach(function (part) {
+      };
+      if (showSeconds) { formatOptions.second = "2-digit"; }
+      new Intl.DateTimeFormat("en-CA-u-ca-gregory-nu-latn", formatOptions).formatToParts(date).forEach(function (part) {
         if (part.type !== "literal") { fields[part.type] = part.value; }
       });
       var offset = {};
@@ -126,7 +128,7 @@
           if (part.type === "timeZoneName") { offset.name = part.value; }
         });
       return fields.year + "-" + fields.month + "-" + fields.day + " " +
-        fields.hour + ":" + fields.minute + ":" + fields.second + " " +
+        fields.hour + ":" + fields.minute + (showSeconds ? ":" + fields.second : "") + " " +
         fields.timeZoneName + " (" + offset.name + ")";
     } catch (_error) {
       throw new Error("The agency time zone is unavailable. Contact an administrator.");

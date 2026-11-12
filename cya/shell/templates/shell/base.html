@@ -14,6 +14,7 @@
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header">
   <a class="brand" href="{% url 'home' %}">Check Your Ambulance</a>
+  {% if cya_menu %}<button id="site-nav-toggle" class="button site-nav-toggle" type="button" aria-controls="site-nav-list" aria-expanded="false" hidden>Menu</button>{% endif %}
   <div class="header-tools">
     {% if cya_user %}
     <div class="account">
@@ -32,7 +33,6 @@
 </header>
 {% if cya_menu %}
 <nav class="site-nav" aria-label="Main">
-  <button id="site-nav-toggle" class="button site-nav-toggle" type="button" aria-controls="site-nav-list" aria-expanded="false" hidden>Menu</button>
   <ul id="site-nav-list" class="site-nav-list">
   {% for item in cya_menu %}
     <li><a href="{{ item.url }}"{% if item.current %} aria-current="page"{% endif %}>{{ item.label }}</a></li>

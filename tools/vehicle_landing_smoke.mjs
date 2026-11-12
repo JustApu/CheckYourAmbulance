@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { captureBrowserEvidence } from "./capture_browser_evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const css = [
@@ -28,23 +29,29 @@ const viewports = [
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR ||
   path.join(os.tmpdir(), `cya-vehicle-landing-smoke-${process.pid}`);
 
-function markup({ active = false, participant = false } = {}) {
+function markup({ active = false, participant = false, incomplete = false } = {}) {
   const action = active
     ? participant
-      ? '<a class="button primary" href="/inspection/sessions/current-session/">Continue inspection</a>'
-      : '<button type="button" class="button primary join-session" data-template="template-night">Join latest open inspection</button>'
-    : '<button type="button" class="button primary start-session" data-template="template-night">Start or join Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations inspection</button>';
+      ? '<a class="button primary" href="/inspection/sessions/current-session/">Continue Night Shift Vehicle Safety Checklist inspection</a>'
+      : '<button type="button" class="button primary join-session" data-template="template-night">Join Night Shift Vehicle Safety Checklist inspection</button>'
+    : '<button type="button" class="button primary start-session" data-template="template-night">Start Night Shift Vehicle Safety Checklist inspection</button>';
   const openSummary = active
-    ? '<p><strong>Open inspection:</strong> Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations · started <time datetime="2026-11-11T20:00:00Z">2026-11-11 20:00 UTC</time></p>'
+    ? '<p><strong>Open inspection:</strong> Night Shift Vehicle Safety Checklist · started <time datetime="2026-11-12T20:00:00Z">2026-11-12 15:00 EST (-0500)</time></p>'
     : "";
-  const primary = active ? `<div class="active-inspection">${openSummary}${action}</div>` : action;
+  const primary = active
+    ? `<div class="active-inspection">${openSummary}${action}</div>`
+    : incomplete
+      ? `<div class="active-inspection"><p><strong>Incomplete inspection:</strong> Night Shift Vehicle Safety Checklist · opened <time datetime="2026-11-11T20:00:00Z">2026-11-11 15:00 EST (-0500)</time></p><a class="button primary" href="/inspection/sessions/incomplete-session/">Resume incomplete Night Shift Vehicle Safety Checklist inspection</a></div><details class="separate-inspection"><summary>Start a new inspection</summary><p>This starts a new inspection. Your incomplete inspection stays available in the list below.</p><ul class="plain inspection-options"><li>${action}</li></ul></details>`
+      : action;
   const separate = active
     ? `<details class="separate-inspection"><summary>Start a separate inspection</summary>
       <p>Use this when another workstream needs its own checklist. It creates a second inspection instead of joining the open one.</p>
-      <ul class="plain inspection-options"><li><button type="button" class="button start-separate" data-template="template-night" data-template-label="Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations">Start separate Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations inspection</button></li></ul></details>`
+      <ul class="plain inspection-options"><li><button type="button" class="button start-separate" data-template="template-night" data-template-label="Night Shift Vehicle Safety Checklist">Start separate Night Shift Vehicle Safety Checklist inspection</button></li></ul></details>`
     : "";
-  const sessionRow = active
-    ? `<li class="session-row"><span class="session-row-status"><strong>Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations</strong> · Open · opened <time datetime="2026-11-11T20:00:00Z">2026-11-11 20:00 UTC</time></span>${participant ? '<a class="button" href="/inspection/sessions/current-session/">Continue inspection</a>' : '<span class="muted">Join using the primary action above.</span>'}</li>`
+  const sessionRow = incomplete
+    ? '<li class="session-row"><span class="session-row-status"><strong>Night Shift Vehicle Safety Checklist</strong> · Incomplete · opened <time datetime="2026-11-11T20:00:00Z">2026-11-11 15:00 EST (-0500)</time></span></li>'
+    : active
+    ? `<li class="session-row"><span class="session-row-status"><strong>Night Shift Vehicle Safety Checklist</strong> · Open · opened <time datetime="2026-11-12T20:00:00Z">2026-11-12 15:00 EST (-0500)</time></span>${participant ? '' : '<span class="muted">Join using the primary action above.</span>'}</li>`
     : "<li>No inspection sessions yet.</li>";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -54,8 +61,8 @@ function markup({ active = false, participant = false } = {}) {
     <nav class="vehicle-actions" aria-label="Vehicle tasks"><a href="/history">Inspection history</a><a href="/report">Report a deficiency</a></nav>
     <p id="vehicle-message" class="notice" role="status" hidden></p><form id="csrf-holder"><input name="csrfmiddlewaretoken" value="synthetic"></form>
     <script id="cya-config" type="application/json">{"vehicle_id":"vehicle-synthetic","sessions_url":"/api/v1/inspection-sessions"}</script>
-    <section class="panel inspection-start" aria-labelledby="start-heading"><h2 id="start-heading">Inspection</h2>
-      ${primary}${separate}</section>
+      <section class="panel inspection-start" aria-labelledby="start-heading"><h2 id="start-heading">Inspection</h2>
+      ${!active ? '<p>Start the configured inspection when you are ready. Other crew members can join it.</p>' : ''}${primary}${separate}</section>
     <section aria-labelledby="sessions-heading"><h2 id="sessions-heading">Active and recent inspections</h2>
       <ul class="plain">${sessionRow}</ul></section></main><script>${script}</script></body></html>`;
 }
@@ -135,7 +142,7 @@ try {
       const fresh = await openPage(browser, viewport, { active: false });
       page = fresh.page;
       await checkLayout(page, viewport);
-      const start = page.getByRole("button", { name: "Start or join Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations inspection" });
+      const start = page.getByRole("button", { name: "Start Night Shift Vehicle Safety Checklist inspection" });
       assert.equal(await start.count(), 1, `${viewport.name}: configured template action is unclear`);
       assert.equal(await page.getByRole("button", { name: /Start a separate/ }).count(), 0, `${viewport.name}: separate action shown with no open session`);
       await page.close();
@@ -143,9 +150,10 @@ try {
       const joined = await openPage(browser, viewport, { active: true });
       page = joined.page;
       await checkLayout(page, viewport);
-      assert.match(await page.locator(".active-inspection").innerText(), /Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations/);
-      assert.equal(await page.getByRole("button", { name: "Join latest open inspection" }).count(), 1);
-      const join = page.getByRole("button", { name: "Join latest open inspection" });
+      assert.match(await page.locator(".active-inspection").innerText(), /Night Shift Vehicle Safety Checklist/);
+      await captureBrowserEvidence(page, `vehicle-entry-${viewport.name}.png`);
+      assert.equal(await page.getByRole("button", { name: "Join Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
+      const join = page.getByRole("button", { name: "Join Night Shift Vehicle Safety Checklist inspection" });
       await join.focus();
       await page.keyboard.press("Enter");
       await page.waitForURL("**/inspection/sessions/joined-session/");
@@ -156,11 +164,11 @@ try {
       const participant = await openPage(browser, viewport, { active: true, participant: true });
       page = participant.page;
       await checkLayout(page, viewport);
-      assert.equal(await page.getByRole("link", { name: "Continue inspection" }).count(), 2);
-      assert.equal(await page.getByRole("button", { name: "Join latest open inspection" }).count(), 0);
+      assert.equal(await page.getByRole("link", { name: "Continue Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
+      assert.equal(await page.getByRole("button", { name: "Join Night Shift Vehicle Safety Checklist inspection" }).count(), 0);
       const summary = page.getByText("Start a separate inspection", { exact: true });
       await summary.click();
-      const separate = page.getByRole("button", { name: "Start separate Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations inspection" });
+      const separate = page.getByRole("button", { name: "Start separate Night Shift Vehicle Safety Checklist inspection" });
       await separate.focus();
       let prompt = "";
       page.once("dialog", async (dialog) => {
@@ -168,13 +176,21 @@ try {
         await dialog.dismiss();
       });
       await page.keyboard.press("Enter");
-      assert.match(prompt, /Night Shift Vehicle Safety Checklist — Medic 6 Emergency Operations/);
+      assert.match(prompt, /Night Shift Vehicle Safety Checklist/);
       assert.match(prompt, /instead of joining the open one/);
       assert.equal(participant.requests.length, 0, `${viewport.name}: cancel created a separate session`);
       page.once("dialog", async (dialog) => { await dialog.accept(); });
       await separate.click();
       await page.waitForURL("**/inspection/sessions/separate-session/");
       assert.equal(participant.requests[0].separate, true, `${viewport.name}: confirmed separate action joined instead`);
+      await page.close();
+
+      const incomplete = await openPage(browser, viewport, { incomplete: true });
+      page = incomplete.page;
+      await checkLayout(page, viewport);
+      assert.equal(await page.getByRole("link", { name: "Resume incomplete Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
+      assert.equal(await page.getByRole("button", { name: "Start Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
+      assert.equal(await page.getByRole("link", { name: "Resume incomplete inspection" }).count(), 0, `${viewport.name}: incomplete resume action is duplicated`);
       console.log(`${viewport.name}: landing actions, session choice, target size and layout passed`);
     } catch (error) {
       mkdirSync(artifacts, { recursive: true });

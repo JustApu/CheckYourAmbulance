@@ -12,7 +12,7 @@
 <h2>{{ check.record.item.label }}{% if check.record.kit %} — {{ check.record.kit.label }}{% endif %}
 </h2>
 <p>
-<strong>{{ check.label }}</strong> · {{ check.state }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time:"seconds" }}</p>
+<strong>{{ check.label }}</strong> · {{ check.state }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time }}</p>
 {% if check.record.explanation %}
 <p>{{ check.record.explanation }}</p>
 {% endif %}
@@ -70,7 +70,7 @@
 <h3>Linked obligation history</h3>
 <ol>
 {% for determination in obligation.history %}
-<li>{{ determination.status_label }} · {{ determination.recorded_at|station_time:"seconds" }} · {{ determination.actor_user.display_name|default:"System" }}{% if determination.explanation %}
+<li>{{ determination.status_label }} · {{ determination.recorded_at|station_time }} · {{ determination.actor_user.display_name|default:"System" }}{% if determination.explanation %}
 <p>{{ determination.explanation }}</p>
 {% endif %}
 </li>

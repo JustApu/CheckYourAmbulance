@@ -49,9 +49,10 @@
         <span>Engine hours (optional)</span>
         <input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off">
       </label>
-      <button type="submit" class="button primary">Save</button>
+      <button type="submit" class="button primary" aria-describedby="readings-save-help">Record readings</button>
     </div>
   </form>
+  <p id="readings-save-help" class="muted readings-save-note">Readings are audited history entries. To avoid recording partial typing, choose Record after entering complete values; incomplete input is not sent.</p>
   <div id="odo-confirm" hidden>
     <label for="odo-why">Why is this reading correct? (optional)</label>
     <textarea id="odo-why" rows="2" maxlength="1000"></textarea>

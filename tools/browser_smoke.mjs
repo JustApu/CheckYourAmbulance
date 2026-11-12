@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { captureBrowserEvidence } from "./capture_browser_evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cssPaths = [
@@ -36,8 +37,8 @@ const html = `<!doctype html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic vehicle inspection</title><script>${themeBootstrap}</script><script>window.__themeBeforeStyles = document.documentElement.getAttribute("data-theme");</script><style>${css}</style></head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
-<header class="site-header"><a class="brand" href="#main">Check Your Ambulance</a><div class="header-tools"><div class="account"><span class="account-name">Sam Example</span><form><button class="button" type="button">Sign out</button></form></div><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div></header>
-<nav class="site-nav" aria-label="Main"><button id="site-nav-toggle" class="button site-nav-toggle" type="button" aria-controls="site-nav-list" aria-expanded="false" hidden>Menu</button><ul id="site-nav-list" class="site-nav-list"><li><a href="#main" aria-current="page">Inspection</a></li><li><a href="#status">Vehicle status</a></li><li><a href="#deficiency">Deficiencies</a></li></ul></nav>
+<header class="site-header"><a class="brand" href="#main">Check Your Ambulance</a><button id="site-nav-toggle" class="button site-nav-toggle" type="button" aria-controls="site-nav-list" aria-expanded="false" hidden>Menu</button><div class="header-tools"><div class="account"><span class="account-name">Sam Example</span><form><button class="button" type="button">Sign out</button></form></div><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div></header>
+<nav class="site-nav" aria-label="Main"><ul id="site-nav-list" class="site-nav-list"><li><a href="#main" aria-current="page">Inspection</a></li><li><a href="#status">Vehicle status</a></li><li><a href="#deficiency">Deficiencies</a></li></ul></nav>
 <div id="connection-banner" class="banner banner-error" role="alert" hidden><span class="indicator-icon" aria-hidden="true">&#9888;</span><strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded.</div>
 <main id="main" tabindex="-1"><h1>Unit 12 inspection</h1>
 <section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open deficiency</span></section>
@@ -212,20 +213,21 @@ async function testInspectionOutcomeSemantics(viewport) {
     await page.goto("http://inspection.test/outcomes", { waitUntil: "load" });
     await page.getByRole("button", { name: /^Cab / }).click();
     const failed = page.locator('#items > li[data-item-key="item-fail|"]');
-    assert.match(await failed.innerText(), /Window status: Due/);
+    assert.match(await failed.innerText(), /Due/);
     assert.match(await failed.innerText(), /Latest recorded check: Fail by Synthetic EMT/);
     assert.match(await failed.innerText(), /Deficiency status: Open\. Severity: High/);
     assert.equal(await failed.locator(".pill-attention").count(), 0, `${viewport.name}: an open deficiency is not repeated as a second attention badge`);
     const passedWithOpenDeficiency = page.locator('#items > li[data-item-key="item-pass-open|"]');
-    assert.match(await passedWithOpenDeficiency.innerText(), /Window status: Done for this window/);
+    assert.match(await passedWithOpenDeficiency.innerText(), /Passed/);
     assert.match(await passedWithOpenDeficiency.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
     assert.match(await passedWithOpenDeficiency.innerText(), /Deficiency status: Open\. Severity: Medium/);
     const priorPass = page.locator('#items > li[data-item-key="item-prior-pass|"]');
-    assert.match(await priorPass.innerText(), /Window status: Due/);
+    assert.match(await priorPass.innerText(), /Due/);
     assert.match(await priorPass.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
     const unable = page.locator('#items > li[data-item-key="item-unable|"]');
     assert.match(await unable.innerText(), /Latest recorded check: Unable to inspect by Synthetic EMT/);
     assert.match(await unable.innerText(), /Deficiency status: Pending verification/);
+    await captureBrowserEvidence(page, `checklist-${viewport.name}.png`);
     const actionButtons = page.locator("#items .item-controls button");
     const count = await actionButtons.count();
     for (let index = 0; index < count; index += 1) {
@@ -269,6 +271,7 @@ async function testAgencyTimezoneConversion() {
         southernFold: window.CyaTimezones.toUtc("2026-04-05T01:45", "Australia/Lord_Howe"),
         southernGap: window.CyaTimezones.toUtc("2026-10-04T02:15", "Australia/Lord_Howe"),
         savedCheck: window.CyaTimezones.formatUtc("2026-06-01T16:00:00Z", "America/New_York"),
+        auditCheck: window.CyaTimezones.formatUtc("2026-06-01T16:00:00Z", "America/New_York", "seconds"),
       }));
       assert.deepEqual(actual, {
         regular: "2026-06-01T16:00:00.000Z",
@@ -276,7 +279,8 @@ async function testAgencyTimezoneConversion() {
         gap: "2026-03-08T07:00:00.000Z",
         southernFold: "2026-04-04T14:45:00.000Z",
         southernGap: "2026-10-03T15:30:00.000Z",
-        savedCheck: "2026-06-01 12:00:00 EDT (GMT-4)",
+        savedCheck: "2026-06-01 12:00 EDT (GMT-4)",
+        auditCheck: "2026-06-01 12:00:00 EDT (GMT-4)",
       }, `device timezone ${deviceZone}: agency-zone conversion changed`);
       const invalid = await page.evaluate(() => {
         const errors = [];
@@ -426,6 +430,8 @@ try {
       assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: skip link focus indicator is missing`);
       const navToggle = page.getByRole("button", { name: "Menu" });
       const navList = page.locator("#site-nav-list");
+      assert.equal(await navToggle.evaluate((element) => element.closest(".site-header") !== null), true, `${viewport.name}: menu is outside the compact header`);
+      assert.equal(await navToggle.evaluate((element) => element.closest(".site-nav") === null), true, `${viewport.name}: menu remains in its own navigation row`);
       if (viewport.width < 768) {
         assert.equal(await navToggle.isVisible(), true, `${viewport.name}: mobile menu toggle is not visible`);
         assert.equal(await navList.isVisible(), false, `${viewport.name}: mobile navigation is not initially collapsed`);

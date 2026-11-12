@@ -20,6 +20,7 @@ class Element {
   }
   get textContent() { return this._text || this.children.map(e => e.textContent).join(""); }
   setAttribute(name, value) { this[name] = value; }
+  getAttribute(name) { return this[name] === undefined ? null : String(this[name]); }
   removeAttribute(name) { if (name === "open") this.open = false; else delete this[name]; }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   fire(name) {
@@ -123,12 +124,12 @@ function checklist(state = "OPEN", extra = {}) {
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   // Verification regressions exercise item actions, including the no-session retry path.
   if (config.verification_for_deficiency_id) run.get("layout-flat").fire("click");
   return run;
 }
-const row = {item_id: "item", item_label: "Synthetic item", kit_id: "kit-a", kit_label: "Synthetic kit A", kind: "PRESENCE", checklist_version_id: "version", latest_check_id: "basis-a", latest_check_outcome: "PASSED", latest_check_at: "2026-06-01T00:00:00Z", deficiencies: [], allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]};
+const row = {item_id: "item", item_label: "Portable suction unit", kit_id: "kit-a", kit_label: "Airway response kit A", compartment_id: "compartment-a", compartment_label: "Driver-side exterior compartment", instructions: "Confirm the unit powers on and the tubing is present.", kind: "PRESENCE", checklist_version_id: "version", latest_check_id: "basis-a", latest_check_outcome: "PASSED", latest_check_at: "2026-06-01T00:00:00Z", deficiencies: [], allowed_outcomes: ["PASSED", "FAILED", "UNABLE_TO_INSPECT"]};
 function findAction(node, action) {
   if (node.dataset && node.dataset.action === action) return node;
   for (const child of node.children) { const found = findAction(child, action); if (found) return found; }
@@ -230,8 +231,9 @@ function generic(kind) {
     assert.equal(pass.textContent, "Pass"); assert.equal(pass.disabled, false, "Pass stays available as a distinct next action");
     run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "mine", latest_check_outcome: "FAILED"}]);
     run.context.testUI.render();
-    const pill = findClass(item(), "pill-failed");
-    assert(pill, "the current window status has its own pill"); assert.equal(pill.textContent, "Window status: Inspected — failed");
+    const pill = findClass(item(), "window-status");
+    assert(pill, "the current window state has its own compact indicator"); assert.equal(pill.textContent, "Failed");
+    assert.equal(pill.getAttribute("aria-label"), "Current-window state: Failed");
     assert(!isPrimary(findAction(item(), "pass")), "after reload the recorded Fail still keeps Pass unhighlighted");
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
     run.context.testUI.setRows([{...open, obligation_state: "DUE", latest_check_id: "other", latest_check_outcome: "PASSED"}]);
@@ -243,7 +245,7 @@ function generic(kind) {
   }
   {
     // Review of PR #93: an earlier Pass satisfied the window; a new acknowledged Fail must still un-highlight Pass.
-    const run = checklist(), item = () => run.elements.items.children[0];
+    const run = checklist(), item = () => run.elements.items.children.find(child => child.dataset.itemKey);
     const passed = {...row, obligation_state: "SATISFIED", obligation_outcome: "PASSED", due_at: "2026-06-01T06:00:00Z"};
     run.context.testUI.setRows([passed]); run.context.testUI.render();
     assert(!isPrimary(findAction(item(), "pass")), "a satisfied Pass window still shows Pass as a neutral action");
@@ -306,7 +308,7 @@ function generic(kind) {
       latest_check_id: "failed-check", latest_check_outcome: "FAILED", latest_check_by: "Synthetic EMT",
       latest_check_at: "2026-06-01T00:00:00Z", deficiencies: [{id: "def-open", severity_label: "High", status: "OPEN", summary: "Synthetic brake issue"}]};
     run.context.testUI.setRows([dueFail]); run.context.testUI.render();
-    assert(findClass(item(), "window-status").textContent.includes("Window status: Due"));
+    assert.equal(findClass(item(), "window-status").textContent, "Due");
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Fail by Synthetic EMT"));
     assert(findClass(item(), "known-deficiency").textContent.includes("Deficiency status: Open. Severity: High."));
     assert.equal(findClass(item(), "pill-attention"), null, "the open deficiency supplies the attention cue without a duplicate badge");
@@ -315,7 +317,7 @@ function generic(kind) {
     const passedWithOpenDeficiency = {...dueFail, obligation_state: "SATISFIED", obligation_outcome: "PASSED",
       latest_check_id: "passed-check", latest_check_outcome: "PASSED"};
     run.context.testUI.setRows([passedWithOpenDeficiency]); run.context.testUI.render();
-    assert(findClass(item(), "window-status").textContent.includes("Window status: Done for this window"));
+    assert.equal(findClass(item(), "window-status").textContent, "Passed");
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Pass"));
     assert(findClass(item(), "known-deficiency").textContent.includes("Deficiency status: Open"), "a passing check does not hide an open deficiency");
     assert(outcomeButtons(item()).every(button => !isPrimary(button)), "a passing check does not make Pass look like the saved result");
@@ -323,7 +325,7 @@ function generic(kind) {
     const newWindow = {...row, obligation_state: "DUE", obligation_outcome: null,
       latest_check_id: "prior-check", latest_check_outcome: "PASSED", deficiencies: []};
     run.context.testUI.setRows([newWindow]); run.context.testUI.render();
-    assert(findClass(item(), "window-status").textContent.includes("Window status: Due"));
+    assert.equal(findClass(item(), "window-status").textContent, "Due");
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Pass"));
     assert(outcomeButtons(item()).every(button => !isPrimary(button)), "a prior-window Pass does not style the new-window action as selected");
 
@@ -333,7 +335,20 @@ function generic(kind) {
     assert(outcomeButtons(item()).every(button => !isPrimary(button)), "Unable to inspect remains distinct from every next action");
 
     run.context.testUI.setRows([{...row, obligation_state: null, obligation_outcome: null, latest_check_id: null, deficiencies: []}]); run.context.testUI.render();
-    assert(findClass(item(), "window-status").textContent.includes("Window status: No current requirement"));
+    assert.equal(findClass(item(), "window-status").textContent, "No current requirement");
+  }
+  {
+    const run = checklist(), item = () => run.elements.items.children.find(child => child.dataset.itemKey);
+    const title = () => findClass(item(), "item-head").children.find(child => child.type === "h3");
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    run.context.testUI.setLayout("COMPARTMENTS");
+    run.context.testUI.selectGroup("compartment:compartment-a", {key: "compartment:compartment-a", label: row.compartment_label});
+    assert.equal(findClass(item(), "item-location"), null, "compartment context is shown once in the group heading");
+    assert(!title().textContent.includes("Airway response kit A"), "kit identity is not repeated on each item card");
+    assert(findClass(item(), "instructions").textContent.includes("powers on"), "configured check criteria remain visible");
+    run.context.testUI.setLayout("FLAT");
+    assert.equal(findClass(item(), "item-location").textContent, "Driver-side exterior compartment", "flat view keeps item location context");
+    assert(title().textContent.includes("Airway response kit A"), "flat view keeps kit instance identity");
   }
   for (const outcome of ["unconfirmed", "rejected"]) {
     // Not-saved and unconfirmed Fail attempts stay distinct from a saved Fail, in words and icon.
@@ -397,8 +412,8 @@ function generic(kind) {
     const run = checklist(); const quantity = {...row, kind: "QUANTITY", expected_quantity: 6};
     run.context.testUI.drafts["item|kit-a"] = "2"; run.context.testUI.openOutcome(quantity, "FAILED"); newReport(run); run.get("outcome-form").fire("submit");
     assert.equal(run.posts()[0].body.quantity, 2);
-    assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "FAILED"}), "Inspected — failed");
-    assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "SUPERVISOR_COMPLETED"}), "Completed by supervisor — unable to inspect");
+    assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "FAILED"}), "Failed");
+    assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "SUPERVISOR_COMPLETED"}), "Supervisor completed: unable to inspect");
   }
   {
     const run = generic("completion"); field(run.form, "explanation", "Synthetic supervisor explanation."); run.form.dataset.check = "unable";
@@ -662,6 +677,21 @@ function generic(kind) {
     assert.equal(run.posts()[0].body.expected_event_id, "event-seen");
     response(run.posts()[0], 403, {status: "REJECTED", code: "FORBIDDEN"}); await tick();
     assert(run.form.querySelector(".workflow-result").textContent.includes("not permitted"));
+  }
+  {
+    const run = checklist();
+    run.get("odo-value").value = "65000";
+    run.get("odo-unit").value = "mi";
+    run.get("odo-hours").value = "845.5";
+    ["odo-value", "odo-unit", "odo-hours"].forEach(id => run.get(id).fire("input"));
+    assert.equal(run.posts().length, 0, "typing a complete reading does not create a history record automatically");
+    run.get("odometer-form").fire("submit");
+    assert.equal(run.posts().length, 1, "one explicit Record action sends one reading");
+    assert.deepEqual({...run.posts()[0].body, operation_id: "x"}, {
+      operation_id: "x", vehicle_id: "vehicle", value: "65000", unit: "mi", confirm_anomaly: false, engine_hours: "845.5",
+    });
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T16:00:00Z"}}); await tick();
+    assert(run.get("odometer-state").querySelector(".save-state-text").textContent.includes("Recorded"), "the server acknowledgement is shown after recording");
   }
   {
     // Issue 37: a 401 from the verification re-read means signed out. Stop reloading, keep the

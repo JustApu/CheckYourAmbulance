@@ -202,6 +202,8 @@ class ShellMarkupTests(ShellTestCase):
         self.assertIn('<a class="skip-link" href="#main">', html)
         self.assertIn('<nav class="site-nav" aria-label="Main">', html)
         self.assertIn('id="site-nav-toggle"', html)
+        self.assertLess(html.index('class="site-header"'), html.index('id="site-nav-toggle"'))
+        self.assertLess(html.index('id="site-nav-toggle"'), html.index('<nav class="site-nav"'))
         self.assertIn('aria-controls="site-nav-list" aria-expanded="false"', html)
         self.assertIn('id="site-nav-list" class="site-nav-list"', html)
         self.assertEqual(html.count("<h1>"), 1)
