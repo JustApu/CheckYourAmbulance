@@ -22,7 +22,7 @@ const cols = '<colgroup><col class="col-item"><col class="col-result"><col class
 const tick = (label) => `<span class="tick"><span class="box" aria-hidden="true"></span>${label}</span>`;
 
 function head(heading, columns) {
-  return `<thead><tr class="repeat-identity"><th colspan="5">Synthetic Medic 6 · ${versions}</th></tr>
+  return `<thead><tr class="repeat-identity"><th colspan="5">Synthetic Medic 6 · ${versions} <span class="version-id">synthetic-version-id</span></th></tr>
     <tr class="section-heading"><th colspan="5" scope="colgroup">${heading}</th></tr>
     <tr class="column-heads">${columns.map((c) => `<th scope="col">${c}</th>`).join("")}</tr></thead>`;
 }
@@ -44,10 +44,11 @@ function kitRow(index) {
     <td class="time" data-label="Time"><span class="blank short"></span></td></tr>`;
 }
 
-function page(title, body) {
+function page(title, body, pageHeader = "") {
+  const running = pageHeader ? `@page { @top-left { content: "${pageHeader}"; font-size: 8pt; } }` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>
-    <style>${css}</style></head><body>
+    <style>${css}${running}</style></head><body>
     <div class="screen-only print-tools"><a href="/back">Back</a><button type="button" class="print-button" id="print-sheet">Print</button><p>Prints on US Letter paper.</p></div>
     <main>${body}</main></body></html>`;
 }
@@ -64,11 +65,16 @@ const outage = page("Synthetic Medic 6 paper checklist", outageHeader + kitSecti
 // against this baseline instead of a fixed number of pages.
 const outageWithoutKits = page("Synthetic Medic 6 paper checklist", outageHeader);
 
-const kitTypes = Array.from({ length: 12 }, (_, kit) => `<section class="kit-type"><h3>Synthetic kit type ${kit + 1}</h3><ul>${
+const kitTypeBlocks = (count) => Array.from({ length: count }, (_, kit) => `<section class="kit-type"><h3>Synthetic kit type ${kit + 1}</h3><ul>${
   Array.from({ length: 8 }, (_, item) => `<li>Synthetic supply ${item + 1}, size ${kit + 1} (${item + 1})</li>`).join("")
 }</ul></section>`).join("");
-const reference = page("Kit reference", `<header class="sheet-header"><h1>Kit reference: what a complete kit contains</h1></header>
-  <section class="kit-reference"><h2>${versions} <span class="version-id">synthetic-version-id</span></h2><div class="kit-columns">${kitTypes}</div></section>`);
+const referenceHeader = `Kit reference: ${versions} (synthetic-version-id)`;
+const referenceOf = (count) => page("Kit reference", `<header class="sheet-header"><h1>Kit reference: what a complete kit contains</h1></header>
+  <section class="kit-reference"><h2>${versions} <span class="version-id">synthetic-version-id</span></h2><div class="kit-columns">${kitTypeBlocks(count)}</div></section>`, referenceHeader);
+const reference = referenceOf(12);
+// A long reference continues on further pages; each carries the running header (checked by
+// rendering the kept PDF; Playwright cannot read @page margin boxes).
+const longReference = referenceOf(40);
 
 // PDF page objects are "/Type /Page" (the page-tree node is "/Type /Pages").
 function pageCount(pdf) {
@@ -152,7 +158,11 @@ try {
     const pages = pageCount(pdf);
     assert.equal(pages, 1, `reference print: 12 kits of 8 items should fit one Letter page, got ${pages}`);
     keep("kit-reference-letter.pdf", pdf);
-    console.log("reference print: 12 kit types on one three-column US Letter page passed");
+    const long = await printPdf(browser, longReference, () => null);
+    const longPages = pageCount(long.pdf);
+    assert.ok(longPages >= 2, `reference print: 40 kit types should continue onto a second page, got ${longPages}`);
+    keep("kit-reference-long-letter.pdf", long.pdf);
+    console.log(`reference print: 12 kit types on one three-column US Letter page, 40 on ${longPages} pages passed`);
   } catch (error) {
     failures.push(`reference print: ${error.message}`);
   }
