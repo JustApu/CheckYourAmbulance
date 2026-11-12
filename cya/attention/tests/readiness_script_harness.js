@@ -8,9 +8,25 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.resolve(__dirname, "../templates/attention/readiness.js"), "utf8");
 
 function run(config) {
+  const panel = {
+    openVehicleIds: [],
+    _html: "initial",
+    get innerHTML() { return this._html; },
+    set innerHTML(value) { this._html = value; this.openVehicleIds = []; },
+    querySelectorAll(selector) {
+      if (selector === ".readiness-details[open]") {
+        return this.openVehicleIds.map(vehicleId => ({getAttribute: () => vehicleId}));
+      }
+      if (selector === ".readiness-details") {
+        return this.details || [];
+      }
+      return [];
+    },
+    details: [],
+  };
   const nodes = {
     "readiness-config": {textContent: JSON.stringify(config)},
-    "readiness-panel": {innerHTML: "initial"},
+    "readiness-panel": panel,
     "readiness-live-state": {textContent: "", children: [], appendChild(node) { this.children.push(node); return node; }},
     "readiness-stale": {hidden: true},
   };
@@ -57,8 +73,15 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     page.fire();  // the reconcile after (re)connecting
     assert.equal(page.requests.length, 1);
     assert.equal(page.requests[0].url, "/fleet/readiness/panel/");
+    page.nodes["readiness-panel"].openVehicleIds = ["vehicle-a"];
+    page.nodes["readiness-panel"].details = [
+      {open: false, getAttribute: () => "vehicle-a"},
+      {open: false, getAttribute: () => "vehicle-b"},
+    ];
     page.requests[0].resolve({ok: true, text: async () => "<p>fresh</p>"}); await tick(); await tick();
     assert.equal(page.nodes["readiness-panel"].innerHTML, "<p>fresh</p>");
+    assert.equal(page.nodes["readiness-panel"].details[0].open, true);
+    assert.equal(page.nodes["readiness-panel"].details[1].open, false);
     // A hint only says to re-read.
     page.sockets[1].onmessage({data: "{}"}); page.fire();
     assert.equal(page.requests.length, 2);

@@ -78,6 +78,7 @@ BROWSER_CSS = frozenset(
     {
         "cya/shell/templates/shell/shell.css",
         "cya/inspections/templates/inspections/inspection.css",
+        "cya/attention/templates/attention/readiness.css",
     }
 )
 

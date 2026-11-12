@@ -19,7 +19,7 @@ from cya.deficiencies import acknowledgement, service
 from cya.deficiencies.closure import close_administrator
 from cya.deficiencies.commands import assign_deficiency, regrade_severity, set_deadline
 from cya.deficiencies.dependency import enter_dependency
-from cya.deficiencies.models import DeficiencyEvent
+from cya.deficiencies.models import DeficiencyEvent, DeficiencySeverity
 from cya.deficiencies.suspension import suspend_checks
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 from cya.obligations.current import FACTS_CACHE
@@ -442,6 +442,62 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "readiness-config")
         self.assertContains(page, "Obligations by state")
         self.assertNotContains(page, 'compliant" flag:')
+
+    def test_vehicle_summaries_keep_attention_signals_separate_and_link_workflows(self):
+        deficiency_id = self.failed(self.suction).body["deficiency_ids"][0]
+        sup = self.supervisor_client()
+        page = sup.get("/fleet/readiness/")
+        self.assertContains(page, 'data-attention="true"')
+        self.assertContains(page, 'data-status="IN_SERVICE"')
+        self.assertContains(page, "Failed: 0")
+        self.assertContains(page, "Critical / High shown: 1")
+        self.assertContains(page, "Overdue:")
+        self.assertContains(page, "Missed:")
+        self.assertContains(page, "Suspensions:")
+        self.assertContains(page, "Obligations, deficiencies and suspensions")
+        self.assertContains(
+            page,
+            "These independent signals do not combine into a compliance or operational status.",
+        )
+        self.assertContains(page, f'href="/inspection/vehicles/{self.vehicle.pk}/"')
+        self.assertContains(page, f'href="/status/vehicles/{self.vehicle.pk}/"')
+        self.assertContains(page, f'href="/deficiencies/{deficiency_id}/"')
+        self.assertContains(page, 'id="readiness-attention-only"')
+        self.assertNotContains(page, 'data-readiness="compliant"')
+
+    def test_vehicle_summary_uses_configured_severity_rank_and_label(self):
+        DeficiencySeverity.objects.create(
+            organization=self.org,
+            code="URGENT",
+            revision=1,
+            label="Urgent",
+            description="Synthetic top severity for this organization.",
+            rank=5,
+            active=True,
+            effective_at=self.clock.now - timedelta(days=1),
+        )
+        self.failed(self.suction, create=self.new_fields(severity="URGENT"))
+        page = self.supervisor_client().get("/fleet/readiness/")
+        self.assertContains(page, "Urgent / Critical shown: 1")
+        self.assertContains(page, 'data-attention="true"')
+
+    def test_vehicle_summary_resolves_reordered_level_by_code_at_as_of(self):
+        self.failed(self.suction, create=self.new_fields(severity="MEDIUM"))
+        effective = self.clock.now + timedelta(minutes=1)
+        DeficiencySeverity.objects.create(
+            organization=self.org,
+            code="MEDIUM",
+            revision=2,
+            label="Serious",
+            description="Synthetic reordered medium level.",
+            rank=5,
+            active=True,
+            effective_at=effective,
+        )
+        self.clock.set(effective)
+        page = self.supervisor_client().get("/fleet/readiness/")
+        self.assertContains(page, "Serious / Critical shown: 1")
+        self.assertContains(page, 'data-attention="true"')
 
     def test_as_of_is_validated_and_shown_as_a_static_picture(self):
         sup = self.supervisor_client()
