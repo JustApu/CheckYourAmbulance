@@ -432,6 +432,7 @@ try {
       const navList = page.locator("#site-nav-list");
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-header") !== null), true, `${viewport.name}: menu is outside the compact header`);
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-nav") === null), true, `${viewport.name}: menu remains in its own navigation row`);
+      await captureBrowserEvidence(page, `shell-${viewport.name}.png`);
       if (viewport.width < 768) {
         assert.equal(await navToggle.isVisible(), true, `${viewport.name}: mobile menu toggle is not visible`);
         assert.equal(await navList.isVisible(), false, `${viewport.name}: mobile navigation is not initially collapsed`);

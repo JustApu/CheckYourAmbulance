@@ -191,6 +191,7 @@ try {
       assert.equal(await page.getByRole("link", { name: "Resume incomplete Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
       assert.equal(await page.getByRole("button", { name: "Start Night Shift Vehicle Safety Checklist inspection" }).count(), 1);
       assert.equal(await page.getByRole("link", { name: "Resume incomplete inspection" }).count(), 0, `${viewport.name}: incomplete resume action is duplicated`);
+      await captureBrowserEvidence(page, `vehicle-resume-${viewport.name}.png`);
       console.log(`${viewport.name}: landing actions, session choice, target size and layout passed`);
     } catch (error) {
       mkdirSync(artifacts, { recursive: true });
