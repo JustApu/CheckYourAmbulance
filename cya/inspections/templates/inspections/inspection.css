@@ -85,6 +85,17 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .workflow-refresh[hidden], fieldset[hidden] { display: none; }
 .workflow-write input[type=hidden] { display: none; }
 .status-result:empty { display: none; }
+.deficiency-overview h2 { margin-top: 0; overflow-wrap: anywhere; }
+.deficiency-state { font-size: 1.1rem; }
+.deficiency-facts { display: grid; grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr); gap: .25rem .75rem; }
+.deficiency-facts dd { margin: 0; overflow-wrap: anywhere; }
+.deficiency-details > summary { display: flex; align-items: center; min-height: 48px; font-weight: 700; cursor: pointer; overflow-wrap: anywhere; }
+.deficiency-next-action h2 { margin-top: 0; }
+.deficiency-next-action > .button, .deficiency-primary-form > .button { min-height: 48px; }
+@media (max-width: 40rem) {
+  .deficiency-facts { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  .deficiency-facts dd { margin-bottom: .35rem; }
+}
 
 .deficiency-filter-form > .deficiency-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); align-items: end; gap: .5rem .75rem; }
 .deficiency-filter-grid > label { min-width: 0; overflow-wrap: anywhere; }

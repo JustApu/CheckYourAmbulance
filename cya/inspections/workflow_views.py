@@ -490,7 +490,15 @@ def _supervisor_controls(user, found, status, roles, context, deadline, assignee
 def deficiency(request, user, deficiency_id):
     found = (
         Deficiency.objects.filter(organization_id=user.organization_id, pk=_identity(deficiency_id))
-        .select_related("vehicle", "reporter", "severity_version", "category_version")
+        .select_related(
+            "vehicle",
+            "reporter",
+            "severity_version",
+            "category_version",
+            "item",
+            "kit",
+            "compartment",
+        )
         .first()
     )
     if found is None:
@@ -524,6 +532,13 @@ def deficiency(request, user, deficiency_id):
     # The server refuses a past follow-up (INVALID_FOLLOW_UP), so a passed one is not prefilled.
     follow_up = dependency.get("follow_up_at") if dependency else None
     follow_up_passed = follow_up is not None and follow_up <= timezone.now()
+    scope = verification_scope(found) if status.status == "PENDING_VERIFICATION" else []
+    verification_progress = {
+        "total": len(scope),
+        "verified": sum(row.satisfied for row in scope),
+        "outstanding": sum(not row.satisfied for row in scope),
+    }
+    suspensions = _suspensions(str(user.organization_id), str(found.pk))
     return render(
         request,
         "inspections/deficiency.html",
@@ -556,8 +571,10 @@ def deficiency(request, user, deficiency_id):
             "deadline": deadline,
             "age_days": deadline["age_seconds"] // 86400,
             "assignee": status.assignee,
-            "scope": verification_scope(found) if status.status == "PENDING_VERIFICATION" else [],
-            "suspensions": _suspensions(str(user.organization_id), str(found.pk)),
+            "scope": scope,
+            "verification_progress": verification_progress,
+            "suspensions": suspensions,
+            "active_suspension_count": sum(not row.ended_at for row in suspensions),
             "supervisor": _supervisor_controls(
                 user,
                 found,
