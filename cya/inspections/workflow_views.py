@@ -654,7 +654,7 @@ def queue(request, user):
     top_codes = {
         level.code
         for level in severity_levels
-        if severity_threshold is None or level.rank >= severity_threshold
+        if severity_threshold is not None and level.rank >= severity_threshold
     }
     severity_label = " / ".join(
         dict.fromkeys(
@@ -688,7 +688,7 @@ def queue(request, user):
         groups.append(
             (
                 "severity",
-                f"Top configured severity: {severity_label or 'Active deficiencies'}",
+                f"Top configured severity: {severity_label}",
                 high_severity,
             )
         )

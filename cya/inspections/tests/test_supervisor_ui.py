@@ -566,6 +566,27 @@ class QueueTests(SupervisorUiCase):
             [str(urgent_grade), str(retired_grade)],
         )
 
+    def test_queue_omits_severity_group_when_no_levels_are_active(self):
+        self.report(summary="Synthetic case with retired severity", severity="HIGH")
+        levels = list(DeficiencySeverity.objects.filter(organization=self.org))
+        for level in levels:
+            DeficiencySeverity.objects.create(
+                organization=self.org,
+                code=level.code,
+                revision=level.revision + 1,
+                label=f"Retired {level.label}",
+                description="Synthetic retired severity level.",
+                rank=level.rank,
+                active=False,
+                effective_at=self.now - timedelta(days=1),
+            )
+        sup = self.signed_in("queue-no-active-severity-supervisor", "SUPERVISOR")
+        response = sup[0].get(self.URL)
+        headings = [group["heading"] for group in response.context["lists"]]
+        self.assertFalse(
+            any(heading.startswith("Top configured severity:") for heading in headings)
+        )
+
     def test_queue_pagination_preserves_filters_and_total_counts(self):
         first = self.report(summary="Synthetic queue marker first")
         self.report(summary="Synthetic queue marker second")

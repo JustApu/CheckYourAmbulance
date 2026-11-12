@@ -49,7 +49,8 @@ and clamp to the last page.
 case groups put extension requests waiting for a decision first, then overdue deficiencies, cases
 at the threshold of the organization's two highest active severity ranks, and unassigned cases.
 Retired grades above that threshold remain included, matching fleet readiness. Severity labels
-and matching codes come from organization configuration, not fixed codes. Each group shows the
+and matching codes come from organization configuration, not fixed codes; the severity group is
+omitted when no levels are active. Each group shows the
 filtered total, a next-action prompt, and numbered 25-row pagination; cases may appear in more
 than one group when they need more than one action. Overdue uses the governing deadline, including
 approved extensions. Both pages only read the current deficiency projection and related records;
