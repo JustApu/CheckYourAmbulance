@@ -6,6 +6,7 @@ not the Workspace integration, which issue 25 (https://github.com/JustApu/CheckY
 """
 
 from unittest import mock
+from urllib.parse import urlencode
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.sign_in = harness.sign_in
         self.make_administrator = harness.make_administrator
         self.form = harness.form
+        self.data = harness.data
         self.change = harness.change
         self.counts = harness.counts
 
@@ -67,6 +69,8 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertContains(history, "SUPERVISOR")
         self.assertContains(history, crew.email)
         self.assertContains(history, "Saved")
+        self.assertContains(history, 'class="role-history-scroll"')
+        self.assertContains(history, 'aria-label="Role history"')
 
     def test_unauthorized_user_is_refused_and_a_denial_is_recorded(self):
         _, admin = self.make_administrator("admin-1")
@@ -79,6 +83,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
             URL,
             {
                 "csrfmiddlewaretoken": client.cookies["csrftoken"].value,
+                "stage": "confirm",
                 "operation_id": str(uuid4()),
                 "target": str(crew.pk),
                 "role": "ADMINISTRATOR",
@@ -101,6 +106,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         token, operation_id = self.form(admin_client)
         data = {
             "csrfmiddlewaretoken": token,
+            "stage": "confirm",
             "operation_id": operation_id,
             "target": str(crew.pk),
             "role": "SUPERVISOR",
@@ -152,6 +158,197 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, 'aria-current="page">Administration')
         self.assertContains(page, "Change a role")
+
+    def test_preview_is_clear_and_does_not_change_roles_until_confirmation(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        data = self.data(admin_client, crew, q=crew.email, stage="preview")
+        before = self.counts()
+
+        preview = admin_client.post(URL, data)
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, f"Grant Supervisor role to {crew.display_name}")
+        self.assertContains(preview, crew.email)
+        self.assertContains(preview, 'name="stage" value="confirm"')
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+        confirmation = admin_client.post(URL, {**data, "stage": "confirm"})
+        self.assertEqual(confirmation.status_code, 302)
+        self.assertEqual(
+            confirmation["Location"], URL + "?" + urlencode({"saved": "1", "q": crew.email})
+        )
+        self.assertEqual(current_role_codes(crew), ("CREW", "SUPERVISOR"))
+
+    def test_user_search_finds_matches_beyond_the_default_first_page(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        for index in range(55):
+            User.objects.create(
+                organization=self.org,
+                idp_issuer="https://accounts.google.com",
+                idp_subject=f"directory-{index:03}",
+                email=f"directory-{index:03}@example.test",
+                display_name=f"Directory User {index:03}",
+            )
+        target = User.objects.create(
+            organization=self.org,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="search-target",
+            email="zoe.target@example.test",
+            display_name="Zoe Searchtarget",
+        )
+
+        by_name = admin_client.get(URL, {"q": "Searchtarget"})
+        self.assertEqual(by_name.status_code, 200)
+        self.assertEqual(by_name.context["target_total"], 1)
+        self.assertContains(by_name, target.display_name)
+        self.assertNotContains(by_name, "Directory User 000")
+
+        by_email = admin_client.get(URL, {"q": "zoe.target@example.test"})
+        self.assertEqual(by_email.context["target_total"], 1)
+        self.assertContains(by_email, target.email)
+
+    def test_non_administrators_cannot_preview_edit_or_submit_unknown_stages(self):
+        admin_client, admin = self.make_administrator("admin-1")
+        client, crew = self.sign_in("crew-1")
+        client.get("/")
+        token = client.cookies["csrftoken"].value
+        role_rows = RoleGrant.objects.count()
+        receipts = CommandReceipt.objects.filter(command_type="ROLE_CHANGE").count()
+
+        for stage in ("preview", "edit", None, "unexpected"):
+            with self.subTest(stage=stage):
+                data = {
+                    "csrfmiddlewaretoken": token,
+                    "operation_id": str(uuid4()),
+                    "target": str(crew.pk),
+                    "role": "ADMINISTRATOR",
+                    "action": "GRANT",
+                }
+                if stage is not None:
+                    data["stage"] = stage
+                response = client.post(URL, data)
+
+                self.assertEqual(response.status_code, 403)
+                for private in (admin.email, crew.email, "Role history", "Change a role"):
+                    self.assertNotContains(response, private, status_code=403)
+
+        self.assertEqual(RoleGrant.objects.count(), role_rows)
+        self.assertEqual(
+            CommandReceipt.objects.filter(command_type="ROLE_CHANGE").count(), receipts
+        )
+        denials = AuditEvent.objects.filter(
+            action="VIEW_ADMINISTRATION", outcome="DENIED", actor_user=crew
+        )
+        self.assertEqual(denials.count(), 4)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+    def test_administrator_missing_or_unknown_stage_is_rejected_without_a_change(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        before = self.counts()
+
+        for stage in (None, "unexpected"):
+            with self.subTest(stage=stage):
+                data = self.data(admin_client, crew)
+                if stage is None:
+                    data.pop("stage")
+                else:
+                    data["stage"] = stage
+                response = admin_client.post(URL, data)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertContains(response, "request was not valid", status_code=400)
+
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+    def test_malformed_preview_is_rejected_without_a_change(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        before = self.counts()
+        cases = {
+            "unknown role": {"role": "ROOT"},
+            "legacy EMT alias": {"role": "EMT"},
+            "unknown action": {"action": "DELETE"},
+            "target not a UUID": {"target": "not-a-uuid"},
+            "target not canonical": {"target": str(crew.pk).upper()},
+            "operation id not a UUID": {"operation_id": "not-a-uuid"},
+            "operation id not UUID4": {"operation_id": "00000000-0000-1000-8000-000000000000"},
+        }
+        for name, change in cases.items():
+            with self.subTest(name=name):
+                data = self.data(admin_client, crew, stage="preview")
+                data.update(change)
+                response = admin_client.post(URL, data)
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+    def test_preview_rejects_inactive_and_cross_organization_targets(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        other_org = Organization.objects.create(name="Other Agency", station_zone="UTC")
+        outside = User.objects.create(
+            organization=other_org,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="outside-preview",
+            email="outside-preview@example.test",
+            display_name="Outside Preview",
+        )
+        inactive = User.objects.create(
+            organization=self.org,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="inactive-preview",
+            email="inactive-preview@example.test",
+            display_name="Inactive Preview",
+            active=False,
+        )
+        before = self.counts()
+
+        for target in (outside, inactive):
+            with self.subTest(target=target.idp_subject):
+                data = self.data(admin_client, target, stage="preview")
+                response = admin_client.post(URL, data)
+                self.assertEqual(response.status_code, 404)
+                self.assertNotContains(response, target.email, status_code=404)
+                self.assertNotContains(response, "Review role change", status_code=404)
+
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(RoleGrant.objects.filter(user__in=(outside, inactive)).count(), 0)
+
+    def test_search_errors_hide_users_and_reject_preview_or_edit_posts(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        before = self.counts()
+        cases = (
+            ("duplicate", ["first", "second"], "Search was supplied more than once"),
+            ("too long", "x" * 101, "Search is limited to 100 characters"),
+        )
+
+        for name, query, message in cases:
+            with self.subTest(search=name, method="GET"):
+                response = admin_client.get(URL, {"q": query})
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, message)
+                self.assertContains(response, "The user list is hidden")
+                self.assertEqual(response.context["targets"], [])
+                self.assertEqual(response.context["target_total"], 0)
+                self.assertNotContains(response, 'id="role-target"')
+
+            for stage in ("preview", "edit"):
+                with self.subTest(search=name, stage=stage):
+                    data = self.data(admin_client, crew, stage=stage, q=query)
+                    response = admin_client.post(URL, data)
+                    self.assertEqual(response.status_code, 400)
+                    self.assertContains(response, message, status_code=400)
+                    self.assertContains(response, "The user list is hidden", status_code=400)
+                    self.assertEqual(response.context["targets"], [])
+                    self.assertEqual(response.context["target_total"], 0)
+                    self.assertNotContains(response, 'id="role-target"', status_code=400)
+
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
 
     def test_a_crew_user_is_not_shown_the_link(self):
         client, _ = self.sign_in("crew-1")
@@ -206,6 +403,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
                 token, fresh_id = self.form(admin_client)
                 data = {
                     "csrfmiddlewaretoken": token,
+                    "stage": "confirm",
                     "operation_id": fresh_id,
                     "target": target,
                     "role": "SUPERVISOR",
@@ -221,6 +419,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         client.get("/")
         base = {
             "csrfmiddlewaretoken": client.cookies["csrftoken"].value,
+            "stage": "confirm",
             "operation_id": str(uuid4()),
             "role": "SUPERVISOR",
             "action": "GRANT",

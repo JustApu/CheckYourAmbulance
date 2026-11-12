@@ -59,6 +59,11 @@ h1 { font-size: 1.5rem; line-height: 1.25; margin: .5rem 0 1rem; }
 .save-state-failed { background: var(--bad-bg); color: var(--bad-fg); font-weight: 700; }
 .save-state-unconfirmed { background: var(--wait-bg); color: var(--wait-fg); font-weight: 700; border-style: dashed; }
 .indicator-icon { font-weight: 700; }
+.role-history-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; border: 1px solid var(--line); }
+.role-history-scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.role-history-table { border-collapse: collapse; min-width: 48rem; width: 100%; }
+.role-history-table th, .role-history-table td { padding: .5rem .75rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.role-administration input[type="search"], .role-administration select { max-width: 100%; min-height: 48px; padding: .4rem .65rem; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .375rem; }
 @media (min-width: 48rem) {
   .site-header, .site-nav-list { padding-left: 2rem; padding-right: 2rem; }
   main { padding: 1.5rem 2rem; }

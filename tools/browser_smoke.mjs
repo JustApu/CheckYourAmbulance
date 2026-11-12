@@ -47,6 +47,7 @@ const html = `<!doctype html>
 <section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title"><h2 id="deficiency-overview-title">Synthetic oxygen cylinder pressure issue</h2><p class="deficiency-state"><strong>In Progress</strong> · High severity</p><p>Synthetic Ambulance 12</p><dl class="deficiency-facts"><dt>Affected scope</dt><dd>Synthetic oxygen cylinder</dd><dt>Assignee</dt><dd>Sam Example</dd><dt>Governing deadline</dt><dd>2026-11-15 12:00 UTC · Overdue</dd></dl></section>
 <section class="panel deficiency-next-action" aria-labelledby="next-action-title"><h2 id="next-action-title">Next action</h2><form class="workflow-write"><p>Record that the repair is complete and request verification.</p><button class="button primary" type="button">Record repair</button></form></section>
 <details class="panel deficiency-details" id="deficiency-work-updates"><summary>Work updates and dependencies</summary><form class="panel workflow-write"><h2>Add progress note</h2><label>Progress note<textarea aria-label="Progress note"></textarea></label><button class="button" type="button">Add note</button></form></details>
+<section class="role-administration" aria-labelledby="role-history-heading"><h2 id="role-history-heading">Role history</h2><div class="role-history-scroll" role="region" aria-label="Role history rows" tabindex="0"><table class="role-history-table"><thead><tr><th>When (agency local time)</th><th>User</th><th>Action</th><th>Role</th><th>Changed by</th></tr></thead><tbody><tr><td>2026-11-12 12:34:56 UTC</td><td>Synthetic User With A Long Display Name (user@example.test)</td><td>GRANT</td><td>SUPERVISOR</td><td>Synthetic Administrator (admin@example.test)</td></tr></tbody></table></div></section>
 </main><script>${shellScript}</script></body></html>`;
 const viewports = [
   { name: "phone-375", width: 375, height: 812 },
@@ -261,6 +262,35 @@ async function testInspectionOutcomeSemantics(viewport) {
 const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR || path.join(os.tmpdir(), `cya-browser-smoke-${process.pid}`);
 const browser = await chromium.launch({ headless: true });
 const failures = [];
+async function testRoleHistoryResponsive(page, viewport) {
+  const region = page.getByRole("region", { name: "Role history rows" });
+  assert.equal(await region.count(), 1, `${viewport.name}: role history region is not exposed accessibly`);
+  const metrics = await region.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    tabIndex: element.tabIndex,
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: innerWidth,
+    historyText: element.innerText,
+  }));
+  assert.equal(metrics.tabIndex, 0, `${viewport.name}: role history region is not keyboard-focusable`);
+  assert.ok(metrics.documentWidth <= metrics.viewportWidth, `${viewport.name}: role history makes the page overflow horizontally`);
+  assert.match(metrics.historyText, /2026-11-12 12:34:56 UTC/);
+  assert.match(metrics.historyText, /Synthetic User With A Long Display Name/);
+  await region.focus();
+  assert.equal(await region.evaluate((element) => element === document.activeElement), true, `${viewport.name}: role history region did not receive focus`);
+  assert.equal(await region.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: role history focus indicator is missing`);
+  if (viewport.width <= 768) {
+    assert.ok(metrics.scrollWidth > metrics.clientWidth, `${viewport.name}: long history row does not scroll horizontally`);
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(
+      () => document.querySelector(".role-history-scroll").scrollLeft > 0,
+      null,
+      { timeout: 2000 },
+    );
+    assert.ok(await region.evaluate((element) => element.scrollLeft > 0), `${viewport.name}: keyboard cannot scroll the history region`);
+  }
+}
 async function testAgencyTimezoneConversion() {
   for (const deviceZone of ["UTC", "America/Los_Angeles", "Pacific/Auckland"]) {
     const context = await browser.newContext({timezoneId: deviceZone});
@@ -431,6 +461,7 @@ try {
       const skipBox = await skipLink.boundingBox();
       assert.ok(skipBox && skipBox.y >= 0, `${viewport.name}: focused skip link is not visible`);
       assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: skip link focus indicator is missing`);
+      await testRoleHistoryResponsive(page, viewport);
       const navToggle = page.locator("#site-nav-toggle");
       const navList = page.locator("#site-nav-list");
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-header") !== null), true, `${viewport.name}: menu is outside the compact header`);
