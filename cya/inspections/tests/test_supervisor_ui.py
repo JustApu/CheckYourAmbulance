@@ -664,6 +664,17 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
         self.assertIn("only an Administrator can reopen it", form)
         self.assertIn('name="explanation" required', form)
 
+    def test_empty_scope_surfaces_its_closure_action_instead_of_an_invalid_repair(self):
+        pk = self.report()
+        start_work(deficiency_id=pk, expected_event_id=self.latest(pk), **self.context(self.admin))
+        self.published_version([s for s in self.items if s["item_id"] != str(self.suction.pk)])
+        page = self.page(self.sup, pk)
+        self.assertContains(page, "No current verification items remain.")
+        self.assertContains(page, 'href="#empty-scope-closure"')
+        self.assertContains(page, 'id="empty-scope-closure" open')
+        self.assertNotContains(page, 'data-kind="repair"')
+        self.assertNotContains(page, "Record repair")
+
     def change(self, pk, action, **fields):
         return self.post(
             f"/api/v1/deficiencies/{pk}/{action}",

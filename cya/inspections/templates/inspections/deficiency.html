@@ -22,7 +22,9 @@
 </section>
 <section class="panel deficiency-next-action" aria-labelledby="next-action-title">
 <h2 id="next-action-title">Next action</h2>
-{% if scope %}
+{% if can_close_empty_scope %}
+<p>No current verification items remain. <a href="#empty-scope-closure">Use the closure exception below.</a></p>
+{% elif scope %}
 <h3>Complete the verification checks</h3>
 <p>Each outstanding item and physical kit needs its own verification Pass. A routine Pass does not verify this repair.</p>
 <p>{{ verification_progress.verified }} of {{ verification_progress.total }} checks verified.</p>
@@ -51,7 +53,7 @@
 {% endif %}
 </section>
 {% if can_close_empty_scope %}
-<details class="panel deficiency-details">
+<details class="panel deficiency-details" id="empty-scope-closure" open>
 <summary>Closure exception — no current verification items</summary>
 <form class="panel workflow-write" data-kind="empty-scope-close" data-url="{% url 'api-deficiency-empty-scope-closures' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Close: no current verification items</h2>
