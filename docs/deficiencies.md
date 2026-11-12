@@ -41,15 +41,16 @@ to search history; the default outstanding view does not remove those records. T
 case-insensitive, treats `%` and `_` as literal characters, and is limited to 100 characters.
 Unknown lifecycle values, duplicate filter parameters, overlong text, and invalid overdue values
 show a notice and return no matches. Result totals use the same filters as the rows. Newest reports
-are first, with stable keyset links showing 25 rows at a time; the cursor is tied to report time and
-id so new reports do not shift the page being read. Invalid cursors show a notice and restart at
-the first page.
+are first, with deterministic 25-row pages and filtered totals. Malformed or duplicate page
+numbers return a notice and show the first page; page numbers beyond the result range show a notice
+and clamp to the last page.
 
 `GET /deficiencies/queue/` remains Supervisor/Administrator-only. Its bounded, searchable active
 case groups put extension requests waiting for a decision first, then overdue deficiencies, cases
-among the organization's two highest active severity ranks, and unassigned cases. Severity labels
+at the threshold of the organization's two highest active severity ranks, and unassigned cases.
+Retired grades above that threshold remain included, matching fleet readiness. Severity labels
 and matching codes come from organization configuration, not fixed codes. Each group shows the
-filtered total, a next-action prompt, and stable 25-row newer/older links; cases may appear in more
+filtered total, a next-action prompt, and numbered 25-row pagination; cases may appear in more
 than one group when they need more than one action. Overdue uses the governing deadline, including
 approved extensions. Both pages only read the current deficiency projection and related records;
 they do not alter status or lifecycle history. The detail link opens the existing role-checked

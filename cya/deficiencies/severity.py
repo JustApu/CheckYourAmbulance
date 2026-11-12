@@ -67,6 +67,17 @@ def levels_in_force(organization_id, now):
     return newest
 
 
+def top_active_levels(levels, count=2):
+    """Return levels at the highest configured active ranks, highest rank first."""
+    active = [level for level in levels.values() if level.active]
+    ranks = sorted({level.rank for level in active}, reverse=True)[:count]
+    top_ranks = set(ranks)
+    return sorted(
+        (level for level in active if level.rank in top_ranks),
+        key=lambda level: (-level.rank, level.code),
+    )
+
+
 def active_levels(organization_id, now):
     """The levels a reporter may choose now, lowest rank (least severe) first."""
     levels = [r for r in levels_in_force(organization_id, now).values() if r.active]

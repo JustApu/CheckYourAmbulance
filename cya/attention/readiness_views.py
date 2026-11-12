@@ -26,7 +26,7 @@ from cya.authorization.policy import Role
 from cya.checks.api import _reply
 from cya.deficiencies.api import _stamp
 from cya.deficiencies.service import DeficiencyError
-from cya.deficiencies.severity import levels_in_force
+from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.inspections.views import STATUS_LABELS as VEHICLE_STATUS_LABELS
 from cya.inspections.views import _authorized, reverse_socket
 from cya.inspections.workflow_views import STATUS_LABELS
@@ -150,15 +150,10 @@ def _screen(request, template, background=False):
         (label, picture.totals[code]) for code, label in CATEGORIES if picture.totals[code]
     ]
     severity_in_force = levels_in_force(str(user.organization_id), picture.as_of)
-    severity_levels = [level for level in severity_in_force.values() if level.active]
-    top_ranks = sorted({level.rank for level in severity_levels}, reverse=True)[:2]
-    severity_threshold = min(top_ranks) if top_ranks else None
+    top_levels = top_active_levels(severity_in_force)
+    severity_threshold = min((level.rank for level in top_levels), default=None)
     attention_severity_labels = list(
-        dict.fromkeys(
-            level.label
-            for level in sorted(severity_levels, key=lambda level: (-level.rank, level.code))
-            if severity_threshold is not None and level.rank >= severity_threshold
-        )
+        dict.fromkeys(level.label for level in top_levels)
     )
     attention_severity_label = " / ".join(attention_severity_labels) or "Active deficiencies"
     for vehicle in picture.vehicles:

@@ -423,7 +423,9 @@ class QueueTests(SupervisorUiCase):
 
     def test_unassigned_overdue_and_waiting_extensions(self):
         unassigned = self.report(summary="Synthetic unassigned")
-        waiting = self.report(summary="Synthetic waiting")
+        self.clock.set(self.now + timedelta(seconds=1))
+        unassigned_later = self.report(summary="Synthetic unassigned later")
+        waiting = self.report(summary="Synthetic waiting first")
         self.assign_and_due(waiting, self.now + timedelta(days=2))
         self.post(
             f"/api/v1/deficiencies/{waiting}/extension-requests",
@@ -434,14 +436,30 @@ class QueueTests(SupervisorUiCase):
                 "proposed_deadline": (self.now + timedelta(days=5)).isoformat(),
             },
         )
-        late = self.report(summary="Synthetic late")
+        self.clock.set(self.now + timedelta(seconds=2))
+        waiting_later = self.report(summary="Synthetic waiting later")
+        self.assign_and_due(waiting_later, self.now + timedelta(days=2))
+        self.post(
+            f"/api/v1/deficiencies/{waiting_later}/extension-requests",
+            {
+                "operation_id": str(uuid4()),
+                "expected_event_id": self.latest(waiting_later),
+                "reason": "Synthetic delay.",
+                "proposed_deadline": (self.now + timedelta(days=5)).isoformat(),
+            },
+        )
+        late = self.report(summary="Synthetic late first")
         self.assign_and_due(late, self.now + timedelta(hours=1))
+        late_later = self.report(summary="Synthetic late later")
+        self.assign_and_due(late_later, self.now + timedelta(hours=2))
         self.clock.set(self.now + timedelta(hours=3))
         sup = self.signed_in("sup-ui", "SUPERVISOR")
         found = self.lists(sup[0].get(self.URL))
-        self.assertEqual(found["Unassigned"], [unassigned])
-        self.assertEqual(found["Overdue"], [late])
-        self.assertEqual(found["Extension requests waiting for a decision"], [waiting])
+        self.assertEqual(found["Unassigned"], [unassigned, unassigned_later])
+        self.assertEqual(found["Overdue"], [late, late_later])
+        self.assertEqual(
+            found["Extension requests waiting for a decision"], [waiting, waiting_later]
+        )
 
     def request_extension(self, pk):
         return self.post(
@@ -479,7 +497,7 @@ class QueueTests(SupervisorUiCase):
         self.assign_and_due(waiting, self.now + timedelta(days=2))
         self.request_extension(waiting)
         sup = self.signed_in("sup-ui", "SUPERVISOR")
-        with mock.patch("cya.inspections.workflow_views.QUEUE_LIMIT", 1):
+        with mock.patch("cya.inspections.workflow_views.DEFICIENCY_PAGE_SIZE", 1):
             found = self.lists(sup[0].get(self.URL))
         self.assertEqual(found["Extension requests waiting for a decision"], [waiting])
 
@@ -513,7 +531,42 @@ class QueueTests(SupervisorUiCase):
         self.assertIn("Top configured severity: Urgent / Critical", headings)
         self.assertNotIn("Top configured severity: Critical / High", headings)
 
-    def test_queue_keyset_pagination_preserves_filters_and_total_counts(self):
+    def test_queue_prioritizes_a_grade_whose_level_was_retired(self):
+        retired_grade = self.report(summary="Synthetic retired grade", severity="CRITICAL")
+        DeficiencySeverity.objects.create(
+            organization=self.org,
+            code="CRITICAL",
+            revision=2,
+            label="Retired critical",
+            description="Synthetic retired configured grade.",
+            rank=4,
+            active=False,
+            effective_at=self.now - timedelta(days=1),
+        )
+        DeficiencySeverity.objects.create(
+            organization=self.org,
+            code="URGENT",
+            revision=1,
+            label="Urgent",
+            description="Synthetic highest active level.",
+            rank=5,
+            active=True,
+            effective_at=self.now - timedelta(days=1),
+        )
+        self.report(summary="Synthetic urgent grade", severity="URGENT")
+        sup = self.signed_in("queue-retired-supervisor", "SUPERVISOR")
+        response = sup[0].get(self.URL)
+        severity_group = next(
+            group
+            for group in response.context["lists"]
+            if group["heading"] == "Top configured severity: Urgent / High"
+        )
+        self.assertIn(
+            str(retired_grade),
+            [str(row.deficiency_id) for row in severity_group["page"]["rows"]],
+        )
+
+    def test_queue_pagination_preserves_filters_and_total_counts(self):
         first = self.report(summary="Synthetic queue marker first")
         self.report(summary="Synthetic queue marker second")
         sup = self.signed_in("queue-page-supervisor", "SUPERVISOR")
@@ -527,6 +580,7 @@ class QueueTests(SupervisorUiCase):
             self.assertEqual(unassigned["total"], 2)
             self.assertEqual(len(unassigned["rows"]), 1)
             self.assertIn("q=queue+marker", unassigned["next_url"])
+            self.assertIn("unassigned_page=2", unassigned["next_url"])
             next_page = sup[0].get(unassigned["next_url"])
             next_unassigned = next(
                 group

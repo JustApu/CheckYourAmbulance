@@ -1,3 +1,4 @@
+{% if page.page_error %}<p class="notice" role="alert">{{ page.page_error }}</p>{% endif %}
 {% if page.previous_url or page.next_url %}
 <nav class="deficiency-pagination" aria-label="{{ pagination_label }}">
 {% if page.previous_url %}<a class="button" href="{{ page.previous_url }}">Newer results</a>{% else %}<span></span>{% endif %}

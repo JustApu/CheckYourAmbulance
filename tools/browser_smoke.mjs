@@ -302,7 +302,7 @@ async function testDeficiencyFilters(viewport) {
     </form><p class="deficiency-applied-filters"><strong>Applied filters:</strong> Text: brake · Vehicle: Medic 6</p>
     <p class="deficiency-results-count">42 matching deficiencies; showing 25 on this page.</p>
     <ul class="plain"><li class="panel"><a href="/deficiencies/one/">Synthetic brake warning</a> — Medic 6 (North County Regional Ambulance)</li></ul>
-    <nav class="deficiency-pagination" aria-label="Deficiency result pages"><a class="button" href="/deficiencies/?q=brake&amp;results_before=cursor">Newer results</a><a class="button" href="/deficiencies/?q=brake&amp;results_after=cursor">Older results</a></nav>
+    <nav class="deficiency-pagination" aria-label="Deficiency result pages"><a class="button" href="/deficiencies/?q=brake&amp;results_page=1">Newer results</a><a class="button" href="/deficiencies/?q=brake&amp;results_page=2">Older results</a></nav>
     </main></body></html>`;
   try {
     await page.route("http://deficiencies.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: listing }));
@@ -311,7 +311,7 @@ async function testDeficiencyFilters(viewport) {
     assert.equal(await page.getByRole("searchbox", { name: "Search deficiency text" }).inputValue(), "brake");
     assert.equal(await page.getByLabel("Lifecycle status").locator('option[value="REPORTED_IN_ERROR"]').textContent(), "Reported in Error");
     assert.equal(await page.getByLabel("Severity").inputValue(), "URGENT");
-    assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/deficiencies/?q=brake&results_after=cursor");
+    assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/deficiencies/?q=brake&results_page=2");
     assert.match(await page.getByText("42 matching deficiencies").innerText(), /showing 25/);
     for (const label of ["Search deficiency text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
       const control = page.getByLabel(label);

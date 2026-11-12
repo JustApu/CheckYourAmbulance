@@ -5,14 +5,11 @@ administrator forms to the deficiency page and the supervisor queue. Form visibi
 permission policy and the deficiency's status; every command still rechecks both.
 """
 
-import base64
-import binascii
 import logging
-from datetime import datetime
 from functools import wraps
 from urllib.parse import urlencode
-from uuid import UUID
 
+from django.core.paginator import Paginator
 from django.db import DatabaseError
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import Http404, JsonResponse
@@ -32,7 +29,7 @@ from cya.checklists.models import Item, KitInstance, Vehicle
 from cya.deficiencies import acknowledgement, overdue, service, suspension
 from cya.deficiencies.commands import ASSIGNEE_ROLES
 from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
-from cya.deficiencies.severity import levels_in_force
+from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.deficiencies.service import DeficiencyError, suggest_related
 from cya.deficiencies.transitions import (
     ACTIVE_STATUSES,
@@ -232,128 +229,53 @@ def _deficiency_filters(
     }
 
 
-def _encode_cursor(row):
-    value = f"{row.deficiency.reported_at.isoformat()}|{row.deficiency_id}"
-    return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
-
-
-def _decode_cursor(value):
-    if not value or len(value) > 200:
-        return None
-    try:
-        raw = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
-        timestamp, identity = raw.decode("utf-8").split("|", 1)
-        reported_at = datetime.fromisoformat(timestamp)
-        if reported_at.utcoffset() is None:
-            return None
-        return reported_at, str(UUID(identity))
-    except (ValueError, UnicodeDecodeError, binascii.Error):
-        return None
-
-
-def _cursor_url(request, filter_query, key, direction, cursor):
+def _page_url(request, filter_query, key, number):
     query = f"{filter_query}&" if filter_query else ""
-    return f"{request.path}?{query}{key}_{direction}={cursor}"
+    return f"{request.path}?{query}{key}_page={number}"
 
 
-def _keyset_page(request, queryset, *, filter_query, key="results"):
-    """Return stable reported-at/id keyset pagination with a total matching count."""
-    after_key, before_key = f"{key}_after", f"{key}_before"
-    after_values, before_values = request.GET.getlist(after_key), request.GET.getlist(before_key)
-    invalid_cursor = (
-        len(after_values) > 1
-        or len(before_values) > 1
-        or bool(after_values and before_values)
+def _paginated_page(request, queryset, *, filter_query, key="results"):
+    """Return one bounded page and its filtered total in deterministic queryset order."""
+    page_values = request.GET.getlist(f"{key}_page")
+    page_error = ""
+    if len(page_values) > 1:
+        requested = 1
+        page_error = "That results-page link was invalid. Showing the first page instead."
+    elif page_values:
+        try:
+            requested = int(page_values[0])
+            if requested < 1:
+                requested = 1
+                page_error = "That results-page link was invalid. Showing the first page instead."
+        except ValueError:
+            requested = 1
+            page_error = "That results-page link was invalid. Showing the first page instead."
+    else:
+        requested = 1
+
+    paginator = Paginator(queryset, DEFICIENCY_PAGE_SIZE)
+    if requested > paginator.num_pages:
+        requested = paginator.num_pages
+        page_error = "That results-page link was out of range. Showing the last page instead."
+    result_page = paginator.page(requested)
+    previous_url = (
+        _page_url(request, filter_query, key, result_page.previous_page_number())
+        if result_page.has_previous()
+        else None
     )
-    if after_values:
-        direction, token = "after", after_values[0]
-    elif before_values:
-        direction, token = "before", before_values[0]
-    else:
-        direction, token = None, ""
-    cursor = _decode_cursor(token) if direction else None
-    if direction and cursor is None:
-        invalid_cursor = True
-    if cursor is not None:
-        reported_at, identity = cursor
-        if not queryset.filter(
-            deficiency__reported_at=reported_at, deficiency_id=identity
-        ).exists():
-            invalid_cursor = True
-    if invalid_cursor:
-        direction, cursor = None, None
-
-    total = queryset.count()
-    page_query = queryset
-    if cursor is not None:
-        reported_at, identity = cursor
-        if direction == "after":
-            page_query = page_query.filter(
-                Q(deficiency__reported_at__lt=reported_at)
-                | Q(deficiency__reported_at=reported_at, deficiency_id__lt=identity)
-            )
-        else:
-            page_query = page_query.filter(
-                Q(deficiency__reported_at__gt=reported_at)
-                | Q(deficiency__reported_at=reported_at, deficiency_id__gt=identity)
-            ).order_by("deficiency__reported_at", "deficiency_id")
-    elif direction == "before":
-        page_query = page_query.order_by("deficiency__reported_at", "deficiency_id")
-
-    rows = list(page_query[: DEFICIENCY_PAGE_SIZE + 1])
-    has_extra = len(rows) > DEFICIENCY_PAGE_SIZE
-    rows = rows[:DEFICIENCY_PAGE_SIZE]
-    if direction == "before":
-        rows.reverse()
-    if invalid_cursor:
-        cursor_error = "That results-page link was invalid. Showing the first page instead."
-    else:
-        cursor_error = ""
-    if rows:
-        first, last = rows[0], rows[-1]
-        if direction == "before":
-            has_previous = has_extra
-            older = queryset.filter(
-                Q(deficiency__reported_at__lt=last.deficiency.reported_at)
-                | Q(
-                    deficiency__reported_at=last.deficiency.reported_at,
-                    deficiency_id__lt=last.deficiency_id,
-                )
-            )
-            has_next = older.exists()
-        elif direction == "after":
-            newer = queryset.filter(
-                Q(deficiency__reported_at__gt=first.deficiency.reported_at)
-                | Q(
-                    deficiency__reported_at=first.deficiency.reported_at,
-                    deficiency_id__gt=first.deficiency_id,
-                )
-            )
-            has_previous = newer.exists()
-            has_next = has_extra
-        else:
-            has_previous = False
-            has_next = has_extra
-        previous_url = (
-            _cursor_url(request, filter_query, key, "before", _encode_cursor(first))
-            if has_previous
-            else None
-        )
-        next_url = (
-            _cursor_url(request, filter_query, key, "after", _encode_cursor(last))
-            if has_next
-            else None
-        )
-    else:
-        previous_url = next_url = None
+    next_url = (
+        _page_url(request, filter_query, key, result_page.next_page_number())
+        if result_page.has_next()
+        else None
+    )
     return {
-        "rows": rows,
-        "total": total,
+        "rows": list(result_page.object_list),
+        "total": paginator.count,
         "has_previous": previous_url is not None,
         "has_next": next_url is not None,
         "previous_url": previous_url,
         "next_url": next_url,
-        "cursor_error": cursor_error,
+        "page_error": page_error,
     }
 
 
@@ -381,7 +303,7 @@ def deficiencies(request, user):
         ],
     )
     queryset = queryset.order_by("-deficiency__reported_at", "-deficiency_id")
-    page_data = _keyset_page(request, queryset, filter_query=filter_context["filter_query"])
+    page_data = _paginated_page(request, queryset, filter_query=filter_context["filter_query"])
     for row in page_data["rows"]:
         row.status_label = STATUS_LABELS[row.status]
     vehicles = Vehicle.objects.filter(organization_id=user.organization_id, active=True).order_by(
@@ -655,7 +577,7 @@ def deficiency(request, user, deficiency_id):
 
 
 def _queue_rows(request, projections, *, filter_query, key):
-    page_data = _keyset_page(request, projections, filter_query=filter_query, key=key)
+    page_data = _paginated_page(request, projections, filter_query=filter_query, key=key)
     for row in page_data["rows"]:
         row.status_label = STATUS_LABELS[row.status]
         row.queue_action = {
@@ -721,29 +643,43 @@ def queue(request, user):
             )
         )
         .filter(requested_at__isnull=False)
+        .order_by("requested_at", "deficiency_id")
     )
     late = overdue.candidates(org, now).filter(pk__in=active.values("pk"))
     late = late.select_related("deficiency__vehicle", "assignee", "severity_version").order_by(
-        "-deficiency__reported_at", "-deficiency_id"
+        "governing", "deficiency_id"
     )
-    active_levels = [level for level in severity_levels if level.active]
-    top_ranks = sorted({level.rank for level in active_levels}, reverse=True)[:2]
-    top_levels = [level for level in active_levels if level.rank in top_ranks]
-    top_codes = {level.code for level in top_levels}
+    top_levels = top_active_levels({level.code: level for level in severity_levels})
+    severity_threshold = min((level.rank for level in top_levels), default=None)
+    top_codes = {
+        level.code
+        for level in severity_levels
+        if severity_threshold is None or level.rank >= severity_threshold
+    }
     severity_label = " / ".join(
         dict.fromkeys(
             level.label
             for level in sorted(top_levels, key=lambda level: (-level.rank, level.code))
         )
     )
-    high_severity = active.filter(severity_version__code__in=top_codes)
-    unassigned = active.filter(assignee__isnull=True)
+    high_severity = active.filter(severity_version__code__in=top_codes).order_by(
+        "deficiency__reported_at", "deficiency_id"
+    )
+    unassigned = active.filter(assignee__isnull=True).order_by(
+        "deficiency__reported_at", "deficiency_id"
+    )
     groups = [
         ("pending", "Extension requests waiting for a decision", pending),
         ("overdue", "Overdue", late),
     ]
     if top_codes:
-        groups.append(("severity", f"Top configured severity: {severity_label}", high_severity))
+        groups.append(
+            (
+                "severity",
+                f"Top configured severity: {severity_label or 'Active deficiencies'}",
+                high_severity,
+            )
+        )
     groups.append(("unassigned", "Unassigned", unassigned))
     lists = [
         {

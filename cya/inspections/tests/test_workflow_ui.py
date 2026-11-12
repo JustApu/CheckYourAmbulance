@@ -632,12 +632,14 @@ class DeficiencyListTests(CrewUiCase):
         bad_overdue = self.client.get("/deficiencies/", {"overdue": "true-ish"})
         self.assertEqual(bad_overdue.context["page"]["total"], 0)
         self.assertContains(bad_overdue, "Choose a valid overdue filter value.")
-        malformed_cursor = self.client.get("/deficiencies/", {"results_after": "not-a-cursor"})
-        self.assertEqual(malformed_cursor.status_code, 200)
-        self.assertEqual(malformed_cursor.context["page"]["total"], 1)
-        self.assertContains(malformed_cursor, "results-page link was invalid")
+        malformed_page = self.client.get("/deficiencies/", {"results_page": "not-a-page"})
+        self.assertEqual(malformed_page.status_code, 200)
+        self.assertEqual(malformed_page.context["page"]["total"], 1)
+        self.assertContains(malformed_page, "results-page link was invalid")
+        out_of_range = self.client.get("/deficiencies/", {"results_page": "99"})
+        self.assertContains(out_of_range, "results-page link was out of range")
 
-    def test_keyset_pagination_preserves_filters_and_does_not_shift_for_new_reports(self):
+    def test_pagination_preserves_filters_and_uses_a_deterministic_order(self):
         identities = {
             self.create_deficiency(summary=f"Synthetic pagination marker {index}")[0]
             for index in range(3)
@@ -647,12 +649,11 @@ class DeficiencyListTests(CrewUiCase):
             first_ids = {str(row.deficiency_id) for row in first.context["page"]["rows"]}
             self.assertEqual(len(first_ids), 2)
             self.assertIn("q=pagination+marker", first.context["page"]["next_url"])
-            self.clock.set(self.now + timedelta(seconds=1))
-            self.create_deficiency(summary="Synthetic pagination marker new")
+            self.assertIn("results_page=2", first.context["page"]["next_url"])
             second = self.client.get(first.context["page"]["next_url"])
             second_ids = {str(row.deficiency_id) for row in second.context["page"]["rows"]}
             self.assertEqual(first.context["page"]["total"], 3)
-            self.assertEqual(second.context["page"]["total"], 4)
+            self.assertEqual(second.context["page"]["total"], 3)
             self.assertEqual(first_ids | second_ids, {str(value) for value in identities})
             self.assertTrue(second.context["page"]["has_previous"])
             previous = self.client.get(second.context["page"]["previous_url"])
