@@ -8,9 +8,28 @@
 |---|---|
 | `/inspection/` | Active vehicles with their operational status. Every built-in role (SPEC §3.3); the server enforces it like the other sections. |
 | `/inspection/vehicles/{id}/` | A responsive vehicle-name/status heading, inspection-history and deficiency tasks, and explicit template-labelled start/join actions. The latest open session is shown with Continue or Join as appropriate; starting a separate inspection is secondary and confirmed. Active sessions and the signed-in user's own ended sessions remain visible. |
+| `/inspection/vehicles/{id}/print/` | The paper checklist for outages (issue #9 Part A): the vehicle's current checklist with blank result, count or value, initials and time columns, for printing on US Letter. Linked from the vehicle page as "Paper checklist for outages". Same access as the vehicle page. |
 | `/inspection/sessions/{id}/` | The checklist screen. A participant only: a session the user did not join answers 404 exactly like one that does not exist. |
 
 A vehicle in another organization, an inactive vehicle and a malformed id are all 404. A signed-out visitor is sent to sign-in and a user with no role gets 403, as for the other sections.
+
+## Paper checklists for outages
+
+The app is online-only, so an outage stops inspections in the app. Crews then use printed checklists kept in each rig (SPEC §17.8 DEP-11; owner decisions recorded on [issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9)).
+
+- **The sheet.** `/inspection/vehicles/{id}/print/` lists the checklist in force for the vehicle when it is printed, grouped by compartment, vehicle system and kit, in the checklist screen's order. Each row has tick boxes for the item's allowed outcomes (Pass, Fail, Unable, N/A), a blank for a count or value where the item records one (with the expected quantity for quantity items), and blanks for initials and time. The header names the vehicle, each checklist template and revision, the version IDs and the instant the sheet reflects (UTC), plus blanks for the date and shift.
+- **Paper size and pages.** Sheets print on US Letter. A long checklist continues on further pages rather than shrinking the type. Every printed page repeats the vehicle and checklist version, so loose pages can be matched up, and each kit instance starts on a new page so its pages can travel with the kit. Page numbers ("Page N of M") come from the browser's print margin; Chromium-based browsers print them, other browsers may not.
+- **No personal data.** The page is standalone, without the app header, so neither the page nor the printout carries the signed-in user's name. It shows checklist definitions only: no check results, deficiencies or crew names.
+- **Not a live record.** The sheet records nothing in the app. If the checklist changes after printing, print new copies; the version ID on a sheet identifies the checklist it was printed from.
+- **Failure.** If the checklist cannot be resolved, the page answers 503 and prints nothing rather than a partial checklist.
+
+**Outage procedure for the rig.**
+
+1. Keep blank printed copies for each vehicle in the place your agency designates; the location varies by agency.
+2. During an outage, record each check on the sheet: tick the outcome, write any count or value, and add your initials and the time.
+3. Keep completed sheets after the outage. Paper results are entered into the app once the downtime has ended, and the sheet can then be shredded. No separate review of the paper records is required.
+4. Until the back-entry feature exists (issue #9 Part B, which needs its own SPEC amendment first), paper results are not entered as ordinary live checks (DEP-11). Keep the completed sheets until back-entry is available.
+5. Reprint blank copies whenever the vehicle's checklist changes.
 
 ## Supervisor fleet readiness
 

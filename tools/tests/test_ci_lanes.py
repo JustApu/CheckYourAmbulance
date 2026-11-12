@@ -315,13 +315,14 @@ class CoverageMapTests(unittest.TestCase):
                 self.assertIn(source.name, harness.read_text(encoding="utf-8"))
 
     def test_each_browser_css_path_exists_and_is_read_by_the_browser_smoke(self):
-        smoke = ROOT / "tools/browser_smoke.mjs"
-        self.assertTrue(smoke.is_file())
-        source = smoke.read_text(encoding="utf-8")
+        # Any registered browser smoke may read a CSS file; at least one must.
+        sources = [
+            (ROOT / smoke).read_text(encoding="utf-8") for smoke in ci_lanes.BROWSER_TEST_PATHS
+        ]
         for css_path in ci_lanes.BROWSER_CSS:
             with self.subTest(css_path=css_path):
                 self.assertTrue((ROOT / css_path).is_file())
-                self.assertIn(css_path, source)
+                self.assertTrue(any(css_path in source for source in sources))
                 css = (ROOT / css_path).read_text(encoding="utf-8")
                 for django_delimiter in ("{%", "{{", "{#"):
                     with self.subTest(css_path=css_path, delimiter=django_delimiter):

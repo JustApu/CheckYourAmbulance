@@ -20,10 +20,11 @@ tr { break-inside: avoid; }
 .repeat-identity th { font-weight: 400; font-size: .85em; border: 0; padding: 0 0 .25rem; }
 .section-heading th { font-size: 1.05em; background: #e8e8e8; }
 .column-heads th { font-size: .9em; }
-.column-heads th:nth-child(1) { width: 38%; }
-.column-heads th:nth-child(2) { width: 30%; }
-.column-heads th:nth-child(3) { width: 14%; }
-.column-heads th:nth-child(4), .column-heads th:nth-child(5) { width: 9%; }
+/* Widths sit on <col>: with table-layout: fixed the first row decides, and that row spans all. */
+.col-item { width: 44%; }
+.col-result { width: 26%; }
+.col-value { width: 12%; }
+.col-initials, .col-time { width: 9%; }
 .item { font-weight: 700; }
 .expected { display: block; font-weight: 400; }
 .instructions { display: block; font-weight: 400; font-size: .9em; }
