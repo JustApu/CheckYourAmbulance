@@ -299,9 +299,7 @@ class PageTests(CrewUiCase):
         html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
 
         self.assertIn("Incomplete inspection:", strip_tags(html))
-        self.assertIn(
-            f"Resume incomplete {self.template.label} inspection", strip_tags(html)
-        )
+        self.assertIn(f"Resume incomplete {self.template.label} inspection", strip_tags(html))
         self.assertEqual(html.count(f'href="/inspection/sessions/{session_id}/"'), 1)
         self.assertIn("Start a new inspection", html)
         self.assertIn("Your incomplete inspection stays available", html)
@@ -346,7 +344,7 @@ class PageTests(CrewUiCase):
         self.assertIn("Audited history entry", html)
         self.assertIn('aria-describedby="readings-save-help"', html)
         self.assertIn("Incomplete values are not sent", html)
-        self.assertNotIn('>Save</button>', html)
+        self.assertNotIn(">Save</button>", html)
         self.assertIn('inputmode="decimal"', html)
         self.assertIn('id="odo-unit"', html)
         self.assertIn("Distance unit", html)
