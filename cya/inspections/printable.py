@@ -22,6 +22,7 @@ OUTCOME_LABELS = {
 # Kinds whose result is written as a number rather than only ticked (SPEC 4.4).
 VALUE_KINDS = frozenset({"QUANTITY", "MEASUREMENT", "VEHICLE_READING"})
 REFERENCE_ITEM_LIMIT = 5000  # kit item definitions read for one reference document
+REFERENCE_TEMPLATE_LIMIT = 200  # checklist templates read for one reference document
 
 
 @dataclass
@@ -150,9 +151,13 @@ def kit_reference(organization_id, as_of):
     Templates without a version in force, or whose version names no kit, are left out.
     """
     result = []
-    templates = ChecklistTemplate.objects.filter(
-        organization_id=organization_id, active=True
-    ).order_by("label", "pk")
+    templates = list(
+        ChecklistTemplate.objects.filter(organization_id=organization_id, active=True).order_by(
+            "label", "pk"
+        )[: REFERENCE_TEMPLATE_LIMIT + 1]
+    )
+    if len(templates) > REFERENCE_TEMPLATE_LIMIT:
+        raise ValueError("too many active checklist templates to print one kit reference")
     for template in templates:
         version = effective_template_version(organization_id, template.pk, as_of)
         if version is None:

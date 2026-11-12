@@ -209,3 +209,11 @@ class KitReferencePageTests(CrewUiCase):
             page = self.client.get(self.URL)
         self.assertEqual(page.status_code, 503)
         self.assertNotIn("laminate", page.content.decode())
+
+    def test_an_unbounded_template_count_is_refused_rather_than_read(self):
+        with (
+            mock.patch.object(printable, "REFERENCE_TEMPLATE_LIMIT", 0),
+            self.assertLogs("cya.inspections.views", "ERROR"),
+        ):
+            page = self.client.get(self.URL)
+        self.assertEqual(page.status_code, 503)
