@@ -38,6 +38,8 @@ class WorkflowUiTests(CrewUiCase):
         return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/check-history/")
 
     def test_routine_check_history_uses_station_local_time_without_seconds(self):
+        self.org.station_zone = "America/New_York"
+        self.org.save(update_fields=["station_zone"])
         self.record(self.suction)
         page = self.history()
         self.assertEqual(page.status_code, 200)
