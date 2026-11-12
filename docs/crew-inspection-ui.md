@@ -25,7 +25,7 @@ The app is online-only, so an outage stops inspections in the app. Crews then us
 - **No personal data.** Both pages are standalone, without the app header, so neither the page nor the printout carries the signed-in user's name. They show checklist definitions only: no check results, deficiencies or crew names.
 - **Not a live record.** Printing records nothing in the app. If the checklist changes after printing, print new copies; the version ID identifies the checklist a sheet was printed from.
 - **Failure.** If the checklist cannot be resolved, either page answers 503 and prints nothing rather than a partial document.
-- **Sealable cabinets.** Not yet supported. The owner asked for compartments to be designated sealable or not, in the app and on paper; that needs a SPEC amendment and a schema change first.
+- **Sealable cabinets.** SPEC §10.2 CAB-9 (amendment 1.32.0) has a sealable compartment print one seal-or-contents row instead of its items. The sealable designation does not exist in the schema yet ([issue #131](https://github.com/JustApu/CheckYourAmbulance/issues/131)), so every compartment currently prints its items.
 
 **Outage procedure for the rig.**
 
