@@ -6,6 +6,7 @@ not the Workspace integration, which issue 25 (https://github.com/JustApu/CheckY
 """
 
 from unittest import mock
+from urllib.parse import urlencode
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.sign_in = harness.sign_in
         self.make_administrator = harness.make_administrator
         self.form = harness.form
+        self.data = harness.data
         self.change = harness.change
         self.counts = harness.counts
 
@@ -67,6 +69,8 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertContains(history, "SUPERVISOR")
         self.assertContains(history, crew.email)
         self.assertContains(history, "Saved")
+        self.assertContains(history, 'class="role-history-scroll"')
+        self.assertContains(history, 'aria-label="Role history"')
 
     def test_unauthorized_user_is_refused_and_a_denial_is_recorded(self):
         _, admin = self.make_administrator("admin-1")
@@ -101,6 +105,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         token, operation_id = self.form(admin_client)
         data = {
             "csrfmiddlewaretoken": token,
+            "stage": "confirm",
             "operation_id": operation_id,
             "target": str(crew.pk),
             "role": "SUPERVISOR",
@@ -152,6 +157,56 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, 'aria-current="page">Administration')
         self.assertContains(page, "Change a role")
+
+    def test_preview_is_clear_and_does_not_change_roles_until_confirmation(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        data = self.data(admin_client, crew, q=crew.email, stage="preview")
+        before = self.counts()
+
+        preview = admin_client.post(URL, data)
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, f"Grant Supervisor role to {crew.display_name}")
+        self.assertContains(preview, crew.email)
+        self.assertContains(preview, 'name="stage" value="confirm"')
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+        confirmation = admin_client.post(URL, {**data, "stage": "confirm"})
+        self.assertEqual(confirmation.status_code, 302)
+        self.assertEqual(
+            confirmation["Location"], URL + "?" + urlencode({"saved": "1", "q": crew.email})
+        )
+        self.assertEqual(current_role_codes(crew), ("CREW", "SUPERVISOR"))
+
+    def test_user_search_finds_matches_beyond_the_default_first_page(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        for index in range(55):
+            User.objects.create(
+                organization=self.org,
+                idp_issuer="https://accounts.google.com",
+                idp_subject=f"directory-{index:03}",
+                email=f"directory-{index:03}@example.test",
+                display_name=f"Directory User {index:03}",
+            )
+        target = User.objects.create(
+            organization=self.org,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="search-target",
+            email="zoe.target@example.test",
+            display_name="Zoe Searchtarget",
+        )
+
+        by_name = admin_client.get(URL, {"q": "Searchtarget"})
+        self.assertEqual(by_name.status_code, 200)
+        self.assertEqual(by_name.context["target_total"], 1)
+        self.assertContains(by_name, target.display_name)
+        self.assertNotContains(by_name, "Directory User 000")
+
+        by_email = admin_client.get(URL, {"q": "zoe.target@example.test"})
+        self.assertEqual(by_email.context["target_total"], 1)
+        self.assertContains(by_email, target.email)
 
     def test_a_crew_user_is_not_shown_the_link(self):
         client, _ = self.sign_in("crew-1")

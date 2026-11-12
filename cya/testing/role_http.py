@@ -81,6 +81,7 @@ class RoleHttpHarness:
         token, fresh_id = self.form(client)
         return {
             "csrfmiddlewaretoken": token,
+            "stage": "confirm",
             "operation_id": operation_id or fresh_id,
             "target": str(target.pk),
             "role": role,
