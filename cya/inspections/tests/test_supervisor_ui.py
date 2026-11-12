@@ -454,7 +454,9 @@ class QueueTests(SupervisorUiCase):
         self.assign_and_due(late_later, self.now + timedelta(hours=2))
         self.clock.set(self.now + timedelta(hours=3))
         sup = self.signed_in("sup-ui", "SUPERVISOR")
-        found = self.lists(sup[0].get(self.URL))
+        response = sup[0].get(self.URL)
+        found = self.lists(response)
+        self.assertNotContains(response, "matching active deficiencies; showing")
         self.assertEqual(found["Unassigned"], [unassigned, unassigned_later])
         self.assertEqual(found["Overdue"], [late, late_later])
         self.assertEqual(

@@ -33,4 +33,4 @@
 </form>
 {% for error in filter_errors %}<p class="notice" role="alert">{{ error }}</p>{% endfor %}
 {% if applied_filters %}<p class="deficiency-applied-filters"><strong>Applied filters:</strong> {% for label, value in applied_filters %}{{ label }}: {{ value }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-<p class="deficiency-results-count">{{ page.total }} {{ filter_total_label }}; showing {{ page.rows|length }} on this page.</p>
+{% if page %}<p class="deficiency-results-count">{{ page.total }} {{ filter_total_label }}; showing {{ page.rows|length }} on this page.</p>{% endif %}
