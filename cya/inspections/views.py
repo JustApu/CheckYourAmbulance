@@ -246,7 +246,12 @@ def kit_reference(request):
             },
             status=503,
         )
-    context = {"title": "Kit reference", "as_of": now, "templates": templates}
+    context = {
+        "title": "Kit reference",
+        "as_of": now,
+        "templates": templates,
+        "page_header_css": printable.reference_page_header(templates),
+    }
     return render(request, "inspections/kit_reference.html", context)
 
 

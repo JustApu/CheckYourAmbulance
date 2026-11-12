@@ -1,5 +1,6 @@
 """Printable outage checklist (issue #9 Part A, SPEC §17.8 DEP-11)."""
 
+import re
 from types import SimpleNamespace
 from unittest import mock
 from uuid import uuid4
@@ -73,6 +74,27 @@ class OutageSheetTests(SimpleTestCase):
         self.assertEqual((measurement.outcomes, measurement.value_unit), (("Pass", "Fail"), "psi"))
         self.assertEqual((reading.outcomes, reading.value_unit, reading.expected), ((), "", ""))
 
+    def test_css_strings_cannot_break_out_of_the_style_element(self):
+        quoted = printable.css_string('A "b" </style><script>x; \\ é')
+        self.assertTrue(quoted.startswith('"') and quoted.endswith('"'))
+        inner = quoted[1:-1]
+        for dangerous in ('"', "<", ">", ";", "/"):
+            self.assertNotIn(dangerous, inner)
+        self.assertIn("\\000022", inner)  # the quote, as a 6-digit CSS escape
+        self.assertEqual(printable.css_string("Plain, 1.0 (x)-y:z"), '"Plain, 1.0 (x)-y:z"')
+
+    def test_the_reference_page_header_names_every_revision_and_version_id(self):
+        header = printable.reference_page_header(
+            [
+                {"label": "Daily, revision 2", "id": "id-1"},
+                {"label": "Weekly, revision 5", "id": "id-2"},
+            ]
+        )
+        self.assertEqual(
+            header, '"Kit reference: Daily, revision 2 (id-1)\\00003b Weekly, revision 5 (id-2)"'
+        )
+        self.assertEqual(printable.reference_page_header([]), '"Kit reference"')
+
     def test_no_rows_means_nothing_to_print(self):
         self.assertEqual(printable.outage_sheet([]), ([], []))
 
@@ -106,6 +128,11 @@ class PrintPageTests(CrewUiCase):
         self.assertIn("Reference", text)
         self.assertIn("then shred it", text)
         self.assertIn('href="/inspection/kit-reference/"', html)
+        # The repeated header on every printed page carries the version ID, not only the masthead.
+        repeated = re.findall(r'<tr class="repeat-identity">(.*?)</tr>', html, re.S)
+        self.assertGreaterEqual(len(repeated), 2)  # one per printed table: each section, and kits
+        for row in repeated:
+            self.assertIn(str(version.pk), row)
 
     def test_the_printed_instant_uses_the_station_zone_with_its_offset(self):
         self.org.station_zone = "America/New_York"
@@ -186,6 +213,10 @@ class KitReferencePageTests(CrewUiCase):
         )
         self.assertIn(f"{template.label}, revision {version.revision}", text)
         self.assertIn(str(version.pk), html)
+        # Every printed page repeats the revision and version ID in its top margin.
+        self.assertRegex(
+            html, r"@page \{ @top-left \{ content: \"Kit reference: [^\"]*" + str(version.pk)
+        )
         # Two kit instances share one kit type, so its contents appear once.
         self.assertEqual(text.count(self.kit_item.label), 1)
         self.assertNotIn(self.masks.label, text)  # loose items are not kit contents

@@ -10,6 +10,8 @@ checklist definitions: no check results, crew names or other personal data.
 
 from dataclasses import dataclass, field
 
+from django.utils.safestring import mark_safe
+
 from cya.checklists.models import ChecklistItemDef, ChecklistTemplate, ChecklistVersion
 from cya.checklists.overlay import effective_template_version
 
@@ -172,3 +174,24 @@ def kit_reference(organization_id, as_of):
                 }
             )
     return result
+
+
+# Characters printed as themselves in a CSS string; anything else is a CSS hex escape, so names
+# cannot end the string, the declaration or the <style> element.
+CSS_PLAIN = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.-:()")
+
+
+def css_string(text):
+    """text as a quoted CSS string literal, safe to place inside a <style> element."""
+    escaped = "".join(c if c in CSS_PLAIN else f"\\{ord(c):06x}" for c in text)
+    return mark_safe(f'"{escaped}"')
+
+
+def reference_page_header(templates):
+    """The kit reference's running page header: every revision and version ID it prints.
+
+    A printed page of the reference carries this in its top margin (CSS @page), so a page that
+    comes loose still names the checklist revisions it was printed from.
+    """
+    parts = [f"{t['label']} ({t['id']})" for t in templates]
+    return css_string("Kit reference: " + "; ".join(parts) if parts else "Kit reference")

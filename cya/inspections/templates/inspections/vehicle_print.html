@@ -31,7 +31,7 @@ every printed page so loose pages can be matched up. Kit contents live on the ki
 <table>
   <colgroup><col class="col-item"><col class="col-result"><col class="col-value"><col class="col-initials"><col class="col-time"></colgroup>
   <thead>
-    <tr class="repeat-identity"><th colspan="5">{{ vehicle.display_name }} · {% for v in versions %}{{ v.label }}{% if not forloop.last %}; {% endif %}{% endfor %}</th></tr>
+    <tr class="repeat-identity"><th colspan="5">{{ vehicle.display_name }} · {% for v in versions %}{{ v.label }} <span class="version-id">{{ v.id }}</span>{% if not forloop.last %}; {% endif %}{% endfor %}</th></tr>
     <tr class="section-heading"><th colspan="5" id="section-{{ forloop.counter }}" scope="colgroup">{{ section.heading }}</th></tr>
     <tr class="column-heads">
       <th scope="col">Item</th>
@@ -60,7 +60,7 @@ every printed page so loose pages can be matched up. Kit contents live on the ki
 <table>
   <colgroup><col class="col-item"><col class="col-result"><col class="col-value"><col class="col-initials"><col class="col-time"></colgroup>
   <thead>
-    <tr class="repeat-identity"><th colspan="5">{{ vehicle.display_name }} · {% for v in versions %}{{ v.label }}{% if not forloop.last %}; {% endif %}{% endfor %}</th></tr>
+    <tr class="repeat-identity"><th colspan="5">{{ vehicle.display_name }} · {% for v in versions %}{{ v.label }} <span class="version-id">{{ v.id }}</span>{% if not forloop.last %}; {% endif %}{% endfor %}</th></tr>
     <tr class="section-heading"><th colspan="5" id="kits-heading" scope="colgroup">Kits: confirm the seal, or check the contents against the kit reference</th></tr>
     <tr class="column-heads">
       <th scope="col">Kit</th>

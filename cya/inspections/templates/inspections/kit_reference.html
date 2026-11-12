@@ -8,7 +8,8 @@ revision and laminated. Standalone like the outage sheet, so it carries no perso
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title }} - Check Your Ambulance</title>
-<style>{% include "inspections/vehicle_print.css" %}</style>
+<style>{% include "inspections/vehicle_print.css" %}
+@page { @top-left { content: {{ page_header_css }}; font-size: 8pt; } }</style>
 </head>
 <body>
 <div class="screen-only print-tools">
