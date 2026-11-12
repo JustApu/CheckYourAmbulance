@@ -7,6 +7,7 @@ not the Workspace integration, which issue 25 (https://github.com/JustApu/CheckY
 
 from unittest import mock
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from django.core.management import call_command
 from django.test import Client, TransactionTestCase, override_settings
@@ -38,6 +39,8 @@ class RoleAdministrationHttpTests(TransactionTestCase):
     def test_authorized_change_is_persisted_in_history_and_audited(self):
         admin_client, admin = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
+        self.org.station_zone = "America/New_York"
+        self.org.save(update_fields=["station_zone"])
         before = self.counts()
 
         response = self.change(admin_client, crew)
@@ -52,6 +55,15 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(audit.command_id, grant.command_id)
         self.assertEqual((self.counts()[0] - before[0], self.counts()[1] - before[1]), (1, 1))
         history = admin_client.get(URL + "?saved=1")
+        expected_time = grant.recorded_at.astimezone(ZoneInfo("America/New_York")).strftime(
+            "%Y-%m-%d %H:%M:%S %Z (%z)"
+        )
+        self.assertContains(
+            history,
+            '<th scope="col">When (agency local time, America/New_York)</th>',
+            html=True,
+        )
+        self.assertContains(history, expected_time)
         self.assertContains(history, "SUPERVISOR")
         self.assertContains(history, crew.email)
         self.assertContains(history, "Saved")
