@@ -7,6 +7,8 @@ roles, participation and organization scope again (SPEC 3.2). A session the sign
 not join answers exactly like one that does not exist.
 """
 
+import logging
+
 from django.db import DatabaseError
 from django.http import Http404, JsonResponse
 from django.shortcuts import render
@@ -17,8 +19,10 @@ from django.views.decorators.http import require_GET
 
 from cya.accounts.returns import sign_in_redirect
 from cya.attention import preferences
+from cya.attention.checklist import vehicle_checklist
 from cya.authorization.backend import canonical_id
 from cya.checklists.models import ChecklistTemplate, Vehicle
+from cya.inspections import printable
 from cya.inspections.models import InspectionSession, SessionParticipant
 from cya.inspections.projections import current_state, is_expired
 from cya.inspections.workflows import report_options
@@ -27,6 +31,8 @@ from cya.odometer.models import OdometerEntry
 from cya.operations.status import status_at
 from cya.shell import navigation
 from cya.shell.views import deny_section
+
+logger = logging.getLogger(__name__)
 
 MAX_VEHICLES = 200
 MAX_SESSIONS = 20
@@ -181,6 +187,40 @@ def vehicle(request, vehicle_id):
         },
     }
     return render(request, "inspections/vehicle.html", context)
+
+
+@never_cache
+@require_GET
+def vehicle_print(request, vehicle_id):
+    """A printable paper checklist for outages (issue #9 Part A); definitions only, no results."""
+    user, refusal = _authorized(request)
+    if refusal:
+        return refusal
+    found = _vehicle(user, vehicle_id)
+    organization_id = str(user.organization_id)
+    try:
+        result = vehicle_checklist(organization_id, str(found.pk))
+        listed = printable.versions(organization_id, result.rows)
+    except (DatabaseError, ValueError) as failure:
+        # ChecklistQueryError is a ValueError; the sheet must never print a partial checklist.
+        logger.error("printable checklist unavailable (%s)", type(failure).__name__)
+        return render(
+            request,
+            "inspections/workflow_unavailable.html",
+            {
+                "title": "Printable checklist temporarily unavailable",
+                "unavailable_content": "The printable checklist",
+            },
+            status=503,
+        )
+    context = {
+        "title": f"{found.display_name} paper checklist",
+        "vehicle": found,
+        "as_of": result.as_of,
+        "versions": listed,
+        "sections": printable.sections(result.rows),
+    }
+    return render(request, "inspections/vehicle_print.html", context)
 
 
 def _odometer_unit(user, vehicle):

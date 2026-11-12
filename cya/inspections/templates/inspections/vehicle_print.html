@@ -1,0 +1,67 @@
+<!doctype html>
+{% comment %}
+Standalone on purpose: the shell header shows the signed-in user's name, and a printed sheet must
+carry no personal data (issue #9). Repeated <thead> rows put the vehicle and checklist version on
+every printed page so loose pages can be matched up.
+{% endcomment %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} - Check Your Ambulance</title>
+<style>{% include "inspections/vehicle_print.css" %}</style>
+</head>
+<body>
+<div class="screen-only print-tools">
+  <a href="{% url 'inspection-vehicle' vehicle.pk %}">Back to {{ vehicle.display_name }}</a>
+  <button type="button" class="print-button" id="print-sheet">Print</button>
+  <p>Prints on US Letter paper. A long checklist continues on more pages, and each kit starts on a new page.</p>
+</div>
+<main>
+<header class="sheet-header">
+  <h1>{{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}: paper inspection checklist</h1>
+  <p class="sheet-meta">Checklist{{ versions|length|pluralize }}: {% for v in versions %}{{ v.label }}{% if not forloop.last %}; {% endif %}{% empty %}none configured{% endfor %}</p>
+  <p class="sheet-meta">Printed from the checklist in force at <time datetime="{{ as_of|date:'c' }}">{{ as_of|date:"Y-m-d H:i" }} UTC</time>. Version ID{{ versions|length|pluralize }}: {% for v in versions %}<span class="version-id">{{ v.id }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+  <p class="sheet-fill">Date <span class="blank wide"></span> Shift <span class="blank"></span></p>
+  <p class="sheet-rule">Use only during an app outage. Keep this sheet until its results are entered into the app, then shred it.</p>
+</header>
+{% for section in sections %}
+<section class="sheet-section{% if section.kit %} kit-section{% endif %}" aria-labelledby="section-{{ forloop.counter }}">
+<table>
+  <thead>
+    <tr class="repeat-identity"><th colspan="5">{{ vehicle.display_name }} · {% for v in versions %}{{ v.label }}{% if not forloop.last %}; {% endif %}{% endfor %}</th></tr>
+    <tr class="section-heading"><th colspan="5" id="section-{{ forloop.counter }}" scope="colgroup">{{ section.heading }}</th></tr>
+    <tr class="column-heads">
+      <th scope="col">Item</th>
+      <th scope="col">Result</th>
+      <th scope="col">Count or value</th>
+      <th scope="col">Initials</th>
+      <th scope="col">Time</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in section.rows %}
+    <tr>
+      <th scope="row" class="item">{{ row.label }}{% if row.expected %} <span class="expected">Expected: {{ row.expected }}</span>{% endif %}{% if row.instructions %}<span class="instructions">{{ row.instructions }}</span>{% endif %}</th>
+      <td class="outcomes" data-label="Result">{% for label in row.outcomes %}<span class="tick"><span class="box" aria-hidden="true"></span>{{ label }}</span>{% endfor %}</td>
+      <td class="value" data-label="Count or value">{% if row.value_unit is not None %}<span class="blank"></span>{% if row.value_unit %} {{ row.value_unit }}{% endif %}{% endif %}</td>
+      <td class="initials" data-label="Initials"><span class="blank short"></span></td>
+      <td class="time" data-label="Time"><span class="blank short"></span></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+{% empty %}
+<p>No checklist is configured for this vehicle, so there is nothing to print.</p>
+{% endfor %}
+</main>
+<script>
+(function () {
+  "use strict";
+  var button = document.getElementById("print-sheet");
+  if (button) { button.addEventListener("click", function () { window.print(); }); }
+})();
+</script>
+</body>
+</html>

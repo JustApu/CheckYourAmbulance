@@ -30,6 +30,11 @@ urlpatterns = [
         name="inspection-vehicle",
     ),
     path(
+        "inspection/vehicles/<str:vehicle_id>/print/",
+        inspection_views.vehicle_print,
+        name="inspection-vehicle-print",
+    ),
+    path(
         "inspection/sessions/<str:session_id>/",
         inspection_views.session,
         name="inspection-session",
