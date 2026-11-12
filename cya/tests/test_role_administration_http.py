@@ -209,6 +209,147 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(by_email.context["target_total"], 1)
         self.assertContains(by_email, target.email)
 
+    def test_non_administrators_cannot_preview_edit_or_submit_unknown_stages(self):
+        admin_client, admin = self.make_administrator("admin-1")
+        client, crew = self.sign_in("crew-1")
+        client.get("/")
+        token = client.cookies["csrftoken"].value
+        role_rows = RoleGrant.objects.count()
+        receipts = CommandReceipt.objects.filter(command_type="ROLE_CHANGE").count()
+
+        for stage in ("preview", "edit", None, "unexpected"):
+            with self.subTest(stage=stage):
+                data = {
+                    "csrfmiddlewaretoken": token,
+                    "operation_id": str(uuid4()),
+                    "target": str(crew.pk),
+                    "role": "ADMINISTRATOR",
+                    "action": "GRANT",
+                }
+                if stage is not None:
+                    data["stage"] = stage
+                response = client.post(URL, data)
+
+                self.assertEqual(response.status_code, 403)
+                for private in (admin.email, crew.email, "Role history", "Change a role"):
+                    self.assertNotContains(response, private, status_code=403)
+
+        self.assertEqual(RoleGrant.objects.count(), role_rows)
+        self.assertEqual(
+            CommandReceipt.objects.filter(command_type="ROLE_CHANGE").count(), receipts
+        )
+        denials = AuditEvent.objects.filter(
+            action="VIEW_ADMINISTRATION", outcome="DENIED", actor_user=crew
+        )
+        self.assertEqual(denials.count(), 4)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+    def test_administrator_missing_or_unknown_stage_is_rejected_without_a_change(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        before = self.counts()
+
+        for stage in (None, "unexpected"):
+            with self.subTest(stage=stage):
+                data = self.data(admin_client, crew)
+                if stage is None:
+                    data.pop("stage")
+                else:
+                    data["stage"] = stage
+                response = admin_client.post(URL, data)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertContains(response, "request was not valid", status_code=400)
+
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+    def test_malformed_preview_is_rejected_without_a_change(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        before = self.counts()
+        cases = {
+            "unknown role": {"role": "ROOT"},
+            "legacy EMT alias": {"role": "EMT"},
+            "unknown action": {"action": "DELETE"},
+            "target not a UUID": {"target": "not-a-uuid"},
+            "target not canonical": {"target": str(crew.pk).upper()},
+            "operation id not a UUID": {"operation_id": "not-a-uuid"},
+            "operation id not UUID4": {"operation_id": "00000000-0000-1000-8000-000000000000"},
+        }
+        for name, change in cases.items():
+            with self.subTest(name=name):
+                data = self.data(admin_client, crew, stage="preview")
+                data.update(change)
+                response = admin_client.post(URL, data)
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+    def test_preview_rejects_inactive_and_cross_organization_targets(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        other_org = Organization.objects.create(name="Other Agency", station_zone="UTC")
+        outside = User.objects.create(
+            organization=other_org,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="outside-preview",
+            email="outside-preview@example.test",
+            display_name="Outside Preview",
+        )
+        inactive = User.objects.create(
+            organization=self.org,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="inactive-preview",
+            email="inactive-preview@example.test",
+            display_name="Inactive Preview",
+            active=False,
+        )
+        before = self.counts()
+
+        for target in (outside, inactive):
+            with self.subTest(target=target.idp_subject):
+                data = self.data(admin_client, target, stage="preview")
+                response = admin_client.post(URL, data)
+                self.assertEqual(response.status_code, 404)
+                self.assertNotContains(response, target.email, status_code=404)
+                self.assertNotContains(response, "Review role change", status_code=404)
+
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(RoleGrant.objects.filter(user__in=(outside, inactive)).count(), 0)
+
+    def test_search_errors_hide_users_and_reject_preview_or_edit_posts(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        before = self.counts()
+        cases = (
+            ("duplicate", ["first", "second"], "Search was supplied more than once"),
+            ("too long", "x" * 101, "Search is limited to 100 characters"),
+        )
+
+        for name, query, message in cases:
+            with self.subTest(search=name, method="GET"):
+                response = admin_client.get(URL, {"q": query})
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, message)
+                self.assertContains(response, "The user list is hidden")
+                self.assertEqual(response.context["targets"], [])
+                self.assertEqual(response.context["target_total"], 0)
+                self.assertNotContains(response, 'id="role-target"')
+
+            for stage in ("preview", "edit"):
+                with self.subTest(search=name, stage=stage):
+                    data = self.data(admin_client, crew, stage=stage, q=query)
+                    response = admin_client.post(URL, data)
+                    self.assertEqual(response.status_code, 400)
+                    self.assertContains(response, message, status_code=400)
+                    self.assertContains(response, "The user list is hidden", status_code=400)
+                    self.assertEqual(response.context["targets"], [])
+                    self.assertEqual(response.context["target_total"], 0)
+                    self.assertNotContains(response, 'id="role-target"', status_code=400)
+
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
     def test_a_crew_user_is_not_shown_the_link(self):
         client, _ = self.sign_in("crew-1")
         self.assertNotContains(client.get("/"), "/administration/")

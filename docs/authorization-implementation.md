@@ -96,14 +96,18 @@ history through the web interface. It is not a general user-management screen.
   highlighted there. Other roles are never shown the link.
 - **GET** shows the organization's latest 50 role-history rows and a change form
   to an Administrator. Active users can be searched by display name or email;
-  results are organization-scoped and capped at 50 per search. The history table
-  scrolls horizontally in its own keyboard-focusable region on narrow screens.
+  results are organization-scoped and capped at 50 per search, and search text is
+  limited to 100 characters. Invalid or repeated search values show an error and
+  hide the user list. The history table scrolls horizontally in its own
+  keyboard-focusable region on narrow screens.
   A signed-out visitor is redirected to sign-in; anyone else
   gets 403 and an audited `VIEW_ADMINISTRATION` denial (503 if that audit fails).
 - The form first posts `stage=preview`, which validates the selection and renders
   a plain-language summary without changing roles or writing audit records. A
   separate confirmation posts `stage=confirm`; `Change selection` returns to the
-  form without making a change.
+  form without making a change. Missing or unknown stages are rejected with 400
+  for an Administrator; preview and edit requests from other roles are audited
+  as `VIEW_ADMINISTRATION` denials.
 - **POST confirmation** takes `target` (user UUID), `role`, `action` (`GRANT` or
   `REVOKE`) and `operation_id` (a canonical UUID4 retained from preview through
   confirmation so a double submit replays). Django's CSRF check applies first.
