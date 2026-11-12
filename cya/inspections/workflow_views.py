@@ -532,6 +532,12 @@ def deficiency(request, user, deficiency_id):
     # The server refuses a past follow-up (INVALID_FOLLOW_UP), so a passed one is not prefilled.
     follow_up = dependency.get("follow_up_at") if dependency else None
     follow_up_passed = follow_up is not None and follow_up <= timezone.now()
+    can_close_empty_scope = status.status in EMPTY_SCOPE_CLOSURE_STATUSES and allowed(
+        "close_empty_scope_deficiency"
+    )
+    empty_scope_available = can_close_empty_scope and not service.correction_scope(
+        str(user.organization_id), found, timezone.now()
+    )
     scope = verification_scope(found) if status.status == "PENDING_VERIFICATION" else []
     verification_progress = {
         "total": len(scope),
@@ -558,8 +564,8 @@ def deficiency(request, user, deficiency_id):
             and allowed("record_deficiency_correction"),
             # With no deadline the server answers NO_DEADLINE, so the form is not offered.
             # Issue 21: Supervisors and Administrators, only while the closure is a valid move.
-            "can_close_empty_scope": status.status in EMPTY_SCOPE_CLOSURE_STATUSES
-            and allowed("close_empty_scope_deficiency"),
+            "can_close_empty_scope": can_close_empty_scope,
+            "empty_scope_available": empty_scope_available,
             "can_request_extension": allowed("request_extension")
             and deadline["governing_deadline"] is not None,
             "can_update_dependency": allowed("update_external_dependency"),

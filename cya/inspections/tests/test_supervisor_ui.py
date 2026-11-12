@@ -666,6 +666,10 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
 
     def test_empty_scope_surfaces_its_closure_action_instead_of_an_invalid_repair(self):
         pk = self.report()
+        open_page = self.page(self.sup, pk)
+        self.assertContains(open_page, "Start work")
+        self.assertNotContains(open_page, "No current verification items remain.")
+        self.assertNotContains(open_page, 'id="empty-scope-closure" open')
         start_work(deficiency_id=pk, expected_event_id=self.latest(pk), **self.context(self.admin))
         self.published_version([s for s in self.items if s["item_id"] != str(self.suction.pk)])
         page = self.page(self.sup, pk)
