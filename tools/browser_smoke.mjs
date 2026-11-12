@@ -469,12 +469,17 @@ try {
       assert.equal(await page.getByRole("heading", { name: "Next action" }).isVisible(), true);
       assert.equal(await page.getByRole("button", { name: "Record repair" }).isVisible(), true);
       const deficiencyDetails = page.locator("#deficiency-work-updates");
-      const deficiencySummary = page.getByText("Work updates and dependencies", { exact: true });
+      const deficiencySummary = deficiencyDetails.locator("summary");
       assert.equal(await deficiencyDetails.evaluate((element) => element.open), false, `${viewport.name}: secondary deficiency actions should start collapsed`);
-      assert.equal(await page.getByRole("button", { name: "Work updates and dependencies" }).count(), 1, `${viewport.name}: disclosure summary is not exposed as a keyboard control`);
+      assert.equal(await deficiencySummary.count(), 1, `${viewport.name}: disclosure summary is missing`);
       const disclosureBox = await deficiencySummary.boundingBox();
       assert.ok(disclosureBox && disclosureBox.height >= 48, `${viewport.name}: disclosure target is shorter than 48 CSS pixels`);
       await deficiencySummary.focus();
+      assert.equal(
+        await deficiencySummary.evaluate((element) => document.activeElement === element),
+        true,
+        `${viewport.name}: disclosure summary is not keyboard reachable`,
+      );
       await page.keyboard.press("Enter");
       assert.equal(await deficiencyDetails.evaluate((element) => element.open), true, `${viewport.name}: Enter did not expand secondary actions`);
       assert.equal(await page.getByLabel("Progress note").isVisible(), true, `${viewport.name}: expanded disclosure content is not visible`);
