@@ -307,7 +307,8 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertContains(page, "Check suspension ended early")  # the history entry
         self.assertContains(page, "Synthetic &lt;b&gt;back&lt;/b&gt;.")
         self.assertNotContains(page, marker)
-        self.assertNotContains(page, "in force")
+        self.assertContains(page, "Check suspensions — 0 in force")
+        self.assertNotContains(page, "; in force")
         again = self.act(self.sup, pk, "check-suspension-ends", suspension_id=suspension_id)
         self.assertEqual(
             (again.status_code, again.json()["code"]), (422, "SUSPENSION_ALREADY_ENDED")
@@ -338,7 +339,8 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertNotContains(page, "Synthetic <i>close</i>.")
         self.assertContains(page, "Known Deficiency — Check Suspended")
         self.assertContains(page, "(Closed by administrator)")  # the suspension's end label
-        self.assertNotContains(page, "in force")
+        self.assertContains(page, "Check suspensions — 0 in force")
+        self.assertNotContains(page, "; in force")
 
         reopened = self.act(
             admin, pk, "administrator-reopenings", explanation="Synthetic <b>reopen</b>."
