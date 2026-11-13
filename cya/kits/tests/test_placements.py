@@ -204,11 +204,11 @@ class AsOfResolutionTests(PlacementCase):
             )
             return [k for k, _ in resolved.placements[0].kits]
 
-        self.assertEqual(kits(as_of=before), sorted([moved, removed]))
+        self.assertEqual(kits(as_of=before), [moved, removed])
         self.assertEqual(kits(as_of=timezone.now()), [])
         self.assertEqual(
             kits(as_of=timezone.now(), recorded_before=before),
-            sorted([moved, removed]),
+            [moved, removed],
             "events recorded after the cutoff do not count",
         )
 
