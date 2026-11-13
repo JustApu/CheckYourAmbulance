@@ -374,9 +374,9 @@ def _resolved_placements(organization_id, vehicle_id, template_version_id, as_of
     present = {kit_id for kits in in_slot.values() for kit_id in kits}
     kit_definitions = {
         str(kit): str(definition)
-        for kit, definition in KitInstanceDefinition.objects.filter(
-            kit_id__in=present
-        ).values_list("kit_id", "definition_id")
+        for kit, definition in KitInstanceDefinition.objects.filter(kit_id__in=present).values_list(
+            "kit_id", "definition_id"
+        )
     }
     labels = {
         str(pk): label
