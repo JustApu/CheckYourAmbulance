@@ -660,14 +660,26 @@ def correction_scope(organization_id, deficiency, now):
     # joins, resolved like the rest of the correction-time scope, unless the scope above already
     # holds the same item and instance.
     present = {(item_id, kit_id) for item_id, _definition, kit_id in rows}
-    for item_id, definition_id, kit_id in _expansions(organization_id, deficiency, current):
+    for item_id, definition_id, kit_id in _expansions(organization_id, deficiency, current, placed):
         if (item_id, kit_id) not in present:
             rows[(item_id, definition_id, kit_id)] = None
             present.add((item_id, kit_id))
     return sorted(rows, key=lambda row: (row[0], row[1], row[2] or ""))
 
 
-def _expansions(organization_id, deficiency, current):
+def placed_entry(placed, item_id, kit_id):
+    """The placed kit content for item_id held by kit_id, or None (issue #129)."""
+    if kit_id is None:
+        return None
+    for item in placed:
+        if str(item.requirement.item_id) == str(item_id) and any(
+            str(k) == str(kit_id) for k, _label in item.kits
+        ):
+            return item
+    return None
+
+
+def _expansions(organization_id, deficiency, current, placed=()):
     """(item, definition, kit or None) of the deficiency's supervisor expansions that apply now.
 
     Like every correction-time row (VER-3), an expanded pair is resolved against today's checklist
@@ -688,6 +700,10 @@ def _expansions(organization_id, deficiency, current):
         )
     applicable = []
     for item_id, kit_id in rows:
+        content = placed_entry(placed, item_id, kit_id)
+        if content is not None:
+            applicable.append((str(item_id), str(content.requirement.definition_id), str(kit_id)))
+            continue
         entry = current.get(str(item_id))
         if entry is None:
             continue

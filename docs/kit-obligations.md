@@ -163,6 +163,33 @@ Designations do not change obligations, checks or kit assignment history. Substi
 
   Kits come from the kit assignment history (`cya/kits/history.py`, with the same `recorded_before` cutoff), never from the current kit rows, so a later move, deactivation or kit list does not change a past resolution.
 
+## Inspections of placed kits
+
+Issue #129 parts 4b and 4c make kits placed by definition drive inspections ([SPEC §4.6](../SPEC.md) KDEF-4, KDEF-7). Every slot-placed kit item keeps working exactly as before (KDEF-8). Each record below names exactly one content source: a `checklist_item_def`, or a placed definition's `kit_definition_item`. The database checks this.
+
+- **Requirements and obligations** (`cya/obligations/requirements.py`, migration cya_obligations 0015):
+  - For each placement at due instant `D`, every instance in the placed slot whose fixed definition is the placed one owes one requirement per content entry.
+  - The content comes from the definition version in force at `D`, as the records stood.
+  - As for any kit item, an instance added after the window opened waits for the next due instant (TIME-1a). A version published later never changes an obligation already created (§5.7).
+  - `requirement_version` pins `kit_definition_item` and `placement` instead of `item_def`. Its insert guard checks:
+    - the placement belongs to the pinned publication's version;
+    - the content belongs to a published version of the placed definition, for the same item;
+    - the kit has the placed definition and is active in the placed slot at its pinned assignment event.
+- **Checks** (`cya/checks/commands.py`, migration cya_checks 0012):
+  - A check on placed content names the kit. The command resolves the content from the placement holding that kit, using the version in force when the session opened, and stores `kit_definition_item`.
+  - The insert guard requires the content to belong to a definition the check's checklist version places, and the kit to have that definition in the placed slot.
+  - Corrections keep the original content source. Publishing a template with placements, or a definition version, creates the item locks a check needs.
+- **Deficiencies** (cya_deficiencies 0020):
+  - Affected items, verification scope rows, scope expansions and check suspensions carry the same alternative.
+  - A deficiency on a kit covers all of that kit's content. Compartment, item and report-time scopes include placed content too.
+  - Instances come from the assignment history, kept when their fixed definition matches.
+- **Crew checklist and printouts:**
+  - The checklist query lists one row per kit of a placed definition for each content entry; the row's `definition_id` is the content entry.
+  - The outage sheet lists those kits.
+  - The kit reference prints each placed definition's contents for its version in force.
+- **Ad hoc requests:** a request naming a placed kit and one of its content items pins that content entry.
+
+
 **Not yet.** Obligations, checks, the checklist screen and printouts do not read placements or kit lists, so publishing either changes no inspection (KDEF-8). Later parts of issue #129 add these:
 - the presence item and kit presence obligations (KDEF-10 to KDEF-12);
 - contents obligations from placed definitions;

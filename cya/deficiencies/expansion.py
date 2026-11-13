@@ -82,8 +82,13 @@ def resolve_items(organization_id, vehicle_id, items, now):
     its active physical kit instances on the vehicle, and any other item names none.
     """
     current = service._effective_items(organization_id, vehicle_id, now)
+    placed = service._effective_placed(organization_id, vehicle_id, now)
     resolved = []
     for index, (item_id, kit_id) in enumerate(items):
+        content = service.placed_entry(placed, item_id, kit_id)
+        if content is not None:  # content of a kit placed by definition (issue #129)
+            resolved.append((item_id, str(content.requirement.definition_id), kit_id))
+            continue
         entry = current.get(item_id)
         if entry is None:
             raise DeficiencyError(

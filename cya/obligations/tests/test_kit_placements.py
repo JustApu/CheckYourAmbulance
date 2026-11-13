@@ -409,3 +409,32 @@ class PlacedKitCheckTests(PlacedKitCase):
         rows = kit_types["Synthetic jump kit"]
         self.assertEqual([r.label for r in rows], ["Synthetic kit contents", "Synthetic gauze"])
         self.assertIn("4", rows[0].expected)
+
+    def test_an_ad_hoc_request_can_name_placed_kit_content(self):
+        from cya.obligations.adhoc import request_inspection
+
+        kit = self.add_placed_kit("Jump kit 1", self.definition)
+        self.clock.set(self.at(hours=5, minutes=30))
+        request_inspection(
+            vehicle_id=str(self.vehicle.pk),
+            items=[{"item_id": str(self.kit_item.pk), "kit_instance_id": kit}],
+            due_at=self.at(hours=9),
+            explanation="Synthetic spot check of the jump kit.",
+            **self.context(self.supervisor),
+        )
+        version = Obligation.objects.get(routine=False, item=self.kit_item).requirement_version
+        content = KitDefinitionItem.objects.get(version_id=self.kit_version, item=self.kit_item)
+        self.assertEqual(
+            (version.item_def_id, version.kit_definition_item_id, str(version.kit_instance_id)),
+            (None, content.pk, kit),
+        )
+
+    def test_scope_expansion_resolves_placed_kit_content(self):
+        from cya.deficiencies.expansion import resolve_items
+
+        kit = self.add_placed_kit("Jump kit 1", self.definition)
+        content = KitDefinitionItem.objects.get(version_id=self.kit_version, item=self.gauze)
+        resolved = resolve_items(
+            str(self.org.pk), str(self.vehicle.pk), [(str(self.gauze.pk), kit)], self.at(hours=5)
+        )
+        self.assertEqual(resolved, [(str(self.gauze.pk), str(content.pk), kit)])

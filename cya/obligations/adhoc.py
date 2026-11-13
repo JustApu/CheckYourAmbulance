@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from django.utils import timezone
 
 from cya.accounts.fields import new_id
-from cya.attention.checklist import ChecklistQueryError, _resolved_items
+from cya.attention.checklist import ChecklistQueryError, _placed_content, _resolved_items
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
-from cya.checklists.models import ChecklistPublication
+from cya.checklists.models import ChecklistPublication, Compartment
 from cya.checklists.overlay import resolve_checklist
 from cya.checks.linking import captured_late_seconds
 from cya.checks.models import ItemLock
@@ -55,12 +55,58 @@ def _items(value):
     return sorted(result, key=lambda pair: (pair[0], pair[1] or ""))
 
 
+def _placed_pin(placed, org, vehicle, due_at, item_id, kit_id, version_pins):
+    """The pin for content of a kit placed by definition held by kit_id, or None (issue #129)."""
+    if kit_id is None:
+        return None
+    for _order, row, version_id, kits in placed:
+        if str(row.requirement.item_id) != item_id or kit_id not in [k for k, _l in kits]:
+            continue
+        slot = Compartment.objects.get(pk=row.compartment_id).stable_slot_id
+        kit = next((k for k in active_kits(org, vehicle, slot, due_at) if k.kit_id == kit_id), None)
+        if kit is None:
+            return None
+        publication_id, override_id = _version_pin(org, vehicle, due_at, version_id, version_pins)
+        return dict(
+            item_id=item_id,
+            item_def_id=None,
+            kit_definition_item_id=str(row.requirement.definition_id),
+            placement_id=str(row.requirement.kit_id),
+            publication_id=publication_id,
+            override_version_id=override_id,
+            kit_instance_id=kit_id,
+            kit_key=kit_id,
+            kit_event_id=kit.since_event_id,
+        )
+    return None
+
+
+def _version_pin(org, vehicle, due_at, version_id, version_pins):
+    if version_id not in version_pins:
+        publication = ChecklistPublication.objects.select_related("checklist_version").get(
+            organization_id=org, checklist_version_id=version_id
+        )
+        overlay = resolve_checklist(
+            organization_id=org,
+            vehicle_id=vehicle,
+            template_id=publication.checklist_version.template_id,
+            as_of=due_at,
+        ).override_version_id
+        version_pins[version_id] = (str(publication.pk), overlay)
+    return version_pins[version_id]
+
+
 def _pins(org, vehicle, due_at, items):
     resolved = _resolved_items(org, vehicle, due_at)
+    placed = _placed_content(org, vehicle, due_at)
     result = []
     version_pins = {}
     kit_slots = {}
     for item_id, kit_id in items:
+        pin = _placed_pin(placed, org, vehicle, due_at, item_id, kit_id, version_pins)
+        if pin is not None:
+            result.append(pin)
+            continue
         if item_id not in resolved:
             raise StatusError(
                 "item is not in this vehicle's due-time checklist",
@@ -91,18 +137,7 @@ def _pins(org, vehicle, due_at, items):
             kit_event = kit.since_event_id
         elif kit_id is not None:
             raise StatusError("item is outside a kit", code="INVALID_SCOPE", path="items")
-        if version_id not in version_pins:
-            publication = ChecklistPublication.objects.select_related("checklist_version").get(
-                organization_id=org, checklist_version_id=version_id
-            )
-            overlay = resolve_checklist(
-                organization_id=org,
-                vehicle_id=vehicle,
-                template_id=publication.checklist_version.template_id,
-                as_of=due_at,
-            ).override_version_id
-            version_pins[version_id] = (str(publication.pk), overlay)
-        publication_id, override_id = version_pins[version_id]
+        publication_id, override_id = _version_pin(org, vehicle, due_at, version_id, version_pins)
         result.append(
             dict(
                 item_id=item_id,
