@@ -69,6 +69,12 @@ class ParseTests(SimpleTestCase):
         self.assertIn("'=HYPERLINK(1)", rendered)
         self.assertEqual(files.parse(rendered.encode(), "csv")[0]["label"], "=HYPERLINK(1)")
 
+    def test_literal_apostrophes_survive_the_round_trip(self):
+        for text in ("'=x", "''", "'plain", "'-'", "=1+1", "-5 masks"):
+            with self.subTest(text=text):
+                kits = [{**files.TEMPLATE_KITS[0], "label": text}]
+                self.assertEqual(files.parse(files.render(kits, "csv"), "csv")[0]["label"], text)
+
     def test_templates_parse_back_to_their_examples(self):
         for fmt in files.FORMATS:
             with self.subTest(fmt=fmt):

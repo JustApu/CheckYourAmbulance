@@ -71,7 +71,7 @@ The header row must hold exactly these columns, in any order:
 - `kit_key`, `kit_label` and `item` are trimmed, and blank lines are skipped.
 - `outcomes` separates values with `|`.
 - `expiration_tracked` is `yes` or `no`.
-- A cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is exported with a leading `'`, so a spreadsheet does not run it as a formula (RPT-2). That apostrophe is removed on import, so files round-trip exactly.
+- A cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is exported with a leading `'`, so a spreadsheet does not run it as a formula (RPT-2). A cell that already starts with `'` gets one more. On import, one leading `'` is removed when it comes before one of those characters or another `'`, so files round-trip exactly.
 
 ## Fields
 

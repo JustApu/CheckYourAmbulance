@@ -10,8 +10,9 @@ The normal form of one kit is {"key", "label", "contents": [entry, ...]}; an ent
 "instructions"}, in file order. "item" is the item's label: files never carry database ids.
 
 CSV cells that a spreadsheet would run as a formula (starting with = + - @, tab or carriage
-return) are written with a leading apostrophe (RPT-2), and that apostrophe is removed again on
-import, so a round trip is exact.
+return), and cells that already start with an apostrophe, are written with one more leading
+apostrophe (RPT-2); import removes exactly that one when it precedes one of those characters, so a
+round trip is exact.
 """
 
 import csv
@@ -154,7 +155,8 @@ def _parse_json(text):
 
 
 def _unneutralize(value):
-    if len(value) >= 2 and value[0] == "'" and value[1:].startswith(FORMULA_STARTS):
+    """Remove the one apostrophe _neutralize adds; a value it did not mark is left as is."""
+    if value.startswith("'") and value[1:].startswith((*FORMULA_STARTS, "'")):
         return value[1:]
     return value
 
@@ -257,7 +259,9 @@ def _parse_csv(text):
 
 
 def _neutralize(value):
-    return "'" + value if value.startswith(FORMULA_STARTS) else value
+    # A value that already starts with an apostrophe is marked too, so a literal "'=x" survives
+    # the round trip (review of PR #144): import removes exactly one apostrophe.
+    return "'" + value if value.startswith((*FORMULA_STARTS, "'")) else value
 
 
 def render(kits, fmt):

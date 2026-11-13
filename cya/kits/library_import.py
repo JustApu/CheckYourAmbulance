@@ -257,11 +257,16 @@ def preview_kit_library(organization_id, data, fmt):
 # --- the import command ----------------------------------------------------------------------
 
 
-def _authorize(organization_id, actor_id, action):
+def _authorize(organization_id, actor_id, action, *, lock_organization=False):
     backend = DatabaseRoleBackend()
 
     def authorize(_org):
-        with locked_identities(organization_id, [actor_id], lock_organization=False) as (
+        # An import locks the organization first (the helper's documented order), so imports
+        # in one organization run one at a time: two cannot both find an item label missing
+        # and create it twice (review of PR #144).
+        with locked_identities(
+            organization_id, [actor_id], lock_organization=lock_organization
+        ) as (
             current_org,
             users,
         ):
@@ -377,7 +382,7 @@ def import_kit_library(*, data, fmt, base_token, **context):
         request_digest=digest({"fmt": fmt, "data": digest_bytes(data), "base_token": base_token}),
         correlation_id=context["correlation_id"],
         request_attempt_id=context["request_attempt_id"],
-        authorize=_authorize(org, context["actor_id"], IMPORT_ACTION),
+        authorize=_authorize(org, context["actor_id"], IMPORT_ACTION, lock_organization=True),
         prepare=build,
     )
 

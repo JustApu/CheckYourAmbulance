@@ -241,3 +241,46 @@ class ExportTests(LibraryCase):
         )
         everything = json.loads(export_kit_library(str(self.org.pk), "json"))
         self.assertEqual([k["key"] for k in everything["kits"]], ["other-kit"])
+
+
+class ConcurrentImportTests(LibraryCase):
+    """Review of PR #144: two imports naming the same new item label create it once."""
+
+    def test_concurrent_imports_do_not_duplicate_a_new_item(self):
+        import threading
+
+        from django.db import close_old_connections
+
+        first, second = library(kit(key="kit-a")), library(kit(key="kit-b"))
+        tokens = [self.preview(data).base_token for data in (first, second)]
+        barrier, outcomes = threading.Barrier(2), []
+
+        def run(data, token):
+            try:
+                barrier.wait(timeout=10)
+                outcomes.append(
+                    import_kit_library(
+                        data=data, fmt="json", base_token=token, **self.context(self.admin)
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - the outcome is asserted below
+                outcomes.append(error)
+            finally:
+                close_old_connections()
+
+        threads = [
+            threading.Thread(target=run, args=pair)
+            for pair in zip((first, second), tokens, strict=True)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        self.assertEqual(Item.objects.filter(organization=self.org, label="Masks").count(), 1)
+        self.assertEqual(Item.objects.filter(organization=self.org, label="Gauge").count(), 1)
+        imported = [o for o in outcomes if not isinstance(o, Exception)]
+        refused = [o for o in outcomes if isinstance(o, ImportRefused)]
+        self.assertEqual(len(imported) + len(refused), 2, outcomes)
+        self.assertGreaterEqual(len(imported), 1)
+        # The later import either saw the items created (stale preview, refused) or reused them.
+        self.assertTrue(all("preview it again" in str(r) for r in refused))
