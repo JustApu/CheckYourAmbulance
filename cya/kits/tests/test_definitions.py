@@ -20,6 +20,7 @@ from cya.kits.definitions import (
     version_effective_at,
 )
 from cya.kits.models import (
+    KitAssignmentEvent,
     KitDefinition,
     KitDefinitionItem,
     KitDefinitionPublication,
@@ -128,6 +129,8 @@ class CreateAndDraftTests(DefinitionCase):
             "unknown field": [{**good, "kit_id": str(uuid4())}],
             "missing field": [{k: v for k, v in good.items() if k != "kind"}],
             "outcomes without PASSED": [{**good, "allowed_outcomes": ["FAILED"]}],
+            "outcome not text": [{**good, "allowed_outcomes": [["PASSED"], "PASSED"]}],
+            "outcomes not a list": [{**good, "allowed_outcomes": {"PASSED": True}}],
             "expiration not bool": [{**good, "expiration_tracked": "yes"}],
             "bad item id": [{**good, "item_id": "not-a-uuid"}],
             "unknown item": [{**good, "item_id": str(uuid4())}],
@@ -373,5 +376,22 @@ class GuardTests(DefinitionCase):
             )
 
         self.refused(lambda: instance_definition(self.receipt("KIT_ASSIGNMENT_RECORD")))
-        KitDefinition.objects.filter(pk=definition_id).update(active=False)
+        # Review of PR #143: another (valid) KIT_ADD receipt cannot give an existing kit a
+        # definition later; only the command that created the kit can (KDEF-3).
         self.refused(lambda: instance_definition(self.receipt("KIT_ADD")))
+        creation = KitAssignmentEvent.objects.get(kit_id=kit_id, sequence=1).command
+        instance_definition(creation)  # the kit's own creating command is accepted
+        other_kit = self.add_kit("Second kit").body["kit_id"]
+        other_creation = KitAssignmentEvent.objects.get(kit_id=other_kit, sequence=1).command
+        KitDefinition.objects.filter(pk=definition_id).update(active=False)
+        self.refused(
+            lambda: KitInstanceDefinition.objects.create(
+                organization=self.org,
+                kit_id=other_kit,
+                definition_id=definition_id,
+                command=other_creation,
+                recorded_at=other_creation.recorded_at,
+                actor_user=self.supervisor,
+                actor_roles_at_time=["SUPERVISOR"],
+            )
+        )

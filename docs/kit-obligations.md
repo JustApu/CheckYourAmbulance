@@ -138,7 +138,7 @@ Designations do not change obligations, checks or kit assignment history. Substi
 | `duplicate_kit_definition(source_version_id, key, label)` | a new definition and its first draft | Copies that version's contents, with none of the original's history. |
 | `set_kit_definition_active(definition_id, active)` | `kit_definition.active` | A deactivated definition cannot be drafted, published or given to a new kit; kits that have it keep it. |
 
-`add_kit_instance` takes an optional `definition_id`. Given one, it records `kit_instance_definition` (append-only, one row per kit, fixed for the kit's life, KDEF-3) in the same command; the definition must exist and be active (the command checks under a row lock and the database insert guard checks again). Kits added without one, and every kit made before this part, have no definition (KDEF-8).
+`add_kit_instance` takes an optional `definition_id`. Given one, it records `kit_instance_definition` (append-only, one row per kit, fixed for the kit's life, KDEF-3) in the same command; the definition must exist and be active (the command checks under a row lock and the database insert guard checks again), and the database accepts the row only from the command that created the kit (its first `kit_assignment_event`), so an existing kit can never be given a definition later. Kits added without one, and every kit made before this part, have no definition (KDEF-8).
 
 `version_effective_at(organization_id, definition_id, at)` answers which published version is in force at an instant.
 

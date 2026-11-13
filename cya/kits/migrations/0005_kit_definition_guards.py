@@ -10,7 +10,9 @@ kit_definition_publication and kit_instance_definition are append-only (A): upda
 triggers, plus insert guards that repeat the command rules so a writer that bypasses the
 command still cannot store a row that does not match its command receipt (organization, actor,
 recorded instant, command type). A publication must name a version that has contents; a kit
-instance may be given only an active definition (KDEF-2). kit_definition's key is immutable
+instance may be given only an active definition (KDEF-2), and only by the command that created it:
+the receipt must be that of the kit's first kit_assignment_event (KDEF-3), so an existing kit can
+never be given a definition later. kit_definition's key is immutable
 (KDEF-1, IMP-1: files match by it). Each trigger is one list element so Django runs it whole.
 """
 
@@ -138,6 +140,9 @@ INSTANCE_DEFINITION_INSERT = f"""CREATE TRIGGER cya_kit_instance_definition_bi B
 FOR EACH ROW BEGIN
 IF {receipt_matches(ADD_KIT_COMMAND)}
 THEN {signal("kit instance definition receipt attribution mismatch")}; END IF;
+IF NOT EXISTS (SELECT 1 FROM kit_assignment_event e WHERE e.kit_id=NEW.kit_id
+ AND e.{ORG}=NEW.{ORG} AND e.sequence=1 AND e.command_id=NEW.command_id)
+THEN {signal("kit definition must be given by the command that created the kit")}; END IF;
 IF NOT EXISTS (SELECT 1 FROM kit_definition d WHERE d.id=NEW.definition_id
  AND d.{ORG}=NEW.{ORG} AND d.active)
 THEN {signal("kit definition is inactive")}; END IF;

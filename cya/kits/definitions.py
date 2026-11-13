@@ -161,6 +161,7 @@ def _outcomes(entry):
     if (
         not isinstance(outcomes, list)
         or not 1 <= len(outcomes) <= len(OUTCOMES)
+        or any(not isinstance(o, str) for o in outcomes)  # before set(): lists are unhashable
         or len(set(outcomes)) != len(outcomes)
         or any(o not in OUTCOMES for o in outcomes)
         or "PASSED" not in outcomes
