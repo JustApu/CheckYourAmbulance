@@ -296,7 +296,9 @@ class ChecklistKitPlacement(models.Model):
         return f"ChecklistKitPlacement {self.pk}"
 
 
-MAX_REQUIRED_COUNT = 99
+# The largest count the column stores on every supported database; a storage range, not a
+# product limit (SPEC 2.0.0 KDEF-9 sets only r >= 1).
+STORED_COUNT_MAX = 2_147_483_647
 
 
 class VehicleKitListVersion(models.Model):
@@ -345,7 +347,7 @@ class VehicleKitRequirement(models.Model):
                 fields=["version", "compartment", "definition"], name="kitreq_version_slot_def"
             ),
             models.CheckConstraint(
-                condition=models.Q(required_count__gte=1, required_count__lte=MAX_REQUIRED_COUNT),
+                condition=models.Q(required_count__gte=1),
                 name="kitreq_required_count",
             ),
         ]

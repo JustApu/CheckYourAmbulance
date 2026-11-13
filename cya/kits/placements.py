@@ -11,7 +11,6 @@ from cya.authorization.backend import canonical_id
 from cya.checklists.validation import ChecklistValidationError, is_count
 from cya.kits.models import ChecklistKitPlacement, KitDefinition, KitDefinitionPublication
 
-MAX_PLACEMENTS = 200
 FIELDS = frozenset({"definition_id", "display_order"})
 
 
@@ -28,8 +27,8 @@ def _reference(value, model, organization_id, where):
 
 def validate_placements(organization_id, placements):
     """Model fields for each placement of a template draft, or raise naming its position."""
-    if not isinstance(placements, list) or len(placements) > MAX_PLACEMENTS:
-        raise ChecklistValidationError(f"placements must be a list of at most {MAX_PLACEMENTS}")
+    if not isinstance(placements, list):
+        raise ChecklistValidationError("placements must be a list")
     validated, seen = [], set()
     for index, spec in enumerate(placements):
         where = f"placements[{index}]"

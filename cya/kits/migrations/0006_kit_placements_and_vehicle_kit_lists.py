@@ -254,7 +254,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="vehiclekitrequirement",
             constraint=models.CheckConstraint(
-                condition=models.Q(("required_count__gte", 1), ("required_count__lte", 99)),
+                condition=models.Q(("required_count__gte", 1)),
                 name="kitreq_required_count",
             ),
         ),

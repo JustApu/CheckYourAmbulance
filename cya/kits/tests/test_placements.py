@@ -229,7 +229,7 @@ class KitListTests(PlacementCase):
             "unknown field": [{**self.line(jump), "colour": "red"}],
             "missing field": [{"definition_id": jump, "required_count": 1, "display_order": 1}],
             "zero count": [self.line(jump, 0)],
-            "too many": [self.line(jump, 100)],
+            "beyond what the column stores": [self.line(jump, 2_147_483_648)],
             "not a number": [self.line(jump, "2")],
             "a boolean is not a count": [self.line(jump, True)],
             "bad order": [self.line(jump, order=-1)],
@@ -244,6 +244,14 @@ class KitListTests(PlacementCase):
             with self.subTest(name), self.assertRaises(KitListError):
                 self.kit_list(lines, publish=False)
         self.assertFalse(VehicleKitListVersion.objects.exists())
+
+    def test_large_counts_are_valid(self):
+        """Review of PR #145: SPEC 2.0.0 KDEF-9 sets only r >= 1, so no product cap applies."""
+        jump = self.definition()
+        version_id = self.kit_list([self.line(jump, 100)])
+        self.assertEqual(
+            VehicleKitRequirement.objects.get(version_id=version_id).required_count, 100
+        )
 
     def test_the_database_refuses_a_line_in_another_vehicles_compartment(self):
         jump = self.definition()

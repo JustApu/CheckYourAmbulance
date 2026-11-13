@@ -26,7 +26,7 @@ from cya.checklists.validation import is_count
 from cya.core.audit_commands import Plan, run_command
 from cya.kits import definitions
 from cya.kits.models import (
-    MAX_REQUIRED_COUNT,
+    STORED_COUNT_MAX,
     KitDefinition,
     VehicleKitListPublication,
     VehicleKitListVersion,
@@ -36,7 +36,6 @@ from cya.kits.models import (
 ACTION = "manage_vehicle_kit_lists"
 DRAFT_COMMAND = "VEHICLE_KIT_LIST_DRAFT"
 PUBLISH_COMMAND = "VEHICLE_KIT_LIST_PUBLISH"
-MAX_LINES = 200
 LINE_FIELDS = frozenset({"definition_id", "compartment_id", "required_count", "display_order"})
 
 
@@ -85,10 +84,8 @@ def _line(org, vehicle, index, entry):
         except (TypeError, ValueError):
             raise KitListError(f"{where}.{field} is not an identifier") from None
     count = entry["required_count"]
-    if not is_count(count) or not 1 <= count <= MAX_REQUIRED_COUNT:
-        raise KitListError(
-            f"{where}.required_count must be a whole number 1 to {MAX_REQUIRED_COUNT}"
-        )
+    if not is_count(count) or not 1 <= count <= STORED_COUNT_MAX:
+        raise KitListError(f"{where}.required_count must be a whole number of at least 1")
     if not is_count(entry["display_order"]):
         raise KitListError(f"{where}.display_order must be a whole number")
     definition = KitDefinition.objects.filter(
@@ -115,8 +112,6 @@ def validate_lines(org, vehicle, lines):
     """The validated lines of a kit list draft; at most one line per slot and definition."""
     if not isinstance(lines, list):
         raise KitListError("lines must be a list")
-    if len(lines) > MAX_LINES:
-        raise KitListError(f"a kit list has at most {MAX_LINES} lines")
     validated, seen = [], set()
     for index, entry in enumerate(lines):
         line = _line(org, vehicle, index, entry)
