@@ -52,6 +52,7 @@ def checklist_row(row, authors):
         "display_order": row.display_order,
         "obligation_state": row.obligation_state,
         "obligation_outcome": row.obligation_outcome,
+        "obligation_completed_at": _stamped(row.obligation_completed_at),
         "due_at": _stamped(row.due_at),
         "item_attention": row.attention.state,
         "attention_check_id": row.attention.check_id,

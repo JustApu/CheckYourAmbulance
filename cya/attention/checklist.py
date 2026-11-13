@@ -100,6 +100,9 @@ class ChecklistRow:
     latest_check_outcome: str | None = None
     latest_check_at: datetime | None = None
     obligation_outcome: str | None = None
+    # When the shown obligation was satisfied (its satisfying check or supervisor completion);
+    # a newer check is in the same window (issue #140).
+    obligation_completed_at: datetime | None = None
     # The shown obligation is under a supervisor check suspension still in force (SPEC 8.9).
     check_suspended: bool = False
 
@@ -406,6 +409,7 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=Fals
                 unit=requirement.unit,
                 allowed_outcomes=tuple(requirement.allowed_outcomes),
                 obligation_outcome=state.outcome if state else None,
+                obligation_completed_at=state.completed_at if state else None,
                 check_suspended=state is not None and state.suspension_in_force,
                 latest_check_id=last.check_id if last else None,
                 latest_check_outcome=last.outcome if last else None,

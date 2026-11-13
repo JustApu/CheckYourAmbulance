@@ -166,6 +166,19 @@ class ViewTests(AttentionCase):
         self.assertIn(str(self.suction.pk), ids)
         self.assertIn(str(self.kit_item.pk), ids)
 
+    def test_a_satisfied_row_says_when_it_was_satisfied(self):
+        # Issue #140: the crew screen compares the newest check with this instant.
+        self.clock.set(self.at(hours=5, minutes=30))
+        self.assertIsNone(self.row(self.masks).obligation_completed_at)
+        recorded_at = self.clock.now
+        self.record(self.masks, quantity=6)
+        row = self.row(self.masks)
+        self.assertEqual(row.obligation_state, "SATISFIED")
+        self.assertGreaterEqual(
+            row.obligation_completed_at, recorded_at
+        )  # the clock ticks per read
+        self.assertEqual(row.obligation_completed_at, row.latest_check_at)
+
     def test_overdue_rows_stay_in_the_filter(self):
         self.clock.set(self.at(hours=9))
         row = self.row(self.suction, needs_attention_only=True)

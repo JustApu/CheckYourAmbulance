@@ -452,6 +452,14 @@ class ChecklistContractTests(CrewUiCase):
         self.assertIsNone(after["attention_check_id"])  # only a red check is named there
         self.assertTrue(after["latest_check_at"].endswith("Z"))
 
+    def test_rows_carry_when_the_shown_obligation_was_satisfied(self):
+        # Issue #140: the screen marks the newest check only if it is no older than this. When
+        # it is set is covered by cya.attention.tests.test_checklist; here, the API field.
+        row = next(r for r in self.rows() if r["item_id"] == str(self.suction.pk))
+        self.assertIn("obligation_completed_at", row)
+        self.assertNotEqual(row["obligation_state"], "SATISFIED")
+        self.assertIsNone(row["obligation_completed_at"])
+
     def test_a_check_recorded_through_the_basis_the_screen_sends_commits_without_a_warning(self):
         self.record(self.suction, actor=self.supervisor)
         shown = next(r for r in self.rows() if r["item_id"] == str(self.suction.pk))
