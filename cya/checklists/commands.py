@@ -154,7 +154,7 @@ def _is_published(**target):
 def save_template_draft(*, template_id, items, placements=None, **context):
     """Create the next draft revision of a template with its complete item set (CHK-2).
 
-    placements (optional) places kits by definition in compartment slots (SPEC 4.6 KDEF-4).
+    placements (optional) names the kit definitions this version inspects (SPEC 4.6 KDEF-4).
     """
     canonical_id(template_id)
     org = context["organization_id"]
@@ -255,18 +255,6 @@ def _require_slots(requirements, vehicle_ids, as_of):
             )
 
 
-def _require_placement_slots(placements, vehicle_ids, as_of):
-    """Every vehicle must have an effective compartment row in each placed kit's slot."""
-    compartments = {str(p.compartment_id) for p in placements}
-    for vehicle_id in vehicle_ids:
-        slots = vehicle_slots("compartment", vehicle_id, compartments, as_of)
-        absent = sorted(ref for ref, row in slots.items() if row is None)
-        if absent:
-            raise ChecklistValidationError(
-                f"vehicle {vehicle_id} has no effective slot for placed kits {absent} at {as_of}"
-            )
-
-
 def _active_vehicle_ids(org):
     return list(
         Vehicle.objects.filter(organization_id=org, active=True).values_list("pk", flat=True)
@@ -302,7 +290,6 @@ def publish_template_version(*, version_id, effective_at=None, **context):
             )
             requirements = [requirement_from_definition(d, "TEMPLATE") for d in definitions]
             _require_slots(requirements, _active_vehicle_ids(org), final)
-            _require_placement_slots(placements, _active_vehicle_ids(org), final)
             ChecklistPublication.objects.create(
                 id=publication_id,
                 organization_id=org,

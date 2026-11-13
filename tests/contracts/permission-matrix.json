@@ -450,6 +450,16 @@
         "Supply Officer": "deny",
         "Administrator": "allow"
       }
+    },
+    {
+      "id": "PERM-44",
+      "action": "manage_vehicle_kit_lists",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
     }
   ]
 }

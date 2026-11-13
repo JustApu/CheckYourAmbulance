@@ -86,9 +86,22 @@ class ResolvedItem:
 
 
 @dataclass(frozen=True)
-class ResolvedPlacement:
-    """A kit placed by definition, resolved for one vehicle (SPEC 4.6 KDEF-4, issue #129).
+class ResolvedKitLine:
+    """One line of the vehicle's kit list in force: exactly required_count in a slot (KDEF-9)."""
 
+    requirement_id: str
+    compartment_id: str  # the vehicle's own effective compartment row in the line's slot
+    compartment_label: str
+    required_count: int
+    display_order: int
+
+
+@dataclass(frozen=True)
+class ResolvedPlacement:
+    """A kit definition the checklist inspects, resolved for one vehicle (SPEC 4.6 KDEF-4).
+
+    lines come from the vehicle's kit list in force at as_of (KDEF-9); kits are the vehicle's
+    instances of the definition at as_of, in any compartment, from the assignment history.
     Obligations do not read placements yet; a later part of issue #129 adds that.
     """
 
@@ -97,10 +110,9 @@ class ResolvedPlacement:
     definition_key: str
     definition_label: str
     display_order: int
-    compartment_id: str  # the vehicle's own effective compartment row in the placed slot
-    compartment_label: str
-    # The vehicle's own active kits of this definition in that slot, as (id, label), by label.
-    kits: tuple[tuple[str, str], ...] = ()
+    lines: tuple[ResolvedKitLine, ...] = ()
+    # (kit id, label, compartment row id or "" when the slot has no effective row), by label.
+    kits: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -338,15 +350,20 @@ def _active_deviations(organization_id, vehicle_id, item_ids, as_of):
 
 
 def _resolved_placements(organization_id, vehicle_id, template_version_id, as_of, recorded_before):
-    """The template version's kit placements as this vehicle resolves them (KDEF-4).
+    """The kit definitions the version inspects, as this vehicle resolves them (KDEF-4, KDEF-9).
 
-    The kits are those in the placed slot at as_of according to the kit assignment history
-    (with the same recorded_before cutoff), never the current kit rows, so a later move or
-    deactivation does not change a past resolution.
+    Kits come from the kit assignment history (with the same recorded_before cutoff), never the
+    current kit rows, so a later move or deactivation does not change a past resolution.
     """
     # Imported late: the kits app depends on checklists.
-    from cya.kits.history import active_kits
-    from cya.kits.models import ChecklistKitPlacement, KitDefinition, KitInstanceDefinition
+    from cya.kits.history import kits_on_vehicle
+    from cya.kits.kit_lists import kit_list_effective_at
+    from cya.kits.models import (
+        ChecklistKitPlacement,
+        KitDefinition,
+        KitInstanceDefinition,
+        VehicleKitRequirement,
+    )
 
     placements = list(
         ChecklistKitPlacement.objects.filter(checklist_version_id=template_version_id).order_by(
@@ -355,44 +372,59 @@ def _resolved_placements(organization_id, vehicle_id, template_version_id, as_of
     )
     if not placements:
         return ()
-    compartments = vehicle_slots(
-        "compartment", vehicle_id, {str(p.compartment_id) for p in placements}, as_of
-    )
     definitions = {
         str(d.pk): d
         for d in KitDefinition.objects.filter(pk__in={p.definition_id for p in placements})
     }
-    in_slot = {}  # stable slot id -> kit ids in it at as_of
-    for compartment in compartments.values():
-        if compartment is not None and compartment.stable_slot_id not in in_slot:
-            in_slot[compartment.stable_slot_id] = [
-                kit.kit_id
-                for kit in active_kits(
-                    organization_id, vehicle_id, compartment.stable_slot_id, as_of, recorded_before
-                )
-            ]
-    present = {kit_id for kits in in_slot.values() for kit_id in kits}
+    kit_list = kit_list_effective_at(organization_id, vehicle_id, as_of, recorded_before)
+    lines = (
+        list(VehicleKitRequirement.objects.filter(version=kit_list).order_by("display_order", "id"))
+        if kit_list
+        else []
+    )
+    on_vehicle = kits_on_vehicle(organization_id, vehicle_id, as_of, recorded_before)
     kit_definitions = {
         str(kit): str(definition)
-        for kit, definition in KitInstanceDefinition.objects.filter(kit_id__in=present).values_list(
-            "kit_id", "definition_id"
-        )
+        for kit, definition in KitInstanceDefinition.objects.filter(
+            kit_id__in=on_vehicle
+        ).values_list("kit_id", "definition_id")
     }
     labels = {
         str(pk): label
-        for pk, label in KitInstance.objects.filter(pk__in=present).values_list("pk", "label")
+        for pk, label in KitInstance.objects.filter(pk__in=on_vehicle).values_list("pk", "label")
     }
+    by_slot = {}  # stable slot id -> the vehicle's own effective compartment row
+    slot_rows = vehicle_slots(
+        "compartment", vehicle_id, {str(line.compartment_id) for line in lines}, as_of
+    )
+    for row in Compartment.objects.filter(
+        vehicle_id=vehicle_id, stable_slot_id__in=set(on_vehicle.values()), effective_at__lte=as_of
+    ).order_by("stable_slot_id", "-revision"):
+        by_slot.setdefault(str(row.stable_slot_id), row)
     resolved = []
     for placement in placements:
-        compartment = compartments.get(str(placement.compartment_id))
-        if compartment is None:
-            raise MissingSlotError(
-                f"vehicle {vehicle_id} has no effective slot for placed kit {placement.pk} at {as_of}"
-            )
         definition = definitions[str(placement.definition_id)]
+        own_lines = []
+        for line in lines:
+            if str(line.definition_id) != str(definition.pk):
+                continue
+            row = slot_rows.get(str(line.compartment_id))
+            if row is None:
+                raise MissingSlotError(
+                    f"vehicle {vehicle_id} has no effective slot for kit list line {line.pk} at {as_of}"
+                )
+            own_lines.append(
+                ResolvedKitLine(
+                    requirement_id=str(line.pk),
+                    compartment_id=str(row.pk),
+                    compartment_label=row.label,
+                    required_count=line.required_count,
+                    display_order=line.display_order,
+                )
+            )
         kits = sorted(
-            (labels[kit_id], kit_id)
-            for kit_id in in_slot[compartment.stable_slot_id]
+            (labels[kit_id], kit_id, str(by_slot[slot].pk) if slot in by_slot else "")
+            for kit_id, slot in on_vehicle.items()
             if kit_definitions.get(kit_id) == str(definition.pk)
         )
         resolved.append(
@@ -402,9 +434,8 @@ def _resolved_placements(organization_id, vehicle_id, template_version_id, as_of
                 definition_key=definition.key,
                 definition_label=definition.label,
                 display_order=placement.display_order,
-                compartment_id=str(compartment.pk),
-                compartment_label=compartment.label,
-                kits=tuple((pk, label) for label, pk in kits),
+                lines=tuple(own_lines),
+                kits=tuple((kit_id, label, row) for label, kit_id, row in kits),
             )
         )
     return tuple(resolved)

@@ -1,19 +1,18 @@
-"""Kits placed by definition in a checklist version (SPEC 4.6 KDEF-4, issue #129 part 4a).
+"""Kit definitions a checklist version inspects (SPEC 4.6 KDEF-4, issue #129 part 4a).
 
-validate_placements checks the placements a template draft carries; check_publishable checks
-them again when the version is published; placements_of reads a version's rows. Obligations do
-not use placements yet (KDEF-8: slot-placed kit items keep working until a later part of issue
-#129 makes requirements come from definitions). Vehicle-override placements arrive with that
-part, which also defines how an override adds or removes a template's placements.
+A placement names a kit definition only: where and how many instances each vehicle should carry
+come from the vehicle's kit list (cya.kits.kit_lists, KDEF-9). validate_placements checks the
+placements a template draft carries; check_publishable checks them again when the version is
+published; placements_of reads a version's rows. Obligations do not use placements yet (KDEF-8:
+slot-placed kit items keep working until a later part of issue #129).
 """
 
 from cya.authorization.backend import canonical_id
-from cya.checklists.models import Compartment
 from cya.checklists.validation import ChecklistValidationError, is_count
 from cya.kits.models import ChecklistKitPlacement, KitDefinition, KitDefinitionPublication
 
 MAX_PLACEMENTS = 200
-FIELDS = frozenset({"definition_id", "compartment_id", "display_order"})
+FIELDS = frozenset({"definition_id", "display_order"})
 
 
 def _reference(value, model, organization_id, where):
@@ -43,21 +42,11 @@ def validate_placements(organization_id, placements):
         )
         if not definition.active:
             raise ChecklistValidationError(f"{where} kit definition {definition.key!r} is inactive")
-        compartment = _reference(
-            spec["compartment_id"], Compartment, organization_id, f"{where} compartment_id"
-        )
-        key = (compartment.stable_slot_id, definition.pk)
-        if key in seen:
-            raise ChecklistValidationError(
-                f"{where} places kit {definition.key!r} in that slot twice"
-            )
-        seen.add(key)
+        if definition.pk in seen:
+            raise ChecklistValidationError(f"{where} places kit {definition.key!r} twice")
+        seen.add(definition.pk)
         validated.append(
-            {
-                "definition_id": str(definition.pk),
-                "compartment_id": str(compartment.pk),
-                "display_order": spec["display_order"],
-            }
+            {"definition_id": str(definition.pk), "display_order": spec["display_order"]}
         )
     return validated
 

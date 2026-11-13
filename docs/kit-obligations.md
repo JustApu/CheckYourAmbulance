@@ -144,13 +144,28 @@ Designations do not change obligations, checks or kit assignment history. Substi
 
 **Not yet.** Checklists still place kit contents by slot, so a kit definition changes no obligation, check or printout yet. Kit-library import and export (§4.7) is part 3: see [kit-library files](kit-library-files.md). Placing kits by definition (`checklist_kit_placement`, KDEF-4) and vehicle files are later parts of issue #129.
 
-## Kits placed by definition
+## Kits placed by definition and vehicle kit lists
 
-Issue #129 part 4a lets a checklist template version place kits by definition (SPEC §4.6 KDEF-4): "kit definition X in compartment slot S", stored in `checklist_kit_placement`. The table is versioned and frozen with its owning version once published, like `checklist_item_def`.
+[Issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129) part 4a implements the placement and kit list rules of [SPEC 2.0.0 §4.6](../SPEC.md) (KDEF-4, KDEF-9).
 
-- **Draft:** `save_template_draft(..., placements=[{definition_id, compartment_id, display_order}])` validates each placement (`cya/kits/placements.py`). The definition must exist in the organization and be active, the compartment must exist, a definition appears at most once per slot, and there are at most 200 placements. Omitting `placements` keeps an existing request's digest.
-- **Publish:** `publish_template_version` refuses a placed definition that is inactive or has no published version, and a placement whose slot some active vehicle lacks. It locks the placed definitions until the publication commits, so a concurrent deactivation waits for it.
-- **Resolve:** `resolve_checklist` returns `placements`, one `ResolvedPlacement` each. It holds the vehicle's own compartment row in the slot and the kits in that slot at `as_of` whose `kit_instance_definition` is that definition, ordered by label. The kits come from the kit assignment history (`cya/kits/history.py`, with the same `recorded_before` cutoff), never the current kit rows, so a later move or deactivation does not change a past resolution.
+- **Placements.** A checklist template version names the kit definitions it inspects, stored in `checklist_kit_placement`: a definition and a display order, with no compartment and no count. Placements are frozen with their version once it is published, like `checklist_item_def`.
+  - **Draft:** `save_template_draft(..., placements=[{definition_id, display_order}])` validates each placement (`cya/kits/placements.py`). The definition must exist in the organization and be active, it may appear only once, and a version has at most 200 placements. Omitting `placements` keeps an existing request's digest.
+  - **Publish:** `publish_template_version` refuses a placed definition that is inactive or has no published version. It locks the placed definitions until the publication commits, so a concurrent deactivation waits for it.
+- **Vehicle kit lists.** Each vehicle has its own kit list (`cya/kits/kit_lists.py`). A line says how many instances of a definition the vehicle should carry, exactly, in one of its compartments (1 to 99).
+  - **Storage:** `vehicle_kit_list_version` and `vehicle_kit_requirement` are versioned and frozen once a `vehicle_kit_list_publication` names the version. The database also refuses a line whose compartment belongs to another vehicle.
+  - **Draft:** `save_vehicle_kit_list_draft(vehicle_id, lines=[{definition_id, compartment_id, required_count, display_order}])` writes the next revision with its complete lines. A definition may appear only once per compartment slot, a list has at most 200 lines, and an empty list is allowed.
+  - **Publish:** `publish_vehicle_kit_list(version_id, effective_at=None)` takes effect at or after the publication, later than the vehicle's previous list. It refuses an inactive listed definition and locks the listed definitions until it commits.
+  - **Permission:** both commands need the policy action `manage_vehicle_kit_lists` (PERM-44: Supervisors and Administrators).
+  - **List in force:** `kit_list_effective_at(organization, vehicle, at, recorded_before=None)` returns the version in force at `at`.
+- **Resolve.** `resolve_checklist` returns `placements`, one `ResolvedPlacement` per placed definition, with:
+  - `lines`: the vehicle's kit list lines for that definition in force at `as_of`, each with the vehicle's own compartment row and the required count;
+  - `kits`: every instance of the definition on the vehicle at `as_of`, in any compartment, with the compartment it is in.
 
-**Not yet.** Obligations, checks, the checklist screen and the printable sheet do not read placements, so publishing a placement changes no inspection (KDEF-8). Part 4b makes requirements come from placements and definitions. Placements in vehicle overrides, and how an override adds or removes a template's placements, come with part 4b. The database still refuses to publish a template version with no items (cya_checklists 0002), so a kits-only template needs at least one item until then.
+  Kits come from the kit assignment history (`cya/kits/history.py`, with the same `recorded_before` cutoff), never from the current kit rows, so a later move, deactivation or kit list does not change a past resolution.
 
+**Not yet.** Obligations, checks, the checklist screen and printouts do not read placements or kit lists, so publishing either changes no inspection (KDEF-8). Later parts of issue #129 add these:
+- the presence item and kit presence obligations (KDEF-10 to KDEF-12);
+- contents obligations from placed definitions;
+- vehicle files that write kit lists (IMP-1, IMP-3).
+
+The database still refuses to publish a template version with no items (cya_checklists 0002), so a kits-only template needs at least one item until then.
