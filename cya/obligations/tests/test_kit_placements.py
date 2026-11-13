@@ -6,7 +6,7 @@ from uuid import uuid4
 from django.db import DatabaseError, transaction
 
 from cya.checklists import commands
-from cya.checklists.models import Item
+from cya.checklists.models import Compartment, Item
 from cya.checks.commands import CheckError, correct_check, record_check
 from cya.checks.models import CheckObligationLink, CheckRecord
 from cya.deficiencies.commands import record_correction, start_work
@@ -17,7 +17,7 @@ from cya.deficiencies.models import (
     VerificationScopeRow,
 )
 from cya.deficiencies.severity import ensure_default_severities
-from cya.kits.commands import add_kit_instance
+from cya.kits.commands import add_kit_instance, record_kit_assignment
 from cya.kits.definitions import (
     create_kit_definition,
     publish_kit_definition_version,
@@ -46,7 +46,6 @@ class PlacedKitCase(KitCase):
             placements=[
                 {
                     "definition_id": self.definition,
-                    "compartment_id": str(self.cabinet.pk),
                     "display_order": 90,
                 }
             ],
@@ -111,6 +110,47 @@ class PlacedKitObligationTests(PlacedKitCase):
         self.assertEqual(owed, expected)
         loose = [o for o in self.obligations() if o.kit_instance_id is None]
         self.assertEqual(len(loose), 3 * len(self.dues), "the checklist's own items are unchanged")
+
+    def test_an_instance_in_any_compartment_owes_its_contents(self):
+        """SPEC 2.0.0 KDEF-4: a placement names no compartment; every instance on the vehicle."""
+        drawer = self.make_slot(Compartment, "drawer")
+        kit = add_kit_instance(
+            label="Jump kit in the drawer",
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(drawer.pk),
+            definition_id=self.definition,
+            **self.context(self.supervisor),
+        ).body["kit_id"]
+        self.assertEqual(self.generate().failures, [])
+        owed = {
+            (str(o.item_id), o.due_at) for o in self.content_rows() if str(o.kit_instance_id) == kit
+        }
+        self.assertEqual(
+            owed, {(str(i.pk), due) for i in (self.kit_item, self.gauze) for due in self.dues}
+        )
+
+    def test_moving_an_instance_within_the_vehicle_keeps_its_obligations(self):
+        drawer = self.make_slot(Compartment, "drawer")
+        kit = self.add_placed_kit("Jump kit 1", self.definition)
+        self.assertEqual(self.generate().failures, [])
+        before = {(o.pk, o.requirement_version_id) for o in self.content_rows()}
+        record_kit_assignment(
+            kit_id=kit,
+            active=True,
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(drawer.pk),
+            **self.context(self.supervisor),
+        )
+        self.assertEqual(self.generate().failures, [])
+        self.assertEqual(
+            {(o.pk, o.requirement_version_id) for o in self.content_rows()},
+            before,
+            "a move between compartments of one vehicle starts no new requirement",
+        )
+        first = KitAssignmentEvent.objects.get(kit_id=kit, sequence=1)
+        self.assertEqual(
+            {o.requirement_version.kit_event_id for o in self.content_rows()}, {first.pk}
+        )
 
     def test_a_requirement_pins_the_content_entry_and_placement_not_an_item_definition(self):
         kit = self.add_placed_kit("Jump kit 1", self.definition)
@@ -243,7 +283,6 @@ class NothingPublishedTests(KitCase):
             placements=[
                 {
                     "definition_id": definition,
-                    "compartment_id": str(self.cabinet.pk),
                     "display_order": 90,
                 }
             ],

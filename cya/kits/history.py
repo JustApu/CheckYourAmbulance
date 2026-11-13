@@ -69,6 +69,46 @@ def active_kits(organization_id, vehicle_id, slot_id, at, recorded_before=None):
     return tuple(sorted(found, key=lambda k: k.kit_id))
 
 
+def _on_vehicle(event, vehicle_id):
+    return event.active and str(event.vehicle_id) == vehicle_id and event.compartment is not None
+
+
+def active_kits_on_vehicle(organization_id, vehicle_id, at, recorded_before=None):
+    """Kit instances active on the vehicle at `at`, in any slot, ordered by kit id (KDEF-4).
+
+    Like active_kits, but a run is the instance's uninterrupted stay on this vehicle: a move
+    between compartments of the same vehicle does not start a new run, so it creates no new
+    requirement, while leaving the vehicle and coming back does (TIME-1a).
+    """
+    organization_id, vehicle_id = str(organization_id), str(vehicle_id)
+    events = KitAssignmentEvent.objects.filter(
+        organization_id=organization_id, effective_at__lte=at
+    )
+    if recorded_before is not None:
+        events = events.filter(recorded_at__lt=recorded_before)
+    candidates = set(events.filter(vehicle_id=vehicle_id).values_list("kit_id", flat=True))
+    if not candidates:
+        return ()
+    chains = defaultdict(list)
+    for event in (
+        events.filter(kit_id__in=candidates)
+        .select_related("compartment")
+        .order_by("kit_id", "sequence")
+    ):
+        chains[str(event.kit_id)].append(event)
+    found = []
+    for kit_id, chain in chains.items():
+        if not _on_vehicle(chain[-1], vehicle_id):
+            continue
+        run = chain[-1]
+        for event in reversed(chain):
+            if not _on_vehicle(event, vehicle_id):
+                break
+            run = event
+        found.append(ActiveKit(kit_id, str(run.pk), run.effective_at))
+    return tuple(sorted(found, key=lambda k: k.kit_id))
+
+
 def kits_on_vehicle(organization_id, vehicle_id, at, recorded_before=None):
     """{kit id: stable slot id} of the kit instances active on the vehicle at `at`, any slot.
 

@@ -39,7 +39,7 @@ from cya.deficiencies.transitions import (
     validate_transition,
 )
 from cya.kits.history import active_kits, slot_of_reference_kit
-from cya.kits.models import KitDefinitionItem, KitInstanceDefinition
+from cya.kits.models import KitInstanceDefinition
 from cya.kits.placements import content_columns, placed_items
 from cya.operations.models import MAX_TEXT
 
@@ -399,9 +399,9 @@ def _effective_items(organization_id, vehicle_id, now):
 def _effective_placed(organization_id, vehicle_id, now):
     """Content of kits placed by definition, required now (SPEC 4.6 KDEF-4, issue #129).
 
-    One ResolvedItem per placement and content entry, its definition_id the content entry. As
-    for slot-placed kits above, the instances come from the assignment history at `now`, kept
-    only when their fixed definition is the placed one.
+    One ResolvedItem per content entry and instance of the placed definition on the vehicle,
+    located in that instance's compartment, its definition_id the content entry. The instances
+    come from the assignment history at `now` (SPEC 2.0.0 KDEF-4).
     """
     found = []
     templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
@@ -419,23 +419,7 @@ def _effective_placed(organization_id, vehicle_id, now):
             raise DeficiencyError(
                 "CHECKLIST_UNAVAILABLE", str(error), status=409, path="target"
             ) from None
-        for item in placed_items(organization_id, resolved, now):
-            slot_id = Compartment.objects.get(pk=item.compartment_id).stable_slot_id
-            active = active_kits(organization_id, vehicle_id, slot_id, now)
-            definition_id = KitDefinitionItem.objects.get(
-                pk=item.requirement.definition_id
-            ).version.definition_id
-            having = {
-                str(k)
-                for k in KitInstanceDefinition.objects.filter(
-                    kit_id__in=[kit.kit_id for kit in active], definition_id=definition_id
-                ).values_list("kit_id", flat=True)
-            }
-            labels = dict(item.kits)
-            kits = tuple(
-                (kit.kit_id, labels.get(kit.kit_id, "")) for kit in active if kit.kit_id in having
-            )
-            found.append(item.__class__(**{**item.__dict__, "kits": kits}))
+        found.extend(placed_items(organization_id, resolved, now))  # one item per kit present
     return found
 
 

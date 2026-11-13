@@ -24,10 +24,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID, uuid5
 
-from cya.checklists.models import ChecklistPublication, Compartment
+from cya.checklists.models import ChecklistPublication
 from cya.checklists.overlay import NoEffectiveVersionError, resolve_checklist
 from cya.conditions.models import ConditionalRule
-from cya.kits.history import active_kits, slot_of_reference_kit
+from cya.kits.history import active_kits, active_kits_on_vehicle, slot_of_reference_kit
 from cya.kits.models import (
     ChecklistKitPlacement,
     KitDefinitionItem,
@@ -252,13 +252,14 @@ def _definition_version(organization_id, definition_id, due_at, recorded_before)
 def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at):
     """Instances of the placed definition owed for this inspection (TIME-1a, KDEF-3, KDEF-4).
 
-    Read from the assignment history like any kit item (not cut off at the freeze instant), and
-    kept only when the instance's fixed definition is the placed one.
+    Every instance with the placed definition that is on the vehicle at D, in any compartment
+    (SPEC 2.0.0 KDEF-4), read from the assignment history like any kit item (not cut off at the
+    freeze instant). An instance whose stay on the vehicle began after the window opened waits
+    for the next due instant.
     """
-    slot = Compartment.objects.get(pk=placement.compartment_id).stable_slot_id
     kits = [
         kit
-        for kit in active_kits(organization_id, vehicle_id, slot, due_at)
+        for kit in active_kits_on_vehicle(organization_id, vehicle_id, due_at)
         if kit.since_at < early_at
     ]
     if not kits:
@@ -275,7 +276,7 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
     """Requirements for the content of kits placed by definition (SPEC 4.6 KDEF-4, KDEF-7).
 
     One per content entry of the definition version in force at D, per instance of that
-    definition in the placed slot. A version published later never changes these pins.
+    definition on the vehicle. A version published later never changes these pins.
     """
     due_at, recorded_before, conditional = context
     placements = ChecklistKitPlacement.objects.filter(

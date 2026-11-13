@@ -6,7 +6,7 @@ an item-pair key for the new column and rewrites the insert guard: migration 001
 the definition and kit apply when item_def_id is set; otherwise the content entry must belong to
 a version, published by the check's instant, of a kit definition that the check's checklist
 version places, and the kit must have that definition (kit_instance_definition) and be on the
-vehicle in the placed slot. A correction keeps its predecessor's content source. Checks written
+vehicle, in any compartment (SPEC 2.0.0 KDEF-4). A correction keeps its predecessor's content source. Checks written
 before this migration all name an item definition, so they keep their meaning (KDEF-8).
 
 item_def_id's keys (migrations 0001, 0002) are dropped around its nullability change and added
@@ -47,16 +47,14 @@ THEN {signal("check kit content does not belong to a kit the version places")}; 
 """
 
 KIT_CONTENT_CHECK = f"""IF NOT EXISTS (SELECT 1 FROM kit_instance k
- JOIN compartment kc ON kc.id=k.compartment_id
  JOIN kit_instance_definition kd ON kd.kit_id=k.id
  JOIN kit_definition_item i ON i.id=NEW.kit_definition_item_id
  JOIN kit_definition_version kv ON kv.id=i.version_id AND kv.definition_id=kd.definition_id
  JOIN checklist_kit_placement pl ON pl.checklist_version_id=NEW.checklist_version_id
   AND pl.definition_id=kd.definition_id
- JOIN compartment pc ON pc.id=pl.compartment_id
  WHERE k.id=NEW.kit_id AND k.{ORG}=NEW.{ORG} AND k.vehicle_id=NEW.vehicle_id
- AND kc.stable_slot_id=pc.stable_slot_id)
-THEN {signal("check kit does not have the placed definition in the placed slot")}; END IF;
+ AND k.compartment_id IS NOT NULL)
+THEN {signal("check kit does not have the placed definition on the vehicle")}; END IF;
 """
 
 

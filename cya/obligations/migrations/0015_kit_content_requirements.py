@@ -6,9 +6,9 @@ kit_definition_item together with the checklist_kit_placement that placed its ki
 for the new columns, a composite key so the content entry names the requirement's own item, and
 a new insert guard. The guard is migration 0006's, with the checklist-definition checks taken
 only when item_def_id is set; otherwise it checks that the placement belongs to the pinned
-publication's version (or override), that the content entry belongs to a published version of
-the placed definition, and that the kit instance has that definition and is active on the
-vehicle in the placed slot at its pinned assignment event. Rows written before this migration
+publication's version, that the content entry belongs to a published version of the placed
+definition, and that the kit instance has that definition and is active on the vehicle, in any
+compartment (SPEC 2.0.0 KDEF-4), at its pinned assignment event. Rows written before this migration
 all name an item definition, so they keep their meaning (KDEF-8).
 """
 
@@ -42,8 +42,7 @@ CONTENT_CHECK = f"""IF NOT EXISTS (SELECT 1 FROM checklist_kit_placement pl
  JOIN kit_definition_version kv ON kv.id=i.version_id
  JOIN kit_definition_publication kp ON kp.version_id=kv.id
  WHERE pl.id=NEW.placement_id AND pl.{ORG}=NEW.{ORG} AND i.{ORG}=NEW.{ORG}
- AND (pl.checklist_version_id=p.checklist_version_id
-  OR (NEW.override_version_id IS NOT NULL AND pl.override_version_id=NEW.override_version_id))
+ AND pl.checklist_version_id=p.checklist_version_id
  AND kv.definition_id=pl.definition_id AND i.item_id=NEW.item_id)
 THEN {signal("requirement kit content mismatch")}; END IF;
 """
@@ -51,13 +50,11 @@ THEN {signal("requirement kit content mismatch")}; END IF;
 KIT_CONTENT_INSTANCE_CHECK = f"""IF NEW.kit_instance_id IS NULL THEN
  {signal("requirement for kit content must name a kit instance")};
 ELSEIF NOT EXISTS (SELECT 1 FROM kit_assignment_event e
-  JOIN compartment ec ON ec.id=e.compartment_id
   JOIN checklist_kit_placement pl ON pl.id=NEW.placement_id
-  JOIN compartment pc ON pc.id=pl.compartment_id
   JOIN kit_instance_definition kd ON kd.kit_id=NEW.kit_instance_id AND kd.definition_id=pl.definition_id
   WHERE e.id=NEW.kit_event_id AND e.{ORG}=NEW.{ORG} AND e.kit_id=NEW.kit_instance_id
-  AND e.vehicle_id=NEW.vehicle_id AND e.active=1 AND ec.stable_slot_id=pc.stable_slot_id)
-THEN {signal("requirement kit instance does not have the placed definition in the placed slot")};
+  AND e.vehicle_id=NEW.vehicle_id AND e.active=1 AND e.compartment_id IS NOT NULL)
+THEN {signal("requirement kit instance does not have the placed definition on the vehicle")};
 END IF;
 """
 

@@ -8,13 +8,13 @@ from cya.accounts.fields import new_id
 from cya.attention.checklist import ChecklistQueryError, _placed_content, _resolved_items
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
-from cya.checklists.models import ChecklistPublication, Compartment
+from cya.checklists.models import ChecklistPublication
 from cya.checklists.overlay import resolve_checklist
 from cya.checks.linking import captured_late_seconds
 from cya.checks.models import ItemLock
 from cya.core.audit_commands import Plan, run_command
 from cya.deficiencies.commands import _authorizer
-from cya.kits.history import active_kits, slot_of_reference_kit
+from cya.kits.history import active_kits, active_kits_on_vehicle, slot_of_reference_kit
 from cya.obligations.generation import UnitUnavailable, lock_unit_scope
 from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.state import NO_KIT
@@ -62,8 +62,9 @@ def _placed_pin(placed, org, vehicle, due_at, item_id, kit_id, version_pins):
     for _order, row, version_id, kits in placed:
         if str(row.requirement.item_id) != item_id or kit_id not in [k for k, _l in kits]:
             continue
-        slot = Compartment.objects.get(pk=row.compartment_id).stable_slot_id
-        kit = next((k for k in active_kits(org, vehicle, slot, due_at) if k.kit_id == kit_id), None)
+        kit = next(
+            (k for k in active_kits_on_vehicle(org, vehicle, due_at) if k.kit_id == kit_id), None
+        )
         if kit is None:
             return None
         publication_id, override_id = _version_pin(org, vehicle, due_at, version_id, version_pins)

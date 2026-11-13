@@ -37,11 +37,10 @@ from django.utils import timezone
 
 from cya.attention.facts import deficiency_facts, latest_effective_checks
 from cya.attention.state import Attention, applies, attention_states, latest_checks
-from cya.checklists.models import ChecklistTemplate, Compartment, Item, KitInstance, Vehicle
+from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
 from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, resolve_checklist
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
-from cya.kits.models import KitDefinitionItem, KitInstanceDefinition
 from cya.kits.placements import placed_items
 from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.projections import get_vehicle_obligations_as_of
@@ -153,8 +152,9 @@ def _resolved_items(organization_id, vehicle_id, as_of):
 def _placed_content(organization_id, vehicle_id, as_of):
     """(template order, ResolvedItem, version id, kits) per placed kit content entry (KDEF-4).
 
-    Like _resolved_items, only bound templates and records made by as_of count. The kits are the
-    instances of the placed definition in the placed slot at as_of, from assignment history.
+    Like _resolved_items, only bound templates and records made by as_of count. Each entry is one
+    instance of the placed definition on the vehicle at as_of, in its own compartment, from
+    assignment history (SPEC 2.0.0 KDEF-4).
     """
     found = []
     bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
@@ -173,30 +173,10 @@ def _placed_content(organization_id, vehicle_id, as_of):
             continue
         except ResolutionError as error:
             raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+        # One item per kit present, in its own compartment, from the assignment history as of
+        # as_of (resolve_checklist), so a past instant never reads the current kit rows.
         for item in placed_items(organization_id, resolved, as_of, recorded_before):
-            content = KitDefinitionItem.objects.select_related("version").get(
-                pk=item.requirement.definition_id
-            )
-            slot = Compartment.objects.get(pk=item.compartment_id).stable_slot_id
-            active = active_kits(
-                organization_id, vehicle_id, slot, as_of, recorded_before=recorded_before
-            )
-            having = {
-                str(k)
-                for k in KitInstanceDefinition.objects.filter(
-                    kit_id__in=[k.kit_id for k in active],
-                    definition_id=content.version.definition_id,
-                ).values_list("kit_id", flat=True)
-            }
-            labels = dict(
-                KitInstance.objects.filter(
-                    organization_id=organization_id, pk__in=list(having)
-                ).values_list("pk", "label")
-            )
-            kits = sorted(
-                ((k.kit_id, labels.get(k.kit_id, "")) for k in active if k.kit_id in having),
-                key=lambda k: (k[1], k[0]),
-            )
+            kits = list(item.kits)
             found.append((order, item, str(resolved.template_version_id), kits))
     return found
 

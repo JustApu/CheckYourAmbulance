@@ -96,17 +96,27 @@ def definition_version_at(organization_id, definition_id, at, recorded_before=No
 
 
 def placed_contents(organization_id, resolved, item_id, at, recorded_before=None):
-    """The item as content of each kit the resolved checklist places (KDEF-4, KDEF-7).
+    """The item as content of each kit of each definition the checklist places (KDEF-4, KDEF-7).
 
-    One ResolvedItem per placement whose definition, in the version in force at `at`, lists the
-    item. Its requirement's definition_id is the kit_definition_item id, its source is
-    KIT_DEFINITION, its kit_id the placement id (so the item counts as inside a kit), and its
-    kits the vehicle's own kits of that definition in the placed slot.
+    For each placement whose definition, in the version in force at `at`, lists the item: one
+    ResolvedItem per instance of that definition on the vehicle (resolved.placements kits, from
+    the assignment history), located in that instance's own compartment and with kits holding
+    only that instance; or one item with no compartment and no kits when none is present (a
+    check then reports that the kit is not on the vehicle). Its requirement's definition_id is
+    the kit_definition_item id, its source KIT_DEFINITION, and its kit_id the placement id (so
+    the item counts as inside a kit).
     """
     # Imported late: overlay is imported by the checklists app, which the kits app depends on.
+    from cya.checklists.models import Compartment
     from cya.checklists.overlay import Requirement, ResolvedItem
     from cya.kits.models import KitDefinitionItem
 
+    rows = {
+        str(row.pk): row
+        for row in Compartment.objects.filter(
+            pk__in={c for p in resolved.placements for _k, _l, c in p.kits if c}
+        )
+    }
     found = []
     for placement in resolved.placements:
         version_id = definition_version_at(
@@ -117,32 +127,37 @@ def placed_contents(organization_id, resolved, item_id, at, recorded_before=None
         content = KitDefinitionItem.objects.filter(version_id=version_id, item_id=item_id).first()
         if content is None:
             continue
-        requirement = Requirement(
-            item_id=str(content.item_id),
-            definition_id=str(content.pk),
-            source=KIT_DEFINITION_SOURCE,
-            display_order=content.display_order,
-            kind=content.kind,
-            instructions=content.instructions,
-            expected_quantity=content.expected_quantity,
-            unit=content.unit,
-            allowed_outcomes=tuple(content.allowed_outcomes),
-            compartment_id=placement.compartment_id,
-            system_id=None,
-            kit_id=placement.placement_id,
-        )
-        found.append(
-            ResolvedItem(
-                requirement=requirement,
-                compartment_id=placement.compartment_id,
-                compartment_label=placement.compartment_label,
+        located = [
+            (rows.get(compartment), ((kit_id, label),))
+            for kit_id, label, compartment in placement.kits
+        ] or [(None, ())]
+        for row, kits in located:
+            requirement = Requirement(
+                item_id=str(content.item_id),
+                definition_id=str(content.pk),
+                source=KIT_DEFINITION_SOURCE,
+                display_order=content.display_order,
+                kind=content.kind,
+                instructions=content.instructions,
+                expected_quantity=content.expected_quantity,
+                unit=content.unit,
+                allowed_outcomes=tuple(content.allowed_outcomes),
+                compartment_id=str(row.pk) if row else None,
                 system_id=None,
-                system_label=None,
-                effective_quantity=content.expected_quantity,
-                deviation_id=None,
-                kits=placement.kits,
+                kit_id=placement.placement_id,
             )
-        )
+            found.append(
+                ResolvedItem(
+                    requirement=requirement,
+                    compartment_id=str(row.pk) if row else None,
+                    compartment_label=row.label if row else None,
+                    system_id=None,
+                    system_label=None,
+                    effective_quantity=content.expected_quantity,
+                    deviation_id=None,
+                    kits=kits,
+                )
+            )
     return found
 
 
@@ -161,7 +176,7 @@ def placed_content_item_ids(placements):
 
 
 def placed_items(organization_id, resolved, at, recorded_before=None):
-    """Every content entry of every kit the resolved checklist places, as ResolvedItems."""
+    """Every content entry of every placed kit present on the vehicle, one ResolvedItem per kit."""
     from cya.kits.models import KitDefinitionItem
 
     items = []
@@ -181,7 +196,10 @@ def placed_items(organization_id, resolved, at, recorded_before=None):
             )
     unique = {}
     for item in items:
-        unique[(item.requirement.definition_id, item.requirement.kit_id)] = item
+        if item.kits:  # a placement with no instance present has nothing to inspect
+            unique[(item.requirement.definition_id, item.requirement.kit_id, item.kits[0][0])] = (
+                item
+            )
     return list(unique.values())
 
 
