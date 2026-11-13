@@ -268,6 +268,9 @@ class KitInstanceDefinitionTests(DefinitionCase):
     def test_a_new_kit_names_its_definition_for_life(self):
         definition_id, _ = self.published_definition()
         first, second = self.add(definition_id), self.add(definition_id)
+        self.assertEqual(
+            first.body["definition_id"], definition_id, "the receipt records the intent"
+        )
         rows = KitInstanceDefinition.objects.filter(definition_id=definition_id)
         self.assertEqual(
             sorted(str(r.kit_id) for r in rows),
@@ -275,6 +278,7 @@ class KitInstanceDefinitionTests(DefinitionCase):
         )
         self.assertEqual(rows.first().actor_user_id, self.supervisor.pk)
         legacy = self.add_kit("Legacy kit")  # no definition: instances made before KDEF (KDEF-8)
+        self.assertNotIn("definition_id", legacy.body)
         self.assertFalse(
             KitInstanceDefinition.objects.filter(kit_id=legacy.body["kit_id"]).exists()
         )
@@ -379,8 +383,10 @@ class GuardTests(DefinitionCase):
         # Review of PR #143: another (valid) KIT_ADD receipt cannot give an existing kit a
         # definition later; only the command that created the kit can (KDEF-3).
         self.refused(lambda: instance_definition(self.receipt("KIT_ADD")))
+        # Review of PR #143: even the kit's own creation receipt cannot retrofit a definition when
+        # none was requested at creation (KDEF-3, KDEF-8).
         creation = KitAssignmentEvent.objects.get(kit_id=kit_id, sequence=1).command
-        instance_definition(creation)  # the kit's own creating command is accepted
+        self.refused(lambda: instance_definition(creation))
         other_kit = self.add_kit("Second kit").body["kit_id"]
         other_creation = KitAssignmentEvent.objects.get(kit_id=other_kit, sequence=1).command
         KitDefinition.objects.filter(pk=definition_id).update(active=False)

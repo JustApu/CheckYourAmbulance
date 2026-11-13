@@ -229,6 +229,10 @@ def add_kit_instance(*, label, vehicle_id, compartment_id, definition_id=None, *
             "sequence": 1,
             "vehicle_ids": [vehicle_id],
         }
+        if definition is not None:
+            # The receipt records the definition as creation intent; the database accepts a
+            # kit_instance_definition row only when it matches (KDEF-3).
+            body["definition_id"] = str(definition.pk)
         return Plan(
             response_body=body,
             apply=apply,

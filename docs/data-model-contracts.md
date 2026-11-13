@@ -70,7 +70,7 @@ Every mutable change has an audit entry in the same transaction.
 | `kit_definition_version` | V | definition_id ref, revision, created_at; unique definition/revision; published iff a `kit_definition_publication` names it, then frozen |
 | `kit_definition_item` | V | version_id ref, item_id ref, display_order, instructions, kind (not `VEHICLE_READING`), expected_quantity (QUANTITY only), unit (MEASUREMENT only), allowed_outcomes, expiration_tracked; unique version/item; frozen with its version |
 | `kit_definition_publication` | A | version_id ref (unique), effective_at ≥ recorded_at, actor, command_id ref (`KIT_DEFINITION_PUBLISH`); refused for an empty version; one definition's publications are strictly ordered by effective_at |
-| `kit_instance_definition` | A | kit_id ref (unique), definition_id ref (active at insert), actor, command_id ref (the `KIT_ADD` receipt of the kit's own first `kit_assignment_event`); the definition a kit instance has, fixed at creation (KDEF-3); none for instances made before kit definitions (KDEF-8) |
+| `kit_instance_definition` | A | kit_id ref (unique), definition_id ref (active at insert), actor, command_id ref (the `KIT_ADD` receipt of the kit's own first `kit_assignment_event`, whose response records this definition_id as requested); the definition a kit instance has, fixed at creation (KDEF-3); none for instances made before kit definitions (KDEF-8) |
 | `vehicle_status_event` | A | vehicle_id ref, prior_event_id? ref, status, explanation, restrictions?; sequence unique per vehicle |
 | `status_request` | A | vehicle_id ref, requested_status, reason, request_id? ref, action (`REQUEST`, `APPROVE`, `DENY`), decision_explanation? |
 
