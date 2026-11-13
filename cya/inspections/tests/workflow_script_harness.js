@@ -239,7 +239,7 @@ function generic(kind) {
     let pass = findAction(item(), "pass");
     assert.equal(pass.textContent, "Pass"); assert.equal(pass.disabled, false, "Pass stays available as a distinct next action");
     assert.equal(fail.disabled, false, "a marked result stays an action");
-    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "mine", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T00:00:00Z"}]);
+    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", obligation_completed_at: "2026-06-01T00:00:00Z", latest_check_id: "mine", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T00:00:00Z"}]);
     run.context.testUI.render();
     const pill = findClass(item(), "window-status");
     assert(pill, "the current window state keeps its own compact indicator"); assert.equal(pill.textContent, "Failed");
@@ -255,7 +255,7 @@ function generic(kind) {
   {
     // Review of PR #93: after an earlier Pass satisfied the window, the newest check (Fail) is the one marked.
     const run = checklist(), item = () => run.elements.items.children.find(child => child.dataset.itemKey);
-    const passed = {...row, obligation_state: "SATISFIED", obligation_outcome: "PASSED", due_at: "2026-06-01T06:00:00Z"};
+    const passed = {...row, obligation_state: "SATISFIED", obligation_outcome: "PASSED", obligation_completed_at: "2026-06-01T00:00:00Z", due_at: "2026-06-01T06:00:00Z"};
     run.context.testUI.setRows([passed]); run.context.testUI.render();
     assert.deepEqual(marked(item()), ["pass"], "a window satisfied by Pass marks Pass");
     findAction(item(), "failed").fire("click");
@@ -267,16 +267,29 @@ function generic(kind) {
     run.context.testUI.setRows([{...passed, latest_check_id: "mine", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T05:40:00Z"}]); run.context.testUI.render();
     assert.deepEqual(marked(item()), ["failed"], "after refresh (still satisfied by the earlier Pass), the newest Fail is marked");
     const fresh = checklist(), freshItem = () => fresh.elements.items.children[0];
-    fresh.context.testUI.setRows([{...passed, latest_check_id: "theirs", latest_check_outcome: "FAILED"}]); fresh.context.testUI.render();
+    fresh.context.testUI.setRows([{...passed, latest_check_id: "theirs", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T05:00:00Z"}]); fresh.context.testUI.render();
     assert.deepEqual(marked(freshItem()), ["failed"], "another viewer of the same server state sees the same mark");
-    fresh.context.testUI.setRows([{...passed, latest_check_id: "later", latest_check_outcome: "PASSED"}]); fresh.context.testUI.render();
+    fresh.context.testUI.setRows([{...passed, latest_check_id: "later", latest_check_outcome: "PASSED", latest_check_at: "2026-06-01T05:10:00Z"}]); fresh.context.testUI.render();
     assert.deepEqual(marked(freshItem()), ["pass"], "a newer Pass is marked");
     for (const [state, outcome] of [["SATISFIED", "SUPERVISOR_COMPLETED"], ["SUSPENDED", "FAILED"], ["EXEMPT", "PASSED"], ["WAIVED", "PASSED"]]) {
       fresh.context.testUI.setRows([{...passed, obligation_state: state, obligation_outcome: outcome, latest_check_outcome: outcome}]); fresh.context.testUI.render();
       assert.deepEqual(marked(freshItem()), [], `${state}/${outcome} marks no button`);
     }
-    fresh.context.testUI.setRows([{...passed, latest_check_id: "x", latest_check_outcome: "UNABLE_TO_INSPECT"}]); fresh.context.testUI.render();
+    fresh.context.testUI.setRows([{...passed, latest_check_id: "x", latest_check_outcome: "UNABLE_TO_INSPECT", latest_check_at: "2026-06-01T05:20:00Z"}]); fresh.context.testUI.render();
     assert.deepEqual(marked(freshItem()), ["unable_to_inspect"], "a recorded Unable to inspect is marked");
+    // Review of PR #141: the satisfying outcome and the newest check are separate fields.
+    fresh.context.testUI.setRows([{...passed, obligation_outcome: "SUPERVISOR_COMPLETED", obligation_completed_at: "2026-06-01T05:30:00Z",
+      latest_check_id: "unable", latest_check_outcome: "UNABLE_TO_INSPECT", latest_check_at: "2026-06-01T05:00:00Z"}]); fresh.context.testUI.render();
+    assert.deepEqual(marked(freshItem()), [], "a supervisor completion after an Unable check marks nothing");
+    fresh.context.testUI.setRows([{...passed, obligation_outcome: "PASSED", obligation_completed_at: "2026-06-01T05:00:00Z",
+      latest_check_id: "older", latest_check_outcome: "FAILED", latest_check_at: "2026-05-31T05:00:00Z"}]); fresh.context.testUI.render();
+    assert.deepEqual(marked(freshItem()), ["pass"], "a newest check older than the satisfaction (an earlier window) is not shown; the satisfying Pass is");
+    fresh.context.testUI.setRows([{...passed, obligation_outcome: "FAILED", obligation_completed_at: "2026-06-01T05:00:00Z",
+      latest_check_id: "older", latest_check_outcome: "PASSED", latest_check_at: null}]); fresh.context.testUI.render();
+    assert.deepEqual(marked(freshItem()), ["failed"], "without the newest check's time, the satisfying outcome is shown");
+    fresh.context.testUI.setRows([{...passed, obligation_outcome: "NOT_APPLICABLE", obligation_completed_at: "2026-06-01T05:00:00Z",
+      latest_check_id: "na", latest_check_outcome: "NOT_APPLICABLE", latest_check_at: "2026-06-01T05:00:00Z"}]); fresh.context.testUI.render();
+    assert.deepEqual(marked(freshItem()), [], "Not applicable has no outcome button, so nothing is marked");
   }
   {
     // The server's outcome is shown, not the tap's guess: a count that does not match is a saved Fail.
@@ -298,7 +311,7 @@ function generic(kind) {
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Pass."));
     assert.deepEqual(marked(item()), ["pass"], "the acknowledged Pass is marked on Pass");
     assert.equal(findAction(item(), "pass").textContent, "✓ Pass");
-    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_id: "theirs", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T00:01:00Z"}]);
+    run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", obligation_completed_at: "2026-06-01T00:01:00Z", latest_check_id: "theirs", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T00:01:00Z"}]);
     run.context.testUI.render();
     assert.deepEqual(marked(item()), ["failed"], "the server's newer recorded Fail outranks this page's earlier saved Pass");
   }
@@ -330,7 +343,7 @@ function generic(kind) {
     assert.deepEqual(marked(item()), [], "a Fail from a window that is due again marks no button");
 
     const passedWithOpenDeficiency = {...dueFail, obligation_state: "SATISFIED", obligation_outcome: "PASSED",
-      latest_check_id: "passed-check", latest_check_outcome: "PASSED"};
+      obligation_completed_at: "2026-06-01T00:00:00Z", latest_check_id: "passed-check", latest_check_outcome: "PASSED"};
     run.context.testUI.setRows([passedWithOpenDeficiency]); run.context.testUI.render();
     assert.equal(findClass(item(), "window-status").textContent, "Passed");
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Pass"));
@@ -344,7 +357,7 @@ function generic(kind) {
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Pass"));
     assert.deepEqual(marked(item()), [], "a prior-window Pass does not mark the new window");
 
-    const unable = {...newWindow, obligation_state: "SATISFIED", obligation_outcome: "FAILED", latest_check_outcome: "UNABLE_TO_INSPECT"};
+    const unable = {...newWindow, obligation_state: "SATISFIED", obligation_outcome: "FAILED", obligation_completed_at: "2026-05-31T23:00:00Z", latest_check_outcome: "UNABLE_TO_INSPECT"};
     run.context.testUI.setRows([unable]); run.context.testUI.render();
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Unable to inspect"));
     assert.deepEqual(marked(item()), ["unable_to_inspect"], "the newest check, Unable to inspect, is the one marked");

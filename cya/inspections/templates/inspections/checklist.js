@@ -338,9 +338,10 @@
   var outcomeWords = {PASSED: "Pass", FAILED: "Fail", UNABLE_TO_INSPECT: "Unable to inspect", NOT_APPLICABLE: "Not applicable"};
   function savedOutcome(entry) { return entry && entry.status === "saved" ? entry.savedOutcome || "PASSED" : null; }
   // The current window's recorded result, which its outcome button shows (issue #140). This
-  // person's acknowledged tap counts until the reloaded row carries that check or a newer one;
-  // otherwise it is the newest check in a satisfied window (after Pass then Fail, Fail: issue 87).
-  // A previous window's check, or one with no outcome button, marks nothing.
+  // person's acknowledged tap counts until the reloaded row carries that check or a newer one.
+  // Otherwise, in a satisfied window, the newest check counts only if it is no older than the
+  // satisfaction (after Pass then Fail, Fail: issue 87); an older one may be from an earlier window,
+  // so the satisfying outcome is shown. A supervisor completion is not a check result: no mark.
   function recordedOutcome(row, entry) {
     var mine = savedOutcome(entry);
     if (mine && entry.checkId && row.latest_check_id !== entry.checkId) {
@@ -348,8 +349,11 @@
       var mineAt = entry.recordedAt ? Date.parse(entry.recordedAt) : NaN;
       if (!row.latest_check_id || rowAt <= mineAt) { return mine; }
     }
-    if (row.obligation_state !== "SATISFIED") { return null; }
-    return row.latest_check_outcome || row.obligation_outcome || null;
+    if (row.obligation_state !== "SATISFIED" || row.obligation_outcome === "SUPERVISOR_COMPLETED") { return null; }
+    var latestAt = row.latest_check_at ? Date.parse(row.latest_check_at) : NaN;
+    var completedAt = row.obligation_completed_at ? Date.parse(row.obligation_completed_at) : NaN;
+    if (row.latest_check_outcome && latestAt >= completedAt) { return row.latest_check_outcome; }
+    return row.obligation_outcome || null;
   }
   function markRecorded(button, outcome, recorded) {
     if (outcome !== recorded) { return; }
