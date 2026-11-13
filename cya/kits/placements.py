@@ -71,9 +71,20 @@ def placements_of(checklist_version_id):
 
 
 def check_publishable(placements):
-    """Every placed definition must be active and have a published version (KDEF-2, KDEF-4)."""
+    """Every placed definition must be active and have a published version (KDEF-2, KDEF-4).
+
+    Locks the placed definitions in id order until the publishing command commits, so a
+    concurrent set_kit_definition_active (which locks the same row) cannot deactivate one
+    between this check and the publication.
+    """
+    locked = {
+        str(d.pk): d
+        for d in KitDefinition.objects.select_for_update()
+        .filter(pk__in={p.definition_id for p in placements})
+        .order_by("pk")
+    }
     for placement in placements:
-        definition = KitDefinition.objects.get(pk=placement.definition_id)
+        definition = locked[str(placement.definition_id)]
         if not definition.active:
             raise ChecklistValidationError(f"placed kit definition {definition.key!r} is inactive")
         if not KitDefinitionPublication.objects.filter(version__definition=definition).exists():

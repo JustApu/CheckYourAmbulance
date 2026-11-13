@@ -337,9 +337,15 @@ def _active_deviations(organization_id, vehicle_id, item_ids, as_of):
     }
 
 
-def _resolved_placements(vehicle_id, template_version_id, as_of):
-    """The template version's kit placements as this vehicle resolves them (KDEF-4)."""
+def _resolved_placements(organization_id, vehicle_id, template_version_id, as_of, recorded_before):
+    """The template version's kit placements as this vehicle resolves them (KDEF-4).
+
+    The kits are those in the placed slot at as_of according to the kit assignment history
+    (with the same recorded_before cutoff), never the current kit rows, so a later move or
+    deactivation does not change a past resolution.
+    """
     # Imported late: the kits app depends on checklists.
+    from cya.kits.history import active_kits
     from cya.kits.models import ChecklistKitPlacement, KitDefinition, KitInstanceDefinition
 
     placements = list(
@@ -356,12 +362,26 @@ def _resolved_placements(vehicle_id, template_version_id, as_of):
         str(d.pk): d
         for d in KitDefinition.objects.filter(pk__in={p.definition_id for p in placements})
     }
-    own = KitInstance.objects.filter(
-        vehicle_id=vehicle_id, active=True, compartment__isnull=False
-    ).select_related("compartment")
-    kit_definitions = dict(
-        KitInstanceDefinition.objects.filter(kit__in=own).values_list("kit_id", "definition_id")
-    )
+    in_slot = {}  # stable slot id -> kit ids in it at as_of
+    for compartment in compartments.values():
+        if compartment is not None and compartment.stable_slot_id not in in_slot:
+            in_slot[compartment.stable_slot_id] = [
+                kit.kit_id
+                for kit in active_kits(
+                    organization_id, vehicle_id, compartment.stable_slot_id, as_of, recorded_before
+                )
+            ]
+    present = {kit_id for kits in in_slot.values() for kit_id in kits}
+    kit_definitions = {
+        str(kit): str(definition)
+        for kit, definition in KitInstanceDefinition.objects.filter(
+            kit_id__in=present
+        ).values_list("kit_id", "definition_id")
+    }
+    labels = {
+        str(pk): label
+        for pk, label in KitInstance.objects.filter(pk__in=present).values_list("pk", "label")
+    }
     resolved = []
     for placement in placements:
         compartment = compartments.get(str(placement.compartment_id))
@@ -371,10 +391,9 @@ def _resolved_placements(vehicle_id, template_version_id, as_of):
             )
         definition = definitions[str(placement.definition_id)]
         kits = sorted(
-            (kit.label, str(kit.pk))
-            for kit in own
-            if kit.compartment.stable_slot_id == compartment.stable_slot_id
-            and str(kit_definitions.get(kit.pk, "")) == str(definition.pk)
+            (labels[kit_id], kit_id)
+            for kit_id in in_slot[compartment.stable_slot_id]
+            if kit_definitions.get(kit_id) == str(definition.pk)
         )
         resolved.append(
             ResolvedPlacement(
@@ -452,7 +471,9 @@ def resolve_checklist(*, organization_id, vehicle_id, template_id, as_of, record
         template_version_id=version.pk,
         override_version_id=override.pk if override else None,
         items=tuple(items),
-        placements=_resolved_placements(vehicle_id, version.pk, as_of),
+        placements=_resolved_placements(
+            organization_id, vehicle_id, version.pk, as_of, recorded_before
+        ),
     )
 
 

@@ -167,3 +167,104 @@ class ResolutionTests(PlacementCase):
     def test_a_version_without_placements_resolves_none(self):
         self.published_version()
         self.assertEqual(self.resolve().placements, ())
+
+
+class AsOfResolutionTests(PlacementCase):
+    """Review of PR #145: a past resolution reads the kit assignment history, not current rows."""
+
+    add_kit = ResolutionTests.add_kit
+
+    def test_a_later_move_or_deactivation_does_not_change_a_past_resolution(self):
+        from django.utils import timezone
+
+        from cya.checklists.overlay import resolve_checklist
+        from cya.kits.commands import record_kit_assignment
+
+        jump = self.definition()
+        self.publish(self.draft_with([self.placement(jump)]))
+        moved = self.add_kit("Jump kit 1", jump)
+        removed = self.add_kit("Jump kit 2", jump)
+        before = timezone.now()
+        elsewhere = self.make_slot(Compartment, "drawer")
+        record_kit_assignment(
+            kit_id=moved,
+            active=True,
+            vehicle_id=str(self.vehicles[0].pk),
+            compartment_id=str(elsewhere.pk),
+            **self.context(),
+        )
+        record_kit_assignment(kit_id=removed, active=False, **self.context())
+
+        def kits(**when):
+            resolved = resolve_checklist(
+                organization_id=str(self.org.pk),
+                vehicle_id=str(self.vehicles[0].pk),
+                template_id=str(self.template.pk),
+                **when,
+            )
+            return [k for k, _ in resolved.placements[0].kits]
+
+        self.assertEqual(kits(as_of=before), sorted([moved, removed]))
+        self.assertEqual(kits(as_of=timezone.now()), [])
+        self.assertEqual(
+            kits(as_of=timezone.now(), recorded_before=before),
+            sorted([moved, removed]),
+            "events recorded after the cutoff do not count",
+        )
+
+
+class ConcurrentDeactivationTests(PlacementCase):
+    """Review of PR #145: publishing holds the placed definitions until it commits."""
+
+    def test_a_deactivation_waits_for_a_publication_that_checked_the_definition(self):
+        import threading
+        from unittest import mock
+
+        from django.db import close_old_connections
+
+        from cya.kits import placements as placements_module
+
+        jump = self.definition()
+        version_id = self.draft_with([self.placement(jump)])
+        checked, release = threading.Event(), threading.Event()
+        order, errors = [], []
+        original = placements_module.check_publishable
+
+        def paused_check(rows):
+            original(rows)
+            checked.set()
+            release.wait(timeout=30)  # deactivation runs meanwhile, if it is not blocked
+
+        def publish():
+            try:
+                with mock.patch.object(commands, "check_publishable", paused_check):
+                    self.publish(version_id)
+                order.append("published")
+            except Exception as error:  # noqa: BLE001 - asserted below
+                errors.append(error)
+            finally:
+                close_old_connections()
+
+        def deactivate():
+            try:
+                checked.wait(timeout=30)
+                # Another actor, so the two commands share no identity lock.
+                set_kit_definition_active(
+                    definition_id=jump, active=False, **self.context(self.supervisor)
+                )
+                order.append("deactivated")
+            except Exception as error:  # noqa: BLE001 - asserted below
+                errors.append(error)
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=publish), threading.Thread(target=deactivate)]
+        for thread in threads:
+            thread.start()
+        self.assertTrue(checked.wait(timeout=30))
+        threads[1].join(timeout=3)  # a deactivation that is not blocked finishes here
+        release.set()
+        for thread in threads:
+            thread.join(timeout=60)
+        self.assertEqual(errors, [])
+        self.assertEqual(order, ["published", "deactivated"])
