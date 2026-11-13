@@ -12,6 +12,7 @@ from cya.deficiencies import api as deficiency_api
 from cya.inspections import api as inspection_api
 from cya.inspections import views as inspection_views
 from cya.inspections import workflow_views
+from cya.kits import views as kit_views
 from cya.notifications import api as notifications_api
 from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
@@ -82,6 +83,13 @@ urlpatterns = [
     ),
     path("administration/", shell.administration, name="administration"),
     path("administration/roles/", authorization.roles, name="administration-roles"),
+    path("administration/kits/", kit_views.library, name="kit-library"),
+    path(
+        "administration/kits/template.<str:fmt>",
+        kit_views.template,
+        name="kit-library-template",
+    ),
+    path("administration/kits/export.<str:fmt>", kit_views.export, name="kit-library-export"),
     path("api/v1/checks", check_api.checks, name="api-checks"),
     path("api/v1/inspection-sessions", inspection_api.sessions, name="api-inspection-sessions"),
     path(

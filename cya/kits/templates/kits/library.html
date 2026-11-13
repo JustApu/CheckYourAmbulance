@@ -1,0 +1,72 @@
+{% extends "shell/base.html" %}
+{% load station_time %}
+{% block content %}
+{% if imported %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">Imported as drafts: {{ counts.created }} created, {{ counts.changed }} changed, {{ counts.unchanged }} unchanged; {{ counts.new_items }} new item{{ counts.new_items|pluralize }}. Publish a draft to put it in force.</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was imported.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<h2>Files</h2>
+<p>A kit-library file lists kit definitions and their contents. Download a template or the current library, edit it, and import it. A file changes only the kits it names; nothing it leaves out is removed. Imports create drafts; publishing stays a separate step.</p>
+<ul>
+{% for fmt in formats %}
+  <li><a href="{% url 'kit-library-template' fmt %}">Blank template ({{ fmt|upper }})</a> · <a href="{% url 'kit-library-export' fmt %}">Current library ({{ fmt|upper }})</a></li>
+{% endfor %}
+</ul>
+
+{% if can_import %}
+{% if plan and not plan.errors %}
+<h2>Review import</h2>
+<p id="import-summary">{{ plan.summary.created }} kit{{ plan.summary.created|pluralize }} to create, {{ plan.summary.changed }} to change (as a new draft), {{ plan.summary.unchanged }} unchanged; {{ plan.summary.new_items }} new item{{ plan.summary.new_items|pluralize }}.</p>
+<div class="table-scroll" role="region" aria-label="Import preview" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Kit key</th><th scope="col">Label</th><th scope="col">Result</th><th scope="col">Contents</th></tr></thead>
+  <tbody>
+  {% for kit in plan.kits %}
+    <tr><td>{{ kit.key }}</td><td>{{ kit.label }}{% if kit.label_changed %} (label changes){% endif %}</td><td>{% if kit.action == "CREATE" %}Create{% elif kit.action == "CHANGE" %}New draft revision{% else %}Unchanged{% endif %}</td><td>{{ kit.contents|length }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if plan.new_items %}<p>New items: {{ plan.new_items|join:", " }}</p>{% endif %}
+<form method="post" action="{% url 'kit-library' %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="confirm">
+  <input type="hidden" name="format" value="{{ carried.format }}">
+  <input type="hidden" name="base_token" value="{{ carried.base_token }}">
+  <input type="hidden" name="operation_id" value="{{ carried.operation_id }}">
+  <input type="hidden" name="data" value="{{ carried.data }}">
+  <p><button type="submit" class="button">Import as drafts</button> <a class="button" href="{% url 'kit-library' %}">Cancel</a></p>
+</form>
+{% else %}
+<h2>Import a file</h2>
+<form method="post" action="{% url 'kit-library' %}" enctype="multipart/form-data">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="preview">
+  <p><label for="library-file">Kit-library file</label><br><input id="library-file" type="file" name="library" accept=".json,.csv,application/json,text/csv" required></p>
+  <fieldset><legend>Format</legend>
+  {% for fmt in formats %}<label><input type="radio" name="format" value="{{ fmt }}"{% if forloop.first %} checked{% endif %}> {{ fmt|upper }}</label> {% endfor %}
+  </fieldset>
+  <p><button type="submit" class="button">Preview import</button></p>
+</form>
+{% endif %}
+{% endif %}
+
+<h2>Kit definitions</h2>
+{% if definitions %}
+<div class="table-scroll" role="region" aria-label="Kit definitions" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Key</th><th scope="col">Label</th><th scope="col">Latest revision</th><th scope="col">In force (agency local time)</th><th scope="col">Status</th></tr></thead>
+  <tbody>
+  {% for d in definitions %}
+    <tr><td>{{ d.key }}</td><td>{{ d.label }}</td><td>{{ d.latest_revision|default:"none" }}</td><td>{% if d.published_revision %}Revision {{ d.published_revision }} from {{ d.published_effective_at|station_time }}{% else %}Not published{% endif %}</td><td>{% if d.active %}Active{% else %}Inactive{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if definitions|length == list_limit %}<p>Showing the first {{ list_limit }} definitions.</p>{% endif %}
+{% else %}
+<p>No kit definitions yet.</p>
+{% endif %}
+</div>
+{% endblock %}

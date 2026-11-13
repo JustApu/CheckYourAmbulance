@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": "SPEC.md §3.3 (version 1.2.0); session permission rows PERM-29 to PERM-31 added by amendment 1.9.0; kit-assignment row PERM-32 added by amendment 1.10.0; PERM-35 is issue 82 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/82) Part A policy; PERM-36 added by amendment 1.17.0 (issue 149 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); PERM-37 proposed by amendment 1.18.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-39 SPEC 1.21.0 (issue 158 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)); PERM-40 SPEC 1.32.0 and 1.33.0 (issue #131 (https://github.com/JustApu/CheckYourAmbulance/issues/131)); PERM-41 SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129))",
+  "source": "SPEC.md §3.3 (version 1.2.0); session permission rows PERM-29 to PERM-31 added by amendment 1.9.0; kit-assignment row PERM-32 added by amendment 1.10.0; PERM-35 is issue 82 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/82) Part A policy; PERM-36 added by amendment 1.17.0 (issue 149 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); PERM-37 proposed by amendment 1.18.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-39 SPEC 1.21.0 (issue 158 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)); PERM-40 SPEC 1.32.0 and 1.33.0 (issue #131 (https://github.com/JustApu/CheckYourAmbulance/issues/131)); PERM-41 SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129)); PERM-42 and PERM-43 SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129))",
   "synthetic": true,
   "tests": [
     {
@@ -2640,6 +2640,78 @@
       "permission_row": "PERM-41",
       "actor_role": "Administrator",
       "action": "manage_kit_definitions",
+      "mode": "allow",
+      "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
+    },
+    {
+      "id": "AUTH-PERM-42-CREW",
+      "criterion": "AC-24",
+      "permission_row": "PERM-42",
+      "actor_role": "Crew",
+      "action": "import_configuration",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-42-SUPERVISOR",
+      "criterion": "AC-24",
+      "permission_row": "PERM-42",
+      "actor_role": "Supervisor",
+      "action": "import_configuration",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-42-SUPPLY_OFFICER",
+      "criterion": "AC-24",
+      "permission_row": "PERM-42",
+      "actor_role": "Supply Officer",
+      "action": "import_configuration",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-42-ADMINISTRATOR",
+      "criterion": "AC-24",
+      "permission_row": "PERM-42",
+      "actor_role": "Administrator",
+      "action": "import_configuration",
+      "mode": "allow",
+      "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
+    },
+    {
+      "id": "AUTH-PERM-43-CREW",
+      "criterion": "AC-24",
+      "permission_row": "PERM-43",
+      "actor_role": "Crew",
+      "action": "export_configuration",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-43-SUPERVISOR",
+      "criterion": "AC-24",
+      "permission_row": "PERM-43",
+      "actor_role": "Supervisor",
+      "action": "export_configuration",
+      "mode": "allow",
+      "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
+    },
+    {
+      "id": "AUTH-PERM-43-SUPPLY_OFFICER",
+      "criterion": "AC-24",
+      "permission_row": "PERM-43",
+      "actor_role": "Supply Officer",
+      "action": "export_configuration",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-43-ADMINISTRATOR",
+      "criterion": "AC-24",
+      "permission_row": "PERM-43",
+      "actor_role": "Administrator",
+      "action": "export_configuration",
       "mode": "allow",
       "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
     }
