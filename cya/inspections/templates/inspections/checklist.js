@@ -342,14 +342,18 @@
   // Otherwise, in a satisfied window, the newest check counts only if it is no older than the
   // satisfaction (after Pass then Fail, Fail: issue 87); an older one may be from an earlier window,
   // so the satisfying outcome is shown. A supervisor completion is not a check result: no mark.
+  var unmarkedStates = {SUSPENDED: true, EXEMPT: true, WAIVED: true};
   function recordedOutcome(row, entry) {
+    // These states have no check result to show, even right after this person's tap.
+    if (unmarkedStates[row.obligation_state] ||
+        (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED")) { return null; }
     var mine = savedOutcome(entry);
     if (mine && entry.checkId && row.latest_check_id !== entry.checkId) {
       var rowAt = row.latest_check_at ? Date.parse(row.latest_check_at) : NaN;
       var mineAt = entry.recordedAt ? Date.parse(entry.recordedAt) : NaN;
       if (!row.latest_check_id || rowAt <= mineAt) { return mine; }
     }
-    if (row.obligation_state !== "SATISFIED" || row.obligation_outcome === "SUPERVISOR_COMPLETED") { return null; }
+    if (row.obligation_state !== "SATISFIED") { return null; }
     var latestAt = row.latest_check_at ? Date.parse(row.latest_check_at) : NaN;
     var completedAt = row.obligation_completed_at ? Date.parse(row.obligation_completed_at) : NaN;
     if (row.latest_check_outcome && latestAt >= completedAt) { return row.latest_check_outcome; }

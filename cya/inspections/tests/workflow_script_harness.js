@@ -311,6 +311,15 @@ function generic(kind) {
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Pass."));
     assert.deepEqual(marked(item()), ["pass"], "the acknowledged Pass is marked on Pass");
     assert.equal(findAction(item(), "pass").textContent, "✓ Pass");
+    // Review of PR #141: a row that has meanwhile become one of these states marks nothing,
+    // even before the reloaded row carries this person's check.
+    for (const [state, outcome] of [["SATISFIED", "SUPERVISOR_COMPLETED"], ["SUSPENDED", null], ["EXEMPT", null], ["WAIVED", null]]) {
+      run.context.testUI.setRows([{...open, obligation_state: state, obligation_outcome: outcome, latest_check_id: "older", latest_check_at: "2026-05-31T23:00:00Z"}]);
+      run.context.testUI.render();
+      assert.deepEqual(marked(item()), [], `${state}/${outcome} marks nothing despite the unreloaded saved tap`);
+    }
+    run.context.testUI.setRows([open]); run.context.testUI.render();
+    assert.deepEqual(marked(item()), ["pass"], "back to a due row, the unreloaded saved tap is marked again");
     run.context.testUI.setRows([{...open, obligation_state: "SATISFIED", obligation_outcome: "FAILED", obligation_completed_at: "2026-06-01T00:01:00Z", latest_check_id: "theirs", latest_check_outcome: "FAILED", latest_check_at: "2026-06-01T00:01:00Z"}]);
     run.context.testUI.render();
     assert.deepEqual(marked(item()), ["failed"], "the server's newer recorded Fail outranks this page's earlier saved Pass");
