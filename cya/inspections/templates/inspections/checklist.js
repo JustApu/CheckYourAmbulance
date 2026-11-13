@@ -170,6 +170,7 @@
         // The server's outcome is authoritative (a count can derive Fail); remember which check it is.
         entry.savedOutcome = answer.body.result.outcome || entry.outcome || "PASSED";
         entry.checkId = answer.body.result.check_id;
+        entry.recordedAt = answer.body.result.server_recorded_at;
         var verification = answer.body.result.verification;
         if (verification) {
           var detail = verification.status === "CLOSED_VERIFIED" ? "Closed — Verified." :
@@ -336,8 +337,35 @@
   // The outcome this person's acknowledged tap recorded, or null when nothing was saved.
   var outcomeWords = {PASSED: "Pass", FAILED: "Fail", UNABLE_TO_INSPECT: "Unable to inspect", NOT_APPLICABLE: "Not applicable"};
   function savedOutcome(entry) { return entry && entry.status === "saved" ? entry.savedOutcome || "PASSED" : null; }
+  // The current window's recorded result, which its outcome button shows (issue #140). This
+  // person's acknowledged tap counts until the reloaded row carries that check or a newer one;
+  // otherwise it is the newest check in a satisfied window (after Pass then Fail, Fail: issue 87).
+  // A previous window's check, or one with no outcome button, marks nothing.
+  function recordedOutcome(row, entry) {
+    var mine = savedOutcome(entry);
+    if (mine && entry.checkId && row.latest_check_id !== entry.checkId) {
+      var rowAt = row.latest_check_at ? Date.parse(row.latest_check_at) : NaN;
+      var mineAt = entry.recordedAt ? Date.parse(entry.recordedAt) : NaN;
+      if (!row.latest_check_id || rowAt <= mineAt) { return mine; }
+    }
+    if (row.obligation_state !== "SATISFIED") { return null; }
+    return row.latest_check_outcome || row.obligation_outcome || null;
+  }
+  function markRecorded(button, outcome, recorded) {
+    if (outcome !== recorded) { return; }
+    button.className += " outcome-recorded";
+    button.dataset.recorded = outcome;
+    var mark = el("span", "outcome-mark", "✓ ");
+    mark.setAttribute("aria-hidden", "true");
+    var text = button.textContent;
+    button.textContent = "";
+    button.appendChild(mark);
+    button.appendChild(document.createTextNode(text));
+    button.setAttribute("aria-label", button.getAttribute("aria-label") + " (recorded result: " + outcomeWords[outcome] + ")");
+  }
   function saveIndicator(entry) {
-    var p = el("p", "save-state save-state-" + entry.status);
+    // A saved result is shown on its button; the line remains for screen readers (issue #140).
+    var p = el("p", "save-state save-state-" + entry.status + (entry.status === "saved" ? " visually-hidden" : ""));
     p.setAttribute("role", "status");
     var icons = {pending: "⌛", saved: "✓", failed: "✕", unconfirmed: "?"};
     var outcome = savedOutcome(entry);
@@ -358,7 +386,9 @@
       return box;
     }
     var label = row.item_label + (row.kit_label ? " (" + row.kit_label + ")" : "");
-    // Outcome buttons are actions, never a display of the saved result or window status.
+    // Outcome buttons stay actions; the one matching the current window's recorded result is also
+    // marked with a check mark and named as recorded, never by colour alone (issue #140).
+    var recorded = recordedOutcome(row, entry);
     var button = el("button", "button",
       row.kind === "QUANTITY" ? "Record count" : "Pass");
     button.type = "button"; button.disabled = !!busy;
@@ -391,7 +421,7 @@
     } else {
       button.addEventListener("click", function () { rememberFocus(row, "pass"); startCheck(row, null); });
     }
-    if (row.allowed_outcomes.indexOf("PASSED") !== -1) { box.appendChild(button); }
+    if (row.allowed_outcomes.indexOf("PASSED") !== -1) { markRecorded(button, "PASSED", recorded); box.appendChild(button); }
     ["FAILED", "UNABLE_TO_INSPECT"].forEach(function (outcome) {
       if (row.allowed_outcomes.indexOf(outcome) === -1 || (config.verification_for_deficiency_id && outcome === "UNABLE_TO_INSPECT")) { return; }
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
@@ -399,6 +429,7 @@
       action.dataset.action = outcome.toLowerCase();
       action.setAttribute("aria-label", "Record " + (outcome === "FAILED" ? "Fail" : "Unable to inspect") + " for " + label);
       action.addEventListener("click", function () { rememberFocus(row, outcome.toLowerCase()); openOutcome(row, outcome); });
+      markRecorded(action, outcome, recorded);
       box.appendChild(action);
     });
     if (entry && entry.retryable && (entry.status === "failed" || entry.status === "unconfirmed")) {

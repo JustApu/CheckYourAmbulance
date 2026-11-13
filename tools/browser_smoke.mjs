@@ -239,6 +239,27 @@ async function testInspectionOutcomeSemantics(viewport) {
       assert.ok(!(await button.getAttribute("class")).split(/\s+/).includes("primary"), `${viewport.name}: outcome action looks selected`);
       assert.match(await button.getAttribute("aria-label"), /^Record (Pass|Fail|Unable to inspect) for /, `${viewport.name}: action name does not distinguish recording from result`);
     }
+    // Issue #140: only the current window's recorded result is marked, with a check mark and a name, not colour alone.
+    const marks = await page.locator("#items .outcome-recorded").evaluateAll((nodes) => nodes.map((node) => node.closest("li").dataset.itemKey + ":" + node.dataset.action));
+    assert.deepEqual(marks, ["item-pass-open|:pass"], `${viewport.name}: wrong recorded-result marks ${JSON.stringify(marks)}`);
+    const recordedPass = passedWithOpenDeficiency.locator(".outcome-recorded");
+    assert.equal((await recordedPass.innerText()).trim(), "✓ Pass", `${viewport.name}: recorded result has no visible check mark`);
+    assert.match(await recordedPass.getAttribute("aria-label"), /\(recorded result: Pass\)$/, `${viewport.name}: recorded result is not named for screen readers`);
+    const markStyle = await recordedPass.evaluate((element) => {
+      const plain = element.parentElement.querySelector("button:not(.outcome-recorded)");
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, plain: getComputedStyle(plain).backgroundColor, border: style.borderTopWidth, enabled: !element.disabled, height: element.getBoundingClientRect().height };
+    });
+    assert.notEqual(markStyle.background, markStyle.plain, `${viewport.name}: recorded result is not visibly filled`);
+    assert.equal(markStyle.border, "3px", `${viewport.name}: recorded result border is not emphasized`);
+    assert.ok(markStyle.enabled && markStyle.height >= 48, `${viewport.name}: recorded result stopped being a 48px action`);
+    await recordedPass.focus();
+    assert.equal(await recordedPass.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: focus is not visible on a recorded result`);
+    await page.emulateMedia({ colorScheme: "dark" });
+    const dark = await recordedPass.evaluate((element) => [getComputedStyle(element).backgroundColor, getComputedStyle(element.parentElement.querySelector("button:not(.outcome-recorded)")).backgroundColor]);
+    assert.notEqual(dark[0], dark[1], `${viewport.name}: recorded result is not visibly filled in dark mode`);
+    assert.notEqual(dark[0], markStyle.background, `${viewport.name}: recorded result does not use the dark-theme colours`);
+    await page.emulateMedia({ colorScheme: "light" });
     const failAction = failed.getByRole("button", { name: "Record Fail for Brake light" });
     await failAction.focus();
     assert.equal(await failAction.evaluate((element) => element === document.activeElement), true, `${viewport.name}: Fail action is not keyboard-focusable`);
@@ -254,7 +275,7 @@ async function testInspectionOutcomeSemantics(viewport) {
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
     assert.equal(await failAction.evaluate((element) => element === document.activeElement), true, `${viewport.name}: cancel did not restore focus to the Fail action`);
-    console.log(`${viewport.name}: recorded outcome, window status, deficiency and neutral keyboard actions passed`);
+    console.log(`${viewport.name}: recorded outcome, window status, deficiency, recorded-result marks and keyboard actions passed`);
   } finally {
     await page.close();
   }
