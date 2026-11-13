@@ -7,6 +7,8 @@ from django.db import DatabaseError, transaction
 
 from cya.checklists import commands
 from cya.checklists.models import Item
+from cya.checks.commands import CheckError, correct_check, record_check
+from cya.checks.models import CheckObligationLink, CheckRecord
 from cya.kits.commands import add_kit_instance
 from cya.kits.definitions import (
     create_kit_definition,
@@ -43,6 +45,7 @@ class PlacedKitCase(KitCase):
             **self.context(),
         ).body["version_id"]
         self.publish(version_id)
+        self.checklist_version = version_id
         self.bind(reconcile=False)
         self.dues = [self.at(hours=6), self.at(days=1, hours=6)]
 
@@ -249,3 +252,61 @@ class NothingPublishedTests(KitCase):
         )
         self.assertEqual(self.generate().failures, [])
         self.assertFalse(Obligation.objects.filter(item=self.kit_item).exists())
+
+
+class PlacedKitCheckTests(PlacedKitCase):
+    """Recording and correcting checks of placed kit content (issue #129 part 4c)."""
+
+    def check(self, kit_id, item=None, **fields):
+        return record_check(
+            vehicle_id=str(self.vehicle.pk),
+            item_id=str((item or self.kit_item).pk),
+            checklist_version_id=self.checklist_version,
+            kit_id=kit_id,
+            purpose="ROUTINE",
+            **{"outcome": None, "quantity": 4, **fields},
+            **self.context(self.crew),
+        )
+
+    def test_a_count_on_placed_content_is_recorded_against_the_content_entry(self):
+        kit = self.add_placed_kit("Jump kit 1", self.definition)
+        self.assertEqual(self.generate().failures, [])
+        self.clock.set(self.at(hours=5, minutes=30))
+        result = self.check(kit)
+        check = CheckRecord.objects.get(pk=result.body["check_id"])
+        content = KitDefinitionItem.objects.get(version_id=self.kit_version, item=self.kit_item)
+        self.assertEqual(
+            (check.outcome, check.item_def_id, check.kit_definition_item_id),
+            ("PASSED", None, content.pk),
+        )
+        self.assertEqual(str(check.kit_id), kit)
+        link = CheckObligationLink.objects.get(check_record=check)
+        self.assertEqual(link.obligation.requirement_version.kit_definition_item_id, content.pk)
+
+    def test_a_correction_keeps_the_content_entry(self):
+        kit = self.add_placed_kit("Jump kit 1", self.definition)
+        self.assertEqual(self.generate().failures, [])
+        self.clock.set(self.at(hours=5, minutes=30))
+        first = self.check(kit, item=self.gauze, outcome="PASSED", quantity=None)
+        corrected = correct_check(
+            check_id=first.body["check_id"],
+            expected_tip_check_id=first.body["check_id"],
+            outcome="PASSED",
+            **self.context(self.crew),
+        )
+        row = CheckRecord.objects.get(pk=corrected.body["check_id"])
+        original = CheckRecord.objects.get(pk=first.body["check_id"])
+        self.assertEqual(
+            (row.item_def_id, row.kit_definition_item_id), (None, original.kit_definition_item_id)
+        )
+
+    def test_a_kit_without_the_placed_definition_cannot_take_its_content(self):
+        self.add_placed_kit("Jump kit 1", self.definition)
+        legacy = self.add_placed_kit("Legacy kit")
+        self.clock.set(self.at(hours=5, minutes=30))
+        with self.assertRaises(CheckError) as raised:
+            self.check(legacy)
+        self.assertEqual(raised.exception.code, "KIT_NOT_ON_VEHICLE")
+        with self.assertRaises(CheckError) as missing:
+            self.check(None)
+        self.assertEqual(missing.exception.code, "KIT_REQUIRED")
