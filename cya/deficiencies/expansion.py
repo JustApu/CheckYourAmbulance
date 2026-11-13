@@ -45,6 +45,7 @@ from cya.deficiencies.transitions import (
     TransitionRejected,
     validate_transition,
 )
+from cya.kits.placements import content_columns
 from cya.operations.models import MAX_TEXT
 
 EXPAND_ACTION = "expand_verification"
@@ -182,7 +183,7 @@ def _expansion_rows(resolved, *, organization_id, deficiency_id, event, receipt,
             deficiency_id=deficiency_id,
             event=event,
             item_id=item_id,
-            definition_id=definition_id,
+            **content_columns(definition_id),
             kit_instance_id=kit_id,
             instance_key=kit_id or NO_KIT_KEY,
             **service.stamp(receipt, current),
@@ -199,7 +200,13 @@ def _append_revision(
     """The newest revision's rows with their own instants, then the added rows (now)."""
     correction_event_id = carried[0].correction_event_id
     specs = [
-        (str(r.item_id), str(r.definition_id), r.kit_instance_id, r.required_after) for r in carried
+        (
+            str(r.item_id),
+            str(r.definition_id or r.kit_definition_item_id),
+            r.kit_instance_id,
+            r.required_after,
+        )
+        for r in carried
     ] + [
         (item_id, definition_id, kit_id, receipt.recorded_at)
         for item_id, definition_id, kit_id in resolved
@@ -211,7 +218,7 @@ def _append_revision(
             deficiency_id=deficiency_id,
             correction_event_id=correction_event_id,
             item_id=item_id,
-            definition_id=definition_id,
+            **content_columns(definition_id),
             kit_instance_id=kit_id,
             instance_key=str(kit_id) if kit_id else NO_KIT_KEY,
             required_after=required_after,

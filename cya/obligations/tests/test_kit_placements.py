@@ -9,6 +9,14 @@ from cya.checklists import commands
 from cya.checklists.models import Item
 from cya.checks.commands import CheckError, correct_check, record_check
 from cya.checks.models import CheckObligationLink, CheckRecord
+from cya.deficiencies.commands import record_correction, start_work
+from cya.deficiencies.models import (
+    DeficiencyAffectedItem,
+    DeficiencyCategory,
+    DeficiencyEvent,
+    VerificationScopeRow,
+)
+from cya.deficiencies.severity import ensure_default_severities
 from cya.kits.commands import add_kit_instance
 from cya.kits.definitions import (
     create_kit_definition,
@@ -310,3 +318,62 @@ class PlacedKitCheckTests(PlacedKitCase):
         with self.assertRaises(CheckError) as missing:
             self.check(None)
         self.assertEqual(missing.exception.code, "KIT_REQUIRED")
+
+    def test_a_failed_count_opens_a_deficiency_whose_scope_is_the_kit_content(self):
+        kit = self.add_placed_kit("Jump kit 1", self.definition)
+        self.assertEqual(self.generate().failures, [])
+        ensure_default_severities(self.org.pk, self.at(days=-1))
+        category = DeficiencyCategory.objects.create(
+            organization=self.org,
+            stable_category_id=str(uuid4()),
+            revision=1,
+            label="Synthetic stock",
+            supply_related=True,
+            effective_at=self.at(days=-1),
+        )
+        self.clock.set(self.at(hours=5, minutes=30))
+        failed = self.check(
+            kit,
+            quantity=3,
+            deficiency={
+                "create": {
+                    "category_id": str(category.stable_category_id),
+                    "severity": "HIGH",
+                    "summary": "Synthetic short count",
+                    "description": "Synthetic: one missing.",
+                }
+            },
+        )
+        check = CheckRecord.objects.get(pk=failed.body["check_id"])
+        self.assertEqual(check.outcome, "FAILED")
+        deficiency_id = failed.body["deficiency_ids"][0]
+        affected = DeficiencyAffectedItem.objects.get(deficiency_id=deficiency_id)
+        self.assertEqual(
+            (affected.definition_id, affected.kit_definition_item_id),
+            (None, check.kit_definition_item_id),
+        )
+        last = (
+            DeficiencyEvent.objects.filter(deficiency_id=deficiency_id)
+            .order_by("-sequence")
+            .first()
+        )
+        started = start_work(
+            deficiency_id=deficiency_id,
+            expected_event_id=str(last.pk),
+            **self.context(self.supervisor),
+        )
+        corrected = record_correction(
+            deficiency_id=deficiency_id,
+            expected_event_id=started.body["event_id"],
+            **self.context(self.supervisor),
+        )
+        self.assertIn(corrected.status, (200, 201))
+        rows = VerificationScopeRow.objects.filter(deficiency_id=deficiency_id)
+        contents = KitDefinitionItem.objects.filter(version_id=self.kit_version)
+        # A deficiency on a kit covers all of that kit's content, as for slot-placed kits.
+        self.assertEqual(
+            sorted(
+                (r.definition_id, r.kit_definition_item_id, str(r.kit_instance_id)) for r in rows
+            ),
+            sorted((None, c.pk, kit) for c in contents),
+        )

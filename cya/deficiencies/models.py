@@ -346,13 +346,32 @@ class DeficiencyAffectedItem(Evidence):
     organization = organization_fk()
     deficiency = models.ForeignKey(Deficiency, on_delete=models.PROTECT, related_name="+")
     item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    # Exactly one content source: a checklist item definition, or a placed kit definition's
+    # content entry (SPEC 4.6 KDEF-7, issue #129).
     definition = models.ForeignKey(
-        "cya_checklists.ChecklistItemDef", on_delete=models.PROTECT, related_name="+"
+        "cya_checklists.ChecklistItemDef", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kit_definition_item = models.ForeignKey(
+        "cya_kits.KitDefinitionItem",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
 
     class Meta:
         db_table = "deficiency_affected_item"
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
+                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                ),
+                name="defaffect_content_source",
+            ),
+            models.UniqueConstraint(
+                fields=["deficiency", "item", "kit_definition_item"], name="defaffect_kit_scope"
+            ),
             models.UniqueConstraint(fields=["organization", "id"], name="defaffect_org_id"),
             models.UniqueConstraint(
                 fields=["deficiency", "item", "definition"], name="defaffect_scope"
@@ -373,8 +392,17 @@ class VerificationScopeRow(Evidence):
         "DeficiencyEvent", on_delete=models.PROTECT, related_name="+"
     )
     item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    # Exactly one content source: a checklist item definition, or a placed kit definition's
+    # content entry (SPEC 4.6 KDEF-7, issue #129).
     definition = models.ForeignKey(
-        "cya_checklists.ChecklistItemDef", on_delete=models.PROTECT, related_name="+"
+        "cya_checklists.ChecklistItemDef", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kit_definition_item = models.ForeignKey(
+        "cya_kits.KitDefinitionItem",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
     kit_instance = models.ForeignKey(
         "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
@@ -388,6 +416,13 @@ class VerificationScopeRow(Evidence):
     class Meta:
         db_table = "verification_scope_row"
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
+                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                ),
+                name="verscope_content_source",
+            ),
             models.UniqueConstraint(fields=["organization", "id"], name="verscope_org_id"),
             models.UniqueConstraint(
                 fields=["deficiency", "scope_revision", "item", "instance_key"],
@@ -421,8 +456,17 @@ class DeficiencyScopeExpansion(Evidence):
     deficiency = models.ForeignKey(Deficiency, on_delete=models.PROTECT, related_name="+")
     event = models.ForeignKey("DeficiencyEvent", on_delete=models.PROTECT, related_name="+")
     item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    # Exactly one content source: a checklist item definition, or a placed kit definition's
+    # content entry (SPEC 4.6 KDEF-7, issue #129).
     definition = models.ForeignKey(
-        "cya_checklists.ChecklistItemDef", on_delete=models.PROTECT, related_name="+"
+        "cya_checklists.ChecklistItemDef", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kit_definition_item = models.ForeignKey(
+        "cya_kits.KitDefinitionItem",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
     kit_instance = models.ForeignKey(
         "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
@@ -432,6 +476,13 @@ class DeficiencyScopeExpansion(Evidence):
     class Meta:
         db_table = "deficiency_scope_expansion"
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
+                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                ),
+                name="defexp_content_source",
+            ),
             models.UniqueConstraint(fields=["organization", "id"], name="defexpansion_org_id"),
             models.UniqueConstraint(
                 fields=["event", "item", "instance_key"], name="defexpansion_event_item_instance"
@@ -467,8 +518,17 @@ class CheckSuspension(Evidence):
         "cya_checklists.Vehicle", on_delete=models.PROTECT, related_name="+"
     )
     item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    # Exactly one content source: a checklist item definition, or a placed kit definition's
+    # content entry (SPEC 4.6 KDEF-7, issue #129).
     definition = models.ForeignKey(
-        "cya_checklists.ChecklistItemDef", on_delete=models.PROTECT, related_name="+"
+        "cya_checklists.ChecklistItemDef", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kit_definition_item = models.ForeignKey(
+        "cya_kits.KitDefinitionItem",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
     kit_instance = models.ForeignKey(
         "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
@@ -487,6 +547,13 @@ class CheckSuspension(Evidence):
     class Meta:
         db_table = "check_suspension"
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
+                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                ),
+                name="checksusp_content_source",
+            ),
             models.UniqueConstraint(fields=["organization", "id"], name="checksusp_org_id"),
             models.UniqueConstraint(
                 fields=["deficiency_event", "item", "instance_key"],

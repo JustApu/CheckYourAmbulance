@@ -158,3 +158,42 @@ def placed_content_item_ids(placements):
         .values_list("item_id", flat=True)
         .distinct()
     )
+
+
+def placed_items(organization_id, resolved, at, recorded_before=None):
+    """Every content entry of every kit the resolved checklist places, as ResolvedItems."""
+    from cya.kits.models import KitDefinitionItem
+
+    items = []
+    for placement in resolved.placements:
+        version_id = definition_version_at(
+            organization_id, placement.definition_id, at, recorded_before
+        )
+        if version_id is None:
+            continue
+        for content in KitDefinitionItem.objects.filter(version_id=version_id).order_by(
+            "display_order", "id"
+        ):
+            items.extend(
+                placed_contents(
+                    organization_id, resolved, str(content.item_id), at, recorded_before
+                )
+            )
+    unique = {}
+    for item in items:
+        unique[(item.requirement.definition_id, item.requirement.kit_id)] = item
+    return list(unique.values())
+
+
+def is_kit_content(definition_id):
+    """True when the id names a placed kit definition's content entry, not a checklist item."""
+    from cya.kits.models import KitDefinitionItem
+
+    return KitDefinitionItem.objects.filter(pk=definition_id).exists()
+
+
+def content_columns(definition_id):
+    """The {definition_id, kit_definition_item_id} pair for a scope row from one content id."""
+    if is_kit_content(definition_id):
+        return {"definition_id": None, "kit_definition_item_id": str(definition_id)}
+    return {"definition_id": str(definition_id), "kit_definition_item_id": None}
