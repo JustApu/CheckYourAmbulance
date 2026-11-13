@@ -63,6 +63,8 @@ POLICY = MappingProxyType(
         "manage_kit_assignment": ("deny", "allow", "allow", "allow"),
         "designate_sealable": ("deny", "allow", "deny", "allow"),
         "manage_kit_definitions": ("deny", "allow", "deny", "allow"),
+        "import_configuration": ("deny", "deny", "deny", "allow"),
+        "export_configuration": ("deny", "allow", "deny", "allow"),
         "configure_deficiency_categories_severities": ("deny", "deny", "deny", "allow"),
         "regrade_deficiency_severity": ("deny", "allow", "deny", "allow"),
         "record_deficiency_correction": ("allow", "allow", "allow", "allow"),

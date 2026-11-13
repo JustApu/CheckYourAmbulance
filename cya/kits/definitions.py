@@ -138,7 +138,7 @@ def _is_published(version_id):
 # --- validation ------------------------------------------------------------------------------
 
 
-def _key(value):
+def check_key(value):
     if not isinstance(value, str) or not 1 <= len(value) <= MAX_KEY:
         raise KitDefinitionError(f"key must be text of 1-{MAX_KEY} characters")
     first, rest = value[0], value[1:]
@@ -150,7 +150,7 @@ def _key(value):
     return value
 
 
-def _label(value):
+def check_label(value):
     if not isinstance(value, str) or not value.strip() or len(value) > MAX_LABEL:
         raise KitDefinitionError(f"label must be nonblank text of at most {MAX_LABEL} characters")
     return value
@@ -187,6 +187,35 @@ def _quantity_and_unit(entry):
     return quantity, unit
 
 
+def content_rules(entry, where):
+    """The item-independent fields of one content entry, checked (KDEF-1, KDEF-5).
+
+    Shared by the draft command and the kit-library importer, so a file and a direct edit are
+    held to the same rules. Raises KitDefinitionError naming `where`.
+    """
+    if entry.get("kind") not in KIT_KINDS:
+        raise KitDefinitionError(f"{where} kind must be one of {list(KIT_KINDS)}")
+    instructions = entry.get("instructions", "")
+    if not isinstance(instructions, str) or len(instructions) > MAX_INSTRUCTIONS:
+        raise KitDefinitionError(f"{where} instructions must be text of at most {MAX_INSTRUCTIONS}")
+    tracked = entry.get("expiration_tracked", False)
+    if type(tracked) is not bool:
+        raise KitDefinitionError(f"{where} expiration_tracked must be true or false")
+    try:
+        quantity, unit = _quantity_and_unit(entry)
+        outcomes = _outcomes(entry)
+    except KitDefinitionError as error:
+        raise KitDefinitionError(f"{where} {error}") from None
+    return {
+        "kind": entry["kind"],
+        "instructions": instructions,
+        "expected_quantity": quantity,
+        "unit": unit,
+        "allowed_outcomes": outcomes,
+        "expiration_tracked": tracked,
+    }
+
+
 def _content(org, index, entry):
     """Model fields for one content entry, or raise naming its position."""
     where = f"contents[{index}]"
@@ -197,16 +226,9 @@ def _content(org, index, entry):
         raise KitDefinitionError(
             f"{where} fields rejected: unknown={sorted(unknown)} missing={sorted(missing)}"
         )
-    if entry["kind"] not in KIT_KINDS:
-        raise KitDefinitionError(f"{where} kind must be one of {list(KIT_KINDS)}")
     if not is_count(entry["display_order"]):
         raise KitDefinitionError(f"{where} display_order must be a nonnegative integer")
-    instructions = entry.get("instructions", "")
-    if not isinstance(instructions, str) or len(instructions) > MAX_INSTRUCTIONS:
-        raise KitDefinitionError(f"{where} instructions must be text of at most {MAX_INSTRUCTIONS}")
-    tracked = entry.get("expiration_tracked", False)
-    if type(tracked) is not bool:
-        raise KitDefinitionError(f"{where} expiration_tracked must be true or false")
+    fields = content_rules(entry, where)
     try:
         item_id = canonical_id(entry["item_id"])
     except (TypeError, ValueError):
@@ -216,21 +238,7 @@ def _content(org, index, entry):
         raise KitDefinitionError(
             f"{where} item {item_id} is not an active item of the organization"
         )
-    try:
-        quantity, unit = _quantity_and_unit(entry)
-        outcomes = _outcomes(entry)
-    except KitDefinitionError as error:
-        raise KitDefinitionError(f"{where} {error}") from None
-    return {
-        "item_id": item_id,
-        "display_order": entry["display_order"],
-        "kind": entry["kind"],
-        "instructions": instructions,
-        "expected_quantity": quantity,
-        "unit": unit,
-        "allowed_outcomes": outcomes,
-        "expiration_tracked": tracked,
-    }
+    return {"item_id": item_id, "display_order": entry["display_order"], **fields}
 
 
 def validate_contents(org, contents):
@@ -270,7 +278,7 @@ def _insert_version(org, definition, revision, version_id, contents, created_at)
 def create_kit_definition(*, key, label, **context):
     """Create a kit definition with no contents yet; its key is permanent (KDEF-1, IMP-1)."""
     org = context["organization_id"]
-    key, label = _key(key), _label(label)
+    key, label = check_key(key), check_label(label)
 
     def build(actor):
         if KitDefinition.objects.filter(organization_id=org, key=key).exists():
@@ -378,7 +386,7 @@ def duplicate_kit_definition(*, source_version_id, key, label, **context):
     """A new definition whose first draft copies one version's contents, without history."""
     canonical_id(source_version_id)
     org = context["organization_id"]
-    key, label = _key(key), _label(label)
+    key, label = check_key(key), check_label(label)
 
     def build(actor):
         source = KitDefinitionVersion.objects.filter(
