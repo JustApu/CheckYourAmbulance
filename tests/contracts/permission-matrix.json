@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": "SPEC.md §3.3 approved 2026-10-16; seal rows added by SPEC 1.2.0 (2026-10-20); session rows PERM-29 to PERM-31 added by SPEC amendment 1.9.0 (2026-10-24); kit-assignment row PERM-32 added by SPEC amendment 1.10.0 (2026-10-24); rows PERM-33 and PERM-34 (deficiency configuration and severity re-grade) added by SPEC amendment 1.12.0 (2026-10-25); PERM-35 (administrator invalidation of supervisor Unable completion) added by issue 82 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/82) Part A; PERM-36 (add a progress note to a deficiency) added by SPEC amendment 1.17.0 (issue 149 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); PERM-37 (record a correction) added by SPEC amendment 1.18.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-38 (close an empty-scope deficiency) proposed by SPEC amendment 1.19.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-39 added by owner-approved SPEC 1.21.0 (issue 158 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)); PERM-40 (designate a compartment or kit sealable) added by owner-approved SPEC 1.32.0 and 1.33.0 (issue #131 (https://github.com/JustApu/CheckYourAmbulance/issues/131))",
+  "source": "SPEC.md §3.3 approved 2026-10-16; seal rows added by SPEC 1.2.0 (2026-10-20); session rows PERM-29 to PERM-31 added by SPEC amendment 1.9.0 (2026-10-24); kit-assignment row PERM-32 added by SPEC amendment 1.10.0 (2026-10-24); rows PERM-33 and PERM-34 (deficiency configuration and severity re-grade) added by SPEC amendment 1.12.0 (2026-10-25); PERM-35 (administrator invalidation of supervisor Unable completion) added by issue 82 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/82) Part A; PERM-36 (add a progress note to a deficiency) added by SPEC amendment 1.17.0 (issue 149 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); PERM-37 (record a correction) added by SPEC amendment 1.18.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-38 (close an empty-scope deficiency) proposed by SPEC amendment 1.19.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-39 added by owner-approved SPEC 1.21.0 (issue 158 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)); PERM-40 (designate a compartment or kit sealable) added by owner-approved SPEC 1.32.0 and 1.33.0 (issue #131 (https://github.com/JustApu/CheckYourAmbulance/issues/131)); PERM-41 (draft, edit, duplicate, publish or deactivate kit definitions) added by owner-approved SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129))",
   "synthetic": true,
   "roles": [
     "Crew",
@@ -414,6 +414,16 @@
     {
       "id": "PERM-40",
       "action": "designate_sealable",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-41",
+      "action": "manage_kit_definitions",
       "by_role": {
         "Crew": "deny",
         "Supervisor": "allow",

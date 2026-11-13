@@ -1,4 +1,4 @@
-"""Actual runtime grants for kit_assignment_event against disposable MariaDB."""
+"""Actual runtime grants for kit tables against disposable MariaDB (issue 92, issue #129)."""
 
 import io
 import os
@@ -12,9 +12,16 @@ from django.test import TransactionTestCase
 from django.utils import timezone
 
 from cya.authorization.roles import grant_initial_crew
-from cya.checklists.models import Compartment, KitInstance, Vehicle
+from cya.checklists.models import Compartment, Item, KitInstance, Vehicle
 from cya.kits.commands import add_kit_instance, record_kit_assignment
-from cya.kits.models import KitAssignmentEvent
+from cya.kits.definitions import (
+    create_kit_definition,
+    duplicate_kit_definition,
+    publish_kit_definition_version,
+    save_kit_definition_draft,
+    set_kit_definition_active,
+)
+from cya.kits.models import KitAssignmentEvent, KitInstanceDefinition
 from cya.tests import test_audit_runtime_db as runtime_tests
 
 
@@ -97,3 +104,60 @@ class KitRuntimeTests(TransactionTestCase):
                 ):
                     cursor.execute(sql)
                 self.assertEqual(caught.exception.args[0], 1142)
+
+    def test_runtime_manages_kit_definitions_but_cannot_rewrite_published_ones(self):
+        item = Item.objects.create(organization=self.org, label="Synthetic masks")
+        contents = [
+            {
+                "item_id": str(item.pk),
+                "display_order": 1,
+                "kind": "QUANTITY",
+                "expected_quantity": 6,
+                "allowed_outcomes": ["PASSED", "FAILED"],
+                "expiration_tracked": True,
+            }
+        ]
+        with self.runtime() as wrapper:
+            definition_id = create_kit_definition(
+                key="synthetic-kit", label="Synthetic kit", **self.context, **ids()
+            ).body["definition_id"]
+            version_id = save_kit_definition_draft(
+                definition_id=definition_id, contents=contents, **self.context, **ids()
+            ).body["version_id"]
+            publish_kit_definition_version(version_id=version_id, **self.context, **ids())
+            duplicate_kit_definition(
+                source_version_id=version_id,
+                key="synthetic-kit-b",
+                label="Synthetic kit B",
+                **self.context,
+                **ids(),
+            )
+            add_kit_instance(
+                label="Synthetic kit 1",
+                vehicle_id=str(self.vehicles[0].pk),
+                compartment_id=str(self.cabinets[0].pk),
+                definition_id=definition_id,
+                **self.context,
+                **ids(),
+            )
+            set_kit_definition_active(
+                definition_id=definition_id, active=False, **self.context, **ids()
+            )
+            self.assertEqual(KitInstanceDefinition.objects.count(), 1)
+            # 1142: no privilege; 1644: a trigger refused the change.
+            for sql, code in (
+                ("UPDATE kit_definition_item SET expected_quantity=1", 1142),
+                ("DELETE FROM kit_definition_item", 1142),
+                ("UPDATE kit_definition_version SET revision=revision", 1142),
+                ("DELETE FROM kit_definition_publication", 1142),
+                ("UPDATE kit_instance_definition SET definition_id=definition_id", 1142),
+                ("DELETE FROM kit_definition", 1142),
+                ("UPDATE kit_definition SET `key`='renamed'", 1644),
+            ):
+                with (
+                    self.subTest(sql=sql),
+                    self.assertRaises(DatabaseError) as caught,
+                    wrapper.cursor() as cursor,
+                ):
+                    cursor.execute(sql)
+                self.assertEqual(caught.exception.args[0], code)

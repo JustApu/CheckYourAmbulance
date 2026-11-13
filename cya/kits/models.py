@@ -14,7 +14,15 @@ cya.kits.history. Full movement workflows (transfers between stations) are R2 (k
 from django.db import models
 
 from cya.accounts.fields import IdentityIDField, new_id
-from cya.checklists.models import Compartment, KitInstance, Vehicle, organization_fk
+from cya.checklists.models import (
+    KINDS,
+    Compartment,
+    Item,
+    KitInstance,
+    Vehicle,
+    non_blank,
+    organization_fk,
+)
 from cya.operations.models import Evidence
 
 
@@ -106,3 +114,153 @@ class KitSealDesignation(Evidence):
 
     def __str__(self):
         return f"KitSealDesignation {self.pk}"
+
+
+# --- kit definitions (SPEC 4.6 KDEF-1 to KDEF-8, issue #129) ---------------------------------
+
+# A kit holds items only (KDEF-5); a vehicle reading is never a kit content.
+KIT_KINDS = tuple(kind for kind in KINDS if kind != "VEHICLE_READING")
+MAX_KEY = 100
+
+
+class KitDefinition(models.Model):
+    """A kit type: what a complete kit contains, versioned (KDEF-1, KDEF-2).
+
+    The key is the stable, administrator-maintained name files use (SPEC 4.7 IMP-1). Label and
+    active flag change through audited commands; the contents live only in versions.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    key = models.CharField(max_length=MAX_KEY)
+    label = models.CharField(max_length=200)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "kit_definition"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitdef_org_id"),
+            models.UniqueConstraint(fields=["organization", "key"], name="kitdef_org_key"),
+            models.CheckConstraint(
+                condition=models.Q(active__in=[True, False]), name="kitdef_bool"
+            ),
+            models.CheckConstraint(condition=non_blank("label"), name="kitdef_label"),
+            models.CheckConstraint(
+                condition=models.Q(key__regex=r"^[a-z0-9][a-z0-9._-]*$"), name="kitdef_key_format"
+            ),
+        ]
+
+    def __str__(self):
+        return f"KitDefinition {self.pk}"
+
+
+class KitDefinitionVersion(models.Model):
+    """One revision of a kit definition's contents. Published iff a publication names it."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    definition = models.ForeignKey(KitDefinition, on_delete=models.PROTECT, related_name="+")
+    revision = models.PositiveIntegerField()
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "kit_definition_version"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitdefver_org_id"),
+            models.UniqueConstraint(fields=["definition", "revision"], name="kitdefver_revision"),
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1), name="kitdefver_revision_min"
+            ),
+        ]
+
+    def __str__(self):
+        return f"KitDefinitionVersion {self.pk}"
+
+
+class KitDefinitionItem(models.Model):
+    """One content entry of a kit definition version (KDEF-1); frozen once published."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    version = models.ForeignKey(KitDefinitionVersion, on_delete=models.PROTECT, related_name="+")
+    item = models.ForeignKey(Item, on_delete=models.PROTECT, related_name="+")
+    display_order = models.PositiveIntegerField()
+    instructions = models.CharField(max_length=4000, blank=True)
+    kind = models.CharField(max_length=30)
+    expected_quantity = models.PositiveIntegerField(null=True)
+    unit = models.CharField(max_length=40, null=True)  # noqa: DJ001
+    allowed_outcomes = models.JSONField()
+    expiration_tracked = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "kit_definition_item"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitdefitem_org_id"),
+            models.UniqueConstraint(fields=["version", "item"], name="kitdefitem_version_item"),
+            models.CheckConstraint(condition=models.Q(kind__in=KIT_KINDS), name="kitdefitem_kind"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="QUANTITY", expected_quantity__isnull=False)
+                    | (~models.Q(kind="QUANTITY") & models.Q(expected_quantity__isnull=True))
+                ),
+                name="kitdefitem_quantity_by_kind",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="MEASUREMENT", unit__isnull=False)
+                    | (~models.Q(kind="MEASUREMENT") & models.Q(unit__isnull=True))
+                ),
+                name="kitdefitem_unit_by_kind",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(expiration_tracked__in=[True, False]),
+                name="kitdefitem_expiration_bool",
+            ),
+        ]
+
+    def __str__(self):
+        return f"KitDefinitionItem {self.pk}"
+
+
+class KitDefinitionPublication(Evidence):
+    """Append-only publication of one kit definition version (KDEF-2, CHK-3)."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    version = models.OneToOneField(KitDefinitionVersion, on_delete=models.PROTECT, related_name="+")
+    effective_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "kit_definition_publication"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitdefpub_org_id"),
+            models.CheckConstraint(
+                condition=models.Q(effective_at__gte=models.F("recorded_at")),
+                name="kitdefpub_not_retroactive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"KitDefinitionPublication {self.pk}"
+
+
+class KitInstanceDefinition(Evidence):
+    """The kit definition a kit instance has, fixed when the instance is created (KDEF-3).
+
+    One append-only row per kit instance; kit_instance itself is not changed, so instances made
+    before kit definitions (KDEF-8) simply have no row.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    kit = models.OneToOneField(KitInstance, on_delete=models.PROTECT, related_name="+")
+    definition = models.ForeignKey(KitDefinition, on_delete=models.PROTECT, related_name="+")
+
+    class Meta:
+        db_table = "kit_instance_definition"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitinstdef_org_id"),
+        ]
+
+    def __str__(self):
+        return f"KitInstanceDefinition {self.pk}"
