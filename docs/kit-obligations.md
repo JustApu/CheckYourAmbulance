@@ -143,3 +143,14 @@ Designations do not change obligations, checks or kit assignment history. Substi
 `version_effective_at(organization_id, definition_id, at)` answers which published version is in force at an instant.
 
 **Not yet.** Checklists still place kit contents by slot, so a kit definition changes no obligation, check or printout yet. Kit-library import and export (§4.7) is part 3: see [kit-library files](kit-library-files.md). Placing kits by definition (`checklist_kit_placement`, KDEF-4) and vehicle files are later parts of issue #129.
+
+## Kits placed by definition
+
+Issue #129 part 4a lets a checklist template version place kits by definition (SPEC §4.6 KDEF-4): "kit definition X in compartment slot S", stored in `checklist_kit_placement`. The table is versioned and frozen with its owning version once published, like `checklist_item_def`.
+
+- **Draft:** `save_template_draft(..., placements=[{definition_id, compartment_id, display_order}])` validates each placement (`cya/kits/placements.py`). The definition must exist in the organization and be active, the compartment must exist, a definition appears at most once per slot, and there are at most 200 placements. Omitting `placements` keeps an existing request's digest.
+- **Publish:** `publish_template_version` refuses a placed definition that is inactive or has no published version, and a placement whose slot some active vehicle lacks.
+- **Resolve:** `resolve_checklist` returns `placements`, one `ResolvedPlacement` each. It holds the vehicle's own compartment row in the slot and the vehicle's active kits whose `kit_instance_definition` is that definition, ordered by label.
+
+**Not yet.** Obligations, checks, the checklist screen and the printable sheet do not read placements, so publishing a placement changes no inspection (KDEF-8). Part 4b makes requirements come from placements and definitions. Placements in vehicle overrides, and how an override adds or removes a template's placements, come with part 4b. The database still refuses to publish a template version with no items (cya_checklists 0002), so a kits-only template needs at least one item until then.
+

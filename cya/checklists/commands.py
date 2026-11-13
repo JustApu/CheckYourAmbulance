@@ -57,6 +57,8 @@ from cya.checklists.validation import (
     validate_definitions,
 )
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
+from cya.kits.models import ChecklistKitPlacement
+from cya.kits.placements import check_publishable, placements_of, validate_placements
 
 MAX_EXPLANATION = 4000
 OVERRIDE_ACTIONS = ("ADD", "REMOVE", "REPLACE")
@@ -149,8 +151,11 @@ def _is_published(**target):
 # --- template drafts -------------------------------------------------------------------------
 
 
-def save_template_draft(*, template_id, items, **context):
-    """Create the next draft revision of a template with its complete item set (CHK-2)."""
+def save_template_draft(*, template_id, items, placements=None, **context):
+    """Create the next draft revision of a template with its complete item set (CHK-2).
+
+    placements (optional) places kits by definition in compartment slots (SPEC 4.6 KDEF-4).
+    """
     canonical_id(template_id)
     org = context["organization_id"]
 
@@ -159,6 +164,7 @@ def save_template_draft(*, template_id, items, **context):
         if not template.active:
             raise ChecklistValidationError("template is inactive")
         definitions = validate_definitions(org, items)
+        placed = validate_placements(org, placements) if placements is not None else []
         revision = _next_revision(ChecklistVersion.objects.filter(template=template))
         version_id = new_id()
 
@@ -176,6 +182,13 @@ def save_template_draft(*, template_id, items, **context):
                 )
                 for fields in definitions
             )
+            if placed:
+                ChecklistKitPlacement.objects.bulk_create(
+                    ChecklistKitPlacement(
+                        id=new_id(), organization_id=org, checklist_version_id=version_id, **fields
+                    )
+                    for fields in placed
+                )
 
         return _plan(
             org,
@@ -186,12 +199,17 @@ def save_template_draft(*, template_id, items, **context):
             version_id=version_id,
             revision=revision,
             item_count=len(definitions),
+            placement_count=len(placed),
         )
 
+    intent = {"template_id": template_id, "items": items}
+    if placements is not None:
+        # Only when given, so the digest of an existing kind of request is unchanged.
+        intent["placements"] = placements
     return _execute(
         action="draft_edit_template",
         command_type="CHECKLIST_DRAFT_SAVE",
-        intent={"template_id": template_id, "items": items},
+        intent=intent,
         build=build,
         **context,
     )
@@ -237,6 +255,18 @@ def _require_slots(requirements, vehicle_ids, as_of):
             )
 
 
+def _require_placement_slots(placements, vehicle_ids, as_of):
+    """Every vehicle must have an effective compartment row in each placed kit's slot."""
+    compartments = {str(p.compartment_id) for p in placements}
+    for vehicle_id in vehicle_ids:
+        slots = vehicle_slots("compartment", vehicle_id, compartments, as_of)
+        absent = sorted(ref for ref, row in slots.items() if row is None)
+        if absent:
+            raise ChecklistValidationError(
+                f"vehicle {vehicle_id} has no effective slot for placed kits {absent} at {as_of}"
+            )
+
+
 def _active_vehicle_ids(org):
     return list(
         Vehicle.objects.filter(organization_id=org, active=True).values_list("pk", flat=True)
@@ -260,6 +290,8 @@ def publish_template_version(*, version_id, effective_at=None, **context):
         if not definitions:
             raise ChecklistValidationError("cannot publish a version without items")
         _locked(ChecklistTemplate, org, version.template_id, "checklist template")
+        placements = placements_of(version.pk)
+        check_publishable(placements)
         publication_id = new_id()
 
         def apply(receipt, current_actor):
@@ -270,6 +302,7 @@ def publish_template_version(*, version_id, effective_at=None, **context):
             )
             requirements = [requirement_from_definition(d, "TEMPLATE") for d in definitions]
             _require_slots(requirements, _active_vehicle_ids(org), final)
+            _require_placement_slots(placements, _active_vehicle_ids(org), final)
             ChecklistPublication.objects.create(
                 id=publication_id,
                 organization_id=org,

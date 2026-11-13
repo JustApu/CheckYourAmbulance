@@ -16,10 +16,12 @@ from django.db import models
 from cya.accounts.fields import IdentityIDField, new_id
 from cya.checklists.models import (
     KINDS,
+    ChecklistVersion,
     Compartment,
     Item,
     KitInstance,
     Vehicle,
+    VehicleOverrideVersion,
     non_blank,
     organization_fk,
 )
@@ -264,3 +266,49 @@ class KitInstanceDefinition(Evidence):
 
     def __str__(self):
         return f"KitInstanceDefinition {self.pk}"
+
+
+class ChecklistKitPlacement(models.Model):
+    """A kit placed by definition in a compartment slot of a checklist version (KDEF-4).
+
+    Owned by exactly one template version or vehicle override version, and frozen with it once
+    published (migration 0007). The compartment row names the slot (its stable_slot_id); each
+    vehicle resolves it to its own compartment row. Obligations do not use placements until a
+    later part of issue #129.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    checklist_version = models.ForeignKey(
+        ChecklistVersion, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    override_version = models.ForeignKey(
+        VehicleOverrideVersion, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    definition = models.ForeignKey(KitDefinition, on_delete=models.PROTECT, related_name="+")
+    compartment = models.ForeignKey(Compartment, on_delete=models.PROTECT, related_name="+")
+    display_order = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "checklist_kit_placement"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitplace_org_id"),
+            models.UniqueConstraint(
+                fields=["checklist_version", "compartment", "definition"],
+                name="kitplace_version_slot_definition",
+            ),
+            models.UniqueConstraint(
+                fields=["override_version", "compartment", "definition"],
+                name="kitplace_override_slot_definition",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(checklist_version__isnull=False, override_version__isnull=True)
+                    | models.Q(checklist_version__isnull=True, override_version__isnull=False)
+                ),
+                name="kitplace_one_owner",
+            ),
+        ]
+
+    def __str__(self):
+        return f"ChecklistKitPlacement {self.pk}"

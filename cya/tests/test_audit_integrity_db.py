@@ -220,6 +220,7 @@ class AuditIntegrityTests(TestCase):
             "deficiency_severity",
             "kit_definition_version",  # issue #129: frozen once published
             "kit_definition_item",  # issue #129: kit contents per version
+            "checklist_kit_placement",  # issue #129: kits placed by definition in a version
         },
     }
 

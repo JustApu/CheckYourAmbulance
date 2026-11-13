@@ -86,12 +86,31 @@ class ResolvedItem:
 
 
 @dataclass(frozen=True)
+class ResolvedPlacement:
+    """A kit placed by definition, resolved for one vehicle (SPEC 4.6 KDEF-4, issue #129).
+
+    Obligations do not read placements yet; a later part of issue #129 adds that.
+    """
+
+    placement_id: str
+    definition_id: str
+    definition_key: str
+    definition_label: str
+    display_order: int
+    compartment_id: str  # the vehicle's own effective compartment row in the placed slot
+    compartment_label: str
+    # The vehicle's own active kits of this definition in that slot, as (id, label), by label.
+    kits: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class ResolvedChecklist:
     vehicle_id: str
     as_of: datetime
     template_version_id: str
     override_version_id: str | None
     items: tuple[ResolvedItem, ...]
+    placements: tuple[ResolvedPlacement, ...] = ()
 
 
 def apply_overlay(template_items, entries):
@@ -318,6 +337,60 @@ def _active_deviations(organization_id, vehicle_id, item_ids, as_of):
     }
 
 
+def _resolved_placements(vehicle_id, template_version_id, as_of):
+    """The template version's kit placements as this vehicle resolves them (KDEF-4)."""
+    # Imported late: the kits app depends on checklists.
+    from cya.kits.models import ChecklistKitPlacement, KitDefinition, KitInstanceDefinition
+
+    placements = list(
+        ChecklistKitPlacement.objects.filter(checklist_version_id=template_version_id).order_by(
+            "display_order", "id"
+        )
+    )
+    if not placements:
+        return ()
+    compartments = vehicle_slots(
+        "compartment", vehicle_id, {str(p.compartment_id) for p in placements}, as_of
+    )
+    definitions = {
+        str(d.pk): d
+        for d in KitDefinition.objects.filter(pk__in={p.definition_id for p in placements})
+    }
+    own = KitInstance.objects.filter(
+        vehicle_id=vehicle_id, active=True, compartment__isnull=False
+    ).select_related("compartment")
+    kit_definitions = dict(
+        KitInstanceDefinition.objects.filter(kit__in=own).values_list("kit_id", "definition_id")
+    )
+    resolved = []
+    for placement in placements:
+        compartment = compartments.get(str(placement.compartment_id))
+        if compartment is None:
+            raise MissingSlotError(
+                f"vehicle {vehicle_id} has no effective slot for placed kit {placement.pk} at {as_of}"
+            )
+        definition = definitions[str(placement.definition_id)]
+        kits = sorted(
+            (kit.label, str(kit.pk))
+            for kit in own
+            if kit.compartment.stable_slot_id == compartment.stable_slot_id
+            and str(kit_definitions.get(kit.pk, "")) == str(definition.pk)
+        )
+        resolved.append(
+            ResolvedPlacement(
+                placement_id=str(placement.pk),
+                definition_id=str(definition.pk),
+                definition_key=definition.key,
+                definition_label=definition.label,
+                display_order=placement.display_order,
+                compartment_id=str(compartment.pk),
+                compartment_label=compartment.label,
+                kits=tuple((pk, label) for label, pk in kits),
+            )
+        )
+    return tuple(resolved)
+
+
 def resolve_checklist(*, organization_id, vehicle_id, template_id, as_of, recorded_before=None):
     """Effective checklist for one vehicle at as_of (a timezone-aware instant).
 
@@ -379,6 +452,7 @@ def resolve_checklist(*, organization_id, vehicle_id, template_id, as_of, record
         template_version_id=version.pk,
         override_version_id=override.pk if override else None,
         items=tuple(items),
+        placements=_resolved_placements(vehicle_id, version.pk, as_of),
     )
 
 
@@ -391,6 +465,7 @@ __all__ = [
     "ResolutionError",
     "ResolvedChecklist",
     "ResolvedItem",
+    "ResolvedPlacement",
     "StaleOverrideError",
     "apply_overlay",
     "governing_versions",
