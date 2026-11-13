@@ -398,3 +398,14 @@ class PlacedKitCheckTests(PlacedKitCase):
             self.assertEqual(row.obligation_state, "CURRENT")
         quantity = placed[(str(self.kit_item.pk), first)]
         self.assertEqual((quantity.kind, quantity.expected_quantity), ("QUANTITY", 4))
+
+    def test_the_kit_reference_prints_the_placed_definition_contents(self):
+        from cya.inspections.printable import kit_reference
+
+        reference = kit_reference(str(self.org.pk), self.at(hours=5))
+        kit_types = dict(
+            next(t for t in reference if t["id"] == self.checklist_version)["kit_types"]
+        )
+        rows = kit_types["Synthetic jump kit"]
+        self.assertEqual([r.label for r in rows], ["Synthetic kit contents", "Synthetic gauze"])
+        self.assertIn("4", rows[0].expected)
