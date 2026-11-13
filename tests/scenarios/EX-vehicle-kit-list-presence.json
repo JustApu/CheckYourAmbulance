@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "EX-vehicle-kit-list-presence",
+  "criterion": "AC-1",
+  "requirements": ["KDEF-9", "KDEF-10", "KDEF-11", "KDEF-12", "SCH-6"],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "an ambulance whose published kit list requires two of a kit definition in one compartment and one of the same definition in a second compartment, and whose daily checklist inspects that definition",
+    "a second ambulance whose kit list lists a different definition instead"
+  ],
+  "when": [
+    "obligations are generated for one due instant, and an inspector records a presence count for the first compartment's line",
+    "the inspector later records a presence count for the second compartment's line"
+  ],
+  "then": [
+    "the first ambulance owes one presence obligation per kit list line, each pinning its own line, both due at the same instant",
+    "the first count names its line and satisfies only that line's obligation, even though both lines share the definition's presence item and due instant",
+    "a count equal to the line's required count passes; a count above or below it fails and opens a deficiency naming the presence item and that compartment",
+    "the contents of every instance of the definition present on the ambulance are owed, wherever it is, and a missing instance owes no contents",
+    "the second ambulance owes nothing for the first definition"
+  ],
+  "status": "contract",
+  "spec_refs": ["§4.6", "§7.2", "§5.1"],
+  "notes": "issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129), SPEC amendment 2.0.0. Contract only: kit lists and presence obligations are implemented in later parts of issue #129."
+}
