@@ -377,3 +377,24 @@ class PlacedKitCheckTests(PlacedKitCase):
             ),
             sorted((None, c.pk, kit) for c in contents),
         )
+
+    def test_the_checklist_screen_lists_placed_content_per_kit(self):
+        from cya.attention.checklist import vehicle_checklist
+
+        first = self.add_placed_kit("Jump kit 1", self.definition)
+        second = self.add_placed_kit("Jump kit 2", self.definition)
+        self.add_placed_kit("Legacy kit")
+        self.assertEqual(self.generate().failures, [])
+        self.clock.set(self.at(hours=5, minutes=30))
+        rows = vehicle_checklist(str(self.org.pk), str(self.vehicle.pk)).rows
+        placed = {(r.item_id, r.kit_id): r for r in rows if r.kit_id}
+        contents = {
+            str(c.item_id): str(c.pk)
+            for c in KitDefinitionItem.objects.filter(version_id=self.kit_version)
+        }
+        self.assertEqual(set(placed), {(item, kit) for item in contents for kit in (first, second)})
+        for (item, _kit), row in placed.items():
+            self.assertEqual(row.definition_id, contents[item])
+            self.assertEqual(row.obligation_state, "CURRENT")
+        quantity = placed[(str(self.kit_item.pk), first)]
+        self.assertEqual((quantity.kind, quantity.expected_quantity), ("QUANTITY", 4))
