@@ -198,6 +198,8 @@ class AuditIntegrityTests(TestCase):
             # table, its guards and grants arrive with the implementation (issue 92 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/92))
             "kit_assignment_event",
             "kit_seal_designation",  # issue #131: Supervisor- or Administrator-set kit seal designation
+            "kit_definition_publication",  # issue #129: publication of a kit definition version
+            "kit_instance_definition",  # issue #129: the kit definition a kit instance has
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
             "deficiency_age_rule",  # issue 150 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/150): administrator-set age highlighting revisions
@@ -207,9 +209,18 @@ class AuditIntegrityTests(TestCase):
         },
         # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): administrator-set mandatory event/channel pairs
         # issue 14 (https://github.com/JustApu/CheckYourAmbulance/issues/14): administrator overrides of the default recipients
-        "M": {"notification_policy", "notification_recipient_rule", "obligation_projection"},
+        "M": {
+            "notification_policy",
+            "notification_recipient_rule",
+            "obligation_projection",
+            "kit_definition",  # issue #129: kit types, key immutable
+        },
         # issue 80 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/80): administrator-configured severity levels
-        "V": {"deficiency_severity"},
+        "V": {
+            "deficiency_severity",
+            "kit_definition_version",  # issue #129: frozen once published
+            "kit_definition_item",  # issue #129: kit contents per version
+        },
     }
 
     def test_manifest_baseline_is_migration_owned_and_matches_live_classes(self):
@@ -291,6 +302,8 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "shared_satisfaction_rule_member",
                         "kit_assignment_event",
                         "kit_seal_designation",
+                        "kit_definition_publication",
+                        "kit_instance_definition",
                     },
                 )
             finally:
@@ -385,6 +398,8 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "shared_satisfaction_rule_member",
                     "kit_assignment_event",
                     "kit_seal_designation",
+                    "kit_definition_publication",
+                    "kit_instance_definition",
                 },
             )
             cursor.execute(

@@ -28,7 +28,7 @@ from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import Role
 from cya.checklists.models import Compartment, KitInstance, Vehicle
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
-from cya.kits.models import KitAssignmentEvent
+from cya.kits.models import KitAssignmentEvent, KitDefinition, KitInstanceDefinition
 from cya.obligations.generation import reconcile_vehicle
 
 logger = logging.getLogger(__name__)
@@ -155,17 +155,39 @@ def _execute(context, command_type, request, build, vehicles_of):
     return result
 
 
-def add_kit_instance(*, label, vehicle_id, compartment_id, **context):
-    """Add a new kit instance in a compartment of a vehicle, active from now."""
+def _definition(org, definition_id):
+    """The active kit definition a new instance is given, locked against deactivation (KDEF-3)."""
+    definition = (
+        KitDefinition.objects.select_for_update()
+        .filter(organization_id=org, pk=definition_id)
+        .first()
+    )
+    if definition is None:
+        raise KitError(f"kit definition {definition_id} does not exist in the organization")
+    if not definition.active:
+        raise KitError("kit definition is inactive and cannot be given to a new kit")
+    return definition
+
+
+def add_kit_instance(*, label, vehicle_id, compartment_id, definition_id=None, **context):
+    """Add a new kit instance in a compartment of a vehicle, active from now.
+
+    definition_id names the kit definition the instance has, fixed for its life (SPEC 4.6
+    KDEF-3). It is optional while checklists still place kits by slot (KDEF-8); an instance
+    without one has no kit definition.
+    """
     org = context["organization_id"]
     canonical_id(vehicle_id)
     canonical_id(compartment_id)
+    if definition_id is not None:
+        canonical_id(definition_id)
     if not isinstance(label, str) or not label.strip() or len(label) > MAX_LABEL:
         raise KitError(f"label must be nonblank text of at most {MAX_LABEL} characters")
 
     def build(actor):
         vehicle = _lock_vehicles(org, [vehicle_id])[vehicle_id]
         _placement(org, vehicle, compartment_id)
+        definition = _definition(org, definition_id) if definition_id is not None else None
         kit_id, event_id = new_id(), new_id()
 
         def apply(receipt, current):
@@ -188,6 +210,17 @@ def add_kit_instance(*, label, vehicle_id, compartment_id, **context):
                 compartment_id=compartment_id,
                 active=True,
             )
+            if definition is not None:
+                KitInstanceDefinition.objects.create(
+                    id=new_id(),
+                    organization_id=org,
+                    kit=kit,
+                    definition=definition,
+                    command=receipt,
+                    recorded_at=receipt.recorded_at,
+                    actor_user=current.user,
+                    actor_roles_at_time=list(current.roles),
+                )
 
         body = {
             "code": "KIT_ADDED",
@@ -196,6 +229,10 @@ def add_kit_instance(*, label, vehicle_id, compartment_id, **context):
             "sequence": 1,
             "vehicle_ids": [vehicle_id],
         }
+        if definition is not None:
+            # The receipt records the definition as creation intent; the database accepts a
+            # kit_instance_definition row only when it matches (KDEF-3).
+            body["definition_id"] = str(definition.pk)
         return Plan(
             response_body=body,
             apply=apply,
@@ -205,6 +242,9 @@ def add_kit_instance(*, label, vehicle_id, compartment_id, **context):
         )
 
     request = {"label": label, "vehicle_id": vehicle_id, "compartment_id": compartment_id}
+    if definition_id is not None:
+        # Only when given, so the digest of an existing kind of request is unchanged.
+        request["definition_id"] = definition_id
     return _execute(context, ADD_COMMAND, request, build, lambda body: body["vehicle_ids"])
 
 

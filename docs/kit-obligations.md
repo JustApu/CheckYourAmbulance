@@ -125,3 +125,21 @@ Issue #131 slice 1 records which cabinets and kits are sealed (SPEC §10.1 SEAL-
 
 Designations do not change obligations, checks or kit assignment history. Substituting an intact seal for checking contents (SEAL-4, CAB-4), and breaking and resealing, are a later slice built on one shared seal model (OQ-66). The paper checklist already prints seal rows from the designations; see [crew inspection screens](crew-inspection-ui.md#paper-checklists-for-outages). There is no designation screen yet; setting up compartments and kits is issue #130.
 
+
+## Kit definitions
+
+[Issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129) part 2 adds the kit definitions of [SPEC §4.6](../SPEC.md) (KDEF-1 to KDEF-8, amendment 1.34.0): a kit type whose contents are versioned like a checklist template. The commands are in `cya/kits/definitions.py`. Each needs the policy action `manage_kit_definitions` (Supervisors and Administrators; §3.3, PERM-41) and runs through `run_command` (operation-id receipt and replay, success or failure audit).
+
+| Command | Writes | Rules |
+|---|---|---|
+| `create_kit_definition(key, label)` | `kit_definition` | The key is permanent (the database refuses a change): 1 to 100 characters, a lowercase letter or digit first, then `a-z 0-9 . _ -`, unique in the organization. |
+| `save_kit_definition_draft(definition_id, contents)` | the next `kit_definition_version` and its `kit_definition_item` rows | The complete content set, 1 to 500 entries, one per active item. A kit holds items only (KDEF-5): any kind except `VEHICLE_READING`, a quantity only for `QUANTITY`, a unit only for `MEASUREMENT`, outcomes including `PASSED`, and an `expiration_tracked` flag. Errors name `contents[i]`. Refused for an inactive definition. |
+| `publish_kit_definition_version(version_id, effective_at=None)` | `kit_definition_publication` | Effective when recorded, or later; never earlier, and strictly later than the definition's latest publication. Refused for an inactive definition or a version already published. The database then freezes the version and its contents. |
+| `duplicate_kit_definition(source_version_id, key, label)` | a new definition and its first draft | Copies that version's contents, with none of the original's history. |
+| `set_kit_definition_active(definition_id, active)` | `kit_definition.active` | A deactivated definition cannot be drafted, published or given to a new kit; kits that have it keep it. |
+
+`add_kit_instance` takes an optional `definition_id`. Given one, it records `kit_instance_definition` (append-only, one row per kit, fixed for the kit's life, KDEF-3) in the same command; the definition must exist and be active (the command checks under a row lock and the database insert guard checks again), and the database accepts the row only from the command that created the kit (its first `kit_assignment_event`) and only for the definition that command's receipt recorded as requested (`definition_id` in the `KIT_ADDED` body), so an existing kit can never be given a definition later, even by reusing its creation receipt. Kits added without one, and every kit made before this part, have no definition (KDEF-8).
+
+`version_effective_at(organization_id, definition_id, at)` answers which published version is in force at an instant.
+
+**Not yet.** Checklists still place kit contents by slot, so a kit definition changes no obligation, check or printout yet. Placing kits by definition (`checklist_kit_placement`, KDEF-4) and the import and export of §4.7 are later parts of issue #129.
