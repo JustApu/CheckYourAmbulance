@@ -18,6 +18,7 @@ from cya.notifications import api as notifications_api
 from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
 from cya.operations import views as operations_views
+from cya.seals import api as seal_api
 from cya.shell import views as shell
 
 urlpatterns = [
@@ -107,6 +108,7 @@ urlpatterns = [
         name="vehicle-file-export",
     ),
     path("api/v1/checks", check_api.checks, name="api-checks"),
+    path("api/v1/seals/<str:action>", seal_api.command, name="api-seal-command"),
     path("api/v1/inspection-sessions", inspection_api.sessions, name="api-inspection-sessions"),
     path(
         "api/v1/inspection-sessions/<str:session_id>/reopen",
