@@ -1,6 +1,7 @@
 """Vehicle file preview, import and export (SPEC 2.1.0 IMP-2 to IMP-7; issue #129)."""
 
 import copy
+from datetime import UTC
 
 from cya.checklists.models import (
     Compartment,
@@ -192,6 +193,26 @@ class ImportTests(VehicleImportCase):
             str(self.org.pk), self.file(schedule="test-1800"), "json"
         ).errors
         self.assertTrue(any(e.startswith("schedule") for e in errors))
+
+    def test_a_reconciliation_failure_after_commit_is_logged(self):
+        from datetime import datetime
+        from types import SimpleNamespace
+        from unittest import mock
+
+        failure = SimpleNamespace(
+            vehicle_id="v", due_at=datetime(2026, 1, 1, tzinfo=UTC), error="boom"
+        )
+        with (
+            mock.patch(
+                "cya.kits.commands.reconcile_vehicle",
+                return_value=SimpleNamespace(failures=[failure]),
+            ) as reconcile,
+            self.assertLogs("cya.kits.commands", level="ERROR") as logs,
+        ):
+            result = self.import_(self.file())
+        reconcile.assert_called_once_with(str(self.org.pk), result.body["vehicle_id"])
+        self.assertIn("boom", logs.output[0])
+        self.assertTrue(Vehicle.objects.filter(key=VIN).exists(), "the import stays committed")
 
     def test_only_administrators_import(self):
         with self.assertRaises(CommandDenied):

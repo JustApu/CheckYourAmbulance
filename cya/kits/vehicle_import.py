@@ -57,6 +57,7 @@ from cya.checklists.validation import (
 from cya.core.audit_commands import Plan, run_command
 from cya.kits import keys as key_rules
 from cya.kits import vehicle_files
+from cya.kits.commands import _reconcile_after
 from cya.kits.kit_lists import kit_list_effective_at
 from cya.kits.library_import import ImportRefused, _active_items_by_label, _authorize
 from cya.kits.models import (
@@ -817,9 +818,7 @@ def import_vehicle_file(*, data, fmt, base_token, **context):
         prepare=build,
     )
     if not result.replayed and applied.get("vehicle_id"):
-        from cya.obligations.generation import reconcile_vehicle
-
-        reconcile_vehicle(org, applied["vehicle_id"])
+        _reconcile_after(org, [applied["vehicle_id"]])  # logs each failed unit, like kit commands
     return result
 
 
