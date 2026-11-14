@@ -133,7 +133,8 @@ def _resolved_items(organization_id, vehicle_id, instant):
             raise SealScopeError("a bound checklist cannot be resolved") from error
         for item in resolved.items:
             chosen.setdefault(
-                str(item.requirement.item_id), (order, item, resolved.template_version_id)
+                (str(item.requirement.item_id), str(template.pk)),
+                (order, item, resolved.template_version_id),
             )
             if len(chosen) > MAX_SCOPE:
                 raise SealScopeError("checklist scope exceeds its item limit")

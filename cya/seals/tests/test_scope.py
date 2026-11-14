@@ -10,6 +10,42 @@ from cya.seals.scope import SealScopeError, resolve_kit_lines, resolve_scope
 
 
 class SealScopeTests(SimpleTestCase):
+    def test_conflicting_bound_checklists_do_not_silently_drop_a_definition(self):
+        def resolved(quantity):
+            requirement = SimpleNamespace(
+                kit_id=None,
+                item_id="supply",
+                definition_id=f"definition-{quantity}",
+                source="TEMPLATE",
+                kind="QUANTITY",
+                unit=None,
+                expiration_tracked=False,
+                allowed_outcomes=("PASSED", "FAILED"),
+            )
+            item = SimpleNamespace(
+                requirement=requirement, compartment_id="cab-row", effective_quantity=quantity
+            )
+            return SimpleNamespace(items=[item], template_version_id=f"version-{quantity}")
+
+        with (
+            patch("cya.seals.scope.bound_template_ids", return_value=["a", "b"]),
+            patch("cya.seals.scope.ChecklistTemplate.objects") as templates,
+            patch("cya.seals.scope.resolve_checklist", side_effect=[resolved(1), resolved(2)]),
+            patch("cya.seals.scope._active_assignments", return_value={}),
+            patch("cya.seals.scope.KitInstanceDefinition.objects") as definitions,
+            patch("cya.seals.scope.KitDefinitionItem.objects") as contents,
+            patch("cya.seals.scope.Compartment.objects") as compartments,
+        ):
+            templates.filter.return_value.order_by.return_value = [
+                SimpleNamespace(pk="a"),
+                SimpleNamespace(pk="b"),
+            ]
+            definitions.filter.return_value.order_by.return_value = []
+            contents.filter.return_value.order_by.return_value = []
+            compartments.filter.return_value.values_list.return_value = [("cab-row", "slot")]
+            with self.assertRaisesRegex(SealScopeError, "incompatible definitions"):
+                resolve_scope("org", "vehicle", timezone.now(), slot_id="slot")
+
     def test_kit_lines_pin_only_their_definition_and_current_assignments(self):
         line = SimpleNamespace(pk="line", definition_id="type-a", required_count=2)
         instance = SimpleNamespace(kit_id="kit-a", definition_id="type-a")
