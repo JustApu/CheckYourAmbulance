@@ -275,3 +275,24 @@ class PresenceCheckTests(PresenceCase):
         )
         (fact,) = deficiency_facts(str(self.org.pk), str(self.vehicle.pk))
         self.assertEqual(fact.kit_key, self.unit(self.cabinet), "the cabinet line only")
+
+    def test_the_checklist_screen_lists_one_presence_row_per_line(self):
+        from cya.attention.checklist import vehicle_checklist
+
+        self.check(self.cabinet, 2)
+        rows = [
+            r
+            for r in vehicle_checklist(str(self.org.pk), str(self.vehicle.pk)).rows
+            if r.item_id == self.presence_item
+        ]
+        by_line = {r.kit_requirement_id: r for r in rows}
+        self.assertEqual(set(by_line), set(self.lines.values()), "one row per kit list line")
+        for compartment, count in ((self.cabinet, 2), (self.drawer, 1)):
+            row = by_line[self.lines[str(compartment.pk)]]
+            self.assertEqual(
+                (row.kit_id, row.kind, row.expected_quantity, row.compartment_id),
+                (None, "QUANTITY", count, str(compartment.pk)),
+            )
+            self.assertEqual(row.definition_id, self.lines[str(compartment.pk)])
+        self.assertEqual(by_line[self.lines[str(self.cabinet.pk)]].obligation_state, "SATISFIED")
+        self.assertEqual(by_line[self.lines[str(self.drawer.pk)]].obligation_state, "CURRENT")

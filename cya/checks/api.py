@@ -48,6 +48,7 @@ OPTIONAL = (
     "explanation",
     "client_observed_at",
     "kit_id",
+    "kit_requirement_id",
     "verification_for_deficiency_id",
     "deficiency",
 )

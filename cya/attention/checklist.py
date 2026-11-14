@@ -41,7 +41,9 @@ from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
 from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, resolve_checklist
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
+from cya.kits.models import KitDefinition
 from cya.kits.placements import placed_items
+from cya.kits.presence import PRESENCE_SOURCE, line_unit_keys, presence_resolved_item
 from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.requirements import bound_template_ids
@@ -106,6 +108,9 @@ class ChecklistRow:
     obligation_completed_at: datetime | None = None
     # The shown obligation is under a supervisor check suspension still in force (SPEC 8.9).
     check_suspended: bool = False
+    # A kit presence row (SPEC 2.0.0 KDEF-10, KDEF-12): the kit list line a count is recorded
+    # against; kit_id is then None and expected_quantity is the line's exact count.
+    kit_requirement_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -178,6 +183,49 @@ def _placed_content(organization_id, vehicle_id, as_of):
         for item in placed_items(organization_id, resolved, as_of, recorded_before):
             kits = list(item.kits)
             found.append((order, item, str(resolved.template_version_id), kits))
+    return found
+
+
+def _presence_rows(organization_id, vehicle_id, as_of):
+    """(template order, ResolvedItem, version id, unit key) per kit list line (KDEF-12).
+
+    The lines of the vehicle's kit list in force at as_of for each definition a bound template
+    places, as the records stood (resolve_checklist), each as its presence Quantity item.
+    """
+    found = []
+    bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
+    templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
+    recorded_before = as_of + timedelta(microseconds=1)
+    for order, template in enumerate(t for t in templates if str(t.pk) in bound):
+        try:
+            resolved = resolve_checklist(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                template_id=template.pk,
+                as_of=as_of,
+                recorded_before=recorded_before,
+            )
+        except (NoEffectiveVersionError, ResolutionError):
+            continue
+        definitions = {
+            str(pk): str(item)
+            for pk, item in KitDefinition.objects.filter(
+                pk__in=[p.definition_id for p in resolved.placements]
+            ).values_list("pk", "presence_item_id")
+        }
+        for placement in resolved.placements:
+            for line in placement.lines:
+                item = presence_resolved_item(
+                    organization_id,
+                    resolved,
+                    line.requirement_id,
+                    definitions[placement.definition_id],
+                    as_of,
+                )
+                if item is None:
+                    continue
+                unit = line_unit_keys([line.requirement_id])[line.requirement_id]
+                found.append((order, item, str(resolved.template_version_id), unit))
     return found
 
 
@@ -406,6 +454,22 @@ def _placements(organization_id, vehicle_id, as_of):
                     version_id,
                 )
             )
+    # Kit presence (KDEF-10, KDEF-12): one row per kit list line; its key is the line's unit key.
+    for order, resolved, version_id, unit in _presence_rows(organization_id, vehicle_id, as_of):
+        item_id = str(resolved.requirement.item_id)
+        if (item_id, unit) not in present:
+            present.add((item_id, unit))
+            placed.append(
+                (
+                    order,
+                    resolved.requirement.display_order,
+                    item_id,
+                    unit,
+                    None,
+                    resolved,
+                    version_id,
+                )
+            )
     if any(item_id not in labels for _o, _d, item_id, *_rest in placed):
         labels.update(
             Item.objects.filter(
@@ -445,7 +509,8 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=Fals
             ChecklistRow(
                 item_id=item_id,
                 item_label=labels.get(item_id, ""),
-                kit_id=str(kit_id) if kit_id else None,
+                # A presence row's internal key is its line's unit key, never a kit.
+                kit_id=str(kit_id) if kit_id and requirement.source != PRESENCE_SOURCE else None,
                 kit_label=kit_label,
                 definition_id=str(requirement.definition_id),
                 kind=requirement.kind,
@@ -468,6 +533,11 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=Fals
                 allowed_outcomes=tuple(requirement.allowed_outcomes),
                 obligation_outcome=state.outcome if state else None,
                 obligation_completed_at=state.completed_at if state else None,
+                kit_requirement_id=(
+                    str(requirement.definition_id)
+                    if requirement.source == PRESENCE_SOURCE
+                    else None
+                ),
                 check_suspended=state is not None and state.suspension_in_force,
                 latest_check_id=last.check_id if last else None,
                 latest_check_outcome=last.outcome if last else None,
