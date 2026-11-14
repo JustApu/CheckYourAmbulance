@@ -927,3 +927,51 @@ def vehicle_file(organization_id, vehicle_id, template_id=None):
         "items": items,
         "kits": kits,
     }
+
+
+def audited_vehicle_export(*, vehicle_id, fmt, template_id=None, **context):
+    """Export one vehicle as an audited, write-free command (IMP-4, RPT-2).
+
+    Returns (result, file bytes). Supervisors and Administrators may export (SPEC 3.3); the
+    audit records the actor, vehicle, format and counts, never the contents.
+    """
+    org = context["organization_id"]
+    canonical_id(context["actor_id"])
+    canonical_id(vehicle_id)
+    if fmt not in vehicle_files.FORMATS:
+        raise ImportRefused([f"format must be one of {list(vehicle_files.FORMATS)}"])
+    produced = {}
+
+    def build(actor):
+        vehicle = vehicle_file(org, vehicle_id, template_id)
+        produced["data"] = vehicle_files.render(vehicle, fmt)
+        values = {
+            "file_type": vehicle_files.FILE_TYPE,
+            "format": fmt,
+            "vehicle_id": vehicle_id,
+            "items": len(vehicle["items"]),
+            "kits": len(vehicle["kits"]),
+        }
+
+        def apply(receipt, _current):
+            return None
+
+        return Plan(
+            response_body={"code": "VEHICLE_EXPORTED", **values},
+            apply=apply,
+            target_type="ORGANIZATION",
+            target_id=org,
+            new_snapshot={"schema_version": 1, "values": values},
+        )
+
+    result = run_command(
+        organization_id=org,
+        operation_id=context["operation_id"],
+        command_type=EXPORT_COMMAND,
+        request_digest=digest({"vehicle_id": vehicle_id, "fmt": fmt, "template_id": template_id}),
+        correlation_id=context["correlation_id"],
+        request_attempt_id=context["request_attempt_id"],
+        authorize=_authorize(org, context["actor_id"], EXPORT_ACTION),
+        prepare=build,
+    )
+    return result, produced.get("data")
