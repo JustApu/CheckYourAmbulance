@@ -55,7 +55,7 @@ def subjects(organization_id, vehicle_id, *, at=None):
     sealed_kits = kit_sealable(organization_id, [str(kit.pk) for kit in kits], at)
     kits = [kit for kit in kits if str(kit.pk) in sealed_kits]
     events = _bounded(
-        SealEvent.objects.filter(organization_id=organization_id)
+        SealEvent.objects.filter(organization_id=organization_id, recorded_at__lte=at)
         .filter(
             Q(kit_id__in=[kit.pk for kit in kits])
             | Q(vehicle_id=vehicle_id, kit__isnull=True, compartment_slot_id__in=latest)
