@@ -38,6 +38,7 @@ from cya.kits.models import (
     KitDefinitionPublication,
     KitDefinitionVersion,
 )
+from cya.kits.presence import create_presence_item
 
 ACTION = "manage_kit_definitions"
 CREATE_COMMAND = "KIT_DEFINITION_CREATE"
@@ -239,6 +240,8 @@ def _content(org, index, entry):
         raise KitDefinitionError(
             f"{where} item {item_id} is not an active item of the organization"
         )
+    if KitDefinition.objects.filter(presence_item_id=item_id).exists():
+        raise KitDefinitionError(f"{where} item {item_id} is a kit presence item (KDEF-12)")
     return {"item_id": item_id, "display_order": entry["display_order"], **fields}
 
 
@@ -288,7 +291,12 @@ def create_kit_definition(*, key, label, **context):
 
         def apply(receipt, _current):
             KitDefinition.objects.create(
-                id=definition_id, organization_id=org, key=key, label=label, active=True
+                id=definition_id,
+                organization_id=org,
+                key=key,
+                label=label,
+                active=True,
+                presence_item=create_presence_item(org, label),
             )
 
         body = {"code": "KIT_DEFINITION_CREATED", "definition_id": definition_id, "key": key}
@@ -434,7 +442,12 @@ def duplicate_kit_definition(*, source_version_id, key, label, **context):
 
         def apply(receipt, _current):
             definition = KitDefinition.objects.create(
-                id=definition_id, organization_id=org, key=key, label=label, active=True
+                id=definition_id,
+                organization_id=org,
+                key=key,
+                label=label,
+                active=True,
+                presence_item=create_presence_item(org, label),
             )
             _insert_version(org, definition, 1, version_id, copied, receipt.recorded_at)
 

@@ -43,6 +43,7 @@ from cya.kits.definitions import (
     content_rules,
 )
 from cya.kits.models import KitDefinition, KitDefinitionItem, KitDefinitionVersion
+from cya.kits.presence import create_presence_item, presence_item_ids, presence_label
 
 IMPORT_ACTION = "import_configuration"
 IMPORT_COMMAND = "KIT_LIBRARY_IMPORT"
@@ -124,10 +125,13 @@ def _item_labels(organization_id):
 
 
 def _active_items_by_label(organization_id, labels):
+    """Items by label, leaving out presence items, which are never kit content (KDEF-12)."""
     found = {}
-    for pk, label, active in Item.objects.filter(
-        organization_id=organization_id, label__in=labels
-    ).values_list("pk", "label", "active"):
+    for pk, label, active in (
+        Item.objects.filter(organization_id=organization_id, label__in=labels)
+        .exclude(pk__in=presence_item_ids(organization_id))
+        .values_list("pk", "label", "active")
+    ):
         found.setdefault(label, []).append((str(pk), active))
     return found
 
@@ -309,11 +313,15 @@ def _apply(organization_id, plan, recorded_at):
                 key=kit.key,
                 label=kit.label,
                 active=True,
+                presence_item=create_presence_item(organization_id, kit.label),
             )
         else:
             definition = KitDefinition.objects.get(pk=kit.definition_id)
             if kit.label_changed:
                 KitDefinition.objects.filter(pk=definition.pk).update(label=kit.label)
+                Item.objects.filter(pk=definition.presence_item_id).update(
+                    label=presence_label(kit.label)
+                )
         if kit.action == UNCHANGED:
             continue
         top = KitDefinitionVersion.objects.filter(definition=definition).aggregate(

@@ -128,7 +128,8 @@ class KitDefinition(models.Model):
     """A kit type: what a complete kit contains, versioned (KDEF-1, KDEF-2).
 
     The key is the stable, administrator-maintained name files use (SPEC 4.7 IMP-1). Label and
-    active flag change through audited commands; the contents live only in versions.
+    active flag change through audited commands; the contents live only in versions. Each
+    definition has its own presence item (KDEF-12).
     """
 
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
@@ -136,6 +137,12 @@ class KitDefinition(models.Model):
     key = models.CharField(max_length=MAX_KEY)
     label = models.CharField(max_length=200)
     active = models.BooleanField(default=True)
+    # The item a kit presence check counts (SPEC 2.0.0 KDEF-12): created with the definition,
+    # never changed, never kit content. Its organization-pair key and immutability are migration
+    # 0010's; db_constraint=False so the reverse migration can drop its index.
+    presence_item = models.OneToOneField(
+        Item, on_delete=models.PROTECT, related_name="+", db_constraint=False
+    )
 
     class Meta:
         db_table = "kit_definition"
