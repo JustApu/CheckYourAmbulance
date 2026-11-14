@@ -1,12 +1,13 @@
 """Bounded, organization-scoped ORM adapter for immutable obligation projections."""
 
+import uuid
 from datetime import UTC, timedelta
 from itertools import islice
 
 from django.db import connection
 from django.db.models import F, Q
 
-from cya.checklists.models import KitInstance, Vehicle
+from cya.checklists.models import Vehicle
 from cya.checks.models import (
     CheckEvent,
     CheckObligationLink,
@@ -226,23 +227,23 @@ class _Units:
     """
 
     def __init__(self, keys):
-        candidates = {k[2] for k in keys if k[2] != NO_KIT}
-        kits = {
-            str(pk)
-            for pk in KitInstance.objects.filter(pk__in=candidates).values_list("pk", flat=True)
-        }
-        self.units = candidates - kits
+        # Unit keys are uuid5 (cya.kits.presence.line_unit_key); kit ids are uuid4 (new_id). Only
+        # a uuid5 key can be a unit, and it is one only if a real line yields it, so ordinary
+        # keys cost no query.
+        candidates = {k[2] for k in keys if k[2] != NO_KIT and uuid.UUID(k[2]).version == 5}
+        self.units = set()
         self.lines = {}  # unit key -> line ids
         self.unit_of = {}  # line id -> unit key
-        if self.units:
-            vehicles = {k[0] for k in keys if k[2] in self.units}
+        if candidates:
+            vehicles = {k[0] for k in keys if k[2] in candidates}
             for pk, vehicle, definition, slot in VehicleKitRequirement.objects.filter(
                 version__vehicle_id__in=vehicles
             ).values_list(
                 "pk", "version__vehicle_id", "definition_id", "compartment__stable_slot_id"
             ):
                 unit = line_unit_key(vehicle, definition, slot)
-                if unit in self.units:
+                if unit in candidates:
+                    self.units.add(unit)
                     self.lines.setdefault(unit, []).append(str(pk))
                     self.unit_of[str(pk)] = unit
 
@@ -287,7 +288,7 @@ def _aware(value):
     return value if value is None or value.tzinfo else value.replace(tzinfo=UTC)
 
 
-def _newest_older_by_key(organization_id, keys, lower, units):
+def _newest_older_by_key(organization_id, keys, lower, units=None):
     """{key: newest recorded_at at or before `lower`} for each (vehicle, item, kit) key with a check.
 
     Each key's answer is one backward step on the (organization, vehicle, item, kit, time) index:
@@ -313,6 +314,7 @@ def _newest_older_by_key(organization_id, keys, lower, units):
     mandatory READ COMMITTED (tests: late commits between two chunk statements, with and
     without earlier history).
     """
+    units = units if units is not None else _Units(keys)
     table = CheckRecord._meta.db_table
     instant = _instant(lower)
     found = {}

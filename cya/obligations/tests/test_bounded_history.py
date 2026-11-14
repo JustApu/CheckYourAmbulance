@@ -259,7 +259,8 @@ class PageBoundTests(ObligationLinkCleanupMixin, AttentionCase):
             DeficiencyEvent.objects.filter(deficiency__vehicle_id=a).count(),
         )
         rows = [
-            mock.Mock(deficiency_id=deficiency_id, item_id=str(uuid4())) for _ in range(bound + 1)
+            mock.Mock(deficiency_id=deficiency_id, item_id=str(uuid4()), kit_requirement_id=None)
+            for _ in range(bound + 1)
         ]
 
         class Scope(list):
