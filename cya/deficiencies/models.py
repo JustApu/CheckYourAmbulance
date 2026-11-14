@@ -358,14 +358,36 @@ class DeficiencyAffectedItem(Evidence):
         related_name="+",
         db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
+    # A kit presence line (SPEC 2.0.0 KDEF-12); enforced by migration 0021's organization key.
+    kit_requirement = models.ForeignKey(
+        "cya_kits.VehicleKitRequirement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
 
     class Meta:
         db_table = "deficiency_affected_item"
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
-                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                    models.Q(
+                        definition__isnull=False,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                    )
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=False,
+                        kit_requirement__isnull=True,
+                    )
+                    # A kit presence line (SPEC 2.0.0 KDEF-12).
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=False,
+                    )
                 ),
                 name="defaffect_content_source",
             ),
@@ -404,6 +426,14 @@ class VerificationScopeRow(Evidence):
         related_name="+",
         db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
+    # A kit presence line (SPEC 2.0.0 KDEF-12); enforced by migration 0021's organization key.
+    kit_requirement = models.ForeignKey(
+        "cya_kits.VehicleKitRequirement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
     kit_instance = models.ForeignKey(
         "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -418,8 +448,22 @@ class VerificationScopeRow(Evidence):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
-                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                    models.Q(
+                        definition__isnull=False,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                    )
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=False,
+                        kit_requirement__isnull=True,
+                    )
+                    # A kit presence line (SPEC 2.0.0 KDEF-12).
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=False,
+                    )
                 ),
                 name="verscope_content_source",
             ),
@@ -468,6 +512,14 @@ class DeficiencyScopeExpansion(Evidence):
         related_name="+",
         db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
+    # A kit presence line (SPEC 2.0.0 KDEF-12); enforced by migration 0021's organization key.
+    kit_requirement = models.ForeignKey(
+        "cya_kits.VehicleKitRequirement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
     kit_instance = models.ForeignKey(
         "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -478,8 +530,22 @@ class DeficiencyScopeExpansion(Evidence):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
-                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                    models.Q(
+                        definition__isnull=False,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                    )
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=False,
+                        kit_requirement__isnull=True,
+                    )
+                    # A kit presence line (SPEC 2.0.0 KDEF-12).
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=False,
+                    )
                 ),
                 name="defexp_content_source",
             ),
@@ -530,6 +596,14 @@ class CheckSuspension(Evidence):
         related_name="+",
         db_constraint=False,  # enforced by migration 0020's organization-pair key
     )
+    # A kit presence line (SPEC 2.0.0 KDEF-12); enforced by migration 0021's organization key.
+    kit_requirement = models.ForeignKey(
+        "cya_kits.VehicleKitRequirement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
     kit_instance = models.ForeignKey(
         "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -549,8 +623,22 @@ class CheckSuspension(Evidence):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    models.Q(definition__isnull=False, kit_definition_item__isnull=True)
-                    | models.Q(definition__isnull=True, kit_definition_item__isnull=False)
+                    models.Q(
+                        definition__isnull=False,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                    )
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=False,
+                        kit_requirement__isnull=True,
+                    )
+                    # A kit presence line (SPEC 2.0.0 KDEF-12).
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=False,
+                    )
                 ),
                 name="checksusp_content_source",
             ),

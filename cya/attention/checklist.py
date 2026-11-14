@@ -30,7 +30,7 @@ started and still within its late-completion limit. Suspensions are read from st
 obligation reader; ``suspension_lookup`` replaces that evidence when supplied.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from django.utils import timezone
@@ -41,7 +41,9 @@ from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
 from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, resolve_checklist
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
+from cya.kits.models import ChecklistKitPlacement, KitDefinition
 from cya.kits.placements import placed_items
+from cya.kits.presence import PRESENCE_SOURCE, line_unit_keys, presence_resolved_item
 from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.requirements import bound_template_ids
@@ -106,6 +108,9 @@ class ChecklistRow:
     obligation_completed_at: datetime | None = None
     # The shown obligation is under a supervisor check suspension still in force (SPEC 8.9).
     check_suspended: bool = False
+    # A kit presence row (SPEC 2.0.0 KDEF-10, KDEF-12): the kit list line a count is recorded
+    # against; kit_id is then None and expected_quantity is the line's exact count.
+    kit_requirement_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +186,91 @@ def _placed_content(organization_id, vehicle_id, as_of):
     return found
 
 
+def _pinned_presence_lines(placed, keys, obligations):
+    """{key: (line id, required count)} for presence rows whose shown obligation pins a line
+    other than the row's (KDEF-12).
+
+    A presence row comes from the kit list in force, but an obligation created under an earlier
+    revision of that list stays on the same stream (the unit key) and pins its own line. The
+    count a crew member records must name that pinned line, or it could not satisfy it.
+    """
+    wanted = {}
+    for entry, key in zip(placed, keys, strict=True):
+        requirement = entry[5].requirement
+        state = obligations.get(key)
+        if requirement.source == PRESENCE_SOURCE and state is not None:
+            wanted[key] = state.obligation.requirement_version_id
+    if not wanted:
+        return {}
+    lines = {
+        str(pk): (str(line), count)
+        for pk, line, count in RequirementVersion.objects.filter(
+            pk__in=set(wanted.values())
+        ).values_list("pk", "kit_requirement_id", "kit_requirement__required_count")
+    }
+    found = {}
+    for entry, key in zip(placed, keys, strict=True):
+        if key in wanted and wanted[key] in lines:
+            line, count = lines[wanted[key]]
+            if line != str(entry[5].requirement.definition_id):
+                found[key] = (line, count)
+    return found
+
+
+def _with_line(resolved, line_id, count):
+    """A presence ResolvedItem retargeted to another line of the same position."""
+    return replace(
+        resolved,
+        requirement=replace(resolved.requirement, definition_id=line_id, expected_quantity=count),
+        effective_quantity=count,
+    )
+
+
+def _presence_rows(organization_id, vehicle_id, as_of):
+    """(template order, ResolvedItem, version id, unit key, placement order) per kit list line.
+
+    The lines of the vehicle's kit list in force at as_of for each definition a bound template
+    places, as the records stood (resolve_checklist), each as its presence Quantity item.
+    """
+    found = []
+    bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
+    templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
+    recorded_before = as_of + timedelta(microseconds=1)
+    for order, template in enumerate(t for t in templates if str(t.pk) in bound):
+        try:
+            resolved = resolve_checklist(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                template_id=template.pk,
+                as_of=as_of,
+                recorded_before=recorded_before,
+            )
+        except (NoEffectiveVersionError, ResolutionError):
+            continue
+        definitions = {
+            str(pk): str(item)
+            for pk, item in KitDefinition.objects.filter(
+                pk__in=[p.definition_id for p in resolved.placements]
+            ).values_list("pk", "presence_item_id")
+        }
+        for placement in resolved.placements:
+            for line in placement.lines:
+                item = presence_resolved_item(
+                    organization_id,
+                    resolved,
+                    line.requirement_id,
+                    definitions[placement.definition_id],
+                    as_of,
+                )
+                if item is None:
+                    continue
+                unit = line_unit_keys([line.requirement_id])[line.requirement_id]
+                found.append(
+                    (order, item, str(resolved.template_version_id), unit, placement.display_order)
+                )
+    return found
+
+
 def _kits_at(organization_id, vehicle_id, reference_kit_id, as_of, slots):
     """(kit id, label) of the vehicle's kits in the reference kit's slot, from assignment history.
 
@@ -238,7 +328,7 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *,
                 key=lambda s: (
                     s.obligation.due_at,
                     s.obligation.item_id,
-                    s.obligation.kit_instance_id or NO_KIT,
+                    s.obligation.unit_key,
                     s.obligation.id,
                 ),
             )
@@ -253,7 +343,7 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *,
     for state in states:
         if _missed(state, as_of):
             continue
-        key = (state.obligation.item_id, state.obligation.kit_instance_id or NO_KIT)
+        key = (state.obligation.item_id, state.obligation.unit_key)
         current = best.get(key)
         if current is None or (_rank(state), state.obligation.due_at) < (
             _rank(current),
@@ -345,7 +435,7 @@ def _ordered_rows(organization_id, vehicle_id, placed, obligations):
         placed.append(
             (
                 len(placed),
-                row.requirement.display_order,
+                (row.requirement.display_order,),
                 obligation.item_id,
                 obligation.kit_instance_id,
                 pin.kit_instance.label if pin.kit_instance_id else None,
@@ -365,7 +455,11 @@ def _placements(organization_id, vehicle_id, as_of):
             "pk", "label"
         )
     )
-    placed = []  # (order, display_order, item_id, kit id, kit label, ResolvedItem, version id)
+    # (order, display key, item_id, kit id, kit label, ResolvedItem, version id). The display key
+    # is a tuple: (display_order,) for a checklist item; for a placed kit definition, its
+    # placement's order, then 0 for a presence line or 1 for kit content, then the entry's order,
+    # so each kit's presence line comes before its contents (KDEF-10).
+    placed = []
     slots = {}
     for item_id, (order, resolved, version_id) in items.items():
         requirement = resolved.requirement
@@ -375,7 +469,7 @@ def _placements(organization_id, vehicle_id, as_of):
                 placed.append(
                     (
                         order,
-                        requirement.display_order,
+                        (requirement.display_order,),
                         item_id,
                         kit_id,
                         kit_label,
@@ -385,11 +479,18 @@ def _placements(organization_id, vehicle_id, as_of):
                 )
         else:
             placed.append(
-                (order, requirement.display_order, item_id, None, None, resolved, version_id)
+                (order, (requirement.display_order,), item_id, None, None, resolved, version_id)
             )
     # Content of kits placed by definition (issue #129): one row per kit of that definition.
     present = {(row[2], row[3]) for row in placed}
-    for order, resolved, version_id, kits in _placed_content(organization_id, vehicle_id, as_of):
+    content = _placed_content(organization_id, vehicle_id, as_of)
+    placement_order = dict(
+        ChecklistKitPlacement.objects.filter(
+            pk__in={entry[1].requirement.kit_id for entry in content}
+        ).values_list("pk", "display_order")
+    )
+    placement_order = {str(pk): value for pk, value in placement_order.items()}
+    for order, resolved, version_id, kits in content:
         item_id = str(resolved.requirement.item_id)
         for kit_id, kit_label in kits:
             if (item_id, kit_id) in present:
@@ -398,10 +499,32 @@ def _placements(organization_id, vehicle_id, as_of):
             placed.append(
                 (
                     order,
-                    resolved.requirement.display_order,
+                    (
+                        placement_order[str(resolved.requirement.kit_id)],
+                        1,
+                        resolved.requirement.display_order,
+                    ),
                     item_id,
                     kit_id,
                     kit_label,
+                    resolved,
+                    version_id,
+                )
+            )
+    # Kit presence (KDEF-10, KDEF-12): one row per kit list line; its key is the line's unit key.
+    for order, resolved, version_id, unit, placement_display in _presence_rows(
+        organization_id, vehicle_id, as_of
+    ):
+        item_id = str(resolved.requirement.item_id)
+        if (item_id, unit) not in present:
+            present.add((item_id, unit))
+            placed.append(
+                (
+                    order,
+                    (placement_display, 0, resolved.requirement.display_order),
+                    item_id,
+                    unit,
+                    None,
                     resolved,
                     version_id,
                 )
@@ -433,19 +556,24 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=Fals
     attention = attention_states(keys, checks, facts)
     newest = latest_checks(checks)
     dtos = _deficiency_dtos(organization_id, facts, as_of)
+    pinned = _pinned_presence_lines(placed, keys, obligations)
     rows = []
     for (_order, _display, item_id, kit_id, kit_label, resolved, version_id), key in zip(
         placed, keys, strict=True
     ):
-        requirement = resolved.requirement
         state = obligations.get(key)
+        if key in pinned:
+            # The shown obligation pins an earlier line of this position: count against it.
+            resolved = _with_line(resolved, *pinned[key])
+        requirement = resolved.requirement
         att = attention[key]
         last = newest.get(key)
         rows.append(
             ChecklistRow(
                 item_id=item_id,
                 item_label=labels.get(item_id, ""),
-                kit_id=str(kit_id) if kit_id else None,
+                # A presence row's internal key is its line's unit key, never a kit.
+                kit_id=str(kit_id) if kit_id and requirement.source != PRESENCE_SOURCE else None,
                 kit_label=kit_label,
                 definition_id=str(requirement.definition_id),
                 kind=requirement.kind,
@@ -468,6 +596,11 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=Fals
                 allowed_outcomes=tuple(requirement.allowed_outcomes),
                 obligation_outcome=state.outcome if state else None,
                 obligation_completed_at=state.completed_at if state else None,
+                kit_requirement_id=(
+                    str(requirement.definition_id)
+                    if requirement.source == PRESENCE_SOURCE
+                    else None
+                ),
                 check_suspended=state is not None and state.suspension_in_force,
                 latest_check_id=last.check_id if last else None,
                 latest_check_outcome=last.outcome if last else None,

@@ -86,6 +86,15 @@ def _shared(value):
     return value
 
 
+def _obligation_facts(obligation):
+    """The obligation's stored facts; kit_key only when it is a presence unit key (KDEF-12), so
+    every other obligation's facts, and so its digest, are unchanged."""
+    facts = asdict(obligation)
+    if facts.get("kit_key") is None:
+        facts.pop("kit_key", None)
+    return facts
+
+
 def _restore(kind, values):
     values = dict(values)
     for key in DATE_FIELDS & values.keys():
@@ -299,7 +308,7 @@ def compile_history(history, instant):
         result[obligation.id] = _json(
             {
                 "version": FACTS_VERSION,
-                "obligation": asdict(obligation),
+                "obligation": _obligation_facts(obligation),
                 "checks": [asdict(c) for c in by_check.get(obligation.id, ())],
                 "determinations": [asdict(d) for d in determinations.get(obligation.id, ())],
                 "statuses": [asdict(status)] if status else [],

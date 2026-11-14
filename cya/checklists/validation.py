@@ -128,6 +128,12 @@ def validate_definition(organization_id, spec):
     item_id = reference(spec, "item_id", Item, organization_id)
     if not Item.objects.get(pk=item_id).active:
         raise ChecklistValidationError(f"item {item_id} is inactive")
+    # Imported late: the kits app depends on checklists.
+    from cya.kits.models import KitDefinition
+
+    if KitDefinition.objects.filter(presence_item_id=item_id).exists():
+        # SPEC 2.0.0 KDEF-12: a presence item is used only for kit presence checks.
+        raise ChecklistValidationError(f"item {item_id} is a kit presence item")
     compartment = reference(spec, "compartment_id", Compartment, organization_id)
     system = reference(spec, "system_id", VehicleSystem, organization_id)
     kit = reference(spec, "kit_id", KitInstance, organization_id)

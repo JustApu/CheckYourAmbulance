@@ -7,6 +7,7 @@ from django.db.models import Exists, F, OuterRef, Q, Subquery
 
 from cya.accounts.fields import new_id
 from cya.checks.models import CheckEvent, CheckObligationLink
+from cya.kits.presence import line_unit_keys
 from cya.obligations.models import (
     Obligation,
     ObligationSelection,
@@ -45,6 +46,7 @@ def _eligible(
     late,
     include_satisfied=False,
     ignore_root_check_id=None,
+    kit_requirement_id=None,
 ):
     selected = (
         ObligationSelection.objects.filter(
@@ -84,6 +86,8 @@ def _eligible(
         kit_key=kit_key,
         recorded_at__lte=recorded_at,
     ).annotate(selected_id=Subquery(selected))
+    if kit_requirement_id is not None:
+        candidates = candidates.filter(requirement_version__kit_requirement_id=kit_requirement_id)
     if late:
         # SCH-2: only up to the obligation's pinned late limit L (inclusive); older ones stay
         # missed. The range on late_limit_at keeps the read off the item's settled history
@@ -114,12 +118,25 @@ def _current_rule(organization_id, recorded_at):
 
 
 def _scope(check, recorded_at):
-    kit_key = str(check.kit_id) if check.kit_id else "00000000-0000-0000-0000-000000000000"
+    """The obligation stream a check can satisfy: its item and its unit key.
+
+    The unit key is the check's kit, or for a kit presence check its line's unit key, which
+    obligations of that line carry as kit_key (SPEC 2.0.0 KDEF-12). A presence check is then
+    eligible only for obligations whose requirement version pins that same line.
+    """
+    kit_requirement = getattr(check, "kit_requirement_id", None)
+    if check.kit_id:
+        kit_key = str(check.kit_id)
+    elif kit_requirement:
+        kit_key = line_unit_keys([kit_requirement])[str(kit_requirement)]
+    else:
+        kit_key = "00000000-0000-0000-0000-000000000000"
     return {
         "organization_id": str(check.organization_id),
         "vehicle_id": str(check.vehicle_id),
         "item_id": str(check.item_id),
         "kit_key": kit_key,
+        "kit_requirement_id": str(kit_requirement) if kit_requirement else None,
         "recorded_at": recorded_at,
     }
 

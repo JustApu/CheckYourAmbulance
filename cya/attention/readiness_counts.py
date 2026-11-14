@@ -34,7 +34,6 @@ from cya.obligations.current import (
 from cya.obligations.models import Obligation, ObligationProjection, ObligationSelection
 from cya.obligations.projections import MAX_ROWS, _bounded
 from cya.obligations.state import (
-    NO_KIT,
     CheckEvidence,
     DeterminationEvidence,
     ObligationEvidence,
@@ -48,7 +47,7 @@ MISSED_AGE = timedelta(days=7)
 
 
 def _key(obligation):
-    return (obligation.item_id, obligation.kit_instance_id or NO_KIT)
+    return (obligation.item_id, obligation.unit_key)
 
 
 def retirement_dispositions(organization_id, obligation_ids, at):

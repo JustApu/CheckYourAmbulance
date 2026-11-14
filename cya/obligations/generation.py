@@ -29,6 +29,7 @@ from cya.accounts.fields import new_id
 from cya.checklists.models import (
     ChecklistPublication,
     ChecklistTemplate,
+    KitInstance,
     Vehicle,
 )
 from cya.checks.linking import captured_late_seconds
@@ -181,10 +182,11 @@ def _ensure_requirement_versions(plan, evidence):
             schedule_rule_id=d.schedule_rule_id,
             conditional_rule_id=d.conditional_rule_id,
             kit_instance_id=d.kit_id,
-            kit_key=d.kit_id or NO_KIT,
+            kit_key=d.key[1],
             kit_event_id=d.kit_event_id,
             kit_definition_item_id=d.kit_definition_item_id,
             placement_id=d.placement_id,
+            kit_requirement_id=d.kit_requirement_id,
             **evidence,
         )
         for rid, d in wanted.items()
@@ -256,13 +258,21 @@ def _apply(receipt, actor, plan, trigger, publication_id):
         for a in plan.actions
         if a.desired is not None
     )
+    # A kit_key is a kit instance, NO_KIT, or a kit presence line's unit key (KDEF-12); only the
+    # first names a physical kit.
+    instances = set(
+        KitInstance.objects.filter(
+            pk__in={a.kit_key for a in plan.actions if a.kit_key != NO_KIT}
+        ).values_list("pk", flat=True)
+    )
+    instances = {str(pk) for pk in instances}
     ObligationSelection.objects.bulk_create(
         ObligationSelection(
             id=new_id(),
             organization_id=plan.organization_id,
             vehicle_id=plan.vehicle_id,
             item_id=a.item_id,
-            kit_instance_id=None if a.kit_key == NO_KIT else a.kit_key,
+            kit_instance_id=a.kit_key if a.kit_key in instances else None,
             kit_key=a.kit_key,
             due_at=plan.due_at,
             sequence=a.tail_sequence + 1,

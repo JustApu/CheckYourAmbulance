@@ -612,7 +612,10 @@ def correction_scope(organization_id, deficiency, now):
         for affected in reported:
             # The report-time definition is part of the immutable affected-item snapshot. Keep
             # that definition even if later publications remove or re-place the item.
-            if affected.kit_definition_item_id:
+            if affected.kit_requirement_id:
+                # A kit presence line (KDEF-12): the line's presence item itself, no kit.
+                selected.append((affected, str(affected.kit_requirement_id), None))
+            elif affected.kit_definition_item_id:
                 # Placed kit content: every active kit on the vehicle with that definition now.
                 definition_id = affected.kit_definition_item.version.definition_id
                 own = KitInstance.objects.filter(
@@ -784,6 +787,7 @@ def end_suspensions(receipt, current, *, organization_id, event):
             item_id=start.item_id,
             definition_id=start.definition_id,
             kit_definition_item_id=start.kit_definition_item_id,
+            kit_requirement_id=start.kit_requirement_id,
             kit_instance_id=start.kit_instance_id,
             instance_key=start.instance_key,
             action="END",

@@ -162,17 +162,23 @@ def placed_contents(organization_id, resolved, item_id, at, recorded_before=None
 
 
 def placed_content_item_ids(placements):
-    """Every item any published version of the placed definitions lists (for item locks)."""
+    """Items checks of the placed definitions need locks for: every item any published version
+    lists, and each definition's presence item (KDEF-12)."""
     from cya.kits.models import KitDefinitionItem
 
-    return list(
+    definition_ids = [p.definition_id for p in placements]
+    contents = (
         KitDefinitionItem.objects.filter(
-            version__definition_id__in=[p.definition_id for p in placements],
+            version__definition_id__in=definition_ids,
             version__in=KitDefinitionPublication.objects.values("version_id"),
         )
         .values_list("item_id", flat=True)
         .distinct()
     )
+    presence = KitDefinition.objects.filter(pk__in=definition_ids).values_list(
+        "presence_item_id", flat=True
+    )
+    return list({*contents, *presence})
 
 
 def placed_items(organization_id, resolved, at, recorded_before=None):
@@ -211,7 +217,16 @@ def is_kit_content(definition_id):
 
 
 def content_columns(definition_id):
-    """The {definition_id, kit_definition_item_id} pair for a scope row from one content id."""
+    """A scope row's content source columns from one content id.
+
+    The id names a checklist item definition, a placed kit definition's content entry, or (for
+    a kit presence check, KDEF-12) a kit list line; exactly one column is set.
+    """
+    from cya.kits.models import VehicleKitRequirement
+
+    columns = {"definition_id": None, "kit_definition_item_id": None, "kit_requirement_id": None}
     if is_kit_content(definition_id):
-        return {"definition_id": None, "kit_definition_item_id": str(definition_id)}
-    return {"definition_id": str(definition_id), "kit_definition_item_id": None}
+        return columns | {"kit_definition_item_id": str(definition_id)}
+    if VehicleKitRequirement.objects.filter(pk=definition_id).exists():
+        return columns | {"kit_requirement_id": str(definition_id)}
+    return columns | {"definition_id": str(definition_id)}

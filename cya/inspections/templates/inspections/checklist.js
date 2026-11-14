@@ -46,7 +46,10 @@
         instant.toISOString().replace(/\.000Z$/, " UTC").replace(/Z$/, " UTC").replace("T", " ");
     }
   }
-  function key(row) { return row.item_id + "|" + (row.kit_id || ""); }
+  // A kit presence row (KDEF-12) has no kit; its kit list line tells two lines of one kit apart.
+  function key(row) {
+    return row.item_id + "|" + (row.kit_id || "") + (row.kit_requirement_id ? "|" + row.kit_requirement_id : "");
+  }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
   function restoreFocusIntent() {
     if (!focusIntent) { return; }
@@ -132,6 +135,7 @@
       p.verification_for_deficiency_id = config.verification_for_deficiency_id;
     }
     if (row.kit_id) { p.kit_id = row.kit_id; }
+    if (row.kit_requirement_id) { p.kit_requirement_id = row.kit_requirement_id; }
     if (entry.acknowledges) { p.acknowledges_check_id = entry.acknowledges; }
     if (entry.outcome) { p.outcome = entry.outcome; }
     if (entry.outcome !== "UNABLE_TO_INSPECT") {

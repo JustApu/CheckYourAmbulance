@@ -70,6 +70,23 @@ def kit_key_matches(name):
     )
 
 
+def unit_key_matches(name):
+    """kit_key on obligation and selection rows: the kit instance, or any other unit key.
+
+    An item inside a kit uses its instance id. Otherwise the key is NO_KIT, or for a kit
+    presence obligation its line's unit key (SPEC 2.0.0 KDEF-12). Which one is enforced on the
+    requirement version (reqversion_kit_key); these rows reach it through the composite anchor
+    keys, so their kit_key always equals their requirement's.
+    """
+    return models.CheckConstraint(
+        condition=(
+            models.Q(kit_instance__isnull=True)
+            | models.Q(kit_instance__isnull=False, kit_instance=models.F("kit_key"))
+        ),
+        name=name,
+    )
+
+
 def actor_kind(name):
     """Exactly the receipt's two cases: a human actor, or a named worker with its job key."""
     return models.CheckConstraint(
@@ -188,6 +205,15 @@ class RequirementVersion(Evidence):
         # Enforced by the organization-pair key of migration 0015, as for the other columns.
         db_constraint=False,
     )
+    # A kit presence requirement's kit list line (SPEC 2.0.0 KDEF-10, KDEF-12).
+    kit_requirement = models.ForeignKey(
+        "cya_kits.VehicleKitRequirement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0016.
+        db_constraint=False,
+    )
     publication = models.ForeignKey(
         "cya_checklists.ChecklistPublication", on_delete=models.PROTECT, related_name="+"
     )
@@ -236,7 +262,20 @@ class RequirementVersion(Evidence):
                 ),
                 name="reqversion_origin",
             ),
-            kit_key_matches("reqversion_kit_key"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        kit_instance__isnull=True, kit_requirement__isnull=True, kit_key=NO_KIT
+                    )
+                    | models.Q(kit_instance__isnull=False, kit_instance=models.F("kit_key"))
+                    # A kit presence requirement: no instance, its line's unit key (KDEF-12).
+                    | (
+                        models.Q(kit_instance__isnull=True, kit_requirement__isnull=False)
+                        & ~models.Q(kit_key=NO_KIT)
+                    )
+                ),
+                name="reqversion_kit_key",
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(kit_instance__isnull=True, kit_event__isnull=True)
@@ -251,12 +290,22 @@ class RequirementVersion(Evidence):
                         item_def__isnull=False,
                         kit_definition_item__isnull=True,
                         placement__isnull=True,
+                        kit_requirement__isnull=True,
                     )
                     | models.Q(
                         item_def__isnull=True,
                         kit_definition_item__isnull=False,
                         placement__isnull=False,
                         kit_instance__isnull=False,
+                        kit_requirement__isnull=True,
+                    )
+                    # A kit presence requirement (KDEF-12): the line and the placement.
+                    | models.Q(
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=True,
+                        placement__isnull=False,
+                        kit_instance__isnull=True,
+                        kit_requirement__isnull=False,
                     )
                 ),
                 name="reqversion_content_source",
@@ -399,7 +448,7 @@ class Obligation(Evidence):
                 ),
                 name="obligation_origin",
             ),
-            kit_key_matches("obligation_kit_key"),
+            unit_key_matches("obligation_kit_key"),
             models.CheckConstraint(
                 condition=models.Q(early_at__lte=models.F("due_at"))
                 & models.Q(due_at__lte=models.F("grace_at")),
@@ -484,7 +533,7 @@ class ObligationSelection(Evidence):
             models.UniqueConstraint(
                 fields=["id", "vehicle", "item", "kit_key", "due_at"], name="selection_anchor_id"
             ),
-            kit_key_matches("selection_kit_key"),
+            unit_key_matches("selection_kit_key"),
             actor_kind("selection_actor_kind"),
             models.CheckConstraint(condition=models.Q(sequence__gte=1), name="selection_sequence"),
             models.CheckConstraint(

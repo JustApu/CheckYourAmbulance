@@ -46,6 +46,15 @@ class CheckRecord(Evidence):
         # Enforced by the organization-pair key of migration 0012.
         db_constraint=False,
     )
+    # A kit presence check: the kit list line it counted (SPEC 2.0.0 KDEF-12, section 7.2).
+    kit_requirement = models.ForeignKey(
+        "cya_kits.VehicleKitRequirement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0013.
+        db_constraint=False,
+    )
     checklist_version = models.ForeignKey(
         ChecklistVersion, on_delete=models.PROTECT, related_name="+"
     )
@@ -93,9 +102,23 @@ class CheckRecord(Evidence):
             models.CheckConstraint(condition=models.Q(outcome__in=OUTCOMES), name="check_outcome"),
             models.CheckConstraint(
                 condition=(
-                    models.Q(item_def__isnull=False, kit_definition_item__isnull=True)
+                    models.Q(
+                        item_def__isnull=False,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                    )
                     | models.Q(
-                        item_def__isnull=True, kit_definition_item__isnull=False, kit__isnull=False
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=False,
+                        kit__isnull=False,
+                        kit_requirement__isnull=True,
+                    )
+                    # A kit presence check names the kit list line it counted (KDEF-12).
+                    | models.Q(
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit__isnull=True,
+                        kit_requirement__isnull=False,
                     )
                 ),
                 name="check_content_source",
