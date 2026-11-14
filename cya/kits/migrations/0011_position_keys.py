@@ -56,7 +56,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ("cya_accounts", "0002_identity_guards"),
         ("cya_core", "0006_audit_action_command_type_guard"),
-        ("cya_kits", "0008_kit_definition_item_id_item"),
+        ("cya_kits", "0010_kit_presence_item_guards"),
     ]
 
     operations = [
