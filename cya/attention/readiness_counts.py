@@ -34,7 +34,6 @@ from cya.obligations.current import (
 from cya.obligations.models import Obligation, ObligationProjection, ObligationSelection
 from cya.obligations.projections import MAX_ROWS, _bounded
 from cya.obligations.state import (
-    NO_KIT,
     CheckEvidence,
     DeterminationEvidence,
     ObligationEvidence,

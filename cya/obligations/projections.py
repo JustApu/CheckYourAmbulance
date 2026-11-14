@@ -21,6 +21,7 @@ from cya.deficiencies.models import (
     DeficiencyAffectedItem,
     DeficiencyEvent,
 )
+from cya.kits.presence import line_unit_keys
 from cya.obligations.history import (
     RecordedCheck,
     RecordedDeficiency,
@@ -552,8 +553,19 @@ def _database_history(organization_id, vehicle_id, obligations, since, instant):
     ]
 
 
+def check_unit_key(row, units):
+    """A check's stream key: its kit, its presence line's unit key (KDEF-12), or NO_KIT."""
+    if row.kit_id:
+        return str(row.kit_id)
+    if getattr(row, "kit_requirement_id", None):
+        return units[str(row.kit_requirement_id)]
+    return NO_KIT
+
+
 def _history_fields(rows, decisions, links, supports, headers, items, events):
     """The check and deficiency evidence of one vehicle, from its database rows."""
+    rows = list(rows)
+    units = line_unit_keys({r.kit_requirement_id for r in rows if r.kit_requirement_id})
     return dict(
         check_records=tuple(
             RecordedCheck(
@@ -565,7 +577,7 @@ def _history_fields(rows, decisions, links, supports, headers, items, events):
                     r.outcome,
                 ),
                 str(r.item_id),
-                str(r.kit_id) if r.kit_id else NO_KIT,
+                check_unit_key(r, units),
                 str(r.actor_user_id) if r.actor_user_id else None,
             )
             for r in rows
