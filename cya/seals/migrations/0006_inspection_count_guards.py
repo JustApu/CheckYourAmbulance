@@ -5,6 +5,7 @@ from importlib import import_module
 from django.db import migrations
 
 previous = import_module("cya.seals.migrations.0002_evidence_guards")
+count_fields = import_module("cya.seals.migrations.0005_inspection_count_checks")
 START_GUARD = """IF NEW.start_receipt_id IS NOT NULL AND NOT EXISTS
  (SELECT 1 FROM command_receipt r JOIN seal_event e ON e.id=NEW.reseal_id
  WHERE r.id=NEW.start_receipt_id AND r.organization_id=NEW.organization_id
@@ -69,5 +70,8 @@ class Migration(migrations.Migration):
                 "ALTER TABLE seal_inspection DROP FOREIGN KEY cya_seal_inspection_start_org_fk",
                 "ALTER TABLE seal_inspection DROP INDEX cya_seal_inspection_start_org_fk",
             ],
-        )
+        ),
+        migrations.RunPython(
+            migrations.RunPython.noop, count_fields.forbid_reverse_with_count_evidence
+        ),
     ]
