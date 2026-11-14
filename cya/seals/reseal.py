@@ -220,7 +220,7 @@ def reseal(
                 if (
                     covered_kit not in assignments
                     or covered_kit in nested_ids
-                    or substitution.recorded_at < start.recorded_at
+                    or substitution.recorded_at <= start.recorded_at
                 ):
                     raise SealError("nested seal verification is outside this inspection")
                 nested_seal, pending = _event_state(
@@ -236,7 +236,11 @@ def reseal(
                     organization_id, vehicle_id, now, kit_id=covered_kit
                 )
                 blocked, suspended = seal_blockers(
-                    organization_id, deficiencies, {item.key for item in nested_scope}, at=now
+                    organization_id,
+                    deficiencies,
+                    {item.key for item in nested_scope},
+                    at=now,
+                    covered_kit_ids=nested_assignments,
                 )
                 if _eligible_seal(
                     nested_seal,
