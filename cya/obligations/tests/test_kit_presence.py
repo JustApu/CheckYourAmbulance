@@ -218,6 +218,8 @@ class PresenceCheckTests(PresenceCase):
         )
         row = CheckRecord.objects.get(pk=corrected.body["check_id"])
         self.assertEqual(str(row.kit_requirement_id), self.lines[str(self.cabinet.pk)])
+        (link,) = CheckObligationLink.objects.filter(check_record=row)
+        self.assertEqual(link.obligation.kit_key, self.unit(self.cabinet))
 
     def test_each_line_has_its_own_latest_check(self):
         """Review of the KDEF-12 keying: one line's check is never another line's latest."""

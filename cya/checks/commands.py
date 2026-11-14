@@ -1442,6 +1442,7 @@ def correct_check(
             vehicle_id=root.vehicle_id,
             item_id=root.item_id,
             kit_id=root.kit_id,
+            kit_requirement_id=root.kit_requirement_id,
         )
         try:
             links = choose_links(

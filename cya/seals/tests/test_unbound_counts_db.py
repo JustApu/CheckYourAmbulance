@@ -131,3 +131,48 @@ class UnboundKitCountTests(KitCase):
         start_inspection(vehicle_id=str(self.vehicle.pk), slot_id=self.slot, **other)
         with self.assertRaises(CheckError):
             self.check(inspection_start_operation_id=other["operation_id"])
+
+    def test_count_is_refused_when_cabinet_is_no_longer_sealable(self):
+        designate_compartment_sealable(
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(self.cabinet.pk),
+            sealable=False,
+            **self.context(self.supervisor),
+        )
+        with self.assertRaises(CheckError):
+            self.check()
+        self.assertFalse(CheckRecord.objects.filter(item_id=self.presence_item).exists())
+
+    def test_superseded_count_cannot_certify_a_reseal(self):
+        check = self.check()
+        correct_check(
+            check_id=check.body["check_id"],
+            expected_tip_check_id=check.body["check_id"],
+            outcome="PASSED",
+            quantity=1,
+            **self.context(self.crew),
+        )
+        with self.assertRaises(ValueError):
+            reseal(
+                vehicle_id=str(self.vehicle.pk),
+                slot_id=self.slot,
+                marking="cabinet-id",
+                inspected_attestation=True,
+                written_attestation=True,
+                observations=[
+                    {
+                        "item_id": str(self.kit_item.pk),
+                        "kit_id": self.kit,
+                        "outcome": "PASSED",
+                        "count": 2,
+                        "expiration": None,
+                        "measurement": None,
+                    }
+                ],
+                start_operation_id=self.start["operation_id"],
+                kit_count_checks=[
+                    {"line_id": str(self.line.pk), "check_id": check.body["check_id"]}
+                ],
+                **self.context(self.crew),
+            )
+        self.assertFalse(SealInspectionKitCount.objects.exists())
