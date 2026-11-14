@@ -3,7 +3,7 @@
 position_key is append-only (A): one key per (kind, stable slot), set once and never changed or
 removed. The schema owner adds organization-pair keys for the evidence columns, append-only
 triggers, and an insert guard: the receipt is a POSITION_KEY_SET command of the same actor and
-instant, and the stable slot exists among the organization's compartments or vehicle systems.
+instant (or a VEHICLE_IMPORT, which keys the positions it creates), and the stable slot exists among the organization's compartments or vehicle systems.
 """
 
 import django.db.models.deletion
@@ -21,7 +21,7 @@ INSERT_GUARD = f"""CREATE TRIGGER cya_position_key_bi BEFORE INSERT ON position_
 FOR EACH ROW BEGIN
 IF NOT EXISTS (SELECT 1 FROM command_receipt r WHERE r.id=NEW.command_id
  AND r.{ORG}=NEW.{ORG} AND r.actor_user_id <=> NEW.actor_user_id
- AND r.recorded_at=NEW.recorded_at AND r.command_type='POSITION_KEY_SET')
+ AND r.recorded_at=NEW.recorded_at AND r.command_type IN ('POSITION_KEY_SET','VEHICLE_IMPORT'))
 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'position key receipt attribution mismatch'; END IF;
 IF (NEW.kind='COMPARTMENT' AND NOT EXISTS (SELECT 1 FROM compartment c
   WHERE c.{ORG}=NEW.{ORG} AND c.stable_slot_id=NEW.stable_slot_id))
