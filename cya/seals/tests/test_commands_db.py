@@ -90,3 +90,22 @@ class SealEventCommandTests(KitCase):
             SealEvent.objects.filter(pk=self.seal.pk).update(marking="changed")
         with self.assertRaises(DatabaseError), transaction.atomic():
             self.seal.delete()
+
+    def test_audit_cannot_be_requested_after_the_seal_is_already_open(self):
+        broken = break_seal(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            expected_tip_id=str(self.seal.pk),
+            reason="Synthetic inspection",
+            **self.context(self.crew),
+        )
+        with self.assertRaises(SealError):
+            request_seal_audit(
+                vehicle_id=str(self.vehicle.pk),
+                kit_id=self.kit_id,
+                expected_tip_id=broken.body["event_id"],
+                **self.context(self.supervisor),
+            )
+        self.assertFalse(
+            SealEvent.objects.filter(kit_id=self.kit_id, event_type="AUDIT_REQUEST").exists()
+        )

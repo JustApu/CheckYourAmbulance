@@ -12,6 +12,7 @@ from cya.checks.api import Rejected, _reply
 from cya.deficiencies.api import _json_body, _run
 from cya.seals import readers
 from cya.seals.commands import (
+    SealAuditOpen,
     SealConflict,
     SealError,
     break_seal,
@@ -62,6 +63,8 @@ def command(request, action):
             )
         except SealConflict:
             raise Rejected(409, "SEAL_CHANGED") from None
+        except SealAuditOpen:
+            raise Rejected(422, "AUDIT_REQUIRES_SEAL") from None
         except (SealLockError, SealScopeError):
             raise Rejected(503, "CONFIGURATION_UNAVAILABLE") from None
         except (SealError, ValueError):

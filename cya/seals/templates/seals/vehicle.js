@@ -68,6 +68,7 @@
         pending = null;
         show(answer.body.code === "SEAL_CHANGED" ? "The seal changed. Refresh and try again." :
           answer.body.code === "FORBIDDEN" ? "You are not permitted to perform this action." :
+          answer.body.code === "AUDIT_REQUIRES_SEAL" ? "The open seal already needs a full inspection before resealing." :
           "The action was not recorded. Check the seal and the information entered, then try again.");
         return;
       }
@@ -274,7 +275,12 @@
         if (subject.state === "SEALED") { box.appendChild(button("Verify seal", function () { verify(subject); })); }
         if (subject.state !== "OPEN") { box.appendChild(button("Break seal", function () { breakSeal(subject); })); }
         if (subject.state === "OPEN") { box.appendChild(button("Inspect and reseal", function () { inspect(subject); })); }
-        if (config.can_request_audit && !subject.audit_pending) { box.appendChild(button("Request audit", function () { audit(subject); })); }
+        if (config.can_request_audit && !subject.audit_pending && subject.state !== "OPEN") {
+          box.appendChild(button("Request audit", function () { audit(subject); }));
+        }
+        if (config.can_request_audit && subject.state === "OPEN" && !subject.audit_pending) {
+          box.appendChild(element("p", "This open seal needs a full inspection before resealing."));
+        }
         list.appendChild(box);
       });
     }).catch(function () { if (sequence === loadSequence) { show("Seal status is unavailable. Refresh and try again."); } });

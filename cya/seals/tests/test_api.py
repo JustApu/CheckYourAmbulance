@@ -8,7 +8,7 @@ from uuid import uuid4
 from django.test import RequestFactory, SimpleTestCase
 
 from cya.seals.api import ACTIONS, command, inspection_scope, vehicle_subjects
-from cya.seals.commands import SealConflict
+from cya.seals.commands import SealAuditOpen, SealConflict
 from cya.seals.locking import SealLockError
 from cya.seals.scope import SealScopeError
 
@@ -67,6 +67,15 @@ class SealApiTests(SimpleTestCase):
                 response = command(self.request(self.body, self.user), "verify")
                 self.assertEqual(response.status_code, 503)
                 self.assertEqual(json.loads(response.content)["code"], "CONFIGURATION_UNAVAILABLE")
+
+    def test_open_audit_refusal_is_actionable(self):
+        with patch.dict(
+            ACTIONS,
+            {"verify": (Mock(side_effect=SealAuditOpen("open")), ACTIONS["verify"][1])},
+        ):
+            response = command(self.request(self.body, self.user), "verify")
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(json.loads(response.content)["code"], "AUDIT_REQUIRES_SEAL")
 
     def test_read_views_are_authenticated_and_use_current_organization(self):
         vehicle_id, kit_id = str(uuid4()), str(uuid4())

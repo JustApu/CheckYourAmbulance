@@ -25,13 +25,13 @@ function find(root, predicate) {
   for (const child of root.children) { const found = find(child, predicate); if (found) return found; }
   return null;
 }
-function page(subject, deferSubjects = false) {
+function page(subject, deferSubjects = false, canRequestAudit = false) {
   const requests = [], elements = {}, sockets = [];
   for (const id of ["seal-subjects", "seal-work", "seal-form", "seal-message", "seal-work-heading", "seal-cancel"]) {
     elements[id] = new Node("div");
   }
   const config = {vehicle_id: "vehicle", subjects_url: "/subjects", scope_url: "/scope/KIND/SUBJECT",
-    command_url: "/command/ACTION", checks_url: "/checks", socket_url: "/socket", can_request_audit: false,
+    command_url: "/command/ACTION", checks_url: "/checks", socket_url: "/socket", can_request_audit: canRequestAudit,
     report_options: {categories: [], severities: []}};
   const document = {
     createElement: tag => new Node(tag),
@@ -54,6 +54,12 @@ function page(subject, deferSubjects = false) {
 }
 
 (async () => {
+  {
+    const p = page({kind: "kit", id: "kit", label: "Sample", state: "OPEN", tip_id: null}, false, true);
+    await tick(); await tick();
+    assert.equal(find(p.elements["seal-subjects"], n => n.textContent === "Request audit"), null);
+    assert.ok(find(p.elements["seal-subjects"], n => /full inspection before resealing/.test(n.textContent)));
+  }
   {
     const p = page(null, true);
     p.sockets[0].onmessage();

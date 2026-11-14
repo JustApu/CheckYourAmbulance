@@ -26,6 +26,10 @@ class SealConflict(SealError):
     """The seal stream changed since the caller read it."""
 
 
+class SealAuditOpen(SealError):
+    """An open subject must be fully inspected before it can receive an audit request."""
+
+
 def _subject(organization_id, vehicle_id, kit_id, slot_id, *, require_sealable):
     vehicle = (
         Vehicle.objects.select_for_update()
@@ -136,6 +140,8 @@ def _append_event(
             raise SealError("there is no intact seal to break")
         if event_type == "AUDIT_REQUEST" and pending:
             raise SealError("a full audit is already pending")
+        if event_type == "AUDIT_REQUEST" and seal is None:
+            raise SealAuditOpen("the open seal already requires a full inspection before reseal")
         event_id = new_id()
 
         def apply(receipt, current):

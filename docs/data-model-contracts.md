@@ -689,7 +689,8 @@ from §3.3 are denied rather than inferred from HTTP verbs.
 Commands compare the expected event tip; verification requires the entered marking
 and intact attestation. Reseal supplies fresh observations, attestations and, for a
 cabinet, inspection-start and line-check evidence. Audit requests require Supervisor
-or Administrator. `GET /api/v1/vehicles/{vehicle}/seals` lists seal subjects, and
+or Administrator and an intact seal; an already open subject requires a full inspection
+before resealing. `GET /api/v1/vehicles/{vehicle}/seals` lists seal subjects, and
 `GET /api/v1/vehicles/{vehicle}/seals/{kit|slot}/{subject}` supplies the current
 inspection scope. Stale tips give 409; invalid requests give 422 and unavailable
 configuration fails closed. Seal commands never claim to resolve a deficiency.
