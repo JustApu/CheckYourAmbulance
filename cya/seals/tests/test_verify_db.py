@@ -18,6 +18,7 @@ from cya.seals.models import (
     SealEvent,
     SealInspection,
     SealInspectionItem,
+    SealSubstitution,
     SealSubstitutionObligation,
 )
 
@@ -142,3 +143,34 @@ class VerifySealTests(KitCase):
         events = list(SealEvent.objects.filter(kit_id=self.kit_id).order_by("sequence"))
         self.assertEqual([event.event_type for event in events], ["RESEAL", "BREAK"])
         self.assertEqual(events[1].prior_event_id, events[0].pk)
+
+    def test_concurrent_verification_never_commits_after_a_break(self):
+        barrier = Barrier(2)
+        contexts = [self.context(self.crew), self.context(self.supervisor)]
+
+        def attempt(index):
+            try:
+                barrier.wait(timeout=10)
+                common = {
+                    "vehicle_id": str(self.vehicle.pk),
+                    "kit_id": self.kit_id,
+                    "expected_tip_id": str(self.seal.pk),
+                }
+                if index:
+                    return break_seal(reason="Synthetic inspection", **common, **contexts[index])
+                return verify_seal(marking="sample", attested=True, **common, **contexts[index])
+            except SealConflict as error:
+                return error
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            verify_result, break_result = list(pool.map(attempt, range(2)))
+        self.assertNotIsInstance(break_result, SealConflict)
+        broken = SealEvent.objects.get(kit_id=self.kit_id, event_type="BREAK")
+        substitutions = SealSubstitution.objects.filter(seal_event=self.seal)
+        if isinstance(verify_result, SealConflict):
+            self.assertFalse(substitutions.exists())
+        else:
+            self.assertEqual(substitutions.count(), 1)
+            self.assertLess(substitutions.get().recorded_at, broken.recorded_at)

@@ -123,7 +123,7 @@ Issue #131 slice 1 records which cabinets and kits are sealed (SPEC §10.1 SEAL-
 
 `kit_sealable(organization_id, kit_ids, at)` answers which kits were sealed at an instant, from `kit_seal_designation` only, for at most 2000 kits per call. A compartment's designation at an instant is the `sealable` flag of the revision `vehicle_slots` returns for that instant.
 
-Designations do not change obligations, checks or kit assignment history. Substituting an intact seal for checking contents (SEAL-4, CAB-4), and breaking and resealing, are a later slice built on one shared seal model (OQ-66). The paper checklist already prints seal rows from the designations; see [crew inspection screens](crew-inspection-ui.md#paper-checklists-for-outages). There is no designation screen yet; setting up compartments and kits is issue #130.
+Designations do not themselves change obligations, checks or kit assignment history. The shared seal workflow records verification, break, full inspection and reseal for designated cabinets and kits (SEAL-4, CAB-4); see the [seal command contracts](data-model-contracts.md#seal-commands-and-query-results). The paper checklist prints seal rows from the designations; see [crew inspection screens](crew-inspection-ui.md#paper-checklists-for-outages). There is no designation screen yet; setting up compartments and kits is issue #130.
 
 
 ## Kit definitions

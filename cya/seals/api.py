@@ -19,7 +19,9 @@ from cya.seals.commands import (
     start_inspection,
     verify_seal,
 )
+from cya.seals.locking import SealLockError
 from cya.seals.reseal import reseal
+from cya.seals.scope import SealScopeError
 
 SUBJECT = frozenset({"operation_id", "vehicle_id"})
 OPTIONAL_SUBJECT = frozenset({"kit_id", "slot_id", "expected_tip_id"})
@@ -60,6 +62,8 @@ def command(request, action):
             )
         except SealConflict:
             raise Rejected(409, "SEAL_CHANGED") from None
+        except (SealLockError, SealScopeError):
+            raise Rejected(503, "CONFIGURATION_UNAVAILABLE") from None
         except (SealError, ValueError):
             raise Rejected(422, "INVALID_SEAL_REQUEST") from None
         return body["operation_id"], result, lambda stored: stored.body
