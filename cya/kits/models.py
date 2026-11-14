@@ -387,3 +387,37 @@ class VehicleKitListPublication(Evidence):
 
     def __str__(self):
         return f"VehicleKitListPublication {self.pk}"
+
+
+POSITION_KINDS = ("COMPARTMENT", "SYSTEM")
+
+
+class PositionKey(Evidence):
+    """The organization-wide key of a compartment or vehicle-system position (SPEC 2.1.0 IMP-6).
+
+    A position is a stable slot: every vehicle's row of it shares its stable_slot_id, and so
+    shares this key. Append-only: a key is set once and never changed or removed.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    kind = models.CharField(max_length=12)
+    stable_slot_id = IdentityIDField()
+    key = models.CharField(max_length=MAX_KEY, db_collation="ascii_bin")
+
+    class Meta:
+        db_table = "position_key"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="poskey_org_id"),
+            models.UniqueConstraint(
+                fields=["organization", "kind", "stable_slot_id"], name="poskey_slot"
+            ),
+            models.UniqueConstraint(fields=["organization", "kind", "key"], name="poskey_key"),
+            models.CheckConstraint(condition=models.Q(kind__in=POSITION_KINDS), name="poskey_kind"),
+            models.CheckConstraint(
+                condition=models.Q(key__regex=r"^[a-z0-9][a-z0-9._-]*$"), name="poskey_format"
+            ),
+        ]
+
+    def __str__(self):
+        return f"PositionKey {self.pk}"

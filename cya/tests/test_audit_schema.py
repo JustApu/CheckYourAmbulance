@@ -60,6 +60,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "kit_seal_designation",
                     "kit_definition_publication",
                     "vehicle_kit_list_publication",
+                    "position_key",
                     "kit_instance_definition",
                 },
             )

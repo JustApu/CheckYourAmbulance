@@ -460,6 +460,16 @@
         "Supply Officer": "deny",
         "Administrator": "allow"
       }
+    },
+    {
+      "id": "PERM-45",
+      "action": "set_configuration_keys",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
     }
   ]
 }

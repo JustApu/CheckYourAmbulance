@@ -61,7 +61,7 @@ Every mutable change has an audit entry in the same transaction.
 | `user` | M | idp_issuer, idp_subject, email, display_name, active; identity tuple unique; no hard delete |
 | `role_grant` | A | user_id ref, role (canonical: `CREW`, `SUPERVISOR`, `SUPPLY_OFFICER`, `ADMINISTRATOR`; legacy `EMT` accepted for historical evidence and read as Crew, not for new grants), action (`GRANT`, `REVOKE`), prior_grant_id? ref; revocation is a new row, never a filled-in revoked_at |
 | `user_preference` | M | user_id ref unique, preferred_view, needs_attention_only; per crew member across devices |
-| `vehicle` | M | display_name, number?, active; operational status is not stored here as authority |
+| `vehicle` | M | display_name, number?, active, key? (the VIN: 17 characters without I, O or Q, uppercase, unique per organization, set once and then immutable; SPEC 2.1.0 IMP-6); operational status is not stored here as authority |
 | `compartment`, `vehicle_system` | V | stable_slot_id, vehicle_id ref, revision, label, effective_at; unique slot/revision; compartment also has sealable (SPEC 10.2 CAB-1, [issue #131](https://github.com/JustApu/CheckYourAmbulance/issues/131)), changed only by a new revision |
 | `kit_instance` | M | label, active, vehicle_id? ref, compartment_id? ref; identity retained on checks; R1 has assignment, no movement workflow |
 | `kit_assignment_event` | A | kit_id ref, vehicle_id? ref, compartment_id? ref, active, effective_at, recorded_at, actor, command_id ref (SPEC amendment 1.10.0, OQ-54; implemented by [issue #92](https://github.com/JustApu/CheckYourAmbulance-archive/issues/92)); effective_at is never before recorded_at; `kit_instance`'s vehicle, compartment and active become a rebuildable projection of the latest event; `kit_movement` (R2) extends it |
@@ -75,6 +75,7 @@ Every mutable change has an audit entry in the same transaction.
 | `vehicle_kit_list_version` | V | vehicle_id ref, revision, created_at; unique vehicle/revision; published iff a `vehicle_kit_list_publication` names it, then frozen (SPEC 4.6 KDEF-9, [issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129)) |
 | `vehicle_kit_requirement` | V | version_id ref, definition_id ref, compartment_id ref (one of the list vehicle's rows; names the slot), required_count ≥ 1 (the exact count), display_order; unique version/compartment/definition; frozen with its version (KDEF-9, KDEF-10) |
 | `vehicle_kit_list_publication` | A | version_id ref (unique), effective_at ≥ recorded_at, actor, command_id ref (`VEHICLE_KIT_LIST_PUBLISH`); one vehicle's publications have strictly increasing effective instants (KDEF-9, CHK-3) |
+| `position_key` | A | kind (`COMPARTMENT` or `SYSTEM`), stable_slot_id, key (lowercase key format); unique per organization and kind on both the slot and the key; the slot must exist; actor, command_id ref (`POSITION_KEY_SET`); one key per position, never changed or removed (SPEC 2.1.0 IMP-6, [issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129)) |
 | `vehicle_status_event` | A | vehicle_id ref, prior_event_id? ref, status, explanation, restrictions?; sequence unique per vehicle |
 | `status_request` | A | vehicle_id ref, requested_status, reason, request_id? ref, action (`REQUEST`, `APPROVE`, `DENY`), decision_explanation? |
 
@@ -92,7 +93,7 @@ No deletion frees an identity for a different person (AUTH-2).
 
 | Table | Kind | Columns and keys beyond common identity |
 |---|---|---|
-| `checklist_template` | M | label, active; version contents stored separately |
+| `checklist_template` | M | label, active, key? (lowercase key format, unique per organization, set once and then immutable; IMP-6); version contents stored separately |
 | `checklist_version` | V | template_id ref, revision; unique template/revision; publication is identified by its referencing publication row |
 | `checklist_publication` | A | checklist_version_id ref unique, effective_at, override_version_id? ref; published versions and children frozen |
 | `item` | M | stable logical item/slot identity, label, active; used across versions |
