@@ -45,7 +45,9 @@ def command(request, action):
             raise Rejected(404, "NOT_FOUND")
         handler, required = ACTIONS[action]
         optional = OPTIONAL_SUBJECT | (
-            {"start_operation_id", "nested_substitution_ids"} if action == "reseal" else set()
+            {"start_operation_id", "nested_substitution_ids", "kit_count_checks"}
+            if action == "reseal"
+            else set()
         )
         body = _json_body(request, required, optional)
         try:

@@ -31,7 +31,8 @@ function page(subject) {
     elements[id] = new Node("div");
   }
   const config = {vehicle_id: "vehicle", subjects_url: "/subjects", scope_url: "/scope/KIND/SUBJECT",
-    command_url: "/command/ACTION", can_request_audit: false, report_options: {categories: [], severities: []}};
+    command_url: "/command/ACTION", checks_url: "/checks", can_request_audit: false,
+    report_options: {categories: [], severities: []}};
   const document = {
     createElement: tag => new Node(tag),
     getElementById(id) { return id === "seal-config" ? {textContent: JSON.stringify(config)} : elements[id]; },
@@ -110,6 +111,32 @@ function page(subject) {
     const item = find(form, n => n.tag === "fieldset" && n.children.some(c => c.textContent === "Supply — Nested"));
     assert.equal(item.hidden, true, "verified nested contents no longer require fresh item entry");
     assert.ok(find(form, n => /2026-12-15/.test(n.textContent)), "nested seal expiration contributes to the cabinet seal");
+  }
+  {
+    const p = page({kind: "slot", id: "slot", label: "Cabinet", state: "OPEN", tip_id: null});
+    await tick(); await tick();
+    find(p.elements["seal-subjects"], n => n.textContent === "Inspect and reseal").fire("click");
+    p.requests[1].resolve({status: 200, json: async () => ({status: "COMMITTED",
+      result: {start_operation_id: "start"}})});
+    await tick(); await tick();
+    p.requests[2].resolve({ok: true, json: async () => ({items: [], kit_lines: [{line_id: "line",
+      label: "Kit", item_id: "presence", required_count: 1, checklist_version_id: "version"}]})});
+    await tick(); await tick();
+    const form = find(p.elements["seal-form"], n => n.tag === "form");
+    find(form, n => n.tag === "input" && n.type === "number").value = "1";
+    find(form, n => n.textContent === "Record kit count").fire("click");
+    assert.equal(p.requests[3].url, "/checks");
+    assert.equal(JSON.parse(p.requests[3].options.body).kit_requirement_id, "line");
+    p.requests[3].resolve({status: 409, json: async () => ({status: "CONFLICT", newest_check: {check_id: "newer"}})});
+    await tick(); await tick();
+    find(form, n => n.textContent === "Record my count too").fire("click");
+    assert.equal(JSON.parse(p.requests[4].options.body).acknowledges_check_id, "newer");
+    p.requests[4].resolve({status: 200, json: async () => ({status: "COMMITTED", result: {check_id: "count-check"}})});
+    await tick(); await tick();
+    find(form, n => n.tag === "input" && n.type === "text").value = "cabinet-id";
+    form.fire("submit");
+    const seal = JSON.parse(p.requests[5].options.body);
+    assert.deepEqual(seal.kit_count_checks, [{line_id: "line", check_id: "count-check"}]);
   }
   process.stdout.write("Seal page harness passed\n");
 })().catch(error => { console.error(error); process.exitCode = 1; });

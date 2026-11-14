@@ -156,6 +156,15 @@ def inspection_scope(organization_id, vehicle_id, kind, subject_id, *, at=None):
     }
     if len(definitions) != len({line.definition_id for line in lines}):
         raise ValueError("seal kit definitions are unavailable")
+    checklist_versions = {}
+    if lines:
+        from cya.attention.checklist import vehicle_checklist
+
+        for row in vehicle_checklist(organization_id, vehicle_id, as_of=at).rows:
+            if row.kit_requirement_id and row.checklist_version_id:
+                checklist_versions.setdefault(
+                    str(row.kit_requirement_id), str(row.checklist_version_id)
+                )
     return {
         "subject": match,
         "items": [
@@ -178,6 +187,7 @@ def inspection_scope(organization_id, vehicle_id, kind, subject_id, *, at=None):
                 "label": definitions[line.definition_id].label,
                 "item_id": str(definitions[line.definition_id].presence_item_id),
                 "required_count": line.required_count,
+                "checklist_version_id": checklist_versions.get(line.line_id),
             }
             for line in lines
         ],

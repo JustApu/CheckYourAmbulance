@@ -12,9 +12,11 @@ from cya.core.models import CommandReceipt
 from cya.deficiencies import service as deficiency_service
 from cya.deficiencies.models import DeficiencyEvidence
 from cya.kits.definitions import authorizer
+from cya.kits.models import KitDefinition
 from cya.kits.sealable import kit_sealable
 from cya.seals.blockers import seal_blockers
 from cya.seals.commands import SealConflict, SealError, _event_state, _events, _subject
+from cya.seals.counts import validate_kit_counts
 from cya.seals.inspection import validate_inspection
 from cya.seals.links import LinkTarget, persist_inspection_links, plan_links
 from cya.seals.locking import lock_seal_inputs, require_item_locks
@@ -22,6 +24,8 @@ from cya.seals.models import (
     SealEvent,
     SealInspection,
     SealInspectionItem,
+    SealInspectionKitCount,
+    SealInspectionKitInstance,
     SealInspectionKitVerification,
     SealSubstitution,
 )
@@ -74,12 +78,13 @@ def reseal(
     expected_tip_id=None,
     start_operation_id=None,
     nested_substitution_ids=None,
+    kit_count_checks=None,
     **context,
 ):
     """Create one atomic inspection, discrepancy evidence and seal event.
 
-    Kit-list counts require the separate line-specific check integration and are refused
-    until that integration is in place.
+    Each cabinet kit-list count is an ordinary, fresh presence check made after inspection
+    start; its immutable record is referenced by the seal's count certification.
     """
     organization_id = context["organization_id"]
     for value in (organization_id, context["actor_id"], vehicle_id):
@@ -100,6 +105,7 @@ def reseal(
         raise SealError("duplicate nested seal verification")
     if nested_substitution_ids and (slot_id is None or start_operation_id is None):
         raise SealError("nested seals require a started cabinet inspection")
+    kit_count_checks = [] if kit_count_checks is None else kit_count_checks
     if not isinstance(marking, str) or not marking.strip() or len(marking) > 200:
         raise SealError("the new seal marking is required")
     if inspected_attestation is not True or written_attestation is not True:
@@ -116,6 +122,7 @@ def reseal(
         "observations": observations,
         "start_operation_id": start_operation_id,
         "nested_substitution_ids": nested_substitution_ids,
+        "kit_count_checks": kit_count_checks,
     }
 
     def build(actor):
@@ -133,6 +140,7 @@ def reseal(
                 operation_id=start_operation_id,
                 actor_user_id=context["actor_id"],
                 command_type="SEAL_INSPECTION_START",
+                recorded_at__lte=now,
             ).first()
             expected_start = {
                 "vehicle_id": vehicle_id,
@@ -167,10 +175,30 @@ def reseal(
         scope, assignments = resolve_scope(
             organization_id, vehicle_id, now, kit_id=kit_id, slot_id=slot_id
         )
-        if slot_id is not None and resolve_kit_lines(
-            organization_id, vehicle_id, slot_id, now, assignments
+        lines = (
+            resolve_kit_lines(organization_id, vehicle_id, slot_id, now, assignments)
+            if slot_id is not None
+            else ()
+        )
+        definition_items = {
+            str(row.pk): str(row.presence_item_id)
+            for row in KitDefinition.objects.filter(
+                organization_id=organization_id, pk__in={line.definition_id for line in lines}
+            )
+        }
+        if len(definition_items) != len({line.definition_id for line in lines}) or any(
+            definition_items[line.definition_id] not in item_locks for line in lines
         ):
-            raise SealError("kit-presence checks must be integrated before resealing this cabinet")
+            raise SealError("a kit-presence item lock is unavailable")
+        count_checks = validate_kit_counts(
+            organization_id,
+            vehicle_id,
+            context["actor_id"],
+            lines,
+            kit_count_checks,
+            start=start,
+            at=now,
+        )
         require_item_locks(scope, item_locks)
         zone = Organization.objects.values_list("station_zone", flat=True).get(pk=organization_id)
         today = now.astimezone(ZoneInfo(zone)).date()
@@ -315,7 +343,23 @@ def reseal(
                 break_event=prior_break,
                 fresh_entry_attestation=True,
                 written_marking_attestation=True,
+                start_receipt=start,
             )
+            for line, check in count_checks:
+                saved_count = SealInspectionKitCount.objects.create(
+                    **stamp,
+                    inspection=inspection,
+                    kit_requirement_id=line.line_id,
+                    check_record=check,
+                    count=check.quantity,
+                )
+                for covered_kit, assignment_id in line.assignments:
+                    SealInspectionKitInstance.objects.create(
+                        **stamp,
+                        kit_count=saved_count,
+                        kit_id=covered_kit,
+                        assignment_id=assignment_id,
+                    )
             for covered_kit, substitution, _ in nested:
                 SealInspectionKitVerification.objects.create(
                     **stamp, inspection=inspection, kit_id=covered_kit, substitution=substitution

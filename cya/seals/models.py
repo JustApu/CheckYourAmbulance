@@ -169,6 +169,9 @@ class SealInspection(Evidence):
     break_event = models.ForeignKey(
         SealEvent, null=True, on_delete=models.PROTECT, related_name="+"
     )
+    start_receipt = models.ForeignKey(
+        "cya_core.CommandReceipt", null=True, on_delete=models.PROTECT, related_name="+"
+    )
     fresh_entry_attestation = models.BooleanField()
     written_marking_attestation = models.BooleanField()
 
@@ -238,6 +241,9 @@ class SealInspectionKitCount(Evidence):
     inspection = models.ForeignKey(SealInspection, on_delete=models.PROTECT, related_name="+")
     kit_requirement = models.ForeignKey(
         "cya_kits.VehicleKitRequirement", on_delete=models.PROTECT, related_name="+"
+    )
+    check_record = models.ForeignKey(
+        "cya_checks.CheckRecord", null=True, on_delete=models.PROTECT, related_name="+"
     )
     count = models.PositiveIntegerField()
 

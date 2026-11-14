@@ -39,14 +39,14 @@
     body[subject.kind === "kit" ? "kit_id" : "slot_id"] = subject.id;
     return body;
   }
-  function send(action, body, onSuccess) {
+  function send(action, body, onSuccess, onConflict) {
     if (pending) { show("A previous request is unconfirmed. Retry it before making another change."); return; }
-    body.operation_id = uuid4(); pending = {action: action, body: body, onSuccess: onSuccess}; transmit();
+    body.operation_id = uuid4(); pending = {action: action, body: body, onSuccess: onSuccess, onConflict: onConflict}; transmit();
   }
   function transmit() {
     if (!pending) { return; }
     var request = pending;
-    fetch(config.command_url.replace("ACTION", request.action), {
+    fetch(request.action === "check" ? config.checks_url : config.command_url.replace("ACTION", request.action), {
       method: "POST", credentials: "same-origin", cache: "no-store",
       headers: {"Content-Type": "application/json", "X-CSRFToken": csrf},
       body: JSON.stringify(request.body)
@@ -57,6 +57,12 @@
         pending = null;
         if (request.onSuccess) { request.onSuccess(answer.body.result); return; }
         work.hidden = true; show("Recorded."); load(); return;
+      }
+      if (answer.body.status === "CONFLICT" && answer.status === 409) {
+        pending = null;
+        if (request.onConflict) { request.onConflict(answer.body); }
+        else { show("Someone else recorded a newer check. Refresh before continuing."); }
+        return;
       }
       if (answer.body.status === "REJECTED" && answer.status < 500) {
         pending = null;
@@ -127,11 +133,46 @@
     });
   }
   function inspectionForm(subject, data, startId) {
-    if (data.kit_lines.length) {
-      formArea.appendChild(element("p", "This cabinet includes kit counts. Inspect its contents individually until those counts can be recorded here."));
-      return;
-    }
-    var form = element("form"), fields = [], nested = {};
+    var form = element("form"), fields = [], nested = {}, counts = {};
+    data.kit_lines.forEach(function (line) {
+      var group = element("fieldset"), legend = element("legend", "Count kits: " + line.label);
+      group.appendChild(legend); form.appendChild(group);
+      if (!line.checklist_version_id) {
+        group.appendChild(element("p", "A checklist for this kit type is not available. Ask a supervisor for help."));
+        return;
+      }
+      var count = field(group, "Fresh kit count (target " + line.required_count + ")", "number", false);
+      count.min = "0"; count.step = "1";
+      var deficiency = deficiencyFields(group), status = element("p"); group.appendChild(status);
+      var record = button("Record kit count", function () {
+        if (count.value === "" || !Number.isSafeInteger(Number(count.value)) || Number(count.value) < 0) {
+          show("Enter a fresh, nonnegative whole kit count."); return;
+        }
+        var quantity = Number(count.value), payload = {vehicle_id: config.vehicle_id, item_id: line.item_id,
+          checklist_version_id: line.checklist_version_id, kit_requirement_id: line.line_id,
+          purpose: "ROUTINE", quantity: quantity};
+        if (quantity !== line.required_count) {
+          if (!deficiency.category.value || !deficiency.severity.value || !deficiency.summary.value.trim() ||
+              !deficiency.description.value.trim()) { show("Complete the deficiency details for the kit count."); return; }
+          payload.deficiency = {create: {category_id: deficiency.category.value, severity: deficiency.severity.value,
+            summary: deficiency.summary.value, description: deficiency.description.value}};
+        }
+        function committed(result) {
+          counts[line.line_id] = result.check_id; count.disabled = true; record.disabled = true;
+          status.textContent = "Kit count recorded.";
+        }
+        function conflict(result) {
+          var newest = result.newest_check;
+          if (!newest || !newest.check_id) { show("A newer check exists. Refresh before continuing."); return; }
+          status.textContent = "Another crew member recorded a newer check. You may also record your count.";
+          group.appendChild(button("Record my count too", function () {
+            payload.acknowledges_check_id = newest.check_id; send("check", payload, committed, conflict);
+          }));
+        }
+        send("check", payload, committed, conflict);
+      });
+      group.appendChild(record);
+    });
     if (subject.kind === "slot") {
       subjectsCache.filter(function (kit) {
         return kit.kind === "kit" && kit.slot_id === subject.id && kit.state === "SEALED";
@@ -210,9 +251,13 @@
         return value;
       });
       if (invalid) { show("Complete the deficiency details for each failed item."); return; }
+      if (data.kit_lines.some(function (line) { return !counts[line.line_id]; })) {
+        show("Record a fresh count for every kit line before resealing."); return;
+      }
       send("reseal", Object.assign(subjectFields(subject), {marking: marking.value,
         inspected_attestation: fresh.checked, written_attestation: written.checked, observations: observations,
-        start_operation_id: startId, nested_substitution_ids: Object.keys(nested).map(function (id) { return nested[id].id; })}));
+        start_operation_id: startId, nested_substitution_ids: Object.keys(nested).map(function (id) { return nested[id].id; }),
+        kit_count_checks: data.kit_lines.map(function (line) { return {line_id: line.line_id, check_id: counts[line.line_id]}; })}));
     });
   }
   function load() {

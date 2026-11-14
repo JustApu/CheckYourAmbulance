@@ -28,6 +28,7 @@ def vehicle_seals(request, vehicle_id):
         "subjects_url": reverse("api-seal-subjects", args=[vehicle.pk]),
         "scope_url": reverse("api-seal-scope", args=[vehicle.pk, "KIND", "SUBJECT"]),
         "command_url": reverse("api-seal-command", args=["ACTION"]),
+        "checks_url": reverse("api-checks"),
         "report_options": options,
         "can_request_audit": bool(roles_for(user) & {"SUPERVISOR", "ADMINISTRATOR"}),
     }
