@@ -48,7 +48,7 @@ MISSED_AGE = timedelta(days=7)
 
 
 def _key(obligation):
-    return (obligation.item_id, obligation.kit_instance_id or NO_KIT)
+    return (obligation.item_id, obligation.unit_key)
 
 
 def retirement_dispositions(organization_id, obligation_ids, at):

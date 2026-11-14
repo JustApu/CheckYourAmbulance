@@ -119,7 +119,7 @@ def replay_checks(history, instant):
         obligation = obligations.get(link.obligation_id)
         if obligation is None:
             raise ValueError("check link has no exported obligation")
-        if (row.item_id, row.kit_key) != (obligation.item_id, obligation.kit_instance_id or NO_KIT):
+        if (row.item_id, row.kit_key) != (obligation.item_id, obligation.unit_key):
             raise ValueError("check link item or kit mismatch")
         checks.append(
             CheckEvidence(

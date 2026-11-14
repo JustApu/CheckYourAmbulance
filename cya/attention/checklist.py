@@ -238,7 +238,7 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *,
                 key=lambda s: (
                     s.obligation.due_at,
                     s.obligation.item_id,
-                    s.obligation.kit_instance_id or NO_KIT,
+                    s.obligation.unit_key,
                     s.obligation.id,
                 ),
             )
@@ -253,7 +253,7 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *,
     for state in states:
         if _missed(state, as_of):
             continue
-        key = (state.obligation.item_id, state.obligation.kit_instance_id or NO_KIT)
+        key = (state.obligation.item_id, state.obligation.unit_key)
         current = best.get(key)
         if current is None or (_rank(state), state.obligation.due_at) < (
             _rank(current),

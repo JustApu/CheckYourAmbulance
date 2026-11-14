@@ -60,6 +60,14 @@ class ObligationEvidence:
     # L = G + the w_late pinned at creation (SCH-2, issue #80). None only for evidence built
     # without it; anything that needs L refuses such evidence rather than assuming a window.
     late_limit_at: datetime | None = None
+    # The obligation's stored stream key: its kit, NO_KIT, or a kit presence line's unit key
+    # (SPEC 2.0.0 KDEF-12). None for evidence built without it, which falls back to the kit.
+    kit_key: str | None = None
+
+    @property
+    def unit_key(self):
+        """The key that groups this obligation with its checks, deficiencies and attention."""
+        return self.kit_key or self.kit_instance_id or NO_KIT
 
     def __post_init__(self):
         for field in ("recorded_at", "early_at", "due_at", "grace_at"):
@@ -414,7 +422,7 @@ def rebuild_vehicle_projection(
 
     linked, check_facts = replay_checks(history, instant)
     deficiencies = deficiency_states(history.deficiency_headers, history.deficiency_events, instant)
-    keys = {(o.item_id, o.kit_instance_id or NO_KIT) for o in history.obligations}
+    keys = {(o.item_id, o.unit_key) for o in history.obligations}
     attention = attention_states(keys, check_facts, deficiencies)
     tails = {}
     for event in history.selections:
@@ -449,7 +457,7 @@ def rebuild_vehicle_projection(
         if obligation.organization_id != history.organization_id or (
             obligation.vehicle_id,
             obligation.item_id,
-            obligation.kit_instance_id or NO_KIT,
+            obligation.unit_key,
             obligation.due_at,
         ) != (vehicle_id, event.item_id, event.kit_key, event.due_at):
             raise ValueError("selection anchor or organization mismatch")
@@ -491,11 +499,11 @@ def rebuild_vehicle_projection(
     result = [
         replace(
             r,
-            attention=attention[(r.obligation.item_id, r.obligation.kit_instance_id or NO_KIT)],
+            attention=attention[(r.obligation.item_id, r.obligation.unit_key)],
             deficiencies=tuple(
                 d
                 for d in by_item.get(r.obligation.item_id, ())
-                if applies(d, r.obligation.item_id, r.obligation.kit_instance_id or NO_KIT)
+                if applies(d, r.obligation.item_id, r.obligation.unit_key)
             ),
         )
         for r in result
@@ -506,7 +514,7 @@ def rebuild_vehicle_projection(
             key=lambda r: (
                 r.obligation.due_at,
                 r.obligation.item_id,
-                r.obligation.kit_instance_id or NO_KIT,
+                r.obligation.unit_key,
                 r.obligation.id,
             ),
         )

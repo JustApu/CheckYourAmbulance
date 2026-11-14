@@ -95,6 +95,8 @@ def _obligation(row):
         str(row.actor_user_id) if row.actor_user_id else None,
         str(row.command_id),
         late_limit_at=row.late_limit_at,
+        # Only a presence unit key is carried; a kit or NO_KIT follows from kit_instance_id.
+        kit_key=None if row.kit_key in (NO_KIT, str(row.kit_instance_id)) else row.kit_key,
     )
 
 
