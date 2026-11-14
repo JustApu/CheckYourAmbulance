@@ -64,3 +64,71 @@ def line_unit_keys(kit_requirement_ids):
             pk__in=list(kit_requirement_ids)
         ).values_list("pk", "version__vehicle_id", "definition_id", "compartment__stable_slot_id")
     }
+
+
+PRESENCE_SOURCE = "KIT_PRESENCE"  # a requirement whose definition_id is a kit list line
+
+
+def presence_resolved_item(organization_id, resolved, kit_requirement_id, item_id, as_of):
+    """The presence check of one kit list line as a Quantity item (KDEF-10, KDEF-12), or None.
+
+    The line must be on a published kit list of the resolved vehicle, its definition placed by
+    the resolved checklist version, and item_id that definition's presence item. The target is
+    the line's exact required count; the item is located in the vehicle's own compartment row of
+    the line's slot at as_of (or the line's row when the slot has no later one).
+    """
+    from cya.checklists.models import Compartment
+    from cya.checklists.overlay import Requirement, ResolvedItem
+    from cya.kits.models import VehicleKitListPublication, VehicleKitRequirement
+
+    line = (
+        VehicleKitRequirement.objects.filter(
+            organization_id=organization_id,
+            pk=kit_requirement_id,
+            version__vehicle_id=resolved.vehicle_id,
+        )
+        .select_related("definition", "compartment")
+        .first()
+    )
+    if line is None or str(line.definition.presence_item_id) != str(item_id):
+        return None
+    if not VehicleKitListPublication.objects.filter(version_id=line.version_id).exists():
+        return None
+    placement = next(
+        (p for p in resolved.placements if p.definition_id == str(line.definition_id)), None
+    )
+    if placement is None:
+        return None
+    row = (
+        Compartment.objects.filter(
+            vehicle_id=resolved.vehicle_id,
+            stable_slot_id=line.compartment.stable_slot_id,
+            effective_at__lte=as_of,
+        )
+        .order_by("-revision")
+        .first()
+    ) or line.compartment
+    requirement = Requirement(
+        item_id=str(item_id),
+        definition_id=str(line.pk),
+        source=PRESENCE_SOURCE,
+        display_order=line.display_order,
+        kind="QUANTITY",
+        instructions="",
+        expected_quantity=line.required_count,
+        unit=None,
+        allowed_outcomes=("PASSED", "FAILED", "UNABLE_TO_INSPECT"),
+        compartment_id=str(row.pk),
+        system_id=None,
+        kit_id=None,
+    )
+    return ResolvedItem(
+        requirement=requirement,
+        compartment_id=str(row.pk),
+        compartment_label=row.label,
+        system_id=None,
+        system_label=None,
+        effective_quantity=line.required_count,
+        deviation_id=None,
+        kits=(),
+    )

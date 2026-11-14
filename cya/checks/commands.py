@@ -79,6 +79,7 @@ from cya.deficiencies.transitions import (
 from cya.inspections.models import InspectionSession, SessionParticipant
 from cya.inspections.projections import current_state, is_expired, rebuild_session_projection
 from cya.kits.placements import KIT_DEFINITION_SOURCE, placed_contents
+from cya.kits.presence import PRESENCE_SOURCE, presence_resolved_item
 from cya.notifications.recipients import notify
 from cya.operations.models import MAX_TEXT
 
@@ -315,7 +316,16 @@ def _pinned_session(organization_id, actor, shape):
     return session
 
 
-def _resolved_item(organization_id, vehicle_id, version, item_id, now, session=None, kit_id=None):
+def _resolved_item(
+    organization_id,
+    vehicle_id,
+    version,
+    item_id,
+    now,
+    session=None,
+    kit_id=None,
+    kit_requirement_id=None,
+):
     """The item as the vehicle's governing checklist defines it; no silent version substitution.
 
     A check in a session is resolved against the checklist the session opened with, including
@@ -342,6 +352,18 @@ def _resolved_item(organization_id, vehicle_id, version, item_id, now, session=N
             status=409,
             path="checklist_version_id",
         )
+    if kit_requirement_id is not None:
+        # A kit presence check counts one kit list line (SPEC 2.0.0 KDEF-10, KDEF-12).
+        presence = presence_resolved_item(
+            organization_id, resolved, kit_requirement_id, item_id, now
+        )
+        if presence is None:
+            raise CheckError(
+                "ITEM_NOT_IN_CHECKLIST",
+                "the kit list line is not a presence check of this vehicle's checklist",
+                path="kit_requirement_id",
+            )
+        return presence
     # Content of a kit placed by definition (SPEC 4.6 KDEF-4): chosen when the requested kit is
     # one of that placement's kits, so an item that is also a loose or slot-placed item is
     # checked as the kit's content only for that kit (issue #129).
@@ -516,10 +538,13 @@ def _session_for_check(organization_id, actor, shape, version, now):
 
 
 def content_source(requirement):
-    """The check's content source fields: an item definition, or placed kit content."""
+    """The check's content source: an item definition, placed kit content or a kit list line."""
+    fields = {"item_def_id": None, "kit_definition_item_id": None, "kit_requirement_id": None}
     if requirement.source == KIT_DEFINITION_SOURCE:
-        return {"item_def_id": None, "kit_definition_item_id": requirement.definition_id}
-    return {"item_def_id": requirement.definition_id, "kit_definition_item_id": None}
+        return fields | {"kit_definition_item_id": requirement.definition_id}
+    if requirement.source == PRESENCE_SOURCE:
+        return fields | {"kit_requirement_id": requirement.definition_id}
+    return fields | {"item_def_id": requirement.definition_id}
 
 
 def chosen_kit_id(in_kit, kits, requested):
@@ -711,6 +736,7 @@ def record_check(
     acknowledges_check_id=None,
     verification_for_deficiency_id=None,
     deficiency=None,
+    kit_requirement_id=None,
     organization_id,
     actor_id,
     operation_id,
@@ -718,6 +744,8 @@ def record_check(
     request_attempt_id,
 ):
     """Record one attributed item-level check (REC-1); idempotent on operation_id (REC-4).
+
+    kit_requirement_id names the kit list line a kit presence check counts (KDEF-12).
 
     The actor is the authenticated user; nothing here accepts a client-supplied actor or roles.
     """
@@ -758,6 +786,10 @@ def record_check(
         "verification_for_deficiency_id": verification_for_deficiency_id,
         "deficiency": deficiency,
     }
+    shape["kit_requirement_id"] = _optional_id(kit_requirement_id, "kit_requirement_id")
+    if kit_requirement_id is not None:
+        # Only when given, so the digest of every existing kind of request is unchanged.
+        request["kit_requirement_id"] = kit_requirement_id
 
     def build(actor):
         _vehicle(organization_id, shape["vehicle_id"], lock=shape["session_id"] is not None)
@@ -785,6 +817,7 @@ def record_check(
                 timezone.now(),
                 _pinned_session(organization_id, actor, shape),
                 shape["kit_id"],
+                shape["kit_requirement_id"],
             )
             raise CheckError(
                 "CONFIGURATION_UNAVAILABLE",
@@ -804,6 +837,7 @@ def record_check(
             now,
             _pinned_session(organization_id, actor, shape),
             shape["kit_id"],
+            shape["kit_requirement_id"],
         )
         shape["derived"] = shape["outcome"] is None
         shape["outcome"] = _outcome(item, shape)
@@ -852,6 +886,7 @@ def record_check(
             vehicle_id=shape["vehicle_id"],
             item_id=shape["item_id"],
             kit_id=chosen_kit,
+            kit_requirement_id=shape["kit_requirement_id"],
         )
         try:
             links = choose_links(prospective_check, recorded_at=now)
@@ -1150,7 +1185,7 @@ def correct_check(
     def build(actor):
         root = (
             CheckRecord.objects.filter(organization_id=organization_id, pk=check_id)
-            .select_related("item_def", "kit_definition_item")
+            .select_related("item_def", "kit_definition_item", "kit_requirement")
             .first()
         )
         if root is None:
@@ -1241,6 +1276,14 @@ def correct_check(
         # The content the original check was recorded against: an item definition, or a
         # placed kit definition's content entry (issue #129). A correction never changes it.
         content = root.item_def or root.kit_definition_item
+        if content is None:  # a kit presence check counts its line, exactly (KDEF-12)
+            content = SimpleNamespace(
+                kind="QUANTITY",
+                unit=None,
+                expected_quantity=root.kit_requirement.required_count,
+                allowed_outcomes=("PASSED", "FAILED", "UNABLE_TO_INSPECT"),
+            )
+            deviation = None
         item = SimpleNamespace(
             requirement=SimpleNamespace(
                 kind=content.kind,
@@ -1322,6 +1365,7 @@ def correct_check(
                 item_id=root.item_id,
                 item_def_id=root.item_def_id,
                 kit_definition_item_id=root.kit_definition_item_id,
+                kit_requirement_id=root.kit_requirement_id,
                 checklist_version_id=root.checklist_version_id,
                 kit_id=root.kit_id,
                 session=root.session,
