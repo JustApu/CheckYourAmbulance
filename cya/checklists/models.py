@@ -34,17 +34,34 @@ def non_blank(column):
     return models.Q(**{f"{column}__regex": r"\S"})
 
 
+# A VIN: 17 characters, letters and digits except I, O and Q, uppercase (SPEC 2.1.0 IMP-6).
+VIN_PATTERN = r"^[A-HJ-NPR-Z0-9]{17}$"
+# Position and template keys use the kit definition key format (IMP-1, IMP-6).
+KEY_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"
+MAX_KEY = 100
+
+
 class Vehicle(models.Model):
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
     organization = organization_fk()
     display_name = models.CharField(max_length=200)
     number = models.CharField(max_length=50, null=True, blank=True)  # noqa: DJ001
     active = models.BooleanField(default=True)
+    # The vehicle's key is its VIN (SPEC 2.1.0 IMP-6): set once, then never changed (a remount
+    # is a new vehicle). Null only for a vehicle created before 2.1.0 whose VIN is not yet set.
+    key = models.CharField(  # noqa: DJ001
+        max_length=17, null=True, blank=True, db_collation="ascii_bin"
+    )
 
     class Meta:
         db_table = "vehicle"
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="vehicle_org_id"),
+            models.UniqueConstraint(fields=["organization", "key"], name="vehicle_org_key"),
+            models.CheckConstraint(
+                condition=models.Q(key__isnull=True) | models.Q(key__regex=VIN_PATTERN),
+                name="vehicle_key_vin",
+            ),
             models.CheckConstraint(
                 condition=models.Q(active__in=[True, False]), name="vehicle_bool"
             ),
@@ -160,11 +177,20 @@ class ChecklistTemplate(models.Model):
     organization = organization_fk()
     label = models.CharField(max_length=200)
     active = models.BooleanField(default=True)
+    # The template key files name (SPEC 2.1.0 IMP-6): set once, then never changed.
+    key = models.CharField(  # noqa: DJ001
+        max_length=MAX_KEY, null=True, blank=True, db_collation="ascii_bin"
+    )
 
     class Meta:
         db_table = "checklist_template"
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="template_org_id"),
+            models.UniqueConstraint(fields=["organization", "key"], name="template_org_key"),
+            models.CheckConstraint(
+                condition=models.Q(key__isnull=True) | models.Q(key__regex=KEY_PATTERN),
+                name="template_key_format",
+            ),
             models.CheckConstraint(
                 condition=models.Q(active__in=[True, False]), name="template_bool"
             ),

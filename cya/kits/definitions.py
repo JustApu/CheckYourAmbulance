@@ -70,12 +70,18 @@ class KitDefinitionError(ValueError):
 # --- shared command plumbing -----------------------------------------------------------------
 
 
-def authorizer(organization_id, actor_id, action=ACTION):
-    """Run-command authorization: the actor must be allowed `action` (SPEC 3.3)."""
+def authorizer(organization_id, actor_id, action=ACTION, *, lock_organization=False):
+    """Run-command authorization: the actor must be allowed `action` (SPEC 3.3).
+
+    lock_organization takes the organization row lock first, before the actor's, for commands
+    whose rules span the organization.
+    """
     backend = DatabaseRoleBackend()
 
     def authorize(_org):
-        with locked_identities(organization_id, [actor_id], lock_organization=False) as (
+        with locked_identities(
+            organization_id, [actor_id], lock_organization=lock_organization
+        ) as (
             current_org,
             users,
         ):

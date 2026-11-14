@@ -12,6 +12,7 @@ from cya.deficiencies import api as deficiency_api
 from cya.inspections import api as inspection_api
 from cya.inspections import views as inspection_views
 from cya.inspections import workflow_views
+from cya.kits import vehicle_views
 from cya.kits import views as kit_views
 from cya.notifications import api as notifications_api
 from cya.odometer import api as odometer_api
@@ -90,6 +91,21 @@ urlpatterns = [
         name="kit-library-template",
     ),
     path("administration/kits/export.<str:fmt>", kit_views.export, name="kit-library-export"),
+    path(
+        "administration/vehicle-files/",
+        vehicle_views.vehicle_files_page,
+        name="vehicle-files",
+    ),
+    path(
+        "administration/vehicle-files/template.<str:fmt>",
+        vehicle_views.template,
+        name="vehicle-file-template",
+    ),
+    path(
+        "administration/vehicle-files/<uuid:vehicle_id>/export.<str:fmt>",
+        vehicle_views.export,
+        name="vehicle-file-export",
+    ),
     path("api/v1/checks", check_api.checks, name="api-checks"),
     path("api/v1/inspection-sessions", inspection_api.sessions, name="api-inspection-sessions"),
     path(
