@@ -78,6 +78,7 @@ from cya.deficiencies.transitions import (
 )
 from cya.inspections.models import InspectionSession, SessionParticipant
 from cya.inspections.projections import current_state, is_expired, rebuild_session_projection
+from cya.kits.placements import KIT_DEFINITION_SOURCE, placed_contents
 from cya.notifications.recipients import notify
 from cya.operations.models import MAX_TEXT
 
@@ -314,7 +315,7 @@ def _pinned_session(organization_id, actor, shape):
     return session
 
 
-def _resolved_item(organization_id, vehicle_id, version, item_id, now, session=None):
+def _resolved_item(organization_id, vehicle_id, version, item_id, now, session=None, kit_id=None):
     """The item as the vehicle's governing checklist defines it; no silent version substitution.
 
     A check in a session is resolved against the checklist the session opened with, including
@@ -341,6 +342,19 @@ def _resolved_item(organization_id, vehicle_id, version, item_id, now, session=N
             status=409,
             path="checklist_version_id",
         )
+    # Content of a kit placed by definition (SPEC 4.6 KDEF-4): chosen when the requested kit is
+    # one of that placement's kits, so an item that is also a loose or slot-placed item is
+    # checked as the kit's content only for that kit (issue #129).
+    placed = placed_contents(
+        organization_id,
+        resolved,
+        item_id,
+        session.opened_at if pinned else now,
+        session.recorded_at + timedelta(microseconds=1) if pinned else None,
+    )
+    for content in placed:
+        if kit_id is not None and kit_id in [k for k, _label in content.kits]:
+            return content
     for item in resolved.items:
         if item.requirement.item_id == item_id:
             if pinned and item.requirement.kind == "QUANTITY":
@@ -357,6 +371,8 @@ def _resolved_item(organization_id, vehicle_id, version, item_id, now, session=N
                     deviation_id=deviation.pk if deviation else None,
                 )
             return item
+    if placed:
+        return placed[0]  # the kit choice then reports KIT_REQUIRED or KIT_NOT_ON_VEHICLE
     raise CheckError(
         "ITEM_NOT_IN_CHECKLIST",
         "the item is not part of this vehicle's checklist version",
@@ -497,6 +513,13 @@ def _session_for_check(organization_id, actor, shape, version, now):
             path="session_id",
         )
     return session
+
+
+def content_source(requirement):
+    """The check's content source fields: an item definition, or placed kit content."""
+    if requirement.source == KIT_DEFINITION_SOURCE:
+        return {"item_def_id": None, "kit_definition_item_id": requirement.definition_id}
+    return {"item_def_id": requirement.definition_id, "kit_definition_item_id": None}
 
 
 def chosen_kit_id(in_kit, kits, requested):
@@ -761,6 +784,7 @@ def record_check(
                 shape["item_id"],
                 timezone.now(),
                 _pinned_session(organization_id, actor, shape),
+                shape["kit_id"],
             )
             raise CheckError(
                 "CONFIGURATION_UNAVAILABLE",
@@ -779,6 +803,7 @@ def record_check(
             shape["item_id"],
             now,
             _pinned_session(organization_id, actor, shape),
+            shape["kit_id"],
         )
         shape["derived"] = shape["outcome"] is None
         shape["outcome"] = _outcome(item, shape)
@@ -909,7 +934,7 @@ def record_check(
                 operation_id=operation_id,
                 vehicle_id=shape["vehicle_id"],
                 item_id=shape["item_id"],
-                item_def_id=item.requirement.definition_id,
+                **content_source(item.requirement),
                 checklist_version_id=version.pk,
                 kit_id=chosen_kit,
                 session=session,
@@ -1125,7 +1150,7 @@ def correct_check(
     def build(actor):
         root = (
             CheckRecord.objects.filter(organization_id=organization_id, pk=check_id)
-            .select_related("item_def")
+            .select_related("item_def", "kit_definition_item")
             .first()
         )
         if root is None:
@@ -1213,15 +1238,18 @@ def correct_check(
             organization_id, root.vehicle_id, [root.item_id], root.recorded_at
         )
         deviation = deviations.get(root.item_id)
+        # The content the original check was recorded against: an item definition, or a
+        # placed kit definition's content entry (issue #129). A correction never changes it.
+        content = root.item_def or root.kit_definition_item
         item = SimpleNamespace(
             requirement=SimpleNamespace(
-                kind=root.item_def.kind,
-                unit=root.item_def.unit,
-                expected_quantity=root.item_def.expected_quantity,
-                allowed_outcomes=tuple(root.item_def.allowed_outcomes),
+                kind=content.kind,
+                unit=content.unit,
+                expected_quantity=content.expected_quantity,
+                allowed_outcomes=tuple(content.allowed_outcomes),
             ),
             effective_quantity=(
-                deviation.alternate_quantity if deviation else root.item_def.expected_quantity
+                deviation.alternate_quantity if deviation else content.expected_quantity
             ),
         )
         shape = {
@@ -1293,6 +1321,7 @@ def correct_check(
                 vehicle_id=root.vehicle_id,
                 item_id=root.item_id,
                 item_def_id=root.item_def_id,
+                kit_definition_item_id=root.kit_definition_item_id,
                 checklist_version_id=root.checklist_version_id,
                 kit_id=root.kit_id,
                 session=root.session,

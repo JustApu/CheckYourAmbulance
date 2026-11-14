@@ -41,6 +41,7 @@ from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
 from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, resolve_checklist
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
+from cya.kits.placements import placed_items
 from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.requirements import bound_template_ids
@@ -146,6 +147,38 @@ def _resolved_items(organization_id, vehicle_id, as_of):
                 str(item.requirement.item_id), (order, item, str(resolved.template_version_id))
             )
     return chosen
+
+
+def _placed_content(organization_id, vehicle_id, as_of):
+    """(template order, ResolvedItem, version id, kits) per placed kit content entry (KDEF-4).
+
+    Like _resolved_items, only bound templates and records made by as_of count. Each entry is one
+    instance of the placed definition on the vehicle at as_of, in its own compartment, from
+    assignment history (SPEC 2.0.0 KDEF-4).
+    """
+    found = []
+    bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
+    templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
+    recorded_before = as_of + timedelta(microseconds=1)
+    for order, template in enumerate(t for t in templates if str(t.pk) in bound):
+        try:
+            resolved = resolve_checklist(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                template_id=template.pk,
+                as_of=as_of,
+                recorded_before=recorded_before,
+            )
+        except NoEffectiveVersionError:
+            continue
+        except ResolutionError as error:
+            raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+        # One item per kit present, in its own compartment, from the assignment history as of
+        # as_of (resolve_checklist), so a past instant never reads the current kit rows.
+        for item in placed_items(organization_id, resolved, as_of, recorded_before):
+            kits = list(item.kits)
+            found.append((order, item, str(resolved.template_version_id), kits))
+    return found
 
 
 def _kits_at(organization_id, vehicle_id, reference_kit_id, as_of, slots):
@@ -354,6 +387,31 @@ def _placements(organization_id, vehicle_id, as_of):
             placed.append(
                 (order, requirement.display_order, item_id, None, None, resolved, version_id)
             )
+    # Content of kits placed by definition (issue #129): one row per kit of that definition.
+    present = {(row[2], row[3]) for row in placed}
+    for order, resolved, version_id, kits in _placed_content(organization_id, vehicle_id, as_of):
+        item_id = str(resolved.requirement.item_id)
+        for kit_id, kit_label in kits:
+            if (item_id, kit_id) in present:
+                continue
+            present.add((item_id, kit_id))
+            placed.append(
+                (
+                    order,
+                    resolved.requirement.display_order,
+                    item_id,
+                    kit_id,
+                    kit_label,
+                    resolved,
+                    version_id,
+                )
+            )
+    if any(item_id not in labels for _o, _d, item_id, *_rest in placed):
+        labels.update(
+            Item.objects.filter(
+                organization_id=organization_id, pk__in=[row[2] for row in placed]
+            ).values_list("pk", "label")
+        )
     return placed, labels
 
 

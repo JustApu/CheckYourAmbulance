@@ -167,8 +167,26 @@ class RequirementVersion(Evidence):
         "cya_checklists.Vehicle", on_delete=models.PROTECT, related_name="+"
     )
     item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    # Exactly one source of the requirement's content: a checklist item definition, or the
+    # content entry of a kit definition placed by a checklist (SPEC 4.6 KDEF-4, issue #129).
     item_def = models.ForeignKey(
-        "cya_checklists.ChecklistItemDef", on_delete=models.PROTECT, related_name="+"
+        "cya_checklists.ChecklistItemDef", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kit_definition_item = models.ForeignKey(
+        "cya_kits.KitDefinitionItem",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0015, as for the other columns.
+        db_constraint=False,
+    )
+    placement = models.ForeignKey(
+        "cya_kits.ChecklistKitPlacement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0015, as for the other columns.
+        db_constraint=False,
     )
     publication = models.ForeignKey(
         "cya_checklists.ChecklistPublication", on_delete=models.PROTECT, related_name="+"
@@ -227,6 +245,22 @@ class RequirementVersion(Evidence):
                 name="reqversion_kit_event",
             ),
             actor_kind("reqversion_actor_kind"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        item_def__isnull=False,
+                        kit_definition_item__isnull=True,
+                        placement__isnull=True,
+                    )
+                    | models.Q(
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=False,
+                        placement__isnull=False,
+                        kit_instance__isnull=False,
+                    )
+                ),
+                name="reqversion_content_source",
+            ),
         ]
 
     def __str__(self):

@@ -79,3 +79,139 @@ def check_publishable(placements):
             raise ChecklistValidationError(
                 f"placed kit definition {definition.key!r} has no published version"
             )
+
+
+KIT_DEFINITION_SOURCE = "KIT_DEFINITION"
+
+
+def definition_version_at(organization_id, definition_id, at, recorded_before=None):
+    """The version id of a kit definition in force at `at`, as the records stood, or None."""
+    publications = KitDefinitionPublication.objects.filter(
+        organization_id=organization_id, version__definition_id=definition_id, effective_at__lte=at
+    )
+    if recorded_before is not None:
+        publications = publications.filter(recorded_at__lt=recorded_before)
+    latest = publications.order_by("-effective_at").values_list("version_id", flat=True).first()
+    return str(latest) if latest else None
+
+
+def placed_contents(organization_id, resolved, item_id, at, recorded_before=None):
+    """The item as content of each kit of each definition the checklist places (KDEF-4, KDEF-7).
+
+    For each placement whose definition, in the version in force at `at`, lists the item: one
+    ResolvedItem per instance of that definition on the vehicle (resolved.placements kits, from
+    the assignment history), located in that instance's own compartment and with kits holding
+    only that instance; or one item with no compartment and no kits when none is present (a
+    check then reports that the kit is not on the vehicle). Its requirement's definition_id is
+    the kit_definition_item id, its source KIT_DEFINITION, and its kit_id the placement id (so
+    the item counts as inside a kit).
+    """
+    # Imported late: overlay is imported by the checklists app, which the kits app depends on.
+    from cya.checklists.models import Compartment
+    from cya.checklists.overlay import Requirement, ResolvedItem
+    from cya.kits.models import KitDefinitionItem
+
+    rows = {
+        str(row.pk): row
+        for row in Compartment.objects.filter(
+            pk__in={c for p in resolved.placements for _k, _l, c in p.kits if c}
+        )
+    }
+    found = []
+    for placement in resolved.placements:
+        version_id = definition_version_at(
+            organization_id, placement.definition_id, at, recorded_before
+        )
+        if version_id is None:
+            continue
+        content = KitDefinitionItem.objects.filter(version_id=version_id, item_id=item_id).first()
+        if content is None:
+            continue
+        located = [
+            (rows.get(compartment), ((kit_id, label),))
+            for kit_id, label, compartment in placement.kits
+        ] or [(None, ())]
+        for row, kits in located:
+            requirement = Requirement(
+                item_id=str(content.item_id),
+                definition_id=str(content.pk),
+                source=KIT_DEFINITION_SOURCE,
+                display_order=content.display_order,
+                kind=content.kind,
+                instructions=content.instructions,
+                expected_quantity=content.expected_quantity,
+                unit=content.unit,
+                allowed_outcomes=tuple(content.allowed_outcomes),
+                compartment_id=str(row.pk) if row else None,
+                system_id=None,
+                kit_id=placement.placement_id,
+            )
+            found.append(
+                ResolvedItem(
+                    requirement=requirement,
+                    compartment_id=str(row.pk) if row else None,
+                    compartment_label=row.label if row else None,
+                    system_id=None,
+                    system_label=None,
+                    effective_quantity=content.expected_quantity,
+                    deviation_id=None,
+                    kits=kits,
+                )
+            )
+    return found
+
+
+def placed_content_item_ids(placements):
+    """Every item any published version of the placed definitions lists (for item locks)."""
+    from cya.kits.models import KitDefinitionItem
+
+    return list(
+        KitDefinitionItem.objects.filter(
+            version__definition_id__in=[p.definition_id for p in placements],
+            version__in=KitDefinitionPublication.objects.values("version_id"),
+        )
+        .values_list("item_id", flat=True)
+        .distinct()
+    )
+
+
+def placed_items(organization_id, resolved, at, recorded_before=None):
+    """Every content entry of every placed kit present on the vehicle, one ResolvedItem per kit."""
+    from cya.kits.models import KitDefinitionItem
+
+    items = []
+    for placement in resolved.placements:
+        version_id = definition_version_at(
+            organization_id, placement.definition_id, at, recorded_before
+        )
+        if version_id is None:
+            continue
+        for content in KitDefinitionItem.objects.filter(version_id=version_id).order_by(
+            "display_order", "id"
+        ):
+            items.extend(
+                placed_contents(
+                    organization_id, resolved, str(content.item_id), at, recorded_before
+                )
+            )
+    unique = {}
+    for item in items:
+        if item.kits:  # a placement with no instance present has nothing to inspect
+            unique[(item.requirement.definition_id, item.requirement.kit_id, item.kits[0][0])] = (
+                item
+            )
+    return list(unique.values())
+
+
+def is_kit_content(definition_id):
+    """True when the id names a placed kit definition's content entry, not a checklist item."""
+    from cya.kits.models import KitDefinitionItem
+
+    return KitDefinitionItem.objects.filter(pk=definition_id).exists()
+
+
+def content_columns(definition_id):
+    """The {definition_id, kit_definition_item_id} pair for a scope row from one content id."""
+    if is_kit_content(definition_id):
+        return {"definition_id": None, "kit_definition_item_id": str(definition_id)}
+    return {"definition_id": str(definition_id), "kit_definition_item_id": None}
