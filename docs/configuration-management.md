@@ -1,6 +1,6 @@
 # Configuration management design
 
-[Issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130) part 1. This page is the schema and service design that the issue requires before any management screen is built. It implements [SPEC 2.2.0 §4.8](../SPEC.md) (CFG-1 to CFG-6) with the §3.3 rows of that amendment. It reuses the kit definitions (§4.6) and vehicle files (§4.7, [vehicle files](vehicle-files.md)) of issue #129. SPEC and the [contracts](data-model-contracts.md) win if they disagree with this page. Nothing here is implemented yet; later parts update this page as they land.
+[Issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130) part 1. This page is the schema and service design that the issue requires before any management screen is built. It implements [SPEC 2.2.0 §4.8](../SPEC.md) (CFG-1 to CFG-6, merged in PR #151) with the §3.3 rows of that amendment. It reuses the kit definitions (§4.6) and vehicle files (§4.7, [vehicle files](vehicle-files.md)) of issue #129. SPEC and the [contracts](data-model-contracts.md) win if they disagree with this page. Nothing here is implemented yet; later parts update this page as they land.
 
 ## Principles
 
@@ -55,7 +55,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   - `revise_position`: any of label, order and retired. It appends a revision effective when recorded and copies the compartment's `sealable` from the newest revision (CAB-1).
   - Like a designation, a revision is refused while a later revision of the slot is already scheduled.
 - **Retiring is refused** while any of these still use the slot:
-  - the vehicle's checklist in force, or one already published for a later instant (template version and override), places an item there;
+  - a version, in force or published for a later instant, of any template bound to the vehicle places an item there. This includes a template bound by a binding recorded to take effect later, and the vehicle's overrides;
   - the kit list in force or a published future kit list names it;
   - an active kit instance is assigned to it.
 
@@ -64,7 +64,9 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   - a kit instance (`add_kit_instance` and `record_kit_assignment`, through `_placement` in `cya/kits/commands.py`);
   - a kit-list line (`cya/kits/kit_lists.py`);
   - a placement in a template or override draft (`cya/checklists/validation.py`).
-- **Publishing refuses** a template version, override or kit list that would place something in a position retired on a bound vehicle. Today such a placement only fails later, at resolution (`MissingSlotError` in `cya/checklists/overlay.py`). The publish check lists the vehicles and positions, so a retirement can never be stranded from the other direction either.
+- **Publishing and binding refuse a retired position** (CFG-2), listing the vehicles and positions. Today such a placement only fails later, at resolution (`MissingSlotError` in `cya/checklists/overlay.py`), so these checks keep a retirement from being stranded from the other direction:
+  - publishing a template version, override or kit list that would place something in a position retired on a vehicle it applies to;
+  - binding a template to a vehicle when a version of it, in force or published for later, uses a position retired there. This covers `bind_requirement` (which accepts a future `effective_at`), the vehicle-file import's binding and the bindings a vehicle duplicate copies.
 - **Readers.**
   - Resolution is unchanged. A retired position's rows still resolve by stable slot and effective instant, so history and in-window obligations keep their meaning, and the checks above keep new requirements away from it.
   - Vehicle files export positions by `display_order`, then label, and leave out retired positions. An import that names a retired position is refused with that reason.
@@ -86,7 +88,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 | The vehicle, with the given name and number, no VIN, inactive, and its first activity event (inactive) | — |
 | One revision-1 row per position, effective when recorded | Each position's label, order and sealable designation in effect now; retired positions are left out |
 | One draft kit list | The lines in force, mapped to the copy's compartment rows |
-| One draft override over the same template version | The override in force |
+| One draft override per bound template, over the same template version | Each override in force (none when there is none) |
 | One binding per bound template and slot, effective when recorded | The source's bindings in force |
 | Item locks for the bound templates' items | — |
 
