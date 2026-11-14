@@ -54,6 +54,18 @@ def newest_effective_check(check, obligation):
         item_id=check.item_id,
     )
     rows = rows.filter(kit_id=check.kit_id) if check.kit_id else rows.filter(kit_id__isnull=True)
+    if check.kit_requirement_id is not None:
+        from cya.kits.models import VehicleKitRequirement
+
+        line = VehicleKitRequirement.objects.select_related("compartment").get(
+            organization_id=check.organization_id, pk=check.kit_requirement_id
+        )
+        # The stable slot and kit definition identify the same physical count across
+        # kit-list revisions; a different cabinet's count is not a competing check.
+        rows = rows.filter(
+            kit_requirement__definition_id=line.definition_id,
+            kit_requirement__compartment__stable_slot_id=line.compartment.stable_slot_id,
+        )
     # A chain an administrator invalidated is not effective (INV-2a); a superseded row is always
     # older than its chain's tip, so it can never be the newest effective check on its own.
     rows = rows.exclude(

@@ -1,8 +1,10 @@
 """An intact kit seal substitutes only for its own physical item's obligation."""
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from uuid import uuid4
 
-from django.db import transaction
+from django.db import connection, transaction
 
 from cya.checklists.models import ChecklistItemDef
 from cya.checks.models import CheckRecord
@@ -11,7 +13,7 @@ from cya.kits.sealable import designate_kit_sealable
 from cya.kits.tests.support import KitCase
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import State
-from cya.seals.commands import SealConflict, SealError, verify_seal
+from cya.seals.commands import SealConflict, SealError, break_seal, verify_seal
 from cya.seals.models import (
     SealEvent,
     SealInspection,
@@ -114,3 +116,29 @@ class VerifySealTests(KitCase):
                 **(kwargs | {"marking": "sample", "expected_tip_id": None}),
                 **self.context(self.crew),
             )
+
+    def test_concurrent_breaks_of_the_same_tip_have_one_winner(self):
+        barrier = Barrier(2)
+        contexts = [self.context(self.crew), self.context(self.supervisor)]
+
+        def attempt(context):
+            try:
+                barrier.wait(timeout=10)
+                return break_seal(
+                    vehicle_id=str(self.vehicle.pk),
+                    kit_id=self.kit_id,
+                    expected_tip_id=str(self.seal.pk),
+                    reason="Synthetic inspection",
+                    **context,
+                )
+            except SealConflict as error:
+                return error
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(attempt, contexts))
+        self.assertEqual(sum(isinstance(result, SealConflict) for result in outcomes), 1)
+        events = list(SealEvent.objects.filter(kit_id=self.kit_id).order_by("sequence"))
+        self.assertEqual([event.event_type for event in events], ["RESEAL", "BREAK"])
+        self.assertEqual(events[1].prior_event_id, events[0].pk)
