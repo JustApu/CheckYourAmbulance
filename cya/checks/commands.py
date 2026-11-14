@@ -223,7 +223,7 @@ def _shape(*, vehicle_id, item_id, checklist_version_id, outcome, purpose, **val
     shape = {
         "vehicle_id": _id(vehicle_id, "vehicle_id"),
         "item_id": _id(item_id, "item_id"),
-        "checklist_version_id": _id(checklist_version_id, "checklist_version_id"),
+        "checklist_version_id": _optional_id(checklist_version_id, "checklist_version_id"),
     }
     if outcome is not None and outcome not in OUTCOMES:
         raise CheckError(
@@ -719,6 +719,58 @@ def _verification_body(plan):
     }
 
 
+def _standalone_presence(organization_id, actor_id, shape, start_id, now):
+    """Resolve an unbound kit line within the actor's still-open cabinet inspection."""
+    from cya.core.models import CommandReceipt
+    from cya.kits.models import VehicleKitRequirement
+    from cya.kits.presence import standalone_presence_item
+    from cya.seals.commands import SealError, _events, _subject
+
+    line = (
+        VehicleKitRequirement.objects.filter(
+            organization_id=organization_id,
+            pk=shape["kit_requirement_id"],
+            version__vehicle_id=shape["vehicle_id"],
+        )
+        .select_related("compartment")
+        .first()
+    )
+    start = CommandReceipt.objects.filter(
+        organization_id=organization_id,
+        actor_user_id=actor_id,
+        operation_id=start_id,
+        command_type="SEAL_INSPECTION_START",
+        recorded_at__lte=now,
+    ).first()
+    if line is None or start is None:
+        raise CheckError("NOT_FOUND", "cabinet inspection or kit line was not found", status=404)
+    slot_id = str(line.compartment.stable_slot_id)
+    expected = {"vehicle_id": shape["vehicle_id"], "kit_id": None, "slot_id": slot_id}
+    if any(start.response_body.get(key) != value for key, value in expected.items()):
+        raise CheckError("INVALID_SCOPE", "the kit line is outside this cabinet inspection")
+    try:
+        _subject(organization_id, shape["vehicle_id"], None, slot_id, require_sealable=True)
+    except SealError:
+        raise CheckError("INVALID_SCOPE", "the cabinet is no longer sealable") from None
+    events = _events(organization_id, shape["vehicle_id"], None, slot_id)
+    tip = str(events[-1].pk) if events else None
+    if tip != start.response_body.get("expected_tip_id"):
+        raise CheckError(
+            "SEAL_CHANGED", "the cabinet seal changed; restart the inspection", status=409
+        )
+    try:
+        item = standalone_presence_item(
+            organization_id, shape["vehicle_id"], shape["kit_requirement_id"], shape["item_id"], now
+        )
+    except (ResolutionError, ValueError):
+        raise CheckError(
+            "CONFIGURATION_UNAVAILABLE", "kit presence scope is unavailable", status=503
+        ) from None
+    if item is None:
+        raise CheckError("ITEM_NOT_IN_CHECKLIST", "the standalone kit line is not available")
+    return item
+
+
 def record_check(
     *,
     vehicle_id,
@@ -737,6 +789,7 @@ def record_check(
     verification_for_deficiency_id=None,
     deficiency=None,
     kit_requirement_id=None,
+    inspection_start_operation_id=None,
     organization_id,
     actor_id,
     operation_id,
@@ -787,12 +840,47 @@ def record_check(
         "deficiency": deficiency,
     }
     shape["kit_requirement_id"] = _optional_id(kit_requirement_id, "kit_requirement_id")
+    shape["inspection_start_operation_id"] = _optional_id(
+        inspection_start_operation_id, "inspection_start_operation_id"
+    )
+    standalone = shape["checklist_version_id"] is None
+    if standalone and (
+        shape["kit_requirement_id"] is None
+        or shape["inspection_start_operation_id"] is None
+        or shape["kit_id"] is not None
+        or shape["session_id"] is not None
+        or purpose != "ROUTINE"
+    ):
+        raise _malformed(
+            "checklist_version_id", "a standalone kit count requires a cabinet inspection"
+        )
+    if not standalone and shape["inspection_start_operation_id"] is not None:
+        raise _malformed(
+            "inspection_start_operation_id", "only a standalone kit count names this start"
+        )
     if kit_requirement_id is not None:
         # Only when given, so the digest of every existing kind of request is unchanged.
         request["kit_requirement_id"] = kit_requirement_id
+    if inspection_start_operation_id is not None:
+        request["inspection_start_operation_id"] = inspection_start_operation_id
 
     def build(actor):
-        _vehicle(organization_id, shape["vehicle_id"], lock=shape["session_id"] is not None)
+        _vehicle(
+            organization_id, shape["vehicle_id"], lock=standalone or shape["session_id"] is not None
+        )
+        if standalone:
+            from cya.checks.locks import ensure_item_locks
+            from cya.seals.locking import lock_seal_inputs
+
+            lock_seal_inputs(organization_id, shape["vehicle_id"])
+            _standalone_presence(
+                organization_id,
+                actor_id,
+                shape,
+                shape["inspection_start_operation_id"],
+                timezone.now(),
+            )
+            ensure_item_locks(organization_id, [shape["vehicle_id"]], [shape["item_id"]])
         # Serialize every check for this vehicle/item, including checks outside a session.
         # Publication creates these rows; a missing row is a configuration failure.
         lock_row = (
@@ -805,6 +893,10 @@ def record_check(
             .first()
         )
         if lock_row is None:
+            if standalone:
+                raise CheckError(
+                    "CONFIGURATION_UNAVAILABLE", "item lock is unavailable", status=503
+                )
             # A lock is provisioned only for an item in the published vehicle checklist.
             # Preserve the normal item-level refusal for an out-of-scope item; if resolution
             # succeeds, the missing lock is a real configuration failure and remains fail-closed.
@@ -828,16 +920,26 @@ def record_check(
         # Assign the evidence instant only after all check-serialization locks are held. A
         # waiter must not record an earlier instant than a check that committed ahead of it.
         now = timezone.now()
-        version = _published_version(organization_id, shape["checklist_version_id"])
-        item = _resolved_item(
-            organization_id,
-            shape["vehicle_id"],
-            version,
-            shape["item_id"],
-            now,
-            _pinned_session(organization_id, actor, shape),
-            shape["kit_id"],
-            shape["kit_requirement_id"],
+        version = (
+            None
+            if standalone
+            else _published_version(organization_id, shape["checklist_version_id"])
+        )
+        item = (
+            _standalone_presence(
+                organization_id, actor_id, shape, shape["inspection_start_operation_id"], now
+            )
+            if standalone
+            else _resolved_item(
+                organization_id,
+                shape["vehicle_id"],
+                version,
+                shape["item_id"],
+                now,
+                _pinned_session(organization_id, actor, shape),
+                shape["kit_id"],
+                shape["kit_requirement_id"],
+            )
         )
         shape["derived"] = shape["outcome"] is None
         shape["outcome"] = _outcome(item, shape)
@@ -970,7 +1072,7 @@ def record_check(
                 vehicle_id=shape["vehicle_id"],
                 item_id=shape["item_id"],
                 **content_source(item.requirement),
-                checklist_version_id=version.pk,
+                checklist_version_id=version.pk if version else None,
                 kit_id=chosen_kit,
                 session=session,
                 basis_check_id=shape["basis_check_id"],
@@ -1058,7 +1160,7 @@ def record_check(
                 "check_id": check_id,
                 "vehicle_id": shape["vehicle_id"],
                 "item_id": shape["item_id"],
-                "checklist_version_id": version.pk,
+                "checklist_version_id": version.pk if version else None,
                 "outcome": shape["outcome"],
                 "outcome_source": "DERIVED" if shape["derived"] else "STATED",
                 "purpose": shape["purpose"],
@@ -1074,6 +1176,8 @@ def record_check(
             "deficiency_ids": [deficiency_id] if selection is not None else [],
             "event_ids": [creation_event_id] if creation_event_id else [],
         }
+        if standalone:
+            body["inspection_start_operation_id"] = inspection_start_operation_id
         if verification is not None:
             # Only a verification check reports its effect, so a routine response is unchanged.
             body["verification"] = _verification_body(verification)

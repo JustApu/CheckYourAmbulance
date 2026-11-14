@@ -137,10 +137,6 @@
     data.kit_lines.forEach(function (line) {
       var group = element("fieldset"), legend = element("legend", "Count kits: " + line.label);
       group.appendChild(legend); form.appendChild(group);
-      if (!line.checklist_version_id) {
-        group.appendChild(element("p", "A checklist for this kit type is not available. Ask a supervisor for help."));
-        return;
-      }
       var count = field(group, "Fresh kit count (target " + line.required_count + ")", "number", false);
       count.min = "0"; count.step = "1";
       var deficiency = deficiencyFields(group), status = element("p"); group.appendChild(status);
@@ -151,6 +147,7 @@
         var quantity = Number(count.value), payload = {vehicle_id: config.vehicle_id, item_id: line.item_id,
           checklist_version_id: line.checklist_version_id, kit_requirement_id: line.line_id,
           purpose: "ROUTINE", quantity: quantity};
+        if (!line.checklist_version_id) { payload.inspection_start_operation_id = startId; }
         if (quantity !== line.required_count) {
           if (!deficiency.category.value || !deficiency.severity.value || !deficiency.summary.value.trim() ||
               !deficiency.description.value.trim()) { show("Complete the deficiency details for the kit count."); return; }

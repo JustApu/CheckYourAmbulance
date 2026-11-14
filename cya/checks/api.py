@@ -49,6 +49,7 @@ OPTIONAL = (
     "client_observed_at",
     "kit_id",
     "kit_requirement_id",
+    "inspection_start_operation_id",
     "verification_for_deficiency_id",
     "deficiency",
 )
