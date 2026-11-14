@@ -296,3 +296,20 @@ class PresenceCheckTests(PresenceCase):
             self.assertEqual(row.definition_id, self.lines[str(compartment.pk)])
         self.assertEqual(by_line[self.lines[str(self.cabinet.pk)]].obligation_state, "SATISFIED")
         self.assertEqual(by_line[self.lines[str(self.drawer.pk)]].obligation_state, "CURRENT")
+
+    def test_the_outage_sheet_prints_each_presence_line_under_its_compartment(self):
+        from cya.attention.checklist import vehicle_checklist
+        from cya.inspections.printable import outage_sheet
+
+        rows = vehicle_checklist(str(self.org.pk), str(self.vehicle.pk)).rows
+        sections, _kits = outage_sheet(rows)
+        label = KitDefinition.objects.get(pk=self.definition).label + " (present)"
+        printed = {
+            section.heading: [r.expected for r in section.rows if r.label == label]
+            for section in sections
+        }
+        cabinet = next(
+            r.compartment_label for r in rows if r.compartment_id == str(self.cabinet.pk)
+        )
+        drawer = next(r.compartment_label for r in rows if r.compartment_id == str(self.drawer.pk))
+        self.assertEqual((printed[cabinet], printed[drawer]), (["2"], ["1"]))
