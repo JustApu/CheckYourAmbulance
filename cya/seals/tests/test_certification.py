@@ -1,13 +1,21 @@
 """A saved seal cannot certify changed physical contents or kit assignments."""
 
+from unittest.mock import patch
+
 from django.test import SimpleTestCase
 
 from cya.kits.seal_rules import CertifiedKitCount
-from cya.seals.certification import CertifiedItem, certification_refusal
+from cya.seals.certification import CertifiedItem, certification_refusal, stored_certification
 from cya.seals.scope import ScopeItem, ScopeKitLine
 
 
 class SealCertificationTests(SimpleTestCase):
+    def test_reseal_without_inspection_is_never_treated_as_certified(self):
+        with patch("cya.seals.models.SealInspection.objects") as inspections:
+            inspections.filter.return_value.first.return_value = None
+            with self.assertRaisesRegex(ValueError, "no full inspection"):
+                stored_certification("org", "reseal")
+
     def setUp(self):
         self.scope = [
             ScopeItem("item", "kit", "def", "KIT_DEFINITION", "QUANTITY", 2, None, True, ()),

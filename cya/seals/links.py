@@ -47,3 +47,45 @@ def plan_links(organization_id, vehicle_id, targets, *, recorded_at):
             raise ValueError("too many seal obligation links")
         planned.append((target, links))
     return planned
+
+
+def persist_inspection_links(inspection_item, links, receipt, actor):
+    """Append inspection links in primary-before-shared order under one receipt."""
+    from cya.seals.models import SealInspectionObligation
+
+    for link in links:
+        SealInspectionObligation.objects.create(
+            id=link["id"],
+            organization_id=inspection_item.organization_id,
+            inspection_item=inspection_item,
+            obligation=link["obligation"],
+            ordinal=link["ordinal"],
+            shared_rule=link["shared_rule"],
+            late_eligible=link["timing"] == "LATE",
+            command=receipt,
+            recorded_at=receipt.recorded_at,
+            actor_user=actor.user,
+            actor_roles_at_time=list(actor.roles),
+        )
+
+
+def persist_substitution_links(substitution, target, links, receipt, actor):
+    """Append separate substitution evidence, including the pinned unit of each obligation."""
+    from cya.seals.models import SealSubstitutionObligation
+
+    for link in links:
+        SealSubstitutionObligation.objects.create(
+            id=link["id"],
+            organization_id=substitution.organization_id,
+            substitution=substitution,
+            obligation=link["obligation"],
+            item_id=target.item_id,
+            kit_key=link["obligation"].kit_key,
+            ordinal=link["ordinal"],
+            shared_rule=link["shared_rule"],
+            late_eligible=link["timing"] == "LATE",
+            command=receipt,
+            recorded_at=receipt.recorded_at,
+            actor_user=actor.user,
+            actor_roles_at_time=list(actor.roles),
+        )

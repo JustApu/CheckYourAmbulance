@@ -14,6 +14,84 @@ class CertifiedItem:
     definition_id: str
 
 
+@dataclass(frozen=True)
+class StoredCertification:
+    """Saved inspection facts; nested kit attestations still need current verification."""
+
+    items: tuple[CertifiedItem, ...]
+    lines: tuple[CertifiedKitCount, ...]
+    nested: tuple[tuple[str, str], ...]  # kit and prior substitution IDs
+
+
+def _bounded(query):
+    rows = tuple(query[: MAX_SCOPE + 1])
+    if len(rows) > MAX_SCOPE:
+        raise ValueError("stored seal certification is too large")
+    return rows
+
+
+def stored_certification(organization_id, seal_event):
+    """Read the full certification of one reseal without silently truncating it."""
+    from cya.seals.models import (
+        SealInspection,
+        SealInspectionItem,
+        SealInspectionKitCount,
+        SealInspectionKitInstance,
+        SealInspectionKitVerification,
+    )
+
+    inspection = SealInspection.objects.filter(
+        organization_id=organization_id, reseal=seal_event
+    ).first()
+    if inspection is None:
+        raise ValueError("the seal has no full inspection")
+    rows = _bounded(
+        SealInspectionItem.objects.filter(
+            organization_id=organization_id, inspection=inspection
+        ).order_by("pk")
+    )
+    items = tuple(
+        CertifiedItem(
+            str(row.item_id),
+            str(row.kit_id) if row.kit_id else None,
+            "KIT_DEFINITION" if row.kit_definition_item_id else "CHECKLIST",
+            str(row.kit_definition_item_id or row.item_def_id),
+        )
+        for row in rows
+    )
+    counts = _bounded(
+        SealInspectionKitCount.objects.filter(
+            organization_id=organization_id, inspection=inspection
+        ).order_by("pk")
+    )
+    assignments = _bounded(
+        SealInspectionKitInstance.objects.filter(
+            organization_id=organization_id, kit_count_id__in=[row.pk for row in counts]
+        ).order_by("kit_count_id", "kit_id")
+    )
+    by_count = {}
+    for assignment in assignments:
+        by_count.setdefault(str(assignment.kit_count_id), []).append(
+            (str(assignment.kit_id), str(assignment.assignment_id))
+        )
+    lines = tuple(
+        CertifiedKitCount(
+            str(row.kit_requirement_id), row.count, tuple(by_count.get(str(row.pk), ()))
+        )
+        for row in counts
+    )
+    nested = _bounded(
+        SealInspectionKitVerification.objects.filter(
+            organization_id=organization_id, inspection=inspection
+        )
+        .order_by("kit_id")
+        .values_list("kit_id", "substitution_id")
+    )
+    return StoredCertification(
+        items, lines, tuple((str(kit), str(substitution)) for kit, substitution in nested)
+    )
+
+
 def certification_refusal(scope, certified_items, lines, certified_lines, *, nested_kit_ids=()):
     """Return a conflict code if the saved inspection no longer covers the current scope.
 

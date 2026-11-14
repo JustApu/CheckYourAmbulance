@@ -1,14 +1,48 @@
 """Seal evidence selects obligations per physical item and per kit-presence line."""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from cya.seals.links import LinkTarget, plan_links
+from cya.seals.links import (
+    LinkTarget,
+    persist_inspection_links,
+    persist_substitution_links,
+    plan_links,
+)
 
 
 class SealLinkTests(SimpleTestCase):
+    def test_persistence_preserves_receipt_attribution_and_late_timing(self):
+        receipt = SimpleNamespace(recorded_at="instant")
+        actor = SimpleNamespace(user="actor", roles=("CREW",))
+        evidence = SimpleNamespace(organization_id="org")
+        target = LinkTarget("item", kit_requirement_id="line")
+        obligation = SimpleNamespace(kit_key="line-unit")
+        link = {
+            "id": "link",
+            "obligation": obligation,
+            "ordinal": 0,
+            "shared_rule": None,
+            "timing": "LATE",
+        }
+        with (
+            patch("cya.seals.models.SealInspectionObligation.objects") as inspection,
+            patch("cya.seals.models.SealSubstitutionObligation.objects") as substitution,
+        ):
+            persist_inspection_links(evidence, [link], receipt, actor)
+            persist_substitution_links(evidence, target, [link], receipt, actor)
+        for manager in (inspection, substitution):
+            fields = manager.create.call_args.kwargs
+            self.assertIs(fields["command"], receipt)
+            self.assertEqual(fields["recorded_at"], "instant")
+            self.assertEqual(fields["actor_user"], "actor")
+            self.assertEqual(fields["actor_roles_at_time"], ["CREW"])
+            self.assertTrue(fields["late_eligible"])
+        self.assertEqual(substitution.create.call_args.kwargs["kit_key"], "line-unit")
+
     def test_each_physical_item_and_presence_line_has_its_own_selection(self):
         targets = [
             LinkTarget("item", "kit-a"),
