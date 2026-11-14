@@ -218,3 +218,23 @@ class PresenceCheckTests(PresenceCase):
         )
         row = CheckRecord.objects.get(pk=corrected.body["check_id"])
         self.assertEqual(str(row.kit_requirement_id), self.lines[str(self.cabinet.pk)])
+
+    def test_each_line_has_its_own_latest_check(self):
+        """Review of the KDEF-12 keying: one line's check is never another line's latest."""
+        from django.utils import timezone
+
+        from cya.attention.facts import latest_effective_checks
+
+        self.check(self.cabinet, 2)
+        self.clock.set(self.at(hours=5, minutes=45))
+        keys = [
+            (self.presence_item, self.unit(self.cabinet)),
+            (self.presence_item, self.unit(self.drawer)),
+        ]
+        found = {
+            f.kit_key: f.outcome
+            for f in latest_effective_checks(
+                str(self.org.pk), str(self.vehicle.pk), keys, timezone.now()
+            )
+        }
+        self.assertEqual(found, {self.unit(self.cabinet): "PASSED"})

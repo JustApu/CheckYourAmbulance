@@ -6,7 +6,7 @@ from itertools import islice
 from django.db import connection
 from django.db.models import F, Q
 
-from cya.checklists.models import Vehicle
+from cya.checklists.models import KitInstance, Vehicle
 from cya.checks.models import (
     CheckEvent,
     CheckObligationLink,
@@ -21,7 +21,8 @@ from cya.deficiencies.models import (
     DeficiencyAffectedItem,
     DeficiencyEvent,
 )
-from cya.kits.presence import line_unit_keys
+from cya.kits.models import VehicleKitRequirement
+from cya.kits.presence import line_unit_key, line_unit_keys
 from cya.obligations.history import (
     RecordedCheck,
     RecordedDeficiency,
@@ -215,14 +216,59 @@ def _key(vehicle_id, item_id, kit_id):
     return (str(vehicle_id), str(item_id), str(kit_id) if kit_id else NO_KIT)
 
 
-def _exact_keys(keys):
+class _Units:
+    """Which check keys are kit presence lines (SPEC 2.0.0 KDEF-12), and their line rows.
+
+    A presence check has no kit; it names its kit list line, and every revision's row of that
+    line (same vehicle, definition and slot) shares one unit key. A key whose kit_key is neither
+    NO_KIT nor a kit instance is such a unit key.
+    """
+
+    def __init__(self, keys):
+        candidates = {k[2] for k in keys if k[2] != NO_KIT}
+        kits = {
+            str(pk)
+            for pk in KitInstance.objects.filter(pk__in=candidates).values_list("pk", flat=True)
+        }
+        self.units = candidates - kits
+        self.lines = {}  # unit key -> line ids
+        self.unit_of = {}  # line id -> unit key
+        if self.units:
+            vehicles = {k[0] for k in keys if k[2] in self.units}
+            for pk, vehicle, definition, slot in VehicleKitRequirement.objects.filter(
+                version__vehicle_id__in=vehicles
+            ).values_list(
+                "pk", "version__vehicle_id", "definition_id", "compartment__stable_slot_id"
+            ):
+                unit = line_unit_key(vehicle, definition, slot)
+                if unit in self.units:
+                    self.lines.setdefault(unit, []).append(str(pk))
+                    self.unit_of[str(pk)] = unit
+
+    def key(self, vehicle_id, item_id, kit_id, kit_requirement_id):
+        """A check row's key: its kit, its presence line's unit key, or NO_KIT."""
+        if kit_id:
+            return _key(vehicle_id, item_id, kit_id)
+        unit = self.unit_of.get(str(kit_requirement_id)) if kit_requirement_id else None
+        return (str(vehicle_id), str(item_id), unit or NO_KIT)
+
+
+def _exact_keys(keys, units):
     """Rows of exactly these (vehicle, item, kit) keys; each is one range of the check index."""
     condition = Q(pk__in=())
     for vehicle_id, item_id, kit_key in sorted(keys):
+        if kit_key in units.units:
+            condition |= Q(
+                vehicle_id=vehicle_id,
+                item_id=item_id,
+                kit_requirement_id__in=units.lines.get(kit_key, ()),
+            )
+            continue
         condition |= Q(
             vehicle_id=vehicle_id,
             item_id=item_id,
             kit_id=None if kit_key == NO_KIT else kit_key,
+            kit_requirement_id=None,
         )
     return condition
 
@@ -240,7 +286,7 @@ def _aware(value):
     return value if value is None or value.tzinfo else value.replace(tzinfo=UTC)
 
 
-def _newest_older_by_key(organization_id, keys, lower):
+def _newest_older_by_key(organization_id, keys, lower, units):
     """{key: newest recorded_at at or before `lower`} for each (vehicle, item, kit) key with a check.
 
     Each key's answer is one backward step on the (organization, vehicle, item, kit, time) index:
@@ -269,14 +315,34 @@ def _newest_older_by_key(organization_id, keys, lower):
     table = CheckRecord._meta.db_table
     instant = _instant(lower)
     found = {}
+    # A kit presence line's key (KDEF-12) is a few rows per inspection: one indexed lookup each.
+    for vehicle_id, item_id, unit in sorted(k for k in keys if k[2] in units.units):
+        newest = (
+            CheckRecord.objects.filter(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                item_id=item_id,
+                kit_requirement_id__in=units.lines.get(unit, ()),
+                recorded_at__lte=lower,
+            )
+            .order_by("-recorded_at")
+            .values_list("recorded_at", flat=True)
+            .first()
+        )
+        if newest is not None:
+            found[(vehicle_id, item_id, unit)] = newest
     for kitted in (False, True):
-        group = sorted(k for k in keys if (k[2] != NO_KIT) == kitted)
+        group = sorted(k for k in keys if k[2] not in units.units and (k[2] != NO_KIT) == kitted)
         for start in range(0, len(group), LOOKUP_CHUNK):
             chunk = group[start : start + LOOKUP_CHUNK]
             width = 3 if kitted else 2
             first = "SELECT %s AS vehicle_id, %s AS item_id" + (", %s AS kit_id" if kitted else "")
             rest = "SELECT %s, %s" + (", %s" if kitted else "")
-            kit = "c.kit_id = k.kit_id" if kitted else "c.kit_id IS NULL"
+            kit = (
+                "c.kit_id = k.kit_id"
+                if kitted
+                else "c.kit_id IS NULL AND c.kit_requirement_id IS NULL"
+            )
             sql = (
                 "SELECT k.vehicle_id, k.item_id, "
                 + ("k.kit_id, " if kitted else "")
@@ -316,6 +382,7 @@ def _attention_roots(organization_id, keys, since, instant, limit):
     windows fell, so a page and a single vehicle agree.
     """
     since = min(since, instant)  # never read a check recorded after the instant
+    units = _Units(keys)
     recent = _bounded(
         CheckRecord.objects.filter(
             organization_id=organization_id,
@@ -325,10 +392,12 @@ def _attention_roots(organization_id, keys, since, instant, limit):
             recorded_at__lte=instant,
         )
         .order_by("recorded_at", "id")
-        .values_list("root_check_id", "vehicle_id", "item_id", "kit_id")[: limit + 1],
+        .values_list("root_check_id", "vehicle_id", "item_id", "kit_id", "kit_requirement_id")[
+            : limit + 1
+        ],
         limit,
     )
-    roots = {str(root) for root, *key in recent if _key(*key) in keys}
+    roots = {str(root) for root, *key in recent if units.key(*key) in keys}
     older_chains = {}  # key -> {root: (newest recorded_at, newest id)}, chains before `since`
     invalidated = set()
     unresolved = set(keys)
@@ -337,7 +406,7 @@ def _attention_roots(organization_id, keys, since, instant, limit):
         # Each key's own newest older check, from the (organization, vehicle, item, kit, time)
         # index alone. Grouped by the exact key: a kit instance with no checks of its own has
         # nothing older and stops here, never walking a sibling kit's history.
-        newest_by_key = _newest_older_by_key(organization_id, unresolved, lower)
+        newest_by_key = _newest_older_by_key(organization_id, unresolved, lower, units)
         older = {key: newest_by_key[key] for key in unresolved if key in newest_by_key}
         unresolved &= set(older)  # a key with nothing older has nothing more to find
         if not unresolved:
@@ -347,20 +416,26 @@ def _attention_roots(organization_id, keys, since, instant, limit):
             # Only the unresolved keys' own rows: a resolved sibling kit or another item can
             # have any amount of settled history inside a wide gap.
             CheckRecord.objects.filter(
-                _exact_keys(unresolved),
+                _exact_keys(unresolved, units),
                 organization_id=organization_id,
                 recorded_at__gt=lower,
                 recorded_at__lte=upper,
             )
             .order_by("recorded_at", "id")
-            .values_list("pk", "root_check_id", "vehicle_id", "item_id", "kit_id", "recorded_at")[
-                : limit + 1
-            ],
+            .values_list(
+                "pk",
+                "root_check_id",
+                "vehicle_id",
+                "item_id",
+                "kit_id",
+                "kit_requirement_id",
+                "recorded_at",
+            )[: limit + 1],
             limit,
         )
         seen = set()
-        for pk, root, vehicle_id, item_id, kit_id, recorded_at in window:
-            key = _key(vehicle_id, item_id, kit_id)
+        for pk, root, vehicle_id, item_id, kit_id, kit_requirement_id, recorded_at in window:
+            key = units.key(vehicle_id, item_id, kit_id, kit_requirement_id)
             if key not in unresolved:
                 continue
             by_root = older_chains.setdefault(key, {})
@@ -410,7 +485,7 @@ def _history(organization_id, obligations, since, instant, limit, *, current_fac
     vehicle_ids = list(obligations)
     owner = {oid: vehicle_id for vehicle_id, by_id in obligations.items() for oid in by_id}
     keys = {
-        _key(vehicle_id, o.item_id, o.kit_instance_id)
+        (str(vehicle_id), str(o.item_id), o.unit_key)
         for vehicle_id, by_id in obligations.items()
         for o in by_id.values()
     }

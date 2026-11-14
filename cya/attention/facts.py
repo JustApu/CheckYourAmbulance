@@ -84,7 +84,8 @@ def latest_effective_checks(organization_id, vehicle_id, keys, as_of):
     Reads only each key's chains from its newest down to its latest valid one, never its older
     history (issue #63; projections.latest_check_roots).
     """
-    from cya.obligations.projections import latest_check_roots
+    from cya.kits.presence import line_unit_keys
+    from cya.obligations.projections import check_unit_key, latest_check_roots
 
     _aware(as_of, "as_of")
     wanted = {(str(vehicle_id), str(item_id), str(kit_key)) for item_id, kit_key in keys}
@@ -93,8 +94,10 @@ def latest_effective_checks(organization_id, vehicle_id, keys, as_of):
     roots = latest_check_roots(organization_id, wanted, as_of)
     effective = _effective_by_root(organization_id, sorted(roots), as_of) if roots else {}
     facts = {}
-    for _root, (_decision, row) in effective.items():
-        key = (str(row.item_id), str(row.kit_id) if row.kit_id else NO_KIT)
+    rows = [row for _decision, row in effective.values()]
+    units = line_unit_keys({r.kit_requirement_id for r in rows if r.kit_requirement_id})
+    for row in rows:
+        key = (str(row.item_id), check_unit_key(row, units))
         if (str(vehicle_id), *key) not in wanted:
             continue
         fact = CheckFact(str(row.pk), key[0], key[1], row.recorded_at, row.outcome)
