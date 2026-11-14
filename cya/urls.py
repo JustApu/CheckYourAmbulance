@@ -19,6 +19,7 @@ from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
 from cya.operations import views as operations_views
 from cya.seals import api as seal_api
+from cya.seals import views as seal_views
 from cya.shell import views as shell
 
 urlpatterns = [
@@ -31,6 +32,11 @@ urlpatterns = [
         "inspection/vehicles/<str:vehicle_id>/",
         inspection_views.vehicle,
         name="inspection-vehicle",
+    ),
+    path(
+        "inspection/vehicles/<str:vehicle_id>/seals/",
+        seal_views.vehicle_seals,
+        name="inspection-vehicle-seals",
     ),
     path(
         "inspection/vehicles/<str:vehicle_id>/print/",
@@ -109,6 +115,16 @@ urlpatterns = [
     ),
     path("api/v1/checks", check_api.checks, name="api-checks"),
     path("api/v1/seals/<str:action>", seal_api.command, name="api-seal-command"),
+    path(
+        "api/v1/vehicles/<str:vehicle_id>/seals",
+        seal_api.vehicle_subjects,
+        name="api-seal-subjects",
+    ),
+    path(
+        "api/v1/vehicles/<str:vehicle_id>/seals/<str:kind>/<str:subject_id>",
+        seal_api.inspection_scope,
+        name="api-seal-scope",
+    ),
     path("api/v1/inspection-sessions", inspection_api.sessions, name="api-inspection-sessions"),
     path(
         "api/v1/inspection-sessions/<str:session_id>/reopen",

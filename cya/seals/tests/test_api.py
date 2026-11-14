@@ -3,10 +3,11 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from uuid import uuid4
 
 from django.test import RequestFactory, SimpleTestCase
 
-from cya.seals.api import ACTIONS, command
+from cya.seals.api import ACTIONS, command, inspection_scope, vehicle_subjects
 from cya.seals.commands import SealConflict
 
 
@@ -54,3 +55,15 @@ class SealApiTests(SimpleTestCase):
             ACTIONS, {"verify": (Mock(side_effect=SealConflict("stale")), ACTIONS["verify"][1])}
         ):
             self.assertEqual(command(self.request(self.body, self.user), "verify").status_code, 409)
+
+    def test_read_views_are_authenticated_and_use_current_organization(self):
+        vehicle_id, kit_id = str(uuid4()), str(uuid4())
+        request = self.factory.get("/seals")
+        request.cya_user = None
+        self.assertEqual(vehicle_subjects(request, vehicle_id).status_code, 401)
+        request.cya_user = self.user
+        with patch("cya.seals.api.readers.subjects", return_value=[]) as subjects:
+            self.assertEqual(vehicle_subjects(request, vehicle_id).status_code, 200)
+            subjects.assert_called_once_with("org", vehicle_id)
+        with patch("cya.seals.api.readers.inspection_scope", side_effect=LookupError):
+            self.assertEqual(inspection_scope(request, vehicle_id, "kit", kit_id).status_code, 404)

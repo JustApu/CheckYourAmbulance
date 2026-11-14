@@ -55,6 +55,7 @@ class RoutingTests(unittest.TestCase):
                     "cya.inspections",
                     "cya.attention",
                     "cya.operations",
+                    "cya.seals",
                     "cya.tests.test_background_refresh",
                 ),
                 False,
