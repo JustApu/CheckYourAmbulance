@@ -1,15 +1,18 @@
 """Audited seal event commands for cabinets and physical kits."""
 
+from zoneinfo import ZoneInfo
+
 from django.utils import timezone
 
 from cya.accounts.fields import new_id
+from cya.accounts.models import Organization
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
 from cya.checklists.models import Compartment, KitInstance, Vehicle
 from cya.core.audit_commands import Plan, run_command
 from cya.kits.definitions import authorizer
 from cya.kits.sealable import kit_sealable
-from cya.seals.models import SealEvent
+from cya.seals.models import SealEvent, SealSubstitution
 
 MAX_EVENTS = 10000
 MAX_REASON = 4000
@@ -181,3 +184,153 @@ def break_seal(*, reason, **kwargs):
 
 def request_seal_audit(**kwargs):
     return _append_event(event_type="AUDIT_REQUEST", **kwargs)
+
+
+def verify_seal(
+    *, vehicle_id, marking, attested, kit_id=None, slot_id=None, expected_tip_id=None, **context
+):
+    """Record attributed substitution only when current seal and complete scope remain valid."""
+    from cya.kits.models import KitDefinition
+    from cya.kits.seal_rules import SealVerificationFacts, verification_refusal
+    from cya.seals.blockers import seal_blockers
+    from cya.seals.links import LinkTarget, persist_substitution_links, plan_links
+    from cya.seals.locking import lock_seal_inputs, require_item_locks
+    from cya.seals.scope import resolve_kit_lines, resolve_scope
+    from cya.seals.verification import current_certification
+
+    organization_id = context["organization_id"]
+    for value in (organization_id, context["actor_id"], vehicle_id):
+        canonical_id(value)
+    if (kit_id is None) == (slot_id is None):
+        raise SealError("exactly one kit or compartment slot is required")
+    canonical_id(kit_id if kit_id is not None else slot_id)
+    if expected_tip_id is not None:
+        canonical_id(expected_tip_id)
+    if not isinstance(marking, str) or not marking.strip() or len(marking) > 200:
+        raise SealError("the seal marking is required")
+    if attested is not True:
+        raise SealError("the intact seal must be attested")
+    request = {
+        "vehicle_id": vehicle_id,
+        "kit_id": kit_id,
+        "slot_id": slot_id,
+        "expected_tip_id": expected_tip_id,
+        "marking": marking,
+        "attested": attested,
+    }
+
+    def build(actor):
+        _subject(organization_id, vehicle_id, kit_id, slot_id, require_sealable=True)
+        now, item_locks, deficiencies = lock_seal_inputs(organization_id, vehicle_id)
+        # A scheduled designation can take effect while another lock is being acquired.
+        now = _subject(organization_id, vehicle_id, kit_id, slot_id, require_sealable=True)
+        events = _events(organization_id, vehicle_id, kit_id, slot_id)
+        tip = events[-1] if events else None
+        if (str(tip.pk) if tip else None) != expected_tip_id:
+            raise SealConflict("seal changed; reload before continuing")
+        seal, pending = _event_state(events)
+        if seal is None:
+            raise SealError("there is no intact seal to verify")
+        scope, assignments = resolve_scope(
+            organization_id, vehicle_id, now, kit_id=kit_id, slot_id=slot_id
+        )
+        lines = (
+            resolve_kit_lines(organization_id, vehicle_id, slot_id, now, assignments)
+            if slot_id is not None
+            else ()
+        )
+        definitions = {
+            str(row.pk): str(row.presence_item_id)
+            for row in KitDefinition.objects.filter(
+                organization_id=organization_id, pk__in={line.definition_id for line in lines}
+            )
+        }
+        if len(definitions) != len({line.definition_id for line in lines}):
+            raise SealError("a covered kit definition is unavailable")
+        require_item_locks(scope, item_locks)
+        if any(definitions[line.definition_id] not in item_locks for line in lines):
+            raise SealError("a kit-presence item lock is unavailable")
+        covered = {item.key for item in scope}
+        presence_lines = {(definitions[line.definition_id], line.line_id) for line in lines}
+        open_deficiency, suspended = seal_blockers(
+            organization_id, deficiencies, covered, at=now, presence_lines=presence_lines
+        )
+        zone = Organization.objects.values_list("station_zone", flat=True).get(pk=organization_id)
+        today = now.astimezone(ZoneInfo(zone)).date()
+        refusal = verification_refusal(
+            SealVerificationFacts(
+                sealable=True,
+                intact=True,
+                marking=seal.marking,
+                expires_on=seal.expiration,
+                no_expiration=seal.no_expiration,
+                audit_pending=pending,
+                open_deficiency=open_deficiency,
+                suspended=suspended,
+            ),
+            marking=marking,
+            attested=attested,
+            today=today,
+        )
+        if refusal:
+            raise SealError(refusal)
+        refusal = current_certification(
+            organization_id,
+            vehicle_id,
+            seal,
+            scope,
+            assignments,
+            at=now,
+            today=today,
+            open_deficiency=open_deficiency,
+            suspended=suspended,
+        )
+        if refusal:
+            raise SealError(refusal)
+        targets = [LinkTarget(item.item_id, item.kit_id) for item in scope]
+        targets.extend(
+            LinkTarget(definitions[line.definition_id], kit_requirement_id=line.line_id)
+            for line in lines
+        )
+        planned = plan_links(organization_id, vehicle_id, targets, recorded_at=now)
+        substitution_id = new_id()
+        count = sum(len(links) for _, links in planned)
+        body = {"code": "SEAL_SUBSTITUTED", "substitution_id": substitution_id, "link_count": count}
+
+        def apply(receipt, current):
+            substitution = SealSubstitution.objects.create(
+                id=substitution_id,
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                seal_event=seal,
+                entered_marking=marking,
+                intact_attestation=True,
+                command=receipt,
+                recorded_at=receipt.recorded_at,
+                actor_user=current.user,
+                actor_roles_at_time=list(current.roles),
+            )
+            for target, links in planned:
+                persist_substitution_links(substitution, target, links, receipt, current)
+
+        return Plan(
+            response_body=body,
+            apply=apply,
+            target_type="ORGANIZATION",
+            target_id=organization_id,
+            recorded_at=now,
+            new_snapshot={"schema_version": 1, "values": body},
+        )
+
+    return run_command(
+        organization_id=organization_id,
+        operation_id=context["operation_id"],
+        command_type="SEAL_SUBSTITUTE",
+        request_digest=digest(request),
+        correlation_id=context["correlation_id"],
+        request_attempt_id=context["request_attempt_id"],
+        authorize=authorizer(
+            organization_id, context["actor_id"], action="verify_break_reseal_kit_seal"
+        ),
+        prepare=build,
+    )

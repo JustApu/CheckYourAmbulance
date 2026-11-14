@@ -33,7 +33,9 @@ class SealBlockerTests(SimpleTestCase):
     def test_in_force_suspension_blocks_its_loose_item(self):
         deficiency = SimpleNamespace(pk="d")
         projections = {"d": SimpleNamespace(status="OPEN")}
-        suspension = SimpleNamespace(item_id="item", instance_key=NO_KIT_KEY)
+        suspension = SimpleNamespace(
+            item_id="item", instance_key=NO_KIT_KEY, kit_requirement_id=None
+        )
         with (
             patch("cya.seals.blockers.Deficiency.objects") as manager,
             patch("cya.seals.blockers.service.correction_scope", return_value=[]),
@@ -49,3 +51,28 @@ class SealBlockerTests(SimpleTestCase):
             manager.filter.return_value.order_by.return_value = []
             with self.assertRaises(SealLockError):
                 seal_blockers("org", {"d": SimpleNamespace(status="OPEN")}, set(), at="instant")
+
+    def test_presence_deficiency_and_suspension_are_specific_to_the_line(self):
+        deficiency = SimpleNamespace(pk="d")
+        projections = {"d": SimpleNamespace(status="OPEN")}
+        suspension = SimpleNamespace(item_id="presence", kit_requirement_id="line-a")
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.DeficiencyAffectedItem.objects") as affected,
+            patch("cya.seals.blockers.service.correction_scope", return_value=[]),
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[suspension]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            affected.filter.return_value.values_list.return_value = [("presence", "line-a")]
+            self.assertEqual(
+                seal_blockers(
+                    "org", projections, set(), at="instant", presence_lines={("presence", "line-a")}
+                ),
+                (True, True),
+            )
+            self.assertEqual(
+                seal_blockers(
+                    "org", projections, set(), at="instant", presence_lines={("presence", "line-b")}
+                ),
+                (False, False),
+            )
