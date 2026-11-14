@@ -183,6 +183,8 @@ def _ensure_requirement_versions(plan, evidence):
             kit_instance_id=d.kit_id,
             kit_key=d.kit_id or NO_KIT,
             kit_event_id=d.kit_event_id,
+            kit_definition_item_id=d.kit_definition_item_id,
+            placement_id=d.placement_id,
             **evidence,
         )
         for rid, d in wanted.items()

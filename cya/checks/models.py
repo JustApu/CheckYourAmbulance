@@ -33,7 +33,19 @@ class CheckRecord(Evidence):
     operation_id = IdentityIDField()
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
     item = models.ForeignKey(Item, on_delete=models.PROTECT, related_name="+")
-    item_def = models.ForeignKey(ChecklistItemDef, on_delete=models.PROTECT, related_name="+")
+    # Exactly one content source: a checklist item definition, or the content entry of a kit
+    # definition placed by the checklist (SPEC 4.6 KDEF-4, KDEF-7; issue #129).
+    item_def = models.ForeignKey(
+        ChecklistItemDef, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kit_definition_item = models.ForeignKey(
+        "cya_kits.KitDefinitionItem",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0012.
+        db_constraint=False,
+    )
     checklist_version = models.ForeignKey(
         ChecklistVersion, on_delete=models.PROTECT, related_name="+"
     )
@@ -79,6 +91,15 @@ class CheckRecord(Evidence):
                 fields=["organization", "operation_id"], name="check_org_operation"
             ),
             models.CheckConstraint(condition=models.Q(outcome__in=OUTCOMES), name="check_outcome"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(item_def__isnull=False, kit_definition_item__isnull=True)
+                    | models.Q(
+                        item_def__isnull=True, kit_definition_item__isnull=False, kit__isnull=False
+                    )
+                ),
+                name="check_content_source",
+            ),
             models.CheckConstraint(condition=models.Q(purpose__in=PURPOSES), name="check_purpose"),
             models.CheckConstraint(
                 condition=models.Q(explanation__isnull=True) | non_blank("explanation"),

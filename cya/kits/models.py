@@ -198,6 +198,8 @@ class KitDefinitionItem(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="kitdefitem_org_id"),
             models.UniqueConstraint(fields=["version", "item"], name="kitdefitem_version_item"),
+            # Target of requirement_version's composite key: a row cannot name another item.
+            models.UniqueConstraint(fields=["id", "item"], name="kitdefitem_id_item"),
             models.CheckConstraint(condition=models.Q(kind__in=KIT_KINDS), name="kitdefitem_kind"),
             models.CheckConstraint(
                 condition=(

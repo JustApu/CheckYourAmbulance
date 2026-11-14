@@ -166,6 +166,46 @@ def versions(organization_id, rows):
     return result
 
 
+def _placed_kit_types(organization_id, version, as_of):
+    """[(kit definition label, [PrintRow])] for the kits the version places by definition.
+
+    Each placed definition prints the contents of its version in force at as_of (KDEF-7).
+    """
+    from cya.kits.models import ChecklistKitPlacement, KitDefinitionItem
+    from cya.kits.placements import definition_version_at
+
+    placements = ChecklistKitPlacement.objects.filter(checklist_version=version).select_related(
+        "definition"
+    )
+    kinds = {}
+    for placement in placements.order_by("definition__label", "definition_id"):
+        definition = placement.definition
+        if (definition.label, definition.pk) in kinds:
+            continue
+        version_id = definition_version_at(organization_id, definition.pk, as_of)
+        if version_id is None:
+            continue
+        contents = (
+            KitDefinitionItem.objects.filter(version_id=version_id)
+            .select_related("item")
+            .order_by("display_order", "pk")[: REFERENCE_ITEM_LIMIT + 1]
+        )
+        rows = [
+            PrintRow(
+                label=content.item.label,
+                instructions=content.instructions,
+                outcomes=(),
+                expected=_expected(content.kind, content.expected_quantity, content.unit),
+                value_unit=None,
+            )
+            for content in contents
+        ]
+        if len(rows) > REFERENCE_ITEM_LIMIT:
+            raise ValueError(f"kit definition {definition.key} lists too many items to print")
+        kinds[(definition.label, definition.pk)] = rows
+    return [(name, rows) for (name, _pk), rows in kinds.items()]
+
+
 def _kit_types(version):
     """[(kit type name, [PrintRow])] for one template version, in display order.
 
@@ -211,7 +251,7 @@ def kit_reference(organization_id, as_of):
         version = effective_template_version(organization_id, template.pk, as_of)
         if version is None:
             continue
-        kit_types = _kit_types(version)
+        kit_types = _kit_types(version) + _placed_kit_types(organization_id, version, as_of)
         if kit_types:
             result.append(
                 {

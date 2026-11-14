@@ -368,6 +368,24 @@ def publish_kit_definition_version(*, version_id, effective_at=None, **context):
                 actor_user=current.user,
                 actor_roles_at_time=list(current.roles),
             )
+            # A check takes the item's lock (cya.checks.locks); every active vehicle gets one
+            # for each content item, as a template publication does for its items.
+            from cya.checklists.models import Vehicle
+            from cya.checks.locks import ensure_item_locks
+
+            ensure_item_locks(
+                org,
+                list(
+                    Vehicle.objects.filter(organization_id=org, active=True).values_list(
+                        "pk", flat=True
+                    )
+                ),
+                list(
+                    KitDefinitionItem.objects.filter(version=version).values_list(
+                        "item_id", flat=True
+                    )
+                ),
+            )
 
         body = {
             "code": "KIT_DEFINITION_PUBLISHED",

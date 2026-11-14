@@ -45,6 +45,7 @@ from cya.deficiencies.transitions import (
     TransitionRejected,
     validate_transition,
 )
+from cya.kits.placements import content_columns
 from cya.operations.models import MAX_TEXT
 
 EXPAND_ACTION = "expand_verification"
@@ -81,8 +82,13 @@ def resolve_items(organization_id, vehicle_id, items, now):
     its active physical kit instances on the vehicle, and any other item names none.
     """
     current = service._effective_items(organization_id, vehicle_id, now)
+    placed = service._effective_placed(organization_id, vehicle_id, now)
     resolved = []
     for index, (item_id, kit_id) in enumerate(items):
+        content = service.placed_entry(placed, item_id, kit_id)
+        if content is not None:  # content of a kit placed by definition (issue #129)
+            resolved.append((item_id, str(content.requirement.definition_id), kit_id))
+            continue
         entry = current.get(item_id)
         if entry is None:
             raise DeficiencyError(
@@ -182,7 +188,7 @@ def _expansion_rows(resolved, *, organization_id, deficiency_id, event, receipt,
             deficiency_id=deficiency_id,
             event=event,
             item_id=item_id,
-            definition_id=definition_id,
+            **content_columns(definition_id),
             kit_instance_id=kit_id,
             instance_key=kit_id or NO_KIT_KEY,
             **service.stamp(receipt, current),
@@ -199,7 +205,13 @@ def _append_revision(
     """The newest revision's rows with their own instants, then the added rows (now)."""
     correction_event_id = carried[0].correction_event_id
     specs = [
-        (str(r.item_id), str(r.definition_id), r.kit_instance_id, r.required_after) for r in carried
+        (
+            str(r.item_id),
+            str(r.definition_id or r.kit_definition_item_id),
+            r.kit_instance_id,
+            r.required_after,
+        )
+        for r in carried
     ] + [
         (item_id, definition_id, kit_id, receipt.recorded_at)
         for item_id, definition_id, kit_id in resolved
@@ -211,7 +223,7 @@ def _append_revision(
             deficiency_id=deficiency_id,
             correction_event_id=correction_event_id,
             item_id=item_id,
-            definition_id=definition_id,
+            **content_columns(definition_id),
             kit_instance_id=kit_id,
             instance_key=str(kit_id) if kit_id else NO_KIT_KEY,
             required_after=required_after,

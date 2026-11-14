@@ -43,6 +43,7 @@ from cya.deficiencies.models import (
     DeficiencyProjection,
 )
 from cya.deficiencies.service import DeficiencyError
+from cya.kits.placements import content_columns
 from cya.operations.models import MAX_TEXT
 
 SUSPEND_ACTION = "suspend_routine_checks"
@@ -100,7 +101,7 @@ def _start_rows(resolved, *, organization_id, deficiency_id, vehicle_id, event, 
             deficiency_id=deficiency_id,
             vehicle_id=vehicle_id,
             item_id=item_id,
-            definition_id=definition_id,
+            **content_columns(definition_id),
             kit_instance_id=kit_id,
             instance_key=kit_id or NO_KIT_KEY,
             action="START",

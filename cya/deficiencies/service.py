@@ -39,6 +39,8 @@ from cya.deficiencies.transitions import (
     validate_transition,
 )
 from cya.kits.history import active_kits, slot_of_reference_kit
+from cya.kits.models import KitInstanceDefinition
+from cya.kits.placements import content_columns, placed_items
 from cya.operations.models import MAX_TEXT
 
 MAX_SUMMARY = 200
@@ -251,7 +253,7 @@ def insert_deficiency(
             organization_id=organization_id,
             deficiency=header,
             item_id=scope_item_id,
-            definition_id=definition_id,
+            **content_columns(definition_id),
             **fields_of_command,
         )
     event = DeficiencyEvent.objects.create(
@@ -394,6 +396,33 @@ def _effective_items(organization_id, vehicle_id, now):
     return items
 
 
+def _effective_placed(organization_id, vehicle_id, now):
+    """Content of kits placed by definition, required now (SPEC 4.6 KDEF-4, issue #129).
+
+    One ResolvedItem per content entry and instance of the placed definition on the vehicle,
+    located in that instance's compartment, its definition_id the content entry. The instances
+    come from the assignment history at `now` (SPEC 2.0.0 KDEF-4).
+    """
+    found = []
+    templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
+    for template in templates:
+        try:
+            resolved = resolve_checklist(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                template_id=template.pk,
+                as_of=now,
+            )
+        except NoEffectiveVersionError:
+            continue
+        except ResolutionError as error:
+            raise DeficiencyError(
+                "CHECKLIST_UNAVAILABLE", str(error), status=409, path="target"
+            ) from None
+        found.extend(placed_items(organization_id, resolved, now))  # one item per kit present
+    return found
+
+
 def lock_checklist_templates(organization_id):
     """Serialize correction-time resolution with publication of existing templates."""
     return list(
@@ -513,6 +542,7 @@ def correction_scope(organization_id, deficiency, now):
     reporting is therefore included. An item in two physical kits produces two rows.
     """
     current = _effective_items(organization_id, str(deficiency.vehicle_id), now)
+    placed = _effective_placed(organization_id, str(deficiency.vehicle_id), now)
     selected = []
     if deficiency.kit_id:
         kit = KitInstance.objects.filter(
@@ -526,6 +556,9 @@ def correction_scope(organization_id, deficiency, now):
             if requirement.kit_id and slot_of_reference_kit(requirement.kit_id) == slot:
                 if any(kit_id == str(kit.pk) for kit_id, _label in item.kits):
                     selected.append((item, requirement.definition_id, str(kit.pk)))
+        for item in placed:
+            if any(kit_id == str(kit.pk) for kit_id, _label in item.kits):
+                selected.append((item, item.requirement.definition_id, str(kit.pk)))
     elif deficiency.compartment_id:
         target = Compartment.objects.filter(
             organization_id=organization_id,
@@ -551,6 +584,11 @@ def correction_scope(organization_id, deficiency, now):
                 )
             else:
                 selected.append((item, item.requirement.definition_id, None))
+        for item in placed:
+            if slots.get(str(item.compartment_id)) == target.stable_slot_id:
+                selected.extend(
+                    (item, item.requirement.definition_id, kit_id) for kit_id, _label in item.kits
+                )
     elif deficiency.item_id:
         item = current.get(str(deficiency.item_id))
         if item is not None:
@@ -560,16 +598,35 @@ def correction_scope(organization_id, deficiency, now):
                 )
             else:
                 selected.append((item, item.requirement.definition_id, None))
+        for item in placed:
+            if item.requirement.item_id == str(deficiency.item_id):
+                selected.extend(
+                    (item, item.requirement.definition_id, kit_id) for kit_id, _label in item.kits
+                )
     else:
         reported = list(
             DeficiencyAffectedItem.objects.filter(
                 organization_id=organization_id, deficiency_id=deficiency.pk
-            ).select_related("definition")
+            ).select_related("definition", "kit_definition_item__version")
         )
         for affected in reported:
             # The report-time definition is part of the immutable affected-item snapshot. Keep
             # that definition even if later publications remove or re-place the item.
-            if affected.definition.kit_id:
+            if affected.kit_definition_item_id:
+                # Placed kit content: every active kit on the vehicle with that definition now.
+                definition_id = affected.kit_definition_item.version.definition_id
+                own = KitInstance.objects.filter(
+                    organization_id=organization_id,
+                    vehicle_id=deficiency.vehicle_id,
+                    active=True,
+                    pk__in=KitInstanceDefinition.objects.filter(definition_id=definition_id).values(
+                        "kit_id"
+                    ),
+                ).values_list("pk", flat=True)
+                selected.extend(
+                    (affected, str(affected.kit_definition_item_id), str(kit)) for kit in own
+                )
+            elif affected.definition.kit_id:
                 slot = slot_of_reference_kit(affected.definition.kit_id)
                 kits = (
                     active_kits(organization_id, str(deficiency.vehicle_id), slot, now)
@@ -587,14 +644,26 @@ def correction_scope(organization_id, deficiency, now):
     # joins, resolved like the rest of the correction-time scope, unless the scope above already
     # holds the same item and instance.
     present = {(item_id, kit_id) for item_id, _definition, kit_id in rows}
-    for item_id, definition_id, kit_id in _expansions(organization_id, deficiency, current):
+    for item_id, definition_id, kit_id in _expansions(organization_id, deficiency, current, placed):
         if (item_id, kit_id) not in present:
             rows[(item_id, definition_id, kit_id)] = None
             present.add((item_id, kit_id))
     return sorted(rows, key=lambda row: (row[0], row[1], row[2] or ""))
 
 
-def _expansions(organization_id, deficiency, current):
+def placed_entry(placed, item_id, kit_id):
+    """The placed kit content for item_id held by kit_id, or None (issue #129)."""
+    if kit_id is None:
+        return None
+    for item in placed:
+        if str(item.requirement.item_id) == str(item_id) and any(
+            str(k) == str(kit_id) for k, _label in item.kits
+        ):
+            return item
+    return None
+
+
+def _expansions(organization_id, deficiency, current, placed=()):
     """(item, definition, kit or None) of the deficiency's supervisor expansions that apply now.
 
     Like every correction-time row (VER-3), an expanded pair is resolved against today's checklist
@@ -615,6 +684,10 @@ def _expansions(organization_id, deficiency, current):
         )
     applicable = []
     for item_id, kit_id in rows:
+        content = placed_entry(placed, item_id, kit_id)
+        if content is not None:
+            applicable.append((str(item_id), str(content.requirement.definition_id), str(kit_id)))
+            continue
         entry = current.get(str(item_id))
         if entry is None:
             continue
@@ -710,6 +783,7 @@ def end_suspensions(receipt, current, *, organization_id, event):
             vehicle_id=start.vehicle_id,
             item_id=start.item_id,
             definition_id=start.definition_id,
+            kit_definition_item_id=start.kit_definition_item_id,
             kit_instance_id=start.kit_instance_id,
             instance_key=start.instance_key,
             action="END",

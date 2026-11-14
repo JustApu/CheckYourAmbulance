@@ -58,7 +58,12 @@ from cya.checklists.validation import (
 )
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
 from cya.kits.models import ChecklistKitPlacement
-from cya.kits.placements import check_publishable, placements_of, validate_placements
+from cya.kits.placements import (
+    check_publishable,
+    placed_content_item_ids,
+    placements_of,
+    validate_placements,
+)
 
 MAX_EXPLANATION = 4000
 OVERRIDE_ACTIONS = ("ADD", "REMOVE", "REPLACE")
@@ -305,7 +310,8 @@ def publish_template_version(*, version_id, effective_at=None, **context):
             ensure_item_locks(
                 org,
                 _active_vehicle_ids(org),
-                [definition.item_id for definition in definitions],
+                [definition.item_id for definition in definitions]
+                + placed_content_item_ids(placements),
             )
 
         return _plan(

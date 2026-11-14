@@ -35,6 +35,7 @@ from cya.deficiencies.transitions import (
     TransitionRejected,
     validate_transition,
 )
+from cya.kits.placements import content_columns
 from cya.operations.models import MAX_TEXT
 
 REPORT_ACTION = "create_deficiency"
@@ -847,7 +848,7 @@ def record_correction(*, deficiency_id, expected_event_id, **context):
                         deficiency=deficiency,
                         correction_event=event,
                         item_id=item_id,
-                        definition_id=definition_id,
+                        **content_columns(definition_id),
                         kit_instance_id=kit_id,
                         instance_key=kit_id or "00000000-0000-0000-0000-000000000000",
                         required_after=receipt.recorded_at,

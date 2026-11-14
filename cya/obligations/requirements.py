@@ -27,7 +27,13 @@ from uuid import UUID, uuid5
 from cya.checklists.models import ChecklistPublication
 from cya.checklists.overlay import NoEffectiveVersionError, resolve_checklist
 from cya.conditions.models import ConditionalRule
-from cya.kits.history import active_kits, slot_of_reference_kit
+from cya.kits.history import active_kits, active_kits_on_vehicle, slot_of_reference_kit
+from cya.kits.models import (
+    ChecklistKitPlacement,
+    KitDefinitionItem,
+    KitDefinitionPublication,
+    KitInstanceDefinition,
+)
 from cya.obligations.models import RequirementBinding
 from cya.obligations.state import NO_KIT
 from cya.operations.status import out_of_service_at
@@ -58,7 +64,7 @@ class DesiredItem:
 
     item_id: str
     requirement_id: str
-    item_def_id: str
+    item_def_id: str | None  # None for content from a placed kit definition (issue #129)
     publication_id: str
     override_version_id: str | None
     binding_id: str
@@ -72,6 +78,10 @@ class DesiredItem:
     # this vehicle and slot (SPEC 1.8.0, TIME-1a); both None for an item outside a kit.
     kit_id: str | None = None
     kit_event_id: str | None = None
+    # Content from a kit definition placed by the checklist (SPEC 4.6 KDEF-4); both None for a
+    # requirement from a checklist item definition.
+    kit_definition_item_id: str | None = None
+    placement_id: str | None = None
 
     @property
     def key(self):
@@ -226,6 +236,101 @@ def _kit_instances(organization_id, vehicle_id, requirement, due_at, early_at, s
     ]
 
 
+def _definition_version(organization_id, definition_id, due_at, recorded_before):
+    """The kit definition version in force at due_at, as the records stood (KDEF-4, §5.7)."""
+    publications = KitDefinitionPublication.objects.filter(
+        organization_id=organization_id,
+        version__definition_id=definition_id,
+        effective_at__lte=due_at,
+    )
+    if recorded_before is not None:
+        publications = publications.filter(recorded_at__lt=recorded_before)
+    latest = publications.order_by("-effective_at").values_list("version_id", flat=True).first()
+    return str(latest) if latest else None
+
+
+def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at):
+    """Instances of the placed definition owed for this inspection (TIME-1a, KDEF-3, KDEF-4).
+
+    Every instance with the placed definition that is on the vehicle at D, in any compartment
+    (SPEC 2.0.0 KDEF-4), read from the assignment history like any kit item (not cut off at the
+    freeze instant). An instance whose stay on the vehicle began after the window opened waits
+    for the next due instant.
+    """
+    kits = [
+        kit
+        for kit in active_kits_on_vehicle(organization_id, vehicle_id, due_at)
+        if kit.since_at < early_at
+    ]
+    if not kits:
+        return []
+    having = set(
+        KitInstanceDefinition.objects.filter(
+            kit_id__in=[k.kit_id for k in kits], definition_id=placement.definition_id
+        ).values_list("kit_id", flat=True)
+    )
+    return [kit for kit in kits if kit.kit_id in {str(k) for k in having}]
+
+
+def _placement_items(organization_id, vehicle_id, occurrence, publication, resolved, context):
+    """Requirements for the content of kits placed by definition (SPEC 4.6 KDEF-4, KDEF-7).
+
+    One per content entry of the definition version in force at D, per instance of that
+    definition on the vehicle. A version published later never changes these pins.
+    """
+    due_at, recorded_before, conditional = context
+    placements = ChecklistKitPlacement.objects.filter(
+        checklist_version_id=resolved.template_version_id
+    ).order_by("display_order", "id")
+    for placement in placements:
+        version_id = _definition_version(
+            organization_id, placement.definition_id, due_at, recorded_before
+        )
+        if version_id is None:
+            continue  # nothing published yet for D: nothing to inspect
+        kits = _placed_kits(organization_id, vehicle_id, placement, due_at, occurrence.early_at)
+        if not kits:
+            continue
+        contents = KitDefinitionItem.objects.filter(version_id=version_id).order_by(
+            "display_order", "id"
+        )
+        for content in contents:
+            item_id = str(content.item_id)
+            for kit in kits:
+                pin = {
+                    "binding": occurrence.binding_id,
+                    "conditional": conditional.get(item_id),
+                    "kit_def_item": str(content.pk),
+                    "placement": str(placement.pk),
+                    "override": resolved.override_version_id,
+                    "publication": str(publication.pk),
+                    "schedule": occurrence.schedule_rule_id,
+                    "kit": kit.kit_id,
+                    "kit_event": kit.since_event_id,
+                }
+                yield (
+                    (item_id, kit.kit_id),
+                    DesiredItem(
+                        item_id=item_id,
+                        requirement_id=requirement_id(organization_id, vehicle_id, item_id, pin),
+                        item_def_id=None,
+                        publication_id=pin["publication"],
+                        override_version_id=pin["override"],
+                        binding_id=pin["binding"],
+                        schedule_rule_id=pin["schedule"],
+                        conditional_rule_id=pin["conditional"],
+                        slot=occurrence.slot,
+                        due_at=due_at,
+                        early_at=occurrence.early_at,
+                        grace_at=occurrence.grace_at,
+                        kit_id=kit.kit_id,
+                        kit_event_id=kit.since_event_id,
+                        kit_definition_item_id=pin["kit_def_item"],
+                        placement_id=pin["placement"],
+                    ),
+                )
+
+
 def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None):
     """The requirements owed for the occurrences sharing one due instant.
 
@@ -297,6 +402,16 @@ def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None
                     kit_id=kit.kit_id if kit else None,
                     kit_event_id=kit.since_event_id if kit else None,
                 )
+        placed = _placement_items(
+            organization_id,
+            vehicle_id,
+            occurrence,
+            publication,
+            resolved,
+            (due_at, recorded_before, conditional),
+        )
+        for key, desired in placed:
+            items.setdefault(key, desired)  # an earlier (slot, template) or item wins
     return Desired(items)
 
 
