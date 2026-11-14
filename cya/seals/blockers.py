@@ -8,7 +8,9 @@ from cya.kits.presence import line_unit_keys
 from cya.seals.locking import MAX_LOCK_ROWS, SealLockError
 
 
-def seal_blockers(organization_id, projections, covered_pairs, *, at, presence_lines=()):
+def seal_blockers(
+    organization_id, projections, covered_pairs, *, at, presence_lines=(), covered_kit_ids=()
+):
     """Return (open deficiency, suspended check) for the already locked vehicle scope.
 
     `covered_pairs` contains server-resolved (item id, physical kit id or None) pairs;
@@ -17,7 +19,8 @@ def seal_blockers(organization_id, projections, covered_pairs, *, at, presence_l
     changes cannot race this read.
     """
     pairs = {(str(item), str(kit) if kit is not None else None) for item, kit in covered_pairs}
-    if len(pairs) > MAX_LOCK_ROWS:
+    kits = {str(kit) for kit in covered_kit_ids}
+    if len(pairs) > MAX_LOCK_ROWS or len(kits) > MAX_LOCK_ROWS:
         raise SealLockError("seal blocker scope is too large")
     if len(projections) > MAX_LOCK_ROWS:
         raise SealLockError("too many deficiencies to check")
@@ -67,9 +70,8 @@ def seal_blockers(organization_id, projections, covered_pairs, *, at, presence_l
             kit_id = getattr(deficiency, "kit_id", None)
             item_id = getattr(deficiency, "item_id", None)
             if kit_id is not None:
-                has_open |= any(
-                    kit == str(kit_id) and (item_id is None or item == str(item_id))
-                    for item, kit in pairs
+                has_open |= (
+                    str(kit_id) in kits if item_id is None else (str(item_id), str(kit_id)) in pairs
                 )
             rows = service.correction_scope(organization_id, deficiency, at)
             if len(rows) > MAX_LOCK_ROWS:

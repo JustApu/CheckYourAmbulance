@@ -322,7 +322,12 @@ def verify_seal(
         covered = {item.key for item in scope}
         presence_lines = {(definitions[line.definition_id], line.line_id) for line in lines}
         open_deficiency, suspended = seal_blockers(
-            organization_id, deficiencies, covered, at=now, presence_lines=presence_lines
+            organization_id,
+            deficiencies,
+            covered,
+            at=now,
+            presence_lines=presence_lines,
+            covered_kit_ids=assignments,
         )
         zone = Organization.objects.values_list("station_zone", flat=True).get(pk=organization_id)
         today = now.astimezone(ZoneInfo(zone)).date()

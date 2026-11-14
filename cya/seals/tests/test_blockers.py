@@ -11,6 +11,25 @@ from cya.seals.locking import SealLockError
 
 
 class SealBlockerTests(SimpleTestCase):
+    def test_open_kit_deficiency_blocks_even_when_kit_has_no_contents(self):
+        deficiency = SimpleNamespace(pk="d", kit_id="kit-a", item_id=None)
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.service.correction_scope", return_value=[]),
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            self.assertEqual(
+                seal_blockers(
+                    "org",
+                    {"d": SimpleNamespace(status="OPEN")},
+                    set(),
+                    at="instant",
+                    covered_kit_ids={"kit-a"},
+                ),
+                (True, False),
+            )
+
     def test_open_deficiency_on_unbound_kit_content_still_blocks(self):
         deficiency = SimpleNamespace(pk="d", kit_id="kit-a", item_id="item")
         with (
