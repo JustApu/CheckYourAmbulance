@@ -744,6 +744,8 @@ def _standalone_presence(organization_id, actor_id, shape, start_id, now):
     ).first()
     if line is None or start is None:
         raise CheckError("NOT_FOUND", "cabinet inspection or kit line was not found", status=404)
+    if start.recorded_at >= now:
+        raise CheckError("INSPECTION_NOT_STARTED", "record the count after inspection starts")
     slot_id = str(line.compartment.stable_slot_id)
     expected = {"vehicle_id": shape["vehicle_id"], "kit_id": None, "slot_id": slot_id}
     if any(start.response_body.get(key) != value for key, value in expected.items()):

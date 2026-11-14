@@ -16,11 +16,13 @@ THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'seal inspection start mismatch'
 COUNT_GUARD = """IF NEW.check_record_id IS NULL OR NOT EXISTS
  (SELECT 1 FROM seal_inspection i JOIN command_receipt start ON start.id=i.start_receipt_id
  JOIN seal_event e ON e.id=i.reseal_id JOIN check_record c ON c.id=NEW.check_record_id
+ JOIN check_record root ON root.id=c.root_check_id
  WHERE i.id=NEW.inspection_id AND i.organization_id=NEW.organization_id
  AND start.organization_id=NEW.organization_id AND c.organization_id=NEW.organization_id
+ AND root.organization_id=NEW.organization_id AND root.actor_user_id=NEW.actor_user_id
  AND c.actor_user_id=NEW.actor_user_id AND c.vehicle_id=e.vehicle_id
  AND c.kit_requirement_id=NEW.kit_requirement_id AND c.quantity=NEW.count
- AND c.outcome IN ('PASSED','FAILED') AND c.recorded_at>=start.recorded_at
+ AND c.outcome IN ('PASSED','FAILED') AND root.recorded_at>start.recorded_at
  AND c.recorded_at<=NEW.recorded_at
  AND NOT EXISTS (SELECT 1 FROM check_event invalidation
   WHERE invalidation.organization_id=NEW.organization_id AND invalidation.root_check_id=c.root_check_id

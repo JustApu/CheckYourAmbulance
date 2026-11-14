@@ -16,7 +16,9 @@ class KitCountCheckTests(SimpleTestCase):
         self.start = SimpleNamespace(recorded_at=datetime(2026, 11, 14, tzinfo=UTC))
         self.at = self.start.recorded_at + timedelta(minutes=5)
         self.line = SimpleNamespace(line_id=self.line_id)
-        root = SimpleNamespace(actor_user_id="actor", recorded_at=self.start.recorded_at)
+        root = SimpleNamespace(
+            actor_user_id="actor", recorded_at=self.start.recorded_at + timedelta(microseconds=1)
+        )
         self.check = SimpleNamespace(
             pk=self.check_id,
             vehicle_id="vehicle",
@@ -59,10 +61,13 @@ class KitCountCheckTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             self.run_case()
         self.check.actor_user_id = "actor"
+        self.check.root_check.recorded_at = self.start.recorded_at
+        with self.assertRaises(ValueError):
+            self.run_case()
         self.check.root_check.recorded_at -= timedelta(seconds=1)
         with self.assertRaises(ValueError):
             self.run_case()
-        self.check.root_check.recorded_at = self.start.recorded_at
+        self.check.root_check.recorded_at = self.start.recorded_at + timedelta(microseconds=1)
         with self.assertRaises(ValueError):
             self.run_case(invalid=[self.check_id])
         with self.assertRaises(ValueError):

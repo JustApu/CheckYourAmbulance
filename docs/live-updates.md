@@ -79,11 +79,10 @@ Seal break and audit commands publish `seal.changed`; inspection and verificatio
 reconnecting. `record_check` publishes `check.recorded`, and the three operational-status
 commands publish `status.changed` (the new status event, from setting a status or approving
 a request) and `status.request` (the request or decision row, from filing a request or
-deciding one; an approval publishes both). Other event kinds are
-reserved for the corresponding correction, invalidation, deficiency, odometer,
-and session commands as those features land. They must call
-`publish_vehicle_update` from the command's write transaction and after
-validating the organization and vehicle scope.
+deciding one; an approval publishes both). Correction, invalidation, deficiency,
+odometer, session and obligation commands publish their corresponding kinds.
+Publishers call `publish_vehicle_update` from the command's write transaction
+after validating the organization and vehicle scope.
 
 ## Tests
 

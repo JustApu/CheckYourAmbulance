@@ -39,7 +39,7 @@ IF NEW.predecessor_check_id IS NULL AND NOT EXISTS
  JOIN vehicle_kit_requirement line ON line.id=NEW.kit_requirement_id
  JOIN compartment position ON position.id=line.compartment_id
  WHERE receipt.id=NEW.command_id AND started.command_type='SEAL_INSPECTION_START'
- AND started.actor_user_id=NEW.actor_user_id AND started.recorded_at<=NEW.recorded_at
+ AND started.actor_user_id=NEW.actor_user_id AND started.recorded_at<NEW.recorded_at
  AND JSON_CONTAINS(started.response_body, JSON_OBJECT('vehicle_id',NEW.vehicle_id,
   'kit_id',NULL,'slot_id',position.stable_slot_id)))
 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'standalone count needs inspection start'; END IF;"""
