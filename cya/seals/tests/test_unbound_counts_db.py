@@ -101,6 +101,10 @@ class UnboundKitCountTests(KitCase):
         )
 
     def test_cabinet_reseal_references_the_effective_line_check(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
         check = self.check()
         result = reseal(
             vehicle_id=str(self.vehicle.pk),
@@ -125,6 +129,9 @@ class UnboundKitCountTests(KitCase):
         saved = SealInspectionKitCount.objects.get(inspection_id=result.body["inspection_id"])
         self.assertEqual(str(saved.check_record_id), check.body["check_id"])
         self.assertEqual(saved.count, 1)
+        guard = import_module("cya.seals.migrations.0005_inspection_count_checks")
+        with self.assertRaises(RuntimeError):
+            guard.forbid_reverse_with_count_evidence(apps, None)
 
     def test_an_open_deficiency_on_unbound_kit_content_blocks_verification(self):
         from datetime import timedelta

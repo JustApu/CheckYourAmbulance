@@ -4,6 +4,16 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def forbid_reverse_with_count_evidence(apps, schema_editor):
+    inspection = apps.get_model("cya_seals", "SealInspection")
+    count = apps.get_model("cya_seals", "SealInspectionKitCount")
+    if (
+        inspection.objects.filter(start_receipt__isnull=False).exists()
+        or count.objects.filter(check_record__isnull=False).exists()
+    ):
+        raise RuntimeError("cannot discard recorded seal inspection start or count evidence")
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("cya_checks", "0013_kit_presence_checks"),
@@ -32,4 +42,5 @@ class Migration(migrations.Migration):
                 to="cya_checks.checkrecord",
             ),
         ),
+        migrations.RunPython(migrations.RunPython.noop, forbid_reverse_with_count_evidence),
     ]
