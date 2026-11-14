@@ -6,7 +6,10 @@
 
 - **Commands, not edits.** Every change is one audited command through `cya.core.audit_commands.run_command` (AUD-1). Screens and vehicle files call the same commands and validation, so the importer and the UI never diverge (issue #130, "Scope/sequence").
 - **History is appended.** Versioned records get new revisions or drafts; nothing published is edited, and nothing is deleted.
-- **Locks.** Each command takes the organization lock first when it checks organization-wide uniqueness. It then locks the vehicle row before anything on that vehicle. This is the order every vehicle-configuration writer already uses: kits, kit lists, overrides, bindings, designations and the importer.
+- **Locks.** The vehicle row is the shared lock for a vehicle's configuration. Kits, kit lists, overrides, bindings, compartment designations and the importer already lock it first; position revisions and retirement do too.
+  - A publication or binding that must check a vehicle's positions (CFG-2) first takes its own locks: the version and template, or the override, or the kit list. Then, before the check, it locks every vehicle it applies to, in id order. That includes inactive vehicles and those whose binding takes effect later.
+  - Retirement locks only the vehicle and never a template, so the order (organization when needed, then the versioned record, then vehicles) has no cycle.
+  - Whichever commits first, the other then reads the committed state (READ COMMITTED) and refuses. Part 3 tests both orders for template publication, override publication, kit-list publication and binding.
 - **Preview, then confirm.** Consequential changes show a preview with a base token, and confirmation recomputes the plan under the locks and refuses a stale token (CFG-6). This is the pattern of the vehicle-file import.
 
 ## Permissions
@@ -32,9 +35,13 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 
 `vehicle.active` is a current-state flag with no history, but CFG-1 needs the instant a vehicle stopped or resumed owing obligations.
 
-- **New table `vehicle_activity_event`** (append-only, kind A): `vehicle_id`, `sequence` (gapless per vehicle), `active`, `recorded_at` and the usual command attribution. The insert guard accepts only `VEHICLE_CREATE`, `VEHICLE_ACTIVE_SET` and `VEHICLE_DUPLICATE` receipts. A vehicle with no events was active from creation (existing vehicles).
+- **New table `vehicle_activity_event`** (append-only, kind A): `vehicle_id`, `sequence` (gapless per vehicle), `active`, `recorded_at` and the usual command attribution. The insert guard accepts only `VEHICLE_CREATE`, `VEHICLE_ACTIVE_SET` and `VEHICLE_DUPLICATE` receipts. **Existing vehicles** have no events.
+  - A deploy-time audited command, `record_vehicle_activity_baseline`, appends one baseline event for each one. The event records the vehicle's current flag, marked as a baseline, at the command's recorded instant.
+  - A baseline says only "known active, or inactive, from this instant". It never claims when an inactive vehicle was deactivated. Evaluation before the baseline instant is unchanged from today, with no inactivity exemption, and generation still skips a vehicle whose flag is false.
+  - So an existing inactive vehicle reactivated later is exempt between its baseline and its reactivation, and nothing is backfilled.
+  - `set_vehicle_active` refuses a vehicle that has no baseline yet, so the baseline can never come after a change.
 - **Commands** (`manage_vehicles`):
-  - `create_vehicle`: name and optional number. Writes the vehicle and its first event, active.
+  - `create_vehicle`: VIN, name and optional number. Writes the vehicle and its first event, active. The creator enters the VIN, which is then set once (SPEC 2.6.0 IMP-6, PR #155).
   - `update_vehicle`: name and number.
   - `set_vehicle_active`: appends an event, updates `vehicle.active` in the same command, then reconciles the vehicle after commit.
 - **Obligations.** This mirrors the out-of-service exemption (§5.9), which is derived from the status stream and never retires or backfills:
@@ -43,7 +50,12 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   - State evaluation (`cya/obligations/state.py`) shows a routine obligation whose due instant falls in an inactive interval as `EXEMPT`, naming the activity event. Its earlier history is untouched.
   - Reactivation resumes from the event instant; due instants in the inactive interval stay exempt, so nothing is backfilled.
   - Ad hoc inspection requests for an inactive vehicle are refused.
-- **Projection.** The current-obligation projection facts gain the activity events, so its digest changes. Deploying this part runs `rebuild_obligation_projection --verify`, as earlier projection changes did.
+- **Projection.** The current-obligation projection facts gain the activity events, so its digest changes and existing projection rows become stale. Deploying this part follows the runbook's [rebuild and comparison](deployment-runbook.md#obligation-projection-rebuild-and-comparison) with traffic closed:
+  1. `rebuild_obligation_projection --organization <uuid> --dry-run`. Differences are expected.
+  2. The same command without a flag. This is the write-capable rebuild. Each vehicle and due-instant group commits on its own, so a failed group rolls back and a rerun is safe.
+  3. `--verify`, which must report `Different: 0`.
+
+  Traffic reopens only after step 3 passes. If it does not, rerun step 2. If step 2 keeps failing, roll back to the previous release, whose projection rows the old digest still accepts.
 - **Coordination.** Issue #131 (seal substitution, Codex) also changes obligation state and projection replay. This part is sequenced after, or reconciled with, those changes, and the precedence between `EXEMPT` (inactive or out of service), waivers and seal substitution is agreed with Codex before code.
 
 ## Compartments and systems (CFG-2)
@@ -51,7 +63,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 - **Schema.** Each `compartment` and `vehicle_system` revision gains `display_order` (a positive integer, or empty) and `retired` (boolean, default false). Revision rows cannot be updated (the `cya_compartment_immutable_bu` and `cya_vehicle_system_immutable_bu` triggers), so existing rows keep an empty order and are never rewritten. Positions sort by order, with empty last, then by label, which is today's label order. The first reorder of a vehicle writes explicit orders as new revisions.
 - **Migration.** The migration is `cya_checklists` 0007, after PR #150's 0005 and issue #131's 0006 (the merge order agreed with the owner).
 - **Commands** (`manage_vehicle_positions`). Each runs under the vehicle lock:
-  - `add_position`: either this vehicle's row in an existing position, named by its position key (IMP-6), or a new position with no key. Creating a key stays an Administrator action (`set_position_key`), so the `position_key` insert guard is unchanged.
+  - `add_position`: either this vehicle's row in an existing position, named by its position key (IMP-6), or a new position. For a new position, the creator enters its key, which is then set once (SPEC 2.6.0 IMP-6, PR #155). The `position_key` insert guard then also accepts `POSITION_ADD` receipts. `set_position_key` stays the Administrator-only way to key an older keyless position.
   - `revise_position`: any of label, order and retired. It appends a revision effective when recorded and copies the compartment's `sealable` from the newest revision (CAB-1).
   - Like a designation, a revision is refused while a later revision of the slot is already scheduled.
 - **Retiring is refused** while any of these still use the slot:
@@ -75,7 +87,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 ## Duplicating a checklist template (CFG-3)
 
 `duplicate_template` (`duplicate_configuration`, command `TEMPLATE_DUPLICATE`):
-- Creates a template with the given label and no key.
+- Creates a template with the label and key its creator gives (SPEC 2.6.0).
 - Creates one draft version copying the chosen version's item definitions, placements (including kit placements, KDEF-4) and settings, through the same validation as `save_template_draft`.
 - Writes no publication, override, binding or obligation, and leaves the source unchanged.
 
@@ -85,8 +97,8 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 
 | Created for the copy | From the source |
 |---|---|
-| The vehicle, with the given name and number, no VIN, inactive, and its first activity event (inactive) | — |
-| One revision-1 row per position, effective when recorded | Each position's label, order and sealable designation in effect now; retired positions are left out |
+| The vehicle, with the VIN, name and number its creator gives (SPEC 2.6.0), inactive, and its first activity event (inactive) | — |
+| One revision-1 row per position, with a new row id and the **same `stable_slot_id`** as the source position (so copied placements, kit-list lines and bindings resolve on the copy), effective when recorded | Each position's label, order and sealable designation in effect now; retired positions are left out |
 | One draft kit list | The lines in force, mapped to the copy's compartment rows |
 | One draft override per bound template, over the same template version | Each override in force (none when there is none) |
 | One binding per bound template and slot, effective when recorded | The source's bindings in force |
