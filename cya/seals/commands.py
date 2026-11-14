@@ -312,6 +312,14 @@ def verify_seal(
             )
             for target, links in planned:
                 persist_substitution_links(substitution, target, links, receipt, current)
+            from cya.live_updates.publish import publish_vehicle_update
+
+            publish_vehicle_update(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                event_id=substitution_id,
+                kind="obligations.changed",
+            )
 
         return Plan(
             response_body=body,
