@@ -148,6 +148,18 @@ class SealSubstitutionEvidence:
 
 
 @dataclass(frozen=True)
+class SealInspectionEvidence:
+    """A fresh inspected-item result linked to one obligation."""
+
+    id: str
+    organization_id: str
+    obligation_id: str
+    recorded_at: datetime
+    outcome: str
+    late_eligible: bool = False
+
+
+@dataclass(frozen=True)
 class StatusEvidence:
     id: str
     vehicle_id: str
@@ -349,6 +361,7 @@ def evaluate_obligation(
     status_events=(),
     suspensions=(),
     seal_substitutions=(),
+    seal_inspections=(),
 ):
     """Derive state from evidence known by T, without querying or reading the clock.
 
@@ -364,6 +377,7 @@ def evaluate_obligation(
         and not status_events
         and not suspensions
         and not seal_substitutions
+        and not seal_inspections
     ):
         if instant < obligation.early_at:
             state = State.UPCOMING
@@ -418,6 +432,35 @@ def evaluate_obligation(
                 first.recorded_at,
                 max(0, (first.recorded_at - obligation.grace_at).total_seconds()),
             )
+    inspections = []
+    for evidence in seal_inspections:
+        aware(evidence.recorded_at)
+        if (
+            evidence.organization_id == obligation.organization_id
+            and evidence.obligation_id == obligation.id
+            and evidence.outcome in ("PASSED", "FAILED")
+            and obligation.early_at <= evidence.recorded_at <= instant
+            and (
+                evidence.recorded_at <= obligation.grace_at
+                or (
+                    evidence.late_eligible is True
+                    and obligation.late_limit_at is not None
+                    and evidence.recorded_at <= obligation.late_limit_at
+                )
+            )
+        ):
+            inspections.append(evidence)
+    if inspections:
+        first = min(inspections, key=lambda e: (e.recorded_at, e.id))
+        if satisfaction is None or first.recorded_at < satisfaction.completed_at:
+            satisfaction = ObligationState(
+                obligation,
+                State.SATISFIED,
+                first.id,
+                first.outcome,
+                first.recorded_at,
+                max(0, (first.recorded_at - obligation.grace_at).total_seconds()),
+            )
     suspension = _suspension_for(obligation, suspensions, instant)
     # A suspension never revokes an obligation already satisfied when it started (owner decision):
     # it covers only an obligation still unsatisfied at its start.
@@ -463,6 +506,7 @@ class ProjectionHistory:
     deficiency_events: tuple[RecordedDeficiencyEvent, ...] = ()
     use_stored_checks: bool = True
     seal_substitutions: tuple[SealSubstitutionEvidence, ...] = ()
+    seal_inspections: tuple[SealInspectionEvidence, ...] = ()
 
 
 def rebuild_vehicle_projection(
@@ -507,6 +551,9 @@ def rebuild_vehicle_projection(
     seals_by_obligation = {}
     for substitution in history.seal_substitutions:
         seals_by_obligation.setdefault(substitution.obligation_id, []).append(substitution)
+    inspections_by_obligation = {}
+    for inspection in history.seal_inspections:
+        inspections_by_obligation.setdefault(inspection.obligation_id, []).append(inspection)
     result = []
     for event in tails.values():
         if event.selected_obligation_id is None:
@@ -530,6 +577,7 @@ def rebuild_vehicle_projection(
                 status_events=history.statuses,
                 suspensions=suspensions_by_obligation.get(obligation.id, ()),
                 seal_substitutions=seals_by_obligation.get(obligation.id, ()),
+                seal_inspections=inspections_by_obligation.get(obligation.id, ()),
             )
         )
     # Explicit human orders are immutable and never participate in routine selection.
@@ -550,6 +598,7 @@ def rebuild_vehicle_projection(
                     status_events=history.statuses,
                     suspensions=suspensions_by_obligation.get(obligation.id, ()),
                     seal_substitutions=seals_by_obligation.get(obligation.id, ()),
+                    seal_inspections=inspections_by_obligation.get(obligation.id, ()),
                 )
             )
     # Each item's deficiencies, in their original order: checking every deficiency against every

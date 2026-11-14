@@ -293,3 +293,44 @@ class SealInspectionKitVerification(Evidence):
                 fields=["inspection", "kit"], name="sealkitverify_inspection_kit"
             ),
         ]
+
+
+class SealInspectionObligation(Evidence):
+    """A freshly inspected item's explicit link to an obligation."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    inspection_item = models.ForeignKey(
+        SealInspectionItem, on_delete=models.PROTECT, related_name="+"
+    )
+    obligation = models.ForeignKey(
+        "cya_obligations.Obligation", on_delete=models.PROTECT, related_name="+"
+    )
+    ordinal = models.PositiveIntegerField()
+    shared_rule = models.ForeignKey(
+        "cya_obligations.SharedSatisfactionRule",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    late_eligible = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "seal_inspection_obligation"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="sealinspob_org_id"),
+            models.UniqueConstraint(
+                fields=["inspection_item", "obligation"], name="sealinspob_pair"
+            ),
+            models.UniqueConstraint(
+                fields=["inspection_item", "ordinal"], name="sealinspob_ordinal"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(ordinal=0, shared_rule__isnull=True)
+                | models.Q(ordinal__gt=0, shared_rule__isnull=False),
+                name="sealinspob_shared_shape",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(late_eligible__in=[True, False]), name="sealinspob_late_bool"
+            ),
+        ]

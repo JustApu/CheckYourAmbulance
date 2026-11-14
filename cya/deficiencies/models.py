@@ -276,6 +276,8 @@ class Deficiency(Evidence):
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
     organization = organization_fk()
     operation_id = IdentityIDField()
+    # Seal inspections may atomically report multiple discrepancies under one receipt.
+    operation_ordinal = models.PositiveIntegerField(default=0)
     reported_at = models.DateTimeField()
     reporter = models.ForeignKey("cya_accounts.User", on_delete=models.PROTECT, related_name="+")
     category_version = models.ForeignKey(
@@ -304,7 +306,8 @@ class Deficiency(Evidence):
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="deficiency_org_id"),
             models.UniqueConstraint(
-                fields=["organization", "operation_id"], name="deficiency_org_operation"
+                fields=["organization", "operation_id", "operation_ordinal"],
+                name="deficiency_org_operation",
             ),
             models.CheckConstraint(condition=non_blank("summary"), name="deficiency_summary"),
             models.CheckConstraint(
@@ -1256,6 +1259,12 @@ class DeficiencyEvidence(Evidence):
         related_name="+",
     )
     note = models.CharField(max_length=MAX_TEXT, null=True)  # noqa: DJ001
+    seal_inspection_item = models.ForeignKey(
+        "cya_seals.SealInspectionItem", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    seal_kit_count = models.ForeignKey(
+        "cya_seals.SealInspectionKitCount", null=True, on_delete=models.PROTECT, related_name="+"
+    )
 
     class Meta:
         db_table = "deficiency_evidence"
@@ -1264,13 +1273,41 @@ class DeficiencyEvidence(Evidence):
             models.UniqueConstraint(
                 fields=["deficiency", "check_record"], name="defevidence_check"
             ),
-            # Exactly one source. kit_inspection_item_id joins this CHECK with the sealed-kit work.
+            models.UniqueConstraint(
+                fields=["deficiency", "seal_inspection_item"], name="defevidence_sealitem"
+            ),
+            models.UniqueConstraint(
+                fields=["deficiency", "seal_kit_count"], name="defevidence_sealkitcount"
+            ),
+            # Exactly one source; seal evidence retains fresh inspection facts.
             models.CheckConstraint(
                 condition=(
-                    models.Q(check_record__isnull=False, note__isnull=True)
+                    models.Q(
+                        check_record__isnull=False,
+                        note__isnull=True,
+                        seal_inspection_item__isnull=True,
+                        seal_kit_count__isnull=True,
+                    )
                     | (
-                        models.Q(check_record__isnull=True, note__isnull=False)
+                        models.Q(
+                            check_record__isnull=True,
+                            note__isnull=False,
+                            seal_inspection_item__isnull=True,
+                            seal_kit_count__isnull=True,
+                        )
                         & models.Q(note__regex=r"\S")
+                    )
+                    | models.Q(
+                        check_record__isnull=True,
+                        note__isnull=True,
+                        seal_inspection_item__isnull=False,
+                        seal_kit_count__isnull=True,
+                    )
+                    | models.Q(
+                        check_record__isnull=True,
+                        note__isnull=True,
+                        seal_inspection_item__isnull=True,
+                        seal_kit_count__isnull=False,
                     )
                 ),
                 name="defevidence_one_source",

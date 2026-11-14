@@ -32,6 +32,7 @@ from cya.obligations.projections import (
     _history,
     _obligation,
     _status,
+    stored_seal_inspections,
     stored_seal_substitutions,
     stored_suspensions,
 )
@@ -41,6 +42,7 @@ from cya.obligations.state import (
     ObligationEvidence,
     ProjectionHistory,
     RuleEvidence,
+    SealInspectionEvidence,
     SealSubstitutionEvidence,
     StatusEvidence,
     SuspensionEvidence,
@@ -112,7 +114,7 @@ class CurrentFacts(dict):
     """Stored projection facts as decoded once, with their evidence restored once (issue #99).
 
     The per-process cache below hands the SAME object to later reads, so treat it as read-only.
-    `evidence` is (obligation, checks, determinations, suspensions, statuses, seals) of frozen
+    `evidence` holds obligation, checks, determinations, suspensions, statuses, seals and inspections
     evidence objects; statuses stay empty until attach_status_fact gives a copy the status
     applicable to its read. Equality is the plain dict's, so the facts compare as before.
     """
@@ -128,6 +130,7 @@ def _evidence(facts, statuses=()):
         tuple(_restore(SuspensionEvidence, r) for r in facts["suspensions"]),
         statuses,
         tuple(_restore(SealSubstitutionEvidence, r) for r in facts.get("seal_substitutions", ())),
+        tuple(_restore(SealInspectionEvidence, r) for r in facts.get("seal_inspections", ())),
     )
 
 
@@ -245,8 +248,8 @@ def evaluate_facts(facts, instant):
         evidence = _evidence(
             facts, tuple(_restore(StatusEvidence, r) for r in facts.get("statuses", ()))
         )
-    obligation, checks, determinations, suspensions, statuses, seals = evidence
-    if not (checks or determinations or statuses or suspensions or seals):
+    obligation, checks, determinations, suspensions, statuses, seals, inspections = evidence
+    if not (checks or determinations or statuses or suspensions or seals or inspections):
         return evaluate_obligation(obligation, instant)
     return evaluate_obligation(
         obligation,
@@ -256,6 +259,7 @@ def evaluate_facts(facts, instant):
         status_events=statuses,
         suspensions=suspensions,
         seal_substitutions=seals,
+        seal_inspections=inspections,
     )
 
 
@@ -295,6 +299,10 @@ def compile_history(history, instant):
     for row in history.seal_substitutions:
         if row.recorded_at <= instant:
             seals.setdefault(row.obligation_id, []).append(row)
+    inspections = {}
+    for row in history.seal_inspections:
+        if row.recorded_at <= instant:
+            inspections.setdefault(row.obligation_id, []).append(row)
     root_of = {r.snapshot.id: r.snapshot.root_id for r in history.check_records}
     chains = {
         c.root_id: [int(c.invalidated), len(c.superseded_ids)]
@@ -327,6 +335,10 @@ def compile_history(history, instant):
         if obligation.id in seals:
             result[obligation.id]["seal_substitutions"] = _json(
                 [asdict(s) for s in seals[obligation.id]]
+            )
+        if obligation.id in inspections:
+            result[obligation.id]["seal_inspections"] = _json(
+                [asdict(s) for s in inspections[obligation.id]]
             )
     return result
 
@@ -367,6 +379,7 @@ def _source_facts(organization_id, rows, instant):
             as_of=instant,
         ),
         seal_substitutions=stored_seal_substitutions(organization_id, ids, instant),
+        seal_inspections=stored_seal_inspections(organization_id, ids, instant),
         **database,
     )
     return compile_history(history, instant)
@@ -509,7 +522,7 @@ def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
         return result
     result = CurrentFacts(facts)
     result["statuses"] = status_facts
-    result.evidence = (*evidence[:4], status_events, evidence[5])
+    result.evidence = (*evidence[:4], status_events, *evidence[5:])
     return result
 
 

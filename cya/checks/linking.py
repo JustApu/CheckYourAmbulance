@@ -99,14 +99,22 @@ def _eligible(
     if not include_satisfied:
         # A seal substitution is separate evidence but has already satisfied the
         # linked obligation just as a qualifying check has.
-        from cya.seals.models import SealSubstitutionObligation
+        from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
 
         already_substituted = SealSubstitutionObligation.objects.filter(
             organization_id=OuterRef("organization_id"),
             obligation_id=OuterRef("pk"),
             recorded_at__lte=recorded_at,
         )
-        candidates = candidates.filter(~Exists(already_satisfied), ~Exists(already_substituted))
+        already_inspected = SealInspectionObligation.objects.filter(
+            organization_id=OuterRef("organization_id"),
+            obligation_id=OuterRef("pk"),
+            recorded_at__lte=recorded_at,
+            inspection_item__outcome__in=("PASSED", "FAILED"),
+        )
+        candidates = candidates.filter(
+            ~Exists(already_satisfied), ~Exists(already_substituted), ~Exists(already_inspected)
+        )
     return list(
         candidates.select_related("requirement_version").order_by("due_at", "pk")[
             : MAX_LINK_CANDIDATES + 1

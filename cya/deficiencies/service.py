@@ -223,6 +223,7 @@ def insert_deficiency(
     compartment_id=None,
     assignee_id=None,
     deadline=None,
+    operation_ordinal=0,
 ):
     """Create the header, its lock, scope snapshot, initial Open event and projection.
 
@@ -235,6 +236,7 @@ def insert_deficiency(
         id=deficiency_id,
         organization_id=organization_id,
         operation_id=operation_id,
+        operation_ordinal=operation_ordinal,
         reported_at=receipt.recorded_at,
         reporter=current.user,
         category_version=category,

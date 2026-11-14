@@ -26,6 +26,7 @@ IMMUTABLE_HEADERS = {
     "inspection_session": ("vehicle_id", "checklist_version_id", "opened_at"),
     "deficiency": (
         "operation_id",
+        "operation_ordinal",
         "reported_at",
         "reporter_id",
         "category_version_id",
