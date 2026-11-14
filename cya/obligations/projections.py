@@ -39,6 +39,7 @@ from cya.obligations.state import (
     ObligationEvidence,
     ProjectionHistory,
     RuleEvidence,
+    SealSubstitutionEvidence,
     SelectionEvidence,
     StatusEvidence,
     SuspensionEvidence,
@@ -46,6 +47,7 @@ from cya.obligations.state import (
     rebuild_vehicle_projection,
 )
 from cya.operations.models import VehicleStatusEvent
+from cya.seals.models import SealSubstitutionObligation
 
 MAX_ROWS = 10000
 MAX_PAGE_VEHICLES = 50  # vehicles one batch read accepts (issue #33)
@@ -59,6 +61,32 @@ def _bounded(rows, limit=None):
     if len(result) > limit:
         raise ValueError("projection evidence exceeds 10000 rows; narrow the due interval")
     return result
+
+
+def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit=None):
+    """Read attributed substitution links known at an instant, refusing excess rows."""
+    limit = MAX_ROWS if limit is None else limit
+    ids = tuple(obligation_ids)
+    if not ids:
+        return ()
+    rows = _bounded(
+        SealSubstitutionObligation.objects.filter(
+            organization_id=organization_id,
+            obligation_id__in=ids,
+            recorded_at__lte=instant,
+        ).order_by("recorded_at", "id")[: limit + 1],
+        limit,
+    )
+    return tuple(
+        SealSubstitutionEvidence(
+            str(row.substitution_id),
+            str(row.organization_id),
+            str(row.obligation_id),
+            row.recorded_at,
+            row.late_eligible,
+        )
+        for row in rows
+    )
 
 
 def _per_vehicle(split):
@@ -796,6 +824,7 @@ def load_projection_history(
         selections=tuple(_selection(e) for e in events),
         determinations=tuple(_determination(d) for d in determinations),
         statuses=tuple(_status(s) for s in statuses),
+        seal_substitutions=stored_seal_substitutions(organization_id, ids, instant_T),
         checks=(
             ()
             if check_lookup is None
@@ -994,6 +1023,13 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
     )
     database = _page_database_history(organization_id, obligations, start, instant_T)
     suspensions = _page_suspensions(organization_id, obligations, instant_T)
+    seal_links = _per_vehicle(
+        _by_vehicle(
+            stored_seal_substitutions(organization_id, sorted(owner), instant_T, limit=page),
+            lambda s: owner.get(s.obligation_id),
+            vehicle_ids,
+        )
+    )
     return {
         vehicle_id: ProjectionHistory(
             **database[vehicle_id],
@@ -1005,6 +1041,7 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
             statuses=tuple(_status(s) for s in statuses[vehicle_id]),
             checks=(),
             suspensions=suspensions[vehicle_id],
+            seal_substitutions=tuple(seal_links[vehicle_id]),
         )
         for vehicle_id in vehicle_ids
     }

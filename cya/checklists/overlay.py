@@ -60,6 +60,7 @@ class Requirement:
     compartment_id: str | None
     system_id: str | None
     kit_id: str | None
+    expiration_tracked: bool = False
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,7 @@ def requirement_from_fields(fields, source, definition_id=""):
         compartment_id=fields["compartment_id"],
         system_id=fields["system_id"],
         kit_id=fields["kit_id"],
+        expiration_tracked=fields.get("expiration_tracked", False),
     )
 
 
@@ -183,6 +185,7 @@ def requirement_from_definition(definition, source):
             "compartment_id": definition.compartment_id,
             "system_id": definition.system_id,
             "kit_id": definition.kit_id,
+            "expiration_tracked": definition.expiration_tracked,
         },
         source,
         definition.pk,

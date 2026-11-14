@@ -9,11 +9,15 @@ from cya.obligations.state import (
     CheckEvidence,
     DeterminationEvidence,
     ObligationEvidence,
+    ProjectionHistory,
     RuleEvidence,
+    SealSubstitutionEvidence,
+    SelectionEvidence,
     State,
     StatusEvidence,
     SuspensionEvidence,
     evaluate_obligation,
+    rebuild_vehicle_projection,
 )
 from cya.obligations.tests.support import START
 
@@ -101,6 +105,76 @@ class StateTests(SimpleTestCase):
         self.assertEqual(
             (result.state, result.outcome, result.late_seconds), (State.SATISFIED, "FAILED", 3600)
         )
+
+    def test_seal_substitution_uses_linked_evidence_and_preserves_history(self):
+        seal = SealSubstitutionEvidence("seal", "org", "obligation", self.at(6))
+        self.assertEqual(self.evaluate(5, seal_substitutions=[seal]).state, State.CURRENT)
+        result = self.evaluate(6, seal_substitutions=[seal])
+        self.assertEqual(
+            (result.state, result.outcome, result.evidence_id),
+            (State.SATISFIED, "SEAL_SUBSTITUTION", "seal"),
+        )
+        for invalid in (
+            replace(seal, organization_id="other"),
+            replace(seal, obligation_id="other"),
+            replace(seal, recorded_at=self.at(4)),
+        ):
+            self.assertEqual(self.evaluate(seal_substitutions=[invalid]).state, State.OVERDUE)
+
+    def test_seal_substitution_obeys_suspension_and_late_link(self):
+        seal = SealSubstitutionEvidence("seal", "org", "obligation", self.at(6))
+        suspended = SuspensionEvidence("obligation", self.at(5))
+        self.assertEqual(
+            self.evaluate(seal_substitutions=[seal], suspensions=[suspended]).state, State.SUSPENDED
+        )
+        late = replace(seal, recorded_at=self.at(8))
+        self.assertEqual(self.evaluate(seal_substitutions=[late]).state, State.OVERDUE)
+        self.assertEqual(
+            self.evaluate(seal_substitutions=[replace(late, late_eligible=True)]).state,
+            State.OVERDUE,
+        )
+        obligation = replace(self.obligation, late_limit_at=self.at(9))
+        self.assertEqual(
+            evaluate_obligation(
+                obligation, self.at(8), seal_substitutions=[replace(late, late_eligible=True)]
+            ).state,
+            State.SATISFIED,
+        )
+        self.assertEqual(
+            evaluate_obligation(
+                obligation,
+                self.at(10),
+                seal_substitutions=[replace(late, recorded_at=self.at(10), late_eligible=True)],
+            ).state,
+            State.OVERDUE,
+        )
+
+    def test_compiled_current_facts_keep_seal_evidence(self):
+        from cya.obligations.current import compile_history, evaluate_facts
+
+        seal = SealSubstitutionEvidence("seal", "org", "obligation", self.at(6))
+        history = ProjectionHistory(
+            organization_id="org", obligations=(self.obligation,), seal_substitutions=(seal,)
+        )
+        before = compile_history(history, self.at(5))[self.obligation.id]
+        after = compile_history(history, self.at(6))[self.obligation.id]
+        self.assertEqual(evaluate_facts(before, self.at(5)).state, State.CURRENT)
+        result = evaluate_facts(after, self.at(6))
+        self.assertEqual((result.state, result.outcome), (State.SATISFIED, "SEAL_SUBSTITUTION"))
+
+    def test_historical_replay_keeps_seal_separate_from_checks(self):
+        seal = SealSubstitutionEvidence("seal", "org", "obligation", self.at(6))
+        selection = SelectionEvidence("vehicle", "item", self.at(6), 1, START, "obligation")
+        history = ProjectionHistory(
+            organization_id="org",
+            obligations=(self.obligation,),
+            selections=(selection,),
+            seal_substitutions=(seal,),
+        )
+        before = rebuild_vehicle_projection(history, "vehicle", self.at(5), self.at(5), self.at(7))
+        after = rebuild_vehicle_projection(history, "vehicle", self.at(6), self.at(5), self.at(7))
+        self.assertEqual(before[0].state, State.CURRENT)
+        self.assertEqual((after[0].state, after[0].outcome), (State.SATISFIED, "SEAL_SUBSTITUTION"))
 
     def test_invalidation_or_correction_excludes_check_only_from_its_recorded_instant(self):
         check = self.check(voided_at=self.at(8))

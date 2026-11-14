@@ -313,6 +313,8 @@ class ChecklistItemDef(models.Model):
     expected_quantity = models.PositiveIntegerField(null=True)
     unit = models.CharField(max_length=40, null=True)  # noqa: DJ001
     allowed_outcomes = models.JSONField()
+    # Published item definitions retain whether a seal inspection needs an expiration date.
+    expiration_tracked = models.BooleanField(default=False)
     # Reserved: bulk pass is deferred from R1 (SPEC 7.6); the database holds it false.
     bulk_eligible = models.BooleanField(default=False)
 
@@ -337,6 +339,10 @@ class ChecklistItemDef(models.Model):
                 name="itemdef_one_owner",
             ),
             models.CheckConstraint(condition=models.Q(kind__in=KINDS), name="itemdef_kind"),
+            models.CheckConstraint(
+                condition=models.Q(expiration_tracked__in=[True, False]),
+                name="itemdef_expiration_bool",
+            ),
             # Exactly one of compartment or ambulance-wide system; a kit sits in a compartment.
             models.CheckConstraint(
                 condition=(

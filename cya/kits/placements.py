@@ -145,6 +145,7 @@ def placed_contents(organization_id, resolved, item_id, at, recorded_before=None
                 compartment_id=str(row.pk) if row else None,
                 system_id=None,
                 kit_id=placement.placement_id,
+                expiration_tracked=content.expiration_tracked,
             )
             found.append(
                 ResolvedItem(

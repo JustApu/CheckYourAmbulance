@@ -133,6 +133,21 @@ class CheckEvidence:
 
 
 @dataclass(frozen=True)
+class SealSubstitutionEvidence:
+    """An attributed substitution explicitly linked to one obligation.
+
+    Links must be created only after the seal command validates its entire
+    covered scope. They identify individual obligations without creating checks.
+    """
+
+    id: str
+    organization_id: str
+    obligation_id: str
+    recorded_at: datetime
+    late_eligible: bool = False
+
+
+@dataclass(frozen=True)
 class StatusEvidence:
     id: str
     vehicle_id: str
@@ -326,7 +341,14 @@ def _satisfaction(obligation, linked, determination):
 
 
 def evaluate_obligation(
-    obligation, instant, *, determinations=(), checks=(), status_events=(), suspensions=()
+    obligation,
+    instant,
+    *,
+    determinations=(),
+    checks=(),
+    status_events=(),
+    suspensions=(),
+    seal_substitutions=(),
 ):
     """Derive state from evidence known by T, without querying or reading the clock.
 
@@ -336,7 +358,13 @@ def evaluate_obligation(
     aware(instant)
     if obligation.recorded_at > instant:
         raise ValueError("obligation did not exist at instant")
-    if not determinations and not checks and not status_events and not suspensions:
+    if (
+        not determinations
+        and not checks
+        and not status_events
+        and not suspensions
+        and not seal_substitutions
+    ):
         if instant < obligation.early_at:
             state = State.UPCOMING
         elif instant < obligation.due_at:
@@ -362,6 +390,34 @@ def evaluate_obligation(
     satisfaction = _satisfaction(
         obligation, _checks_for(obligation, checks, instant), determination
     )
+    substitutions = []
+    for evidence in seal_substitutions:
+        aware(evidence.recorded_at)
+        if (
+            evidence.organization_id == obligation.organization_id
+            and evidence.obligation_id == obligation.id
+            and obligation.early_at <= evidence.recorded_at <= instant
+            and (
+                evidence.recorded_at <= obligation.grace_at
+                or (
+                    evidence.late_eligible is True
+                    and obligation.late_limit_at is not None
+                    and evidence.recorded_at <= obligation.late_limit_at
+                )
+            )
+        ):
+            substitutions.append(evidence)
+    if substitutions:
+        first = min(substitutions, key=lambda e: (e.recorded_at, e.id))
+        if satisfaction is None or first.recorded_at < satisfaction.completed_at:
+            satisfaction = ObligationState(
+                obligation,
+                State.SATISFIED,
+                first.id,
+                "SEAL_SUBSTITUTION",
+                first.recorded_at,
+                max(0, (first.recorded_at - obligation.grace_at).total_seconds()),
+            )
     suspension = _suspension_for(obligation, suspensions, instant)
     # A suspension never revokes an obligation already satisfied when it started (owner decision):
     # it covers only an obligation still unsatisfied at its start.
@@ -406,6 +462,7 @@ class ProjectionHistory:
     deficiency_headers: tuple[RecordedDeficiency, ...] = ()
     deficiency_events: tuple[RecordedDeficiencyEvent, ...] = ()
     use_stored_checks: bool = True
+    seal_substitutions: tuple[SealSubstitutionEvidence, ...] = ()
 
 
 def rebuild_vehicle_projection(
@@ -447,6 +504,9 @@ def rebuild_vehicle_projection(
     suspensions_by_obligation = {}
     for suspension in history.suspensions:
         suspensions_by_obligation.setdefault(suspension.obligation_id, []).append(suspension)
+    seals_by_obligation = {}
+    for substitution in history.seal_substitutions:
+        seals_by_obligation.setdefault(substitution.obligation_id, []).append(substitution)
     result = []
     for event in tails.values():
         if event.selected_obligation_id is None:
@@ -469,6 +529,7 @@ def rebuild_vehicle_projection(
                 checks=checks_by_obligation.get(obligation.id, ()),
                 status_events=history.statuses,
                 suspensions=suspensions_by_obligation.get(obligation.id, ()),
+                seal_substitutions=seals_by_obligation.get(obligation.id, ()),
             )
         )
     # Explicit human orders are immutable and never participate in routine selection.
@@ -488,6 +549,7 @@ def rebuild_vehicle_projection(
                     checks=checks_by_obligation.get(obligation.id, ()),
                     status_events=history.statuses,
                     suspensions=suspensions_by_obligation.get(obligation.id, ()),
+                    seal_substitutions=seals_by_obligation.get(obligation.id, ()),
                 )
             )
     # Each item's deficiencies, in their original order: checking every deficiency against every

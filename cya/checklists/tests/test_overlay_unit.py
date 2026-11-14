@@ -2,7 +2,13 @@
 
 from django.test import SimpleTestCase
 
-from cya.checklists.overlay import OverlayError, OverrideEntry, Requirement, apply_overlay
+from cya.checklists.overlay import (
+    OverlayError,
+    OverrideEntry,
+    Requirement,
+    apply_overlay,
+    requirement_from_fields,
+)
 
 
 def req(item, order=10, source="TEMPLATE", quantity=None, kind="PRESENCE_CONDITION"):
@@ -74,3 +80,21 @@ class ApplyOverlayTests(SimpleTestCase):
         before = list(self.template)
         apply_overlay(self.template, [OverrideEntry("a", "REMOVE", None)])
         self.assertEqual(self.template, before)
+
+    def test_item_expiration_tracking_follows_selected_definition(self):
+        fields = {
+            "item_id": "a",
+            "display_order": 1,
+            "kind": "PRESENCE_CONDITION",
+            "instructions": "",
+            "expected_quantity": None,
+            "unit": None,
+            "allowed_outcomes": ["PASSED"],
+            "compartment_id": "slot",
+            "system_id": None,
+            "kit_id": None,
+        }
+        self.assertFalse(requirement_from_fields(fields, "TEMPLATE").expiration_tracked)
+        replacement = requirement_from_fields(fields | {"expiration_tracked": True}, "OVERRIDE")
+        selected = apply_overlay([req("a")], [OverrideEntry("a", "REPLACE", replacement)])
+        self.assertTrue(selected[0].expiration_tracked)
