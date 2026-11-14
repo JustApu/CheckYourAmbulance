@@ -28,12 +28,15 @@ from cya.checklists.models import ChecklistPublication
 from cya.checklists.overlay import NoEffectiveVersionError, resolve_checklist
 from cya.conditions.models import ConditionalRule
 from cya.kits.history import active_kits, active_kits_on_vehicle, slot_of_reference_kit
+from cya.kits.kit_lists import kit_list_effective_at
 from cya.kits.models import (
     ChecklistKitPlacement,
     KitDefinitionItem,
     KitDefinitionPublication,
     KitInstanceDefinition,
+    VehicleKitRequirement,
 )
+from cya.kits.presence import line_unit_key
 from cya.obligations.models import RequirementBinding
 from cya.obligations.state import NO_KIT
 from cya.operations.status import out_of_service_at
@@ -82,10 +85,14 @@ class DesiredItem:
     # requirement from a checklist item definition.
     kit_definition_item_id: str | None = None
     placement_id: str | None = None
+    # A kit presence requirement (SPEC 2.0.0 KDEF-10 to KDEF-12): its kit list line and that
+    # line's unit key, which stands in for the kit key of the obligation stream.
+    kit_requirement_id: str | None = None
+    unit_key: str | None = None
 
     @property
     def key(self):
-        return (self.item_id, self.kit_id or NO_KIT)
+        return (self.item_id, self.kit_id or self.unit_key or NO_KIT)
 
 
 @dataclass(frozen=True)
@@ -272,6 +279,65 @@ def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at):
     return [kit for kit in kits if kit.kit_id in {str(k) for k in having}]
 
 
+def _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before):
+    """The lines of the vehicle's kit list in force at D, as the records stood (KDEF-9)."""
+    version = kit_list_effective_at(organization_id, vehicle_id, due_at, recorded_before)
+    if version is None:
+        return []
+    return list(
+        VehicleKitRequirement.objects.filter(version=version)
+        .select_related("compartment", "definition")
+        .order_by("display_order", "id")
+    )
+
+
+def _presence_items(
+    organization_id, vehicle_id, occurrence, publication, resolved, placement, lines, context
+):
+    """Kit presence requirements for one placed definition (SPEC 2.0.0 KDEF-10, KDEF-12).
+
+    One per line of the vehicle's kit list in force at D that lists the placed definition: an
+    obligation of the definition's presence item outside any kit, pinning the line and the
+    placement. Its stream is keyed by the line's unit key, so two compartments of one
+    definition are separate obligations and a count change stays on the same stream.
+    """
+    _due_at, _recorded_before, conditional = context
+    for line in lines:
+        if str(line.definition_id) != str(placement.definition_id):
+            continue
+        item_id = str(line.definition.presence_item_id)
+        unit = line_unit_key(vehicle_id, line.definition_id, line.compartment.stable_slot_id)
+        pin = {
+            "binding": occurrence.binding_id,
+            "conditional": conditional.get(item_id),
+            "kit_requirement": str(line.pk),
+            "placement": str(placement.pk),
+            "override": resolved.override_version_id,
+            "publication": str(publication.pk),
+            "schedule": occurrence.schedule_rule_id,
+        }
+        yield (
+            (item_id, unit),
+            DesiredItem(
+                item_id=item_id,
+                requirement_id=requirement_id(organization_id, vehicle_id, item_id, pin),
+                item_def_id=None,
+                publication_id=pin["publication"],
+                override_version_id=pin["override"],
+                binding_id=pin["binding"],
+                schedule_rule_id=pin["schedule"],
+                conditional_rule_id=pin["conditional"],
+                slot=occurrence.slot,
+                due_at=_due_at,
+                early_at=occurrence.early_at,
+                grace_at=occurrence.grace_at,
+                placement_id=pin["placement"],
+                kit_requirement_id=pin["kit_requirement"],
+                unit_key=unit,
+            ),
+        )
+
+
 def _placement_items(organization_id, vehicle_id, occurrence, publication, resolved, context):
     """Requirements for the content of kits placed by definition (SPEC 4.6 KDEF-4, KDEF-7).
 
@@ -282,7 +348,18 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
     placements = ChecklistKitPlacement.objects.filter(
         checklist_version_id=resolved.template_version_id
     ).order_by("display_order", "id")
+    lines = _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before)
     for placement in placements:
+        yield from _presence_items(
+            organization_id,
+            vehicle_id,
+            occurrence,
+            publication,
+            resolved,
+            placement,
+            lines,
+            context,
+        )
         version_id = _definition_version(
             organization_id, placement.definition_id, due_at, recorded_before
         )
