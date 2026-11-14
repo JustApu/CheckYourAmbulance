@@ -69,6 +69,33 @@ def active_kits(organization_id, vehicle_id, slot_id, at, recorded_before=None):
     return tuple(sorted(found, key=lambda k: k.kit_id))
 
 
+def kits_on_vehicle(organization_id, vehicle_id, at, recorded_before=None):
+    """{kit id: stable slot id} of the kit instances active on the vehicle at `at`, any slot.
+
+    Read from the assignment history only, like active_kits, with the same recorded_before
+    cutoff (KDEF-4: a placed definition's instances are owed wherever they are on the vehicle).
+    """
+    organization_id, vehicle_id = str(organization_id), str(vehicle_id)
+    events = KitAssignmentEvent.objects.filter(
+        organization_id=organization_id, effective_at__lte=at
+    )
+    if recorded_before is not None:
+        events = events.filter(recorded_at__lt=recorded_before)
+    candidates = set(events.filter(vehicle_id=vehicle_id).values_list("kit_id", flat=True))
+    latest = {}
+    for event in (
+        events.filter(kit_id__in=candidates)
+        .select_related("compartment")
+        .order_by("kit_id", "sequence")
+    ):
+        latest[str(event.kit_id)] = event
+    return {
+        kit_id: str(event.compartment.stable_slot_id)
+        for kit_id, event in latest.items()
+        if event.active and str(event.vehicle_id) == vehicle_id and event.compartment is not None
+    }
+
+
 def slot_of_reference_kit(kit_id):
     """The stable slot a checklist definition's template kit stands for, or None if unplaced.
 

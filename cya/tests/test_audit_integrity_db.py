@@ -199,6 +199,7 @@ class AuditIntegrityTests(TestCase):
             "kit_assignment_event",
             "kit_seal_designation",  # issue #131: Supervisor- or Administrator-set kit seal designation
             "kit_definition_publication",  # issue #129: publication of a kit definition version
+            "vehicle_kit_list_publication",  # issue #129: publication of a vehicle kit list
             "kit_instance_definition",  # issue #129: the kit definition a kit instance has
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
@@ -220,6 +221,9 @@ class AuditIntegrityTests(TestCase):
             "deficiency_severity",
             "kit_definition_version",  # issue #129: frozen once published
             "kit_definition_item",  # issue #129: kit contents per version
+            "checklist_kit_placement",  # issue #129: kit definitions a checklist inspects
+            "vehicle_kit_list_version",  # issue #129: a vehicle's kit list, frozen once published
+            "vehicle_kit_requirement",  # issue #129: kit list lines (definition, slot, count)
         },
     }
 
@@ -303,6 +307,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "kit_assignment_event",
                         "kit_seal_designation",
                         "kit_definition_publication",
+                        "vehicle_kit_list_publication",
                         "kit_instance_definition",
                     },
                 )
@@ -399,6 +404,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "kit_assignment_event",
                     "kit_seal_designation",
                     "kit_definition_publication",
+                    "vehicle_kit_list_publication",
                     "kit_instance_definition",
                 },
             )

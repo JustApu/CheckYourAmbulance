@@ -69,7 +69,8 @@ class KitDefinitionError(ValueError):
 # --- shared command plumbing -----------------------------------------------------------------
 
 
-def _authorize(organization_id, actor_id):
+def authorizer(organization_id, actor_id, action=ACTION):
+    """Run-command authorization: the actor must be allowed `action` (SPEC 3.3)."""
     backend = DatabaseRoleBackend()
 
     def authorize(_org):
@@ -86,7 +87,7 @@ def _authorize(organization_id, actor_id):
                 organization_id, actor_id, roles, user.active and current_org.active
             )
             try:
-                require_permission(principal, organization_id, ACTION)
+                require_permission(principal, organization_id, action)
             except PermissionDenied:
                 raise CommandDenied(actor) from None
             return actor
@@ -103,7 +104,7 @@ def _run(context, command_type, request, build):
         request_digest=digest(request),
         correlation_id=context["correlation_id"],
         request_attempt_id=context["request_attempt_id"],
-        authorize=_authorize(context["organization_id"], context["actor_id"]),
+        authorize=authorizer(context["organization_id"], context["actor_id"]),
         prepare=build,
     )
 

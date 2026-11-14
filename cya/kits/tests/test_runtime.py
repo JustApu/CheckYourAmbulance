@@ -21,6 +21,7 @@ from cya.kits.definitions import (
     save_kit_definition_draft,
     set_kit_definition_active,
 )
+from cya.kits.kit_lists import publish_vehicle_kit_list, save_vehicle_kit_list_draft
 from cya.kits.models import KitAssignmentEvent, KitInstanceDefinition
 from cya.tests import test_audit_runtime_db as runtime_tests
 
@@ -161,3 +162,38 @@ class KitRuntimeTests(TransactionTestCase):
                 ):
                     cursor.execute(sql)
                 self.assertEqual(caught.exception.args[0], code)
+
+    def test_runtime_manages_vehicle_kit_lists_but_cannot_rewrite_published_ones(self):
+        """Issue #129 part 4a: kit list drafts and publications through the runtime account."""
+        with self.runtime() as wrapper:
+            definition_id = create_kit_definition(
+                key="synthetic-kit", label="Synthetic kit", **self.context, **ids()
+            ).body["definition_id"]
+            version_id = save_vehicle_kit_list_draft(
+                vehicle_id=str(self.vehicles[0].pk),
+                lines=[
+                    {
+                        "definition_id": definition_id,
+                        "compartment_id": str(self.cabinets[0].pk),
+                        "required_count": 2,
+                        "display_order": 1,
+                    }
+                ],
+                **self.context,
+                **ids(),
+            ).body["version_id"]
+            publish_vehicle_kit_list(version_id=version_id, **self.context, **ids())
+            # 1142: no privilege.
+            for sql in (
+                "UPDATE vehicle_kit_requirement SET required_count=1",
+                "DELETE FROM vehicle_kit_requirement",
+                "UPDATE vehicle_kit_list_version SET revision=revision",
+                "DELETE FROM vehicle_kit_list_publication",
+            ):
+                with (
+                    self.subTest(sql=sql),
+                    self.assertRaises(DatabaseError) as caught,
+                    wrapper.cursor() as cursor,
+                ):
+                    cursor.execute(sql)
+                self.assertEqual(caught.exception.args[0], 1142)

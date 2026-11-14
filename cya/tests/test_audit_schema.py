@@ -59,6 +59,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "kit_assignment_event",
                     "kit_seal_designation",
                     "kit_definition_publication",
+                    "vehicle_kit_list_publication",
                     "kit_instance_definition",
                 },
             )

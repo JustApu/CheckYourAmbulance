@@ -16,6 +16,7 @@ from django.db import models
 from cya.accounts.fields import IdentityIDField, new_id
 from cya.checklists.models import (
     KINDS,
+    ChecklistVersion,
     Compartment,
     Item,
     KitInstance,
@@ -264,3 +265,116 @@ class KitInstanceDefinition(Evidence):
 
     def __str__(self):
         return f"KitInstanceDefinition {self.pk}"
+
+
+class ChecklistKitPlacement(models.Model):
+    """A kit definition a checklist version inspects on its schedule (SPEC 4.6 KDEF-4).
+
+    Names no compartment and no count: where and how many instances a vehicle should carry come
+    from its kit list (VehicleKitRequirement, KDEF-9). Frozen with its checklist version once
+    published (migration 0007).
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    checklist_version = models.ForeignKey(
+        ChecklistVersion, on_delete=models.PROTECT, related_name="+"
+    )
+    definition = models.ForeignKey(KitDefinition, on_delete=models.PROTECT, related_name="+")
+    display_order = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "checklist_kit_placement"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitplace_org_id"),
+            models.UniqueConstraint(
+                fields=["checklist_version", "definition"], name="kitplace_version_definition"
+            ),
+        ]
+
+    def __str__(self):
+        return f"ChecklistKitPlacement {self.pk}"
+
+
+# The largest count the column stores on every supported database; a storage range, not a
+# product limit (SPEC 2.0.0 KDEF-9 sets only r >= 1).
+STORED_COUNT_MAX = 2_147_483_647
+
+
+class VehicleKitListVersion(models.Model):
+    """One revision of a vehicle's kit list (KDEF-9). Published iff a publication names it."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    revision = models.PositiveIntegerField()
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "vehicle_kit_list_version"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitlistver_org_id"),
+            models.UniqueConstraint(fields=["vehicle", "revision"], name="kitlistver_revision"),
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1), name="kitlistver_revision_min"
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleKitListVersion {self.pk}"
+
+
+class VehicleKitRequirement(models.Model):
+    """One kit list line: exactly required_count instances of a definition in a slot (KDEF-9).
+
+    The compartment is one of the vehicle's own rows and names its slot (stable_slot_id).
+    Frozen with its version once published (migration 0007).
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    version = models.ForeignKey(VehicleKitListVersion, on_delete=models.PROTECT, related_name="+")
+    definition = models.ForeignKey(KitDefinition, on_delete=models.PROTECT, related_name="+")
+    compartment = models.ForeignKey(Compartment, on_delete=models.PROTECT, related_name="+")
+    required_count = models.PositiveIntegerField()
+    display_order = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "vehicle_kit_requirement"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitreq_org_id"),
+            models.UniqueConstraint(
+                fields=["version", "compartment", "definition"], name="kitreq_version_slot_def"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(required_count__gte=1),
+                name="kitreq_required_count",
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleKitRequirement {self.pk}"
+
+
+class VehicleKitListPublication(Evidence):
+    """Append-only publication of one vehicle kit list version (KDEF-9, CHK-3)."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    version = models.OneToOneField(
+        VehicleKitListVersion, on_delete=models.PROTECT, related_name="+"
+    )
+    effective_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "vehicle_kit_list_publication"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="kitlistpub_org_id"),
+            models.CheckConstraint(
+                condition=models.Q(effective_at__gte=models.F("recorded_at")),
+                name="kitlistpub_not_retroactive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleKitListPublication {self.pk}"
