@@ -197,3 +197,29 @@ Issue #129 parts 4b and 4c make kits placed by definition drive inspections ([SP
 - vehicle files that write kit lists (IMP-1, IMP-3).
 
 The database still refuses to publish a template version with no items (cya_checklists 0002), so a kits-only template needs at least one item until then.
+
+## Kit presence
+
+Issue #129 adds the kit presence checks of [SPEC 2.0.0 §4.6](../SPEC.md) (KDEF-10 to KDEF-12): each line of a vehicle's kit list ("exactly r of kit definition X in compartment slot S") is checked by counting the kits actually there.
+
+- **Presence item** (`cya/kits/presence.py`, cya_kits 0009 and 0010):
+  - Every kit definition has its own presence item, "<label> (present)". It is created with the definition, renamed with it, and never changes.
+  - The database refuses it as kit content, and the kit-library importer never matches it by label.
+- **Obligations** (cya_obligations 0016):
+  - For a due instant D of a checklist that places definition X, each line for X on the vehicle's kit list in force at D owes one obligation of X's presence item, outside any kit.
+  - Its requirement version pins the line (`kit_requirement`) and the placement. The insert guard checks that the line is on a published kit list of the vehicle, that the placement places the line's definition, and that the item is that definition's presence item.
+  - The obligation's `kit_instance_id` stays NULL. Its `kit_key` is the line's unit key: `line_unit_key(vehicle, definition, slot)`, a uuid5, never a kit id. Two compartments of one definition are therefore separate obligations, while a changed count on a later kit list revision stays on the same stream and replaces the requirement like any other change.
+- **Checks** (cya_checks 0013):
+  - A presence check names the line it counted (`check_record.kit_requirement_id`, sent by the crew screen from the row, never inferred). It is a Quantity check of the presence item against the line's exact count: an equal count is a Pass, any other count is a Fail.
+  - It is eligible only for obligations whose requirement version pins that same line, and the check and link insert guards enforce the same rule. A correction keeps the line.
+- **Deficiencies and suspensions** (cya_deficiencies 0021):
+  - A failed count opens a deficiency whose affected item is the presence item with the line as its content source (`kit_requirement`). Verification scope rows, scope expansions and check suspensions carry the same source.
+  - Attention, deficiency facts and suspensions apply such a deficiency to that line's unit key only, never to another line of the definition.
+- **Reading:**
+  - Obligation evidence, state, attention and readiness key an obligation by its `kit_key`.
+  - Check lookups (`cya/obligations/projections.py`) find a presence line's checks by `kit_requirement_id` over every revision's row of the line, and only a uuid5 key is looked up as a possible line, so ordinary lookups keep their statement counts.
+- **Crew screen and printouts:**
+  - The checklist API lists one row per kit list line: the presence item as a Quantity row with the exact count, in the line's compartment, with `kit_requirement_id` and no kit. The client keys rows by item, kit and line, and sends the line with the count.
+  - The outage sheet prints each line under its compartment with its count.
+
+Tests: `cya/obligations/tests/test_kit_presence.py`.
