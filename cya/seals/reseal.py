@@ -8,15 +8,25 @@ from cya.accounts.models import Organization
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
 from cya.core.audit_commands import Plan, run_command
+from cya.core.models import CommandReceipt
 from cya.deficiencies import service as deficiency_service
 from cya.deficiencies.models import DeficiencyEvidence
 from cya.kits.definitions import authorizer
+from cya.kits.sealable import kit_sealable
+from cya.seals.blockers import seal_blockers
 from cya.seals.commands import SealConflict, SealError, _event_state, _events, _subject
 from cya.seals.inspection import validate_inspection
 from cya.seals.links import LinkTarget, persist_inspection_links, plan_links
 from cya.seals.locking import lock_seal_inputs, require_item_locks
-from cya.seals.models import SealEvent, SealInspection, SealInspectionItem
+from cya.seals.models import (
+    SealEvent,
+    SealInspection,
+    SealInspectionItem,
+    SealInspectionKitVerification,
+    SealSubstitution,
+)
 from cya.seals.scope import MAX_SCOPE, resolve_kit_lines, resolve_scope
+from cya.seals.verification import _eligible_seal, current_certification
 
 
 def _observations(rows):
@@ -62,12 +72,14 @@ def reseal(
     kit_id=None,
     slot_id=None,
     expected_tip_id=None,
+    start_operation_id=None,
+    nested_substitution_ids=None,
     **context,
 ):
     """Create one atomic inspection, discrepancy evidence and seal event.
 
-    Kit-list counts and nested-seal attestations require the separate line-specific check
-    integration and are deliberately refused until that integration is in place.
+    Kit-list counts require the separate line-specific check integration and are refused
+    until that integration is in place.
     """
     organization_id = context["organization_id"]
     for value in (organization_id, context["actor_id"], vehicle_id):
@@ -77,6 +89,17 @@ def reseal(
     canonical_id(kit_id if kit_id is not None else slot_id)
     if expected_tip_id is not None:
         canonical_id(expected_tip_id)
+    if start_operation_id is not None:
+        canonical_id(start_operation_id)
+    nested_substitution_ids = [] if nested_substitution_ids is None else nested_substitution_ids
+    if not isinstance(nested_substitution_ids, list) or len(nested_substitution_ids) > MAX_SCOPE:
+        raise SealError("invalid nested seal verifications")
+    for substitution_id in nested_substitution_ids:
+        canonical_id(substitution_id)
+    if len(set(nested_substitution_ids)) != len(nested_substitution_ids):
+        raise SealError("duplicate nested seal verification")
+    if nested_substitution_ids and (slot_id is None or start_operation_id is None):
+        raise SealError("nested seals require a started cabinet inspection")
     if not isinstance(marking, str) or not marking.strip() or len(marking) > 200:
         raise SealError("the new seal marking is required")
     if inspected_attestation is not True or written_attestation is not True:
@@ -91,16 +114,36 @@ def reseal(
         "inspected_attestation": inspected_attestation,
         "written_attestation": written_attestation,
         "observations": observations,
+        "start_operation_id": start_operation_id,
+        "nested_substitution_ids": nested_substitution_ids,
     }
 
     def build(actor):
         _subject(organization_id, vehicle_id, kit_id, slot_id, require_sealable=True)
-        _, item_locks, _ = lock_seal_inputs(organization_id, vehicle_id)
+        _, item_locks, deficiencies = lock_seal_inputs(organization_id, vehicle_id)
         now = _subject(organization_id, vehicle_id, kit_id, slot_id, require_sealable=True)
         events = _events(organization_id, vehicle_id, kit_id, slot_id)
         prior = events[-1] if events else None
         if (str(prior.pk) if prior else None) != expected_tip_id:
             raise SealConflict("seal changed; reload before continuing")
+        start = None
+        if start_operation_id is not None:
+            start = CommandReceipt.objects.filter(
+                organization_id=organization_id,
+                operation_id=start_operation_id,
+                actor_user_id=context["actor_id"],
+                command_type="SEAL_INSPECTION_START",
+            ).first()
+            expected_start = {
+                "vehicle_id": vehicle_id,
+                "kit_id": kit_id,
+                "slot_id": slot_id,
+                "expected_tip_id": expected_tip_id,
+            }
+            if start is None or any(
+                start.response_body.get(key) != value for key, value in expected_start.items()
+            ):
+                raise SealError("inspection start does not match this seal")
         seal, audit_pending = _event_state(events)
         if seal is not None:
             raise SealError("break the intact seal before inspecting")
@@ -128,17 +171,82 @@ def reseal(
             organization_id, vehicle_id, slot_id, now, assignments
         ):
             raise SealError("kit-presence checks must be integrated before resealing this cabinet")
+        require_item_locks(scope, item_locks)
+        zone = Organization.objects.values_list("station_zone", flat=True).get(pk=organization_id)
+        today = now.astimezone(ZoneInfo(zone)).date()
+        nested = []
+        nested_ids = set()
         if slot_id is not None:
-            for covered_kit in assignments:
+            substitutions = list(
+                SealSubstitution.objects.filter(
+                    organization_id=organization_id,
+                    pk__in=nested_substitution_ids,
+                    actor_user_id=context["actor_id"],
+                    vehicle_id=vehicle_id,
+                ).select_related("seal_event")
+            )
+            if len(substitutions) != len(nested_substitution_ids):
+                raise SealError("a nested seal verification is unavailable")
+            for substitution in substitutions:
+                covered_kit = str(substitution.seal_event.kit_id)
+                if (
+                    covered_kit not in assignments
+                    or covered_kit in nested_ids
+                    or substitution.recorded_at < start.recorded_at
+                ):
+                    raise SealError("nested seal verification is outside this inspection")
+                nested_seal, pending = _event_state(
+                    _events(organization_id, vehicle_id, covered_kit, None)
+                )
+                if (
+                    nested_seal is None
+                    or nested_seal.pk != substitution.seal_event_id
+                    or covered_kit not in kit_sealable(organization_id, [covered_kit], now)
+                ):
+                    raise SealError("a nested kit seal has changed")
+                nested_scope, nested_assignments = resolve_scope(
+                    organization_id, vehicle_id, now, kit_id=covered_kit
+                )
+                blocked, suspended = seal_blockers(
+                    organization_id, deficiencies, {item.key for item in nested_scope}, at=now
+                )
+                if _eligible_seal(
+                    nested_seal,
+                    pending,
+                    marking=substitution.entered_marking,
+                    today=today,
+                    open_deficiency=blocked,
+                    suspended=suspended,
+                ):
+                    raise SealError("a nested kit seal cannot substitute")
+                if current_certification(
+                    organization_id,
+                    vehicle_id,
+                    nested_seal,
+                    nested_scope,
+                    nested_assignments,
+                    at=now,
+                    today=today,
+                    open_deficiency=blocked,
+                    suspended=suspended,
+                ):
+                    raise SealError("a nested kit certification has changed")
+                nested.append((covered_kit, substitution, nested_seal))
+                nested_ids.add(covered_kit)
+            for covered_kit in set(assignments) - nested_ids:
                 nested_seal, _ = _event_state(
                     _events(organization_id, vehicle_id, covered_kit, None)
                 )
                 if nested_seal is not None:
                     raise SealError("break or verify each nested kit seal before resealing")
-        require_item_locks(scope, item_locks)
-        zone = Organization.objects.values_list("station_zone", flat=True).get(pk=organization_id)
-        today = now.astimezone(ZoneInfo(zone)).date()
-        inspected, expiration, _ = validate_inspection(scope, entries, today=today)
+        fresh_scope = tuple(item for item in scope if item.kit_id not in nested_ids)
+        inspected, expiration, _ = validate_inspection(fresh_scope, entries, today=today)
+        dates = [
+            value
+            for value in [expiration, *(seal.expiration for _, _, seal in nested)]
+            if value is not None
+        ]
+        expiration = min(dates, default=None)
         targets = [LinkTarget(row.scope.item_id, row.scope.kit_id) for row in inspected]
         planned = plan_links(organization_id, vehicle_id, targets, recorded_at=now)
         discrepancies = []
@@ -175,6 +283,7 @@ def reseal(
             "inspection_id": inspection_id,
             "expiration": expiration.isoformat() if expiration else None,
             "no_expiration": expiration is None,
+            "start_operation_id": start_operation_id,
             "deficiencies": [{"id": row["id"], "ordinal": row["ordinal"]} for row in discrepancies],
         }
 
@@ -207,6 +316,10 @@ def reseal(
                 fresh_entry_attestation=True,
                 written_marking_attestation=True,
             )
+            for covered_kit, substitution, _ in nested:
+                SealInspectionKitVerification.objects.create(
+                    **stamp, inspection=inspection, kit_id=covered_kit, substitution=substitution
+                )
             for row, (_, links) in zip(inspected, planned, strict=True):
                 source = (
                     {"kit_definition_item_id": row.scope.definition_id}

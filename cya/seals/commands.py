@@ -186,6 +186,67 @@ def request_seal_audit(**kwargs):
     return _append_event(event_type="AUDIT_REQUEST", **kwargs)
 
 
+def start_inspection(*, vehicle_id, kit_id=None, slot_id=None, expected_tip_id=None, **context):
+    """Mark when a fresh inspection begins, without changing the seal event stream."""
+    organization_id = context["organization_id"]
+    for value in (organization_id, context["actor_id"], vehicle_id):
+        canonical_id(value)
+    if (kit_id is None) == (slot_id is None):
+        raise SealError("exactly one kit or compartment slot is required")
+    canonical_id(kit_id if kit_id is not None else slot_id)
+    if expected_tip_id is not None:
+        canonical_id(expected_tip_id)
+    request = {
+        "vehicle_id": vehicle_id,
+        "kit_id": kit_id,
+        "slot_id": slot_id,
+        "expected_tip_id": expected_tip_id,
+    }
+
+    def build(actor):
+        now = _subject(organization_id, vehicle_id, kit_id, slot_id, require_sealable=True)
+        events = _events(organization_id, vehicle_id, kit_id, slot_id)
+        prior = events[-1] if events else None
+        if (str(prior.pk) if prior else None) != expected_tip_id:
+            raise SealConflict("seal changed; reload before continuing")
+        seal, pending = _event_state(events)
+        if seal is not None:
+            raise SealError("break the intact seal before inspecting")
+        if pending:
+            audit = next(event for event in reversed(events) if event.event_type == "AUDIT_REQUEST")
+            broken = next(
+                (event for event in reversed(events) if event.event_type == "BREAK"), None
+            )
+            if broken is None or broken.sequence < audit.sequence:
+                raise SealError("the audit requires a break after it was requested")
+        body = {
+            "code": "SEAL_INSPECTION_STARTED",
+            "start_operation_id": context["operation_id"],
+            **request,
+        }
+        return Plan(
+            response_body=body,
+            apply=lambda _receipt, _current: None,
+            target_type="ORGANIZATION",
+            target_id=organization_id,
+            recorded_at=now,
+            new_snapshot={"schema_version": 1, "values": body},
+        )
+
+    return run_command(
+        organization_id=organization_id,
+        operation_id=context["operation_id"],
+        command_type="SEAL_INSPECTION_START",
+        request_digest=digest(request),
+        correlation_id=context["correlation_id"],
+        request_attempt_id=context["request_attempt_id"],
+        authorize=authorizer(
+            organization_id, context["actor_id"], action="verify_break_reseal_kit_seal"
+        ),
+        prepare=build,
+    )
+
+
 def verify_seal(
     *, vehicle_id, marking, attested, kit_id=None, slot_id=None, expected_tip_id=None, **context
 ):

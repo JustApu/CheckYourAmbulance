@@ -11,7 +11,14 @@ from cya.authorization.backend import canonical_id
 from cya.checks.api import Rejected, _reply
 from cya.deficiencies.api import _json_body, _run
 from cya.seals import readers
-from cya.seals.commands import SealConflict, SealError, break_seal, request_seal_audit, verify_seal
+from cya.seals.commands import (
+    SealConflict,
+    SealError,
+    break_seal,
+    request_seal_audit,
+    start_inspection,
+    verify_seal,
+)
 from cya.seals.reseal import reseal
 
 SUBJECT = frozenset({"operation_id", "vehicle_id"})
@@ -19,6 +26,7 @@ OPTIONAL_SUBJECT = frozenset({"kit_id", "slot_id", "expected_tip_id"})
 ACTIONS = {
     "break": (break_seal, SUBJECT | {"reason"}),
     "audit": (request_seal_audit, SUBJECT),
+    "start": (start_inspection, SUBJECT),
     "verify": (verify_seal, SUBJECT | {"marking", "attested"}),
     "reseal": (
         reseal,
@@ -36,7 +44,10 @@ def command(request, action):
         if action not in ACTIONS:
             raise Rejected(404, "NOT_FOUND")
         handler, required = ACTIONS[action]
-        body = _json_body(request, required, OPTIONAL_SUBJECT)
+        optional = OPTIONAL_SUBJECT | (
+            {"start_operation_id", "nested_substitution_ids"} if action == "reseal" else set()
+        )
+        body = _json_body(request, required, optional)
         try:
             result = handler(
                 **body,

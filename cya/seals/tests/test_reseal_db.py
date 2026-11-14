@@ -5,11 +5,12 @@ from datetime import timedelta
 from cya.accounts.fields import new_id
 from cya.deficiencies.models import DeficiencyCategory, DeficiencyEvidence
 from cya.deficiencies.severity import ensure_default_severities
-from cya.kits.sealable import designate_kit_sealable
+from cya.kits.sealable import designate_compartment_sealable, designate_kit_sealable
 from cya.kits.tests.support import KitCase
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import State
-from cya.seals.models import SealEvent, SealInspectionObligation
+from cya.seals.commands import start_inspection, verify_seal
+from cya.seals.models import SealEvent, SealInspectionKitVerification, SealInspectionObligation
 from cya.seals.reseal import reseal
 
 
@@ -25,6 +26,15 @@ class ResealTests(KitCase):
         self.bind(reconcile=False)
         self.assertEqual(self.generate().failures, [])
         self.clock.set(self.at(hours=5))
+
+    def test_inspection_start_is_attributed_replayable_and_writes_no_seal_event(self):
+        context = self.context(self.crew)
+        kwargs = {"vehicle_id": str(self.vehicle.pk), "kit_id": self.kit_id}
+        first = start_inspection(**kwargs, **context)
+        second = start_inspection(**kwargs, **context)
+        self.assertTrue(second.replayed)
+        self.assertEqual(first.body["start_operation_id"], context["operation_id"])
+        self.assertFalse(SealEvent.objects.filter(kit_id=self.kit_id).exists())
 
     def test_full_fresh_inspection_is_recorded_once_and_satisfies_one_physical_item(self):
         context = self.context(self.crew)
@@ -116,3 +126,65 @@ class ResealTests(KitCase):
         )
         self.assertEqual(evidence.seal_inspection_item.outcome, "FAILED")
         self.assertEqual(evidence.actor_user_id, self.crew.pk)
+
+    def test_cabinet_inspection_records_a_fresh_nested_seal_verification(self):
+        kit = reseal(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            marking="kit-id",
+            inspected_attestation=True,
+            written_attestation=True,
+            observations=[
+                {
+                    "item_id": str(self.kit_item.pk),
+                    "kit_id": self.kit_id,
+                    "outcome": "PASSED",
+                    "count": 2,
+                    "expiration": None,
+                    "measurement": None,
+                }
+            ],
+            **self.context(self.crew),
+        )
+        designate_compartment_sealable(
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(self.cabinet.pk),
+            sealable=True,
+            **self.context(self.supervisor),
+        )
+        start_context = self.context(self.crew)
+        start_inspection(vehicle_id=str(self.vehicle.pk), slot_id=self.slot, **start_context)
+        nested = verify_seal(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            marking="kit-id",
+            attested=True,
+            expected_tip_id=kit.body["event_id"],
+            **self.context(self.crew),
+        )
+        cabinet = reseal(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            marking="cabinet-id",
+            inspected_attestation=True,
+            written_attestation=True,
+            observations=[],
+            start_operation_id=start_context["operation_id"],
+            nested_substitution_ids=[nested.body["substitution_id"]],
+            **self.context(self.crew),
+        )
+        self.assertTrue(cabinet.body["no_expiration"])
+        saved = SealInspectionKitVerification.objects.get(
+            inspection_id=cabinet.body["inspection_id"]
+        )
+        self.assertEqual(str(saved.kit_id), self.kit_id)
+        self.assertEqual(str(saved.substitution_id), nested.body["substitution_id"])
+        verified = verify_seal(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            marking="cabinet-id",
+            attested=True,
+            expected_tip_id=cabinet.body["event_id"],
+            **self.context(self.crew),
+        )
+        self.assertEqual(verified.body["code"], "SEAL_SUBSTITUTED")
