@@ -25,7 +25,7 @@ function find(root, predicate) {
   for (const child of root.children) { const found = find(child, predicate); if (found) return found; }
   return null;
 }
-function page(subject) {
+function page(subject, deferSubjects = false) {
   const requests = [], elements = {}, sockets = [];
   for (const id of ["seal-subjects", "seal-work", "seal-form", "seal-message", "seal-work-heading", "seal-cancel"]) {
     elements[id] = new Node("div");
@@ -45,7 +45,7 @@ function page(subject) {
     setTimeout: callback => { callback(); return 1; }, clearTimeout() {},
     fetch(url, options) {
       const request = {url, options}; requests.push(request);
-      if (url === "/subjects") return Promise.resolve({ok: true, json: async () => ({subjects:
+      if (url === "/subjects" && !deferSubjects) return Promise.resolve({ok: true, json: async () => ({subjects:
         Array.isArray(subject) ? subject : [subject]})});
       return new Promise((resolve, reject) => { request.resolve = resolve; request.reject = reject; });
     }};
@@ -54,6 +54,19 @@ function page(subject) {
 }
 
 (async () => {
+  {
+    const p = page(null, true);
+    p.sockets[0].onmessage();
+    p.requests[1].resolve({ok: true, json: async () => ({subjects: [
+      {kind: "kit", id: "kit", label: "New state", state: "OPEN", tip_id: null}]})});
+    await tick(); await tick();
+    p.requests[0].resolve({ok: true, json: async () => ({subjects: [
+      {kind: "kit", id: "kit", label: "Old state", state: "SEALED", tip_id: "tip"}]})});
+    await tick(); await tick();
+    assert.ok(find(p.elements["seal-subjects"], n => n.textContent === "New state"));
+    assert.equal(find(p.elements["seal-subjects"], n => n.textContent === "Old state"), null,
+      "an older response cannot overwrite newer seal state");
+  }
   {
     const p = page({kind: "kit", id: "kit", label: "Sample", state: "SEALED", tip_id: "tip"});
     await tick(); await tick();

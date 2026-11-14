@@ -4,7 +4,7 @@
   var csrf = document.querySelector("#seal-csrf [name=csrfmiddlewaretoken]").value;
   var list = document.getElementById("seal-subjects"), work = document.getElementById("seal-work");
   var formArea = document.getElementById("seal-form"), message = document.getElementById("seal-message");
-  var heading = document.getElementById("seal-work-heading"), pending = null, subjectsCache = [];
+  var heading = document.getElementById("seal-work-heading"), pending = null, subjectsCache = [], loadSequence = 0;
 
   function element(tag, text) {
     var node = document.createElement(tag);
@@ -258,9 +258,11 @@
     });
   }
   function load() {
+    var sequence = ++loadSequence;
     fetch(config.subjects_url, {credentials: "same-origin", cache: "no-store"}).then(function (response) {
       if (!response.ok) { throw new Error("unavailable"); } return response.json();
     }).then(function (data) {
+      if (sequence !== loadSequence) { return; }
       subjectsCache = data.subjects;
       list.replaceChildren();
       if (!data.subjects.length) { list.appendChild(element("p", "No sealable kits or cabinets are configured.")); }
@@ -275,7 +277,7 @@
         if (config.can_request_audit && !subject.audit_pending) { box.appendChild(button("Request audit", function () { audit(subject); })); }
         list.appendChild(box);
       });
-    }).catch(function () { show("Seal status is unavailable. Refresh and try again."); });
+    }).catch(function () { if (sequence === loadSequence) { show("Seal status is unavailable. Refresh and try again."); } });
   }
   document.getElementById("seal-cancel").addEventListener("click", function () {
     if (pending) { show("Retry the unconfirmed action before continuing."); return; } work.hidden = true;
