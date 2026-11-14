@@ -217,7 +217,16 @@ def is_kit_content(definition_id):
 
 
 def content_columns(definition_id):
-    """The {definition_id, kit_definition_item_id} pair for a scope row from one content id."""
+    """A scope row's content source columns from one content id.
+
+    The id names a checklist item definition, a placed kit definition's content entry, or (for
+    a kit presence check, KDEF-12) a kit list line; exactly one column is set.
+    """
+    from cya.kits.models import VehicleKitRequirement
+
+    columns = {"definition_id": None, "kit_definition_item_id": None, "kit_requirement_id": None}
     if is_kit_content(definition_id):
-        return {"definition_id": None, "kit_definition_item_id": str(definition_id)}
-    return {"definition_id": str(definition_id), "kit_definition_item_id": None}
+        return columns | {"kit_definition_item_id": str(definition_id)}
+    if VehicleKitRequirement.objects.filter(pk=definition_id).exists():
+        return columns | {"kit_requirement_id": str(definition_id)}
+    return columns | {"definition_id": str(definition_id)}

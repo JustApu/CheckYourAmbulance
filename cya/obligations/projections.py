@@ -151,12 +151,12 @@ def stored_suspensions(*, organization_id, vehicle_id, obligation_ids, as_of):
             pk__in=obligation_ids,
         )
         .order_by("id")
-        .values_list("pk", "item_id", "kit_instance_id", "recorded_at", "grace_at")[: MAX_ROWS + 1]
+        .values_list("pk", "item_id", "kit_key", "recorded_at", "grace_at")[: MAX_ROWS + 1]
     )
     by_key = {}
-    for pk, item_id, kit_id, recorded_at, grace_at in wanted:
-        key = (str(item_id), str(kit_id) if kit_id else NO_KIT)
-        by_key.setdefault(key, []).append((str(pk), recorded_at, grace_at))
+    for pk, item_id, kit_key, recorded_at, grace_at in wanted:
+        # kit_key: the kit, NO_KIT, or a kit presence line's unit key (KDEF-12).
+        by_key.setdefault((str(item_id), str(kit_key)), []).append((str(pk), recorded_at, grace_at))
     if not by_key:
         return ()
     rows = _bounded(
@@ -168,14 +168,15 @@ def stored_suspensions(*, organization_id, vehicle_id, obligation_ids, as_of):
         ).order_by("recorded_at", "id")[: MAX_ROWS + 1]
     )
     ended = {str(r.prior_suspension_id): r.recorded_at for r in rows if r.action == "END"}
+    # A suspension of a kit presence line covers that line's obligations only (KDEF-12).
+    units = line_unit_keys({r.kit_requirement_id for r in rows if r.kit_requirement_id})
     result = []
     for row in rows:
         if row.action != "START":
             continue
         end = ended.get(str(row.pk))
-        for obligation_id, recorded_at, grace_at in by_key.get(
-            (str(row.item_id), row.instance_key), ()
-        ):
+        key = units[str(row.kit_requirement_id)] if row.kit_requirement_id else row.instance_key
+        for obligation_id, recorded_at, grace_at in by_key.get((str(row.item_id), key), ()):
             # In force at some min(T, G) with T at or after the obligation was recorded.
             if row.recorded_at <= grace_at and (end is None or end > min(recorded_at, grace_at)):
                 result.append(
@@ -597,9 +598,14 @@ def _history(organization_id, obligations, since, instant, limit, *, current_fac
         )
     )
     affected = {}
+    presence_lines = {}  # deficiency id -> its kit presence line (KDEF-12)
     for found in scope.values():
         for row in found:
             affected.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
+            if row.kit_requirement_id:
+                presence_lines[str(row.deficiency_id)] = str(row.kit_requirement_id)
+    line_units = line_unit_keys(set(presence_lines.values()))
+    deficiency_units = {pk: line_units[line] for pk, line in presence_lines.items()}
     events = _per_vehicle(
         _by_vehicle(
             _bounded(
@@ -616,7 +622,14 @@ def _history(organization_id, obligations, since, instant, limit, *, current_fac
     )
     return {
         v: _history_fields(
-            rows[v], decisions[v], links[v], supports[v], headers[v], affected, events[v]
+            rows[v],
+            decisions[v],
+            links[v],
+            supports[v],
+            headers[v],
+            affected,
+            events[v],
+            deficiency_units,
         )
         for v in vehicle_ids
     }
@@ -637,8 +650,15 @@ def check_unit_key(row, units):
     return NO_KIT
 
 
-def _history_fields(rows, decisions, links, supports, headers, items, events):
-    """The check and deficiency evidence of one vehicle, from its database rows."""
+def _history_fields(
+    rows, decisions, links, supports, headers, items, events, deficiency_units=None
+):
+    """The check and deficiency evidence of one vehicle, from its database rows.
+
+    deficiency_units maps a deficiency opened for a kit presence line to that line's unit key,
+    so it applies to that line's obligations only, never to another line of the definition.
+    """
+    deficiency_units = deficiency_units or {}
     rows = list(rows)
     units = line_unit_keys({r.kit_requirement_id for r in rows if r.kit_requirement_id})
     return dict(
@@ -680,7 +700,7 @@ def _history_fields(rows, decisions, links, supports, headers, items, events):
                 str(d.pk),
                 d.recorded_at,
                 frozenset(items.get(str(d.pk), ())),
-                str(d.kit_id) if d.kit_id else NO_KIT,
+                str(d.kit_id) if d.kit_id else deficiency_units.get(str(d.pk), NO_KIT),
             )
             for d in headers
         ),

@@ -238,3 +238,40 @@ class PresenceCheckTests(PresenceCase):
             )
         }
         self.assertEqual(found, {self.unit(self.cabinet): "PASSED"})
+
+    def test_a_failed_count_opens_a_deficiency_for_that_line_only(self):
+        from cya.attention.facts import deficiency_facts
+        from cya.deficiencies.models import DeficiencyAffectedItem, DeficiencyCategory
+        from cya.deficiencies.severity import ensure_default_severities
+
+        ensure_default_severities(self.org.pk, self.at(days=-1))
+        category = DeficiencyCategory.objects.create(
+            organization=self.org,
+            stable_category_id=str(uuid4()),
+            revision=1,
+            label="Synthetic stock",
+            supply_related=True,
+            effective_at=self.at(days=-1),
+        )
+        failed = self.check(
+            self.cabinet,
+            1,
+            deficiency={
+                "create": {
+                    "category_id": str(category.stable_category_id),
+                    "severity": "HIGH",
+                    "summary": "Synthetic missing kit",
+                    "description": "Synthetic: one of two kits is missing.",
+                }
+            },
+        )
+        check = CheckRecord.objects.get(pk=failed.body["check_id"])
+        self.assertEqual(check.outcome, "FAILED")
+        deficiency_id = failed.body["deficiency_ids"][0]
+        affected = DeficiencyAffectedItem.objects.get(deficiency_id=deficiency_id)
+        self.assertEqual(
+            (str(affected.item_id), affected.definition_id, str(affected.kit_requirement_id)),
+            (self.presence_item, None, self.lines[str(self.cabinet.pk)]),
+        )
+        (fact,) = deficiency_facts(str(self.org.pk), str(self.vehicle.pk))
+        self.assertEqual(fact.kit_key, self.unit(self.cabinet), "the cabinet line only")

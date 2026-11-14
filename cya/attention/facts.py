@@ -27,6 +27,7 @@ from cya.deficiencies.models import (
     DeficiencyProjection,
 )
 from cya.deficiencies.transitions import ACTIVE_STATUSES
+from cya.kits.presence import line_unit_keys
 from cya.obligations.state import NO_KIT
 
 MAX_ROWS = 10000
@@ -153,18 +154,22 @@ def deficiency_facts(organization_id, vehicle_id, as_of=None):
             "pk", "kit_id"
         )
     )
-    items = {}
+    items, presence_lines = {}, {}
     scope = DeficiencyAffectedItem.objects.filter(
         organization_id=organization_id, deficiency_id__in=statuses
-    ).values_list("deficiency_id", "item_id")
-    for deficiency_id, item_id in scope:
+    ).values_list("deficiency_id", "item_id", "kit_requirement_id")
+    for deficiency_id, item_id, line in scope:
         items.setdefault(str(deficiency_id), set()).add(str(item_id))
+        if line:
+            presence_lines[str(deficiency_id)] = str(line)
+    # A deficiency for a kit presence line applies to that line only (KDEF-12).
+    line_units = line_unit_keys(set(presence_lines.values()))
     return [
         DeficiencyFact(
             pk,
             status,
             frozenset(items.get(pk, ())),
-            str(kits[pk]) if kits.get(pk) else NO_KIT,
+            str(kits[pk]) if kits.get(pk) else line_units.get(presence_lines.get(pk, ""), NO_KIT),
         )
         for pk, status in sorted(statuses.items())
     ]
