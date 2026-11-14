@@ -4,7 +4,7 @@
   var csrf = document.querySelector("#seal-csrf [name=csrfmiddlewaretoken]").value;
   var list = document.getElementById("seal-subjects"), work = document.getElementById("seal-work");
   var formArea = document.getElementById("seal-form"), message = document.getElementById("seal-message");
-  var heading = document.getElementById("seal-work-heading"), pending = null;
+  var heading = document.getElementById("seal-work-heading"), pending = null, subjectsCache = [];
 
   function element(tag, text) {
     var node = document.createElement(tag);
@@ -39,9 +39,9 @@
     body[subject.kind === "kit" ? "kit_id" : "slot_id"] = subject.id;
     return body;
   }
-  function send(action, body) {
+  function send(action, body, onSuccess) {
     if (pending) { show("A previous request is unconfirmed. Retry it before making another change."); return; }
-    body.operation_id = uuid4(); pending = {action: action, body: body}; transmit();
+    body.operation_id = uuid4(); pending = {action: action, body: body, onSuccess: onSuccess}; transmit();
   }
   function transmit() {
     if (!pending) { return; }
@@ -54,7 +54,9 @@
       return response.json().then(function (body) { return {status: response.status, body: body}; });
     }).then(function (answer) {
       if (answer.body.status === "COMMITTED") {
-        pending = null; work.hidden = true; show("Recorded."); load(); return;
+        pending = null;
+        if (request.onSuccess) { request.onSuccess(answer.body.result); return; }
+        work.hidden = true; show("Recorded."); load(); return;
       }
       if (answer.body.status === "REJECTED" && answer.status < 500) {
         pending = null;
@@ -115,22 +117,51 @@
   }
   function inspect(subject) {
     if (!open(subject, "Inspect and reseal")) { return; }
-    var url = config.scope_url.replace("KIND", encodeURIComponent(subject.kind)).replace("SUBJECT", encodeURIComponent(subject.id));
-    fetch(url, {credentials: "same-origin", cache: "no-store"}).then(function (response) {
-      if (!response.ok) { throw new Error("scope unavailable"); } return response.json();
-    }).then(function (data) { inspectionForm(subject, data); }).catch(function () {
-      show("The current contents are unavailable. Refresh and try again.");
+    send("start", subjectFields(subject), function (started) {
+      var url = config.scope_url.replace("KIND", encodeURIComponent(subject.kind)).replace("SUBJECT", encodeURIComponent(subject.id));
+      fetch(url, {credentials: "same-origin", cache: "no-store"}).then(function (response) {
+        if (!response.ok) { throw new Error("scope unavailable"); } return response.json();
+      }).then(function (data) { inspectionForm(subject, data, started.start_operation_id); }).catch(function () {
+        show("The current contents are unavailable. Refresh and try again.");
+      });
     });
   }
-  function inspectionForm(subject, data) {
+  function inspectionForm(subject, data, startId) {
     if (data.kit_lines.length) {
       formArea.appendChild(element("p", "This cabinet includes kit counts. Inspect its contents individually until those counts can be recorded here."));
       return;
     }
-    var form = element("form"), fields = [], dates = [];
+    var form = element("form"), fields = [], nested = {};
+    if (subject.kind === "slot") {
+      subjectsCache.filter(function (kit) {
+        return kit.kind === "kit" && kit.slot_id === subject.id && kit.state === "SEALED";
+      }).forEach(function (kit) {
+        var group = element("fieldset"), label = element("legend", "Verify nested kit: " + kit.label);
+        group.appendChild(label);
+        var marking = field(group, "Crew ID written on the kit seal", "text", false);
+        var intact = field(group, "I checked that this kit seal is intact", "checkbox", false);
+        var status = element("p"); group.appendChild(status);
+        var verifyButton = button("Verify this kit seal", function () {
+          if (!marking.value.trim() || !intact.checked) { show("Enter the kit seal ID and attest that it is intact."); return; }
+          send("verify", Object.assign(subjectFields(kit), {marking: marking.value, attested: true}), function (result) {
+            nested[kit.id] = {id: result.substitution_id, expiration: kit.expiration};
+            fields.forEach(function (row) {
+              if (row.item.kit_id !== kit.id) { return; }
+              row.group.hidden = true;
+              [row.count, row.measurement, row.expiration, row.outcome].forEach(function (input) {
+                if (input) { input.disabled = true; input.required = false; }
+              });
+            });
+            marking.disabled = true; intact.disabled = true; verifyButton.disabled = true;
+            status.textContent = "Kit seal verified."; updateExpiration();
+          });
+        });
+        group.appendChild(verifyButton); form.appendChild(group);
+      });
+    }
     data.items.forEach(function (item) {
       var group = element("fieldset"), legend = element("legend", item.label + (item.kit_label ? " — " + item.kit_label : ""));
-      group.appendChild(legend); var row = {item: item};
+      group.appendChild(legend); var row = {item: item, group: group};
       if (item.kind === "QUANTITY") {
         row.count = field(group, "Fresh count (target " + item.expected_quantity + ")", "number", true);
         row.count.min = "0"; row.count.step = "1";
@@ -138,7 +169,7 @@
       if (item.kind === "MEASUREMENT") {
         row.measurement = field(group, "Measurement (" + item.unit + ")", "text", true);
       }
-      if (item.expiration_tracked) { row.expiration = field(group, "Fresh expiration date", "date", true); dates.push(row.expiration); }
+      if (item.expiration_tracked) { row.expiration = field(group, "Fresh expiration date", "date", true); }
       row.outcome = select(group, "Result", item.kind === "QUANTITY" ?
         [{value: "", label: "Use count"}, {value: "FAILED", label: "Failed for another reason"}] :
         [{value: "", label: "Choose result"}, {value: "PASSED", label: "Passed"}, {value: "FAILED", label: "Failed"}]);
@@ -147,12 +178,15 @@
     });
     var expiry = element("p"), marking = field(form, "Crew ID to write on seal", "text", true);
     function updateExpiration() {
-      var values = dates.map(function (input) { return input.value; }).filter(Boolean).sort();
-      expiry.textContent = dates.length === 0 ? "Write no expiration on the seal." :
-        values.length !== dates.length ? "Enter every tracked expiration to calculate the seal date." :
+      var dates = fields.filter(function (row) { return row.expiration && !row.group.hidden; });
+      var values = dates.map(function (row) { return row.expiration.value; }).filter(Boolean);
+      var nestedDates = Object.keys(nested).map(function (id) { return nested[id].expiration; }).filter(Boolean);
+      values = values.concat(nestedDates).sort();
+      expiry.textContent = dates.length === 0 && nestedDates.length === 0 ? "Write no expiration on the seal." :
+        dates.some(function (row) { return !row.expiration.value; }) ? "Enter every tracked expiration to calculate the seal date." :
         "Write this earliest expiration on the seal: " + values[0] + ".";
     }
-    dates.forEach(function (input) { input.addEventListener("change", updateExpiration); });
+    fields.forEach(function (row) { if (row.expiration) { row.expiration.addEventListener("change", updateExpiration); } });
     updateExpiration(); form.appendChild(expiry);
     var fresh = field(form, "I inspected every listed item", "checkbox", true);
     var written = field(form, "I wrote the crew ID and the displayed expiration or no expiration", "checkbox", true);
@@ -161,7 +195,7 @@
     form.addEventListener("submit", function (event) {
       event.preventDefault(); if (!form.reportValidity()) { return; }
       var invalid = false;
-      var observations = fields.map(function (row) {
+      var observations = fields.filter(function (row) { return !row.group.hidden; }).map(function (row) {
         var count = row.count ? Number(row.count.value) : null;
         var failed = row.outcome.value === "FAILED" || (row.count && count !== row.item.expected_quantity);
         var value = {item_id: row.item.item_id, kit_id: row.item.kit_id, outcome: row.outcome.value || null,
@@ -177,13 +211,15 @@
       });
       if (invalid) { show("Complete the deficiency details for each failed item."); return; }
       send("reseal", Object.assign(subjectFields(subject), {marking: marking.value,
-        inspected_attestation: fresh.checked, written_attestation: written.checked, observations: observations}));
+        inspected_attestation: fresh.checked, written_attestation: written.checked, observations: observations,
+        start_operation_id: startId, nested_substitution_ids: Object.keys(nested).map(function (id) { return nested[id].id; })}));
     });
   }
   function load() {
     fetch(config.subjects_url, {credentials: "same-origin", cache: "no-store"}).then(function (response) {
       if (!response.ok) { throw new Error("unavailable"); } return response.json();
     }).then(function (data) {
+      subjectsCache = data.subjects;
       list.replaceChildren();
       if (!data.subjects.length) { list.appendChild(element("p", "No sealable kits or cabinets are configured.")); }
       data.subjects.forEach(function (subject) {

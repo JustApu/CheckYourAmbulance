@@ -14,7 +14,7 @@ class SealReaderTests(SimpleTestCase):
     def test_subjects_show_expiry_and_latest_tip(self):
         now = datetime(2026, 11, 14, tzinfo=UTC)
         vehicle = SimpleNamespace(organization=SimpleNamespace(station_zone="UTC"))
-        kit = SimpleNamespace(pk="kit", label="Sample kit")
+        kit = SimpleNamespace(pk="kit", label="Sample kit", compartment_id=None)
         event = SimpleNamespace(
             pk="event",
             kit_id="kit",

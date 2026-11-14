@@ -40,7 +40,8 @@ function page(subject) {
   const context = {document, crypto: crypto.webcrypto, Uint8Array, encodeURIComponent,
     fetch(url, options) {
       const request = {url, options}; requests.push(request);
-      if (url === "/subjects") return Promise.resolve({ok: true, json: async () => ({subjects: [subject]})});
+      if (url === "/subjects") return Promise.resolve({ok: true, json: async () => ({subjects:
+        Array.isArray(subject) ? subject : [subject]})});
       return new Promise((resolve, reject) => { request.resolve = resolve; request.reject = reject; });
     }};
   vm.createContext(context); vm.runInContext(fs.readFileSync(script, "utf8"), context);
@@ -67,7 +68,10 @@ function page(subject) {
     const p = page({kind: "kit", id: "kit", label: "Sample", state: "OPEN", tip_id: null});
     await tick(); await tick();
     find(p.elements["seal-subjects"], n => n.textContent === "Inspect and reseal").fire("click");
-    const get = p.requests[1];
+    p.requests[1].resolve({status: 200, json: async () => ({status: "COMMITTED",
+      result: {start_operation_id: "start"}})});
+    await tick(); await tick();
+    const get = p.requests[2];
     get.resolve({ok: true, json: async () => ({kit_lines: [], items: [{item_id: "item", kit_id: "kit",
       label: "Supply", kit_label: "Sample", kind: "QUANTITY", expected_quantity: 2,
       expiration_tracked: true, unit: null}]})});
@@ -79,6 +83,33 @@ function page(subject) {
     assert.ok(find(form, n => /Enter every tracked expiration/.test(n.textContent)));
     expiration.value = "2026-12-31"; expiration.fire("change");
     assert.ok(find(form, n => /2026-12-31/.test(n.textContent)));
+  }
+  {
+    const p = page([
+      {kind: "slot", id: "slot", label: "Cabinet", state: "OPEN", tip_id: null},
+      {kind: "kit", id: "kit", slot_id: "slot", label: "Nested", state: "SEALED",
+        tip_id: "kit-tip", expiration: "2026-12-15"},
+    ]);
+    await tick(); await tick();
+    find(p.elements["seal-subjects"], n => n.textContent === "Inspect and reseal").fire("click");
+    p.requests[1].resolve({status: 200, json: async () => ({status: "COMMITTED",
+      result: {start_operation_id: "start"}})});
+    await tick(); await tick();
+    p.requests[2].resolve({ok: true, json: async () => ({kit_lines: [], items: [{item_id: "item", kit_id: "kit",
+      label: "Supply", kit_label: "Nested", kind: "QUANTITY", expected_quantity: 2,
+      expiration_tracked: true, unit: null}]})});
+    await tick(); await tick();
+    const form = find(p.elements["seal-form"], n => n.tag === "form");
+    const nested = find(form, n => n.tag === "fieldset" && n.children.some(c => c.textContent === "Verify nested kit: Nested"));
+    find(nested, n => n.tag === "input" && n.type === "text").value = "nested-id";
+    find(nested, n => n.tag === "input" && n.type === "checkbox").checked = true;
+    find(nested, n => n.textContent === "Verify this kit seal").fire("click");
+    p.requests[3].resolve({status: 200, json: async () => ({status: "COMMITTED",
+      result: {substitution_id: "nested-substitution"}})});
+    await tick(); await tick();
+    const item = find(form, n => n.tag === "fieldset" && n.children.some(c => c.textContent === "Supply — Nested"));
+    assert.equal(item.hidden, true, "verified nested contents no longer require fresh item entry");
+    assert.ok(find(form, n => /2026-12-15/.test(n.textContent)), "nested seal expiration contributes to the cabinet seal");
   }
   process.stdout.write("Seal page harness passed\n");
 })().catch(error => { console.error(error); process.exitCode = 1; });

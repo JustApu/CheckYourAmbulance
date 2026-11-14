@@ -49,7 +49,9 @@ def subjects(organization_id, vehicle_id, *, at=None):
     kits = _bounded(
         KitInstance.objects.filter(
             organization_id=organization_id, vehicle_id=vehicle_id, active=True
-        ).order_by("pk"),
+        )
+        .select_related("compartment")
+        .order_by("pk"),
         MAX_SCOPE,
     )
     sealed_kits = kit_sealable(organization_id, [str(kit.pk) for kit in kits], at)
@@ -71,7 +73,7 @@ def subjects(organization_id, vehicle_id, *, at=None):
         streams[key].append(event)
     today = at.astimezone(ZoneInfo(vehicle.organization.station_zone)).date()
 
-    def state(kind, subject_id, label):
+    def state(kind, subject_id, label, slot_id=None):
         stream = streams[(kind, subject_id)]
         seal, pending = _event_state(stream)
         status = (
@@ -92,10 +94,19 @@ def subjects(organization_id, vehicle_id, *, at=None):
             "expiration": seal.expiration.isoformat() if seal and seal.expiration else None,
             "no_expiration": bool(seal and seal.no_expiration),
             "audit_pending": pending,
+            "slot_id": slot_id,
         }
 
     result = [state("slot", slot, row.label) for slot, row in latest.items()]
-    result.extend(state("kit", str(kit.pk), kit.label) for kit in kits)
+    result.extend(
+        state(
+            "kit",
+            str(kit.pk),
+            kit.label,
+            str(kit.compartment.stable_slot_id) if kit.compartment_id else None,
+        )
+        for kit in kits
+    )
     return sorted(result, key=lambda row: (row["kind"], row["label"].casefold(), row["id"]))
 
 
