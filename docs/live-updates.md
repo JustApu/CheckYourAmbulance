@@ -53,8 +53,8 @@ have this JSON shape:
 
 The allowed `kind` values are `check.recorded`, `check.corrected`,
 `check.invalidated`, `deficiency.changed`, `odometer.recorded`, and
-`odometer.corrected`, `odometer.invalidated`, `session.changed`, `status.changed`
-and `status.request`. `event_id` identifies the durable domain record or event.
+`odometer.corrected`, `odometer.invalidated`, `session.changed`, `status.changed`,
+`status.request`, `obligations.changed` and `seal.changed`. `event_id` identifies the durable domain record or event.
 Messages contain no names, notes, check outcomes, or other business payload.
 The server rejects unsupported kinds and malformed identifiers.
 
@@ -74,7 +74,9 @@ It never requests `/auth/login/` itself, so an open tab past its session cannot 
 count against the [sign-in rate limit](google-workspace-signin.md). The checklist keeps each
 Unconfirmed item's Retry.
 
-Currently `record_check` publishes `check.recorded`, and the three operational-status
+Seal break and audit commands publish `seal.changed`; inspection and verification publish
+`obligations.changed`. The seal page re-reads authoritative status on a hint and after
+reconnecting. `record_check` publishes `check.recorded`, and the three operational-status
 commands publish `status.changed` (the new status event, from setting a status or approving
 a request) and `status.request` (the request or decision row, from filing a request or
 deciding one; an approval publishes both). Other event kinds are

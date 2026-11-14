@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
-from cya.inspections.views import _authorized, _vehicle
+from cya.inspections.views import _authorized, _vehicle, reverse_socket
 from cya.inspections.workflows import report_options
 from cya.shell.navigation import roles_for
 
@@ -29,6 +29,7 @@ def vehicle_seals(request, vehicle_id):
         "scope_url": reverse("api-seal-scope", args=[vehicle.pk, "KIND", "SUBJECT"]),
         "command_url": reverse("api-seal-command", args=["ACTION"]),
         "checks_url": reverse("api-checks"),
+        "socket_url": reverse_socket(str(vehicle.pk)),
         "report_options": options,
         "can_request_audit": bool(roles_for(user) & {"SUPERVISOR", "ADMINISTRATOR"}),
     }

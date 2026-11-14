@@ -26,19 +26,23 @@ function find(root, predicate) {
   return null;
 }
 function page(subject) {
-  const requests = [], elements = {};
+  const requests = [], elements = {}, sockets = [];
   for (const id of ["seal-subjects", "seal-work", "seal-form", "seal-message", "seal-work-heading", "seal-cancel"]) {
     elements[id] = new Node("div");
   }
   const config = {vehicle_id: "vehicle", subjects_url: "/subjects", scope_url: "/scope/KIND/SUBJECT",
-    command_url: "/command/ACTION", checks_url: "/checks", can_request_audit: false,
+    command_url: "/command/ACTION", checks_url: "/checks", socket_url: "/socket", can_request_audit: false,
     report_options: {categories: [], severities: []}};
   const document = {
     createElement: tag => new Node(tag),
     getElementById(id) { return id === "seal-config" ? {textContent: JSON.stringify(config)} : elements[id]; },
     querySelector() { return {value: "synthetic-csrf"}; },
+    addEventListener() {},
   };
   const context = {document, crypto: crypto.webcrypto, Uint8Array, encodeURIComponent,
+    location: {protocol: "https:", host: "example.test"},
+    WebSocket: class { constructor(url) { this.url = url; sockets.push(this); } },
+    setTimeout: callback => { callback(); return 1; }, clearTimeout() {},
     fetch(url, options) {
       const request = {url, options}; requests.push(request);
       if (url === "/subjects") return Promise.resolve({ok: true, json: async () => ({subjects:
@@ -46,10 +50,21 @@ function page(subject) {
       return new Promise((resolve, reject) => { request.resolve = resolve; request.reject = reject; });
     }};
   vm.createContext(context); vm.runInContext(fs.readFileSync(script, "utf8"), context);
-  return {elements, requests};
+  return {elements, requests, sockets};
 }
 
 (async () => {
+  {
+    const p = page({kind: "kit", id: "kit", label: "Sample", state: "SEALED", tip_id: "tip"});
+    await tick(); await tick();
+    assert.equal(p.sockets[0].url, "wss://example.test/socket");
+    p.sockets[0].onmessage();
+    await tick(); await tick();
+    assert.equal(p.requests.filter(request => request.url === "/subjects").length, 2,
+      "a vehicle update refreshes authoritative seal state");
+    p.sockets[0].onclose({code: 4401});
+    assert.match(p.elements["seal-message"].textContent, /sign-in or access changed/);
+  }
   {
     const p = page({kind: "kit", id: "kit", label: "Sample", state: "SEALED", tip_id: "tip"});
     await tick(); await tick();

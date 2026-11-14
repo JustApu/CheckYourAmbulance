@@ -155,6 +155,14 @@ def _append_event(
                 actor_user=current.user,
                 actor_roles_at_time=list(current.roles),
             )
+            from cya.live_updates.publish import publish_vehicle_update
+
+            publish_vehicle_update(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                event_id=event_id,
+                kind="seal.changed",
+            )
 
         body = {"code": "SEAL_" + event_type, "event_id": event_id}
         return Plan(

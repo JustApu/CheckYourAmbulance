@@ -280,5 +280,30 @@
   document.getElementById("seal-cancel").addEventListener("click", function () {
     if (pending) { show("Retry the unconfirmed action before continuing."); return; } work.hidden = true;
   });
+  var socketBackoff = 1000, socketStopped = false, refreshTimer;
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer); refreshTimer = setTimeout(load, 250);
+  }
+  function connect() {
+    if (socketStopped) { return; }
+    var scheme = location.protocol === "https:" ? "wss://" : "ws://";
+    var socket = new WebSocket(scheme + location.host + config.socket_url);
+    socket.onopen = function () {
+      socketBackoff = 1000;
+      if (message.textContent === "Live updates are unavailable; reconnecting.") { show(""); }
+      scheduleRefresh();
+    };
+    socket.onmessage = scheduleRefresh;
+    socket.onclose = function (event) {
+      if (event.code === 4401 || event.code === 4403) {
+        socketStopped = true;
+        show("Your sign-in or access changed. Sign in again and reload to see updates."); return;
+      }
+      if (!pending) { show("Live updates are unavailable; reconnecting."); }
+      setTimeout(connect, socketBackoff); socketBackoff = Math.min(socketBackoff * 2, 30000);
+    };
+  }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) { scheduleRefresh(); } });
   load();
+  connect();
 }());

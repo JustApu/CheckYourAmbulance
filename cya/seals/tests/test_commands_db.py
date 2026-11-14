@@ -1,5 +1,6 @@
 """Database checks for attributed seal break and audit events."""
 
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.db import DatabaseError, transaction
@@ -50,8 +51,15 @@ class SealEventCommandTests(KitCase):
             "expected_tip_id": str(self.seal.pk),
             "reason": "inspect contents",
         }
-        first = break_seal(**kwargs, **context)
-        second = break_seal(**kwargs, **context)
+        with patch("cya.live_updates.publish.publish_vehicle_update") as publish:
+            first = break_seal(**kwargs, **context)
+            second = break_seal(**kwargs, **context)
+        publish.assert_called_once_with(
+            organization_id=str(self.org.pk),
+            vehicle_id=str(self.vehicle.pk),
+            event_id=first.body["event_id"],
+            kind="seal.changed",
+        )
         self.assertTrue(second.replayed)
         self.assertEqual(first.body, second.body)
         event = SealEvent.objects.get(pk=first.body["event_id"])

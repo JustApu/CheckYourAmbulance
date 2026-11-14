@@ -2,6 +2,8 @@
 
 from cya.checks.commands import CheckError, correct_check, record_check
 from cya.checks.models import CheckObligationLink, CheckRecord
+from cya.deficiencies.models import DeficiencyCategory
+from cya.deficiencies.severity import ensure_default_severities
 from cya.kits.commands import add_kit_instance
 from cya.kits.definitions import (
     create_kit_definition,
@@ -12,7 +14,7 @@ from cya.kits.kit_lists import publish_vehicle_kit_list, save_vehicle_kit_list_d
 from cya.kits.models import KitDefinition, VehicleKitRequirement
 from cya.kits.sealable import designate_compartment_sealable
 from cya.kits.tests.support import KitCase
-from cya.seals.commands import start_inspection
+from cya.seals.commands import SealError, start_inspection, verify_seal
 from cya.seals.models import SealInspectionKitCount
 from cya.seals.reseal import reseal
 
@@ -123,6 +125,131 @@ class UnboundKitCountTests(KitCase):
         saved = SealInspectionKitCount.objects.get(inspection_id=result.body["inspection_id"])
         self.assertEqual(str(saved.check_record_id), check.body["check_id"])
         self.assertEqual(saved.count, 1)
+
+    def test_an_open_deficiency_on_unbound_kit_content_blocks_verification(self):
+        from datetime import timedelta
+
+        from cya.accounts.fields import new_id
+
+        effective_at = self.clock_start - timedelta(days=1)
+        ensure_default_severities(self.org.pk, effective_at)
+        category = DeficiencyCategory.objects.create(
+            organization=self.org,
+            stable_category_id=new_id(),
+            revision=1,
+            label="Synthetic supply",
+            supply_related=True,
+            effective_at=effective_at,
+        )
+        check = self.check()
+        result = reseal(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            marking="cabinet-id",
+            inspected_attestation=True,
+            written_attestation=True,
+            observations=[
+                {
+                    "item_id": str(self.kit_item.pk),
+                    "kit_id": self.kit,
+                    "outcome": None,
+                    "count": 1,
+                    "expiration": None,
+                    "measurement": None,
+                    "deficiency": {
+                        "create": {
+                            "category_id": str(category.stable_category_id),
+                            "severity": "MEDIUM",
+                            "summary": "Synthetic shortfall",
+                            "description": "One item is missing.",
+                        }
+                    },
+                }
+            ],
+            start_operation_id=self.start["operation_id"],
+            kit_count_checks=[{"line_id": str(self.line.pk), "check_id": check.body["check_id"]}],
+            **self.context(self.crew),
+        )
+        with self.assertRaises(SealError):
+            verify_seal(
+                vehicle_id=str(self.vehicle.pk),
+                slot_id=self.slot,
+                expected_tip_id=result.body["event_id"],
+                marking="cabinet-id",
+                attested=True,
+                **self.context(self.crew),
+            )
+
+    def test_presence_deficiency_remains_a_blocker_after_kit_list_republication(self):
+        from datetime import timedelta
+
+        from cya.accounts.fields import new_id
+
+        effective_at = self.clock_start - timedelta(days=1)
+        ensure_default_severities(self.org.pk, effective_at)
+        category = DeficiencyCategory.objects.create(
+            organization=self.org,
+            stable_category_id=new_id(),
+            revision=1,
+            label="Synthetic supply",
+            supply_related=True,
+            effective_at=effective_at,
+        )
+        self.check(
+            quantity=0,
+            deficiency={
+                "create": {
+                    "category_id": str(category.stable_category_id),
+                    "severity": "MEDIUM",
+                    "summary": "Synthetic missing kit",
+                    "description": "The kit was missing.",
+                }
+            },
+        )
+        version = save_vehicle_kit_list_draft(
+            vehicle_id=str(self.vehicle.pk),
+            lines=[
+                {
+                    "definition_id": self.definition,
+                    "compartment_id": str(self.cabinet.pk),
+                    "required_count": 1,
+                    "display_order": 1,
+                }
+            ],
+            **self.context(self.supervisor),
+        ).body["version_id"]
+        publish_vehicle_kit_list(version_id=version, **self.context(self.supervisor))
+        self.line = VehicleKitRequirement.objects.get(version_id=version)
+        check = self.check()
+        result = reseal(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            marking="cabinet-id",
+            inspected_attestation=True,
+            written_attestation=True,
+            observations=[
+                {
+                    "item_id": str(self.kit_item.pk),
+                    "kit_id": self.kit,
+                    "outcome": "PASSED",
+                    "count": 2,
+                    "expiration": None,
+                    "measurement": None,
+                }
+            ],
+            start_operation_id=self.start["operation_id"],
+            kit_count_checks=[{"line_id": str(self.line.pk), "check_id": check.body["check_id"]}],
+            **self.context(self.crew),
+        )
+        with self.assertRaises(SealError):
+            verify_seal(
+                vehicle_id=str(self.vehicle.pk),
+                slot_id=self.slot,
+                expected_tip_id=result.body["event_id"],
+                marking="cabinet-id",
+                attested=True,
+                **self.context(self.crew),
+            )
 
     def test_missing_or_other_actors_start_is_refused(self):
         with self.assertRaises(CheckError):

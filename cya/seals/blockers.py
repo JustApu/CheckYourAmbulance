@@ -4,6 +4,7 @@ from cya.deficiencies import service
 from cya.deficiencies.effects import NO_KIT_KEY
 from cya.deficiencies.models import Deficiency, DeficiencyAffectedItem
 from cya.deficiencies.transitions import ACTIVE_STATUSES
+from cya.kits.presence import line_unit_keys
 from cya.seals.locking import MAX_LOCK_ROWS, SealLockError
 
 
@@ -33,20 +34,44 @@ def seal_blockers(organization_id, projections, covered_pairs, *, at, presence_l
         raise SealLockError("a locked deficiency is unavailable")
     has_open = False
     has_suspension = False
+
+    def units_for(lines):
+        ids = {str(line) for line in lines}
+        units = line_unit_keys(ids)
+        if set(units) != ids:
+            raise SealLockError("a kit-presence line is unavailable")
+        return units
+
+    current_units = units_for(line for _, line in line_pairs)
+    presence_units = {(item, current_units[line]) for item, line in line_pairs}
     if line_pairs:
         active_ids = [key for key, value in projections.items() if value.status in ACTIVE_STATUSES]
         affected = DeficiencyAffectedItem.objects.filter(
             organization_id=organization_id,
             deficiency_id__in=active_ids,
-            kit_requirement_id__in={line for _, line in line_pairs},
+            item_id__in={item for item, _ in line_pairs},
+            kit_requirement_id__isnull=False,
         ).values_list("item_id", "kit_requirement_id")[: MAX_LOCK_ROWS + 1]
         affected = list(affected)
         if len(affected) > MAX_LOCK_ROWS:
             raise SealLockError("too many kit-presence deficiency rows")
-        has_open = any((str(item), str(line)) in line_pairs for item, line in affected)
+        affected_units = units_for(line for _, line in affected)
+        has_open = any(
+            (str(item), affected_units[str(line)]) in presence_units for item, line in affected
+        )
     for deficiency_id, projection in projections.items():
         if projection.status in ACTIVE_STATUSES:
-            rows = service.correction_scope(organization_id, deficiencies[deficiency_id], at)
+            deficiency = deficiencies[deficiency_id]
+            # A physical kit may have no bound checklist. Its direct deficiency remains
+            # a blocker even when the correction-time checklist resolver returns no rows.
+            kit_id = getattr(deficiency, "kit_id", None)
+            item_id = getattr(deficiency, "item_id", None)
+            if kit_id is not None:
+                has_open |= any(
+                    kit == str(kit_id) and (item_id is None or item == str(item_id))
+                    for item, kit in pairs
+                )
+            rows = service.correction_scope(organization_id, deficiency, at)
             if len(rows) > MAX_LOCK_ROWS:
                 raise SealLockError("deficiency scope is too large")
             has_open |= any(
@@ -55,7 +80,8 @@ def seal_blockers(organization_id, projections, covered_pairs, *, at, presence_l
         suspensions = service.suspensions_in_force(organization_id, deficiency_id)
         for row in suspensions:
             if row.kit_requirement_id is not None:
-                has_suspension |= (str(row.item_id), str(row.kit_requirement_id)) in line_pairs
+                unit = units_for([row.kit_requirement_id])[str(row.kit_requirement_id)]
+                has_suspension |= (str(row.item_id), unit) in presence_units
             else:
                 has_suspension |= (
                     str(row.item_id),
