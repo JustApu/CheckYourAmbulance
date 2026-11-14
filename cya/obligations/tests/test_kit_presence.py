@@ -313,3 +313,70 @@ class PresenceCheckTests(PresenceCase):
         )
         drawer = next(r.compartment_label for r in rows if r.compartment_id == str(self.drawer.pk))
         self.assertEqual((printed[cabinet], printed[drawer]), (["2"], ["1"]))
+
+    def test_a_revised_list_keeps_rows_on_the_open_obligations_line(self):
+        """Review of PR #148: the row names the line its shown obligation pins."""
+        from cya.attention.checklist import vehicle_checklist
+
+        self.kit_list((self.cabinet, 3), (self.drawer, 1))  # revised while the window is open
+        self.assertEqual(self.generate().failures, [])
+        row = next(
+            r
+            for r in vehicle_checklist(str(self.org.pk), str(self.vehicle.pk)).rows
+            if r.item_id == self.presence_item and r.compartment_id == str(self.cabinet.pk)
+        )
+        self.assertEqual(
+            (row.kit_requirement_id, row.expected_quantity),
+            (self.lines[str(self.cabinet.pk)], 2),
+            "the open obligation's pinned line and count, not the revised list's",
+        )
+        result = self.check(self.cabinet, 2)  # sends that row's line
+        check = CheckRecord.objects.get(pk=result.body["check_id"])
+        self.assertEqual(check.outcome, "PASSED")
+        self.assertTrue(CheckObligationLink.objects.filter(check_record=check).exists())
+
+    def test_a_presence_row_comes_before_its_kits_contents(self):
+        """Review of PR #148 (KDEF-10): independent display orders cannot reorder them."""
+        from cya.attention.checklist import vehicle_checklist
+
+        kit = self.add_placed_kit("Jump kit 1", self.definition)
+        self.assertEqual(self.generate().failures, [])
+        rows = list(vehicle_checklist(str(self.org.pk), str(self.vehicle.pk)).rows)
+        presence = [i for i, r in enumerate(rows) if r.item_id == self.presence_item]
+        contents = [i for i, r in enumerate(rows) if r.kit_id == kit]
+        self.assertTrue(presence and contents)
+        self.assertLess(max(presence), min(contents))
+
+
+class PresenceItemTests(PresenceCase):
+    """Review of PR #148 (KDEF-12): a presence item is never an ordinary checklist item."""
+
+    def test_validation_refuses_a_presence_item_in_a_template(self):
+        from cya.checklists import commands
+        from cya.checklists.validation import ChecklistValidationError
+
+        items = self.base_items() + [
+            {**self.base_items()[0], "item_id": self.presence_item, "display_order": 99}
+        ]
+        with self.assertRaises(ChecklistValidationError):
+            commands.save_template_draft(
+                template_id=str(self.template.pk), items=items, **self.context()
+            )
+
+    def test_the_database_refuses_a_presence_item_definition(self):
+        from cya.checklists import commands
+        from cya.checklists.models import ChecklistItemDef
+
+        # A draft, so the published-version freeze cannot be what refuses the row.
+        draft = commands.save_template_draft(
+            template_id=str(self.template.pk), items=self.base_items(), **self.context()
+        ).body["version_id"]
+        source = ChecklistItemDef.objects.filter(checklist_version_id=draft).first()
+        fields = {
+            f.attname: getattr(source, f.attname)
+            for f in ChecklistItemDef._meta.concrete_fields
+            if f.attname not in ("id", "item_id")
+        }
+        ChecklistItemDef.objects.create(**fields, item_id=str(self.kit_item.pk))  # accepted
+        with self.assertRaises(DatabaseError), transaction.atomic():
+            ChecklistItemDef.objects.create(**fields, item_id=self.presence_item)

@@ -4,6 +4,8 @@
 - A definition's presence item never changes (a separate trigger, so migration 0005's key guard,
   generated from tools.audit_enforcement.IMMUTABLE_HEADERS, stays as it was).
 - A presence item is never kit content: kit_definition_item refuses it on insert.
+- A presence item is never a checklist item either: checklist_item_def (template and override
+  definitions) refuses it on insert. Presence items are only ever counted by kit presence checks.
 
 Each trigger is one list element so Django runs it whole.
 """
@@ -28,9 +30,14 @@ FORWARD = [
     "FOR EACH ROW BEGIN IF EXISTS (SELECT 1 FROM kit_definition d "
     "WHERE d.presence_item_id = NEW.item_id) THEN "
     f"{signal('a presence item is never kit content')}; END IF; END",
+    "CREATE TRIGGER cya_checklist_item_def_presence_bi BEFORE INSERT ON checklist_item_def "
+    "FOR EACH ROW BEGIN IF EXISTS (SELECT 1 FROM kit_definition d "
+    "WHERE d.presence_item_id = NEW.item_id) THEN "
+    f"{signal('a presence item is never a checklist item')}; END IF; END",
 ]
 
 REVERSE = [
+    "DROP TRIGGER cya_checklist_item_def_presence_bi",
     "DROP TRIGGER cya_kit_definition_item_presence_bi",
     "DROP TRIGGER cya_kit_definition_presence_bu",
     f"ALTER TABLE `kit_definition` DROP FOREIGN KEY `{FK}`",
