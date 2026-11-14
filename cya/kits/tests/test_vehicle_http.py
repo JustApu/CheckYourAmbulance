@@ -154,3 +154,12 @@ class VehicleFilesHttpTests(VehicleImportCase):
         self.assertEqual(vehicle_files.parse(exported.content, "json")["vin"], VIN)
         self.assertTrue(AuditEvent.objects.filter(command__command_type="VEHICLE_EXPORT").exists())
         self.assertEqual(self.admin_client.get(f"{URL}{vehicle.pk}/export.xlsx").status_code, 404)
+
+    def test_hostile_uploads_are_refused_without_a_server_error(self):
+        for data in (
+            b'{"file_type": "vehicle", "vehicle": ' + b"[" * 100_000 + b"]" * 100_000 + b"}",
+            b'{"file_type": "vehicle", "schema_version": ' + b"9" * 5000 + b"}",
+        ):
+            response = self.preview(data)
+            self.assertEqual(response.status_code, 400)
+            self.assertContains(response, "not valid JSON", status_code=400)

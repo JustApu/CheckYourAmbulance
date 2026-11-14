@@ -32,17 +32,22 @@ An import sets the VIN of the vehicle it creates and the keys of positions it cr
 1. **Preview.** Choose the file and its format. The file is read in full and nothing is written (IMP-2). The page summarizes the plan: whether the vehicle is created or updated, positions added or renamed, checklist changes, kit list changes and kits added, and the schedule assigned. If anything is wrong, it lists every problem by JSON path or CSV row instead.
 2. **Import.** One audited command (`VEHICLE_IMPORT`) applies the whole preview, or nothing (IMP-3, IMP-7):
    - **Vehicle:** an unknown VIN creates the vehicle; a known VIN updates its display name and number. An inactive vehicle's VIN is refused.
-   - **Compartments and systems:** a key the vehicle already has keeps that row, and a changed label adds a new revision. A key used on other vehicles adds this vehicle's row in that position. A new key creates the position.
+   - **Compartments and systems:** a key the vehicle already has keeps that row, and a changed label adds a new revision that keeps the compartment's sealable designation. If a later revision of that position is already scheduled, a changed label is refused until it takes effect. A key used on other vehicles adds this vehicle's row in that position. A new key creates the position.
    - **Items outside kits:** the file names the vehicle's checklist template by key, and each item is matched by exact label against the template version in force. An item already there with the same fields is unchanged. Any other item becomes an entry (add or replace) in one new **draft** override of that vehicle; entries of an existing override that the file does not change are carried into it. An unknown label creates the item. The import never writes a template version.
    - **Kit list:** a new **draft** kit list when any line is new or its count differs; lines in force that the file leaves out are kept. When fewer kits of a definition are in a compartment than the file's count, the import adds the missing kits there.
    - **Schedule:** if the vehicle has no binding to the template, the import binds it to the named schedule, or to the organization's only schedule when the file names none. An existing different binding is refused; the import never changes or removes one.
    - It never publishes: publish the override and the kit list as separate steps.
    - It never deactivates or deletes anything the file leaves out.
-   - The confirmation is refused, and you preview again, if the configuration or the file has changed since the preview.
+   - The confirmation is refused, and you preview again, if the configuration or the file has changed since the preview. The import holds the organization and the vehicle while it rechecks and applies the plan, so other changes to that vehicle wait for it.
 
    The page carries the file back for the confirmation; the server keeps no copy between the two steps. The audit records the actor, file type, format and summary counts, never the contents (IMP-4).
 
-Limits: 1,000,000 bytes, UTF-8 (a byte-order mark is accepted), and 20,000 CSV rows. At most 200 problems are listed.
+Limits:
+- 1,000,000 bytes, UTF-8 (a byte-order mark is accepted), and 20,000 CSV rows.
+- At most 1,000 compartments, 1,000 systems, 1,000 items and 1,000 kit lines per file.
+- A kit count from 1 to 2,147,483,647, and at most 1,000 physical kits added by one import.
+- CSV numbers have at most 10 digits. JSON that is nested too deeply or holds a number too long to read is refused as not valid JSON.
+- At most 200 problems are listed.
 
 ## JSON
 

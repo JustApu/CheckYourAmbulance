@@ -126,12 +126,7 @@ def _json_kit(raw, where, found):
 
 
 def _parse_json(text):
-    try:
-        document = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise FileErrors(
-            [f"file: not valid JSON (line {error.lineno}, column {error.colno})"]
-        ) from None
+    document = load_json(text)
     found = _Collector()
     if not isinstance(document, dict):
         raise FileErrors(["file: the top level must be an object"])
@@ -192,13 +187,31 @@ def _csv_rows(text, found):
     return rows
 
 
+MAX_DIGITS = 10  # larger than any stored count or quantity
+
+
 def _csv_int(value, where, found):
     if value == "":
         return None
-    if not value.isdigit():
-        found.add(where, "must be a whole number")
+    # isdigit() alone accepts non-ASCII digits such as "²", which int() refuses.
+    if not (value.isascii() and value.isdigit()) or len(value) > MAX_DIGITS:
+        found.add(where, f"must be a whole number of at most {MAX_DIGITS} digits")
         return None
     return int(value)
+
+
+def load_json(text):
+    """json.loads, with every way untrusted text can fail turned into one FileErrors."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        raise FileErrors(
+            [f"file: not valid JSON (line {error.lineno}, column {error.colno})"]
+        ) from None
+    except (ValueError, RecursionError):  # e.g. a number of thousands of digits, deep nesting
+        raise FileErrors(
+            ["file: not valid JSON (too deeply nested or a number too long)"]
+        ) from None
 
 
 def _csv_bool(value, where, found):

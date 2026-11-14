@@ -29,6 +29,7 @@ from cya.kits.library_files import (
     _neutralize,
     _text,
     _unneutralize,
+    load_json,
 )
 
 FILE_TYPE = "vehicle"
@@ -121,12 +122,7 @@ def _json_item(raw, where, found):
 
 
 def _parse_json(text):
-    try:
-        document = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise FileErrors(
-            [f"file: not valid JSON (line {error.lineno}, column {error.colno})"]
-        ) from None
+    document = load_json(text)
     found = _Collector()
     if not isinstance(document, dict):
         raise FileErrors(["file: the top level must be an object"])

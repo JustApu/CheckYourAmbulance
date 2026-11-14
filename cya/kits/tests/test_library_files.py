@@ -133,3 +133,19 @@ class ParseTests(SimpleTestCase):
         for n in range(files.MAX_ERRORS + 50):
             errors.add("x", str(n))
         self.assertEqual(len(errors.errors), files.MAX_ERRORS)
+
+    def test_hostile_json_and_csv_numbers_are_file_errors(self):
+        # Codex review 5907353408 of PR #150, finding 4: the parsing helpers are shared.
+        for data in (
+            b"[" * 100_000 + b"]" * 100_000,
+            b'{"file_type": "kit-library", "schema_version": ' + b"9" * 5000 + b"}",
+        ):
+            with self.assertRaises(files.FileErrors):
+                files.parse(data, "json")
+        for bad in ("²", "9" * 11):
+            with self.subTest(value=bad):
+                found = files._Collector()
+                self.assertIsNone(files._csv_int(bad, "row 2, quantity", found))
+                self.assertIn("whole number", found.errors[0])
+        found = files._Collector()
+        self.assertEqual(files._csv_int("9" * files.MAX_DIGITS, "q", found), int("9" * 10))

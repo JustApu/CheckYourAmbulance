@@ -27,6 +27,7 @@ Anyone else gets 403, and the denial is audited. The Administration menu entry i
 Limits:
 - 1,000,000 bytes, UTF-8 (a byte-order mark is accepted).
 - 200 kits per file, 500 contents per kit, 20,000 CSV rows.
+- CSV numbers have at most 10 digits. JSON that is nested too deeply or holds a number too long to read is refused as not valid JSON.
 - At most 200 problems are listed.
 
 ## Items

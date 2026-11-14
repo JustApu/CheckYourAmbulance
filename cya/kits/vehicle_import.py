@@ -4,7 +4,7 @@ preview_vehicle_file reads a file and builds a plan with no writes (IMP-2): what
 or changed, and every problem. Its base token summarises the configuration the plan read plus
 the file's digest. import_vehicle_file is one audited command (VEHICLE_IMPORT, policy action
 import_configuration, Administrators; SPEC 3.3) that recomputes the plan under the organization
-lock, refuses it if the base token no longer matches, and applies it all or nothing (IMP-3):
+lock and the vehicle's row lock, refuses it if the base token no longer matches, and applies it all or nothing (IMP-3):
 
 - the vehicle is created with its VIN as key, or its display name and number updated;
 - each compartment or system position is matched by its position key (IMP-6): a key the vehicle
@@ -61,6 +61,7 @@ from cya.kits.commands import _reconcile_after
 from cya.kits.kit_lists import kit_list_effective_at
 from cya.kits.library_import import ImportRefused, _active_items_by_label, _authorize
 from cya.kits.models import (
+    STORED_COUNT_MAX,
     KitAssignmentEvent,
     KitDefinition,
     KitInstanceDefinition,
@@ -77,6 +78,9 @@ IMPORT_COMMAND = "VEHICLE_IMPORT"
 EXPORT_COMMAND = "VEHICLE_EXPORT"
 MAX_LABEL = 200
 MAX_NUMBER = 50
+# Bounds on what one file may ask for, checked while planning, before anything is allocated.
+MAX_ENTRIES = 1000  # compartments, systems, items or kit lines in one file, each
+MAX_NEW_KITS = 1000  # physical kit instances one import may add
 KIND_OF = {"compartments": "COMPARTMENT", "systems": "SYSTEM"}
 SLOT_MODEL = {"COMPARTMENT": Compartment, "SYSTEM": VehicleSystem}
 
@@ -112,6 +116,16 @@ class VehiclePlan:
             "kits_added": sum(n for _d, _s, n in self.new_kits),
             "binding_slot": self.binding_slot,
         }
+
+
+def _tail_rows(vehicle, model):
+    """{stable slot id: the vehicle's newest revision}, including one scheduled for later."""
+    if vehicle is None:
+        return {}
+    tails = {}
+    for row in model.objects.filter(vehicle=vehicle).order_by("stable_slot_id", "-revision"):
+        tails.setdefault(str(row.stable_slot_id), row)
+    return tails
 
 
 def _latest_rows(vehicle, model, now):
@@ -212,9 +226,12 @@ def build_plan(organization_id, vehicle, source=""):
         errors.append("vin: that vehicle is inactive; a remount is a new vehicle with a new VIN")
 
     # Template and the version in force (IMP-7).
-    template = ChecklistTemplate.objects.filter(
-        organization_id=org, key=vehicle.get("template")
-    ).first()
+    template_key = vehicle.get("template")
+    template = (
+        ChecklistTemplate.objects.filter(organization_id=org, key=template_key).first()
+        if isinstance(template_key, str)
+        else None
+    )
     if template is None or not template.active:
         errors.append("template: no active template has that key")
     else:
@@ -235,7 +252,14 @@ def build_plan(organization_id, vehicle, source=""):
             "stable_slot_id", "key"
         ):
             slots[kind][key] = str(slot)
-    rows = {kind: _latest_rows(found, SLOT_MODEL[kind], now) for kind in KIND_OF.values()}
+    # Each position's newest revision: a relabel appends after it and keeps its designation,
+    # and a revision scheduled for later is refused rather than overtaken (as designations do).
+    rows = {kind: _tail_rows(found, SLOT_MODEL[kind]) for kind in KIND_OF.values()}
+    current_rows = {kind: _latest_rows(found, SLOT_MODEL[kind], now) for kind in KIND_OF.values()}
+    for name in (*KIND_OF, "items", "kits"):
+        if len(vehicle.get(name) or []) > MAX_ENTRIES:
+            errors.append(f"{name}: more than {MAX_ENTRIES} entries")
+            return plan
     for name, kind in KIND_OF.items():
         seen = set()
         for index, entry in enumerate(vehicle.get(name) or []):
@@ -252,6 +276,27 @@ def build_plan(organization_id, vehicle, source=""):
             seen.add(key)
             slot = slots[kind].get(key)
             row = rows[kind].get(slot) if slot else None
+            if row is not None and row.effective_at > now:
+                # A revision is scheduled. Matching the label in effect now writes nothing;
+                # anything else would overtake the scheduled revision, so it is refused.
+                current = current_rows[kind].get(slot)
+                if current is not None and label in (None, current.label):
+                    plan.positions.append(
+                        {
+                            "kind": kind,
+                            "key": key,
+                            "label": label,
+                            "slot": slot,
+                            "row": current,
+                            "action": "UNCHANGED",
+                        }
+                    )
+                    continue
+                errors.append(
+                    f"{where}: a later revision of this position is already scheduled for "
+                    f"{row.effective_at:%Y-%m-%d %H:%M} UTC; import after it takes effect"
+                )
+                continue
             if slot is None:
                 action = "NEW_POSITION"
             elif row is None:
@@ -275,11 +320,14 @@ def build_plan(organization_id, vehicle, source=""):
         (kind, key)
         for kind in KIND_OF.values()
         for key, slot in slots[kind].items()
-        if slot in rows[kind]
+        if slot in current_rows[kind]  # a row in effect now: _apply places items and kits in it
     }
 
     def position(kind, key, where):
         if key is None:
+            return None
+        if not isinstance(key, str):
+            errors.append(f"{where}: must be a position key")
             return None
         if (kind, key) not in listed and (kind, key) not in has_row:
             errors.append(
@@ -393,7 +441,10 @@ def build_plan(organization_id, vehicle, source=""):
     definitions = {
         d.key: d
         for d in KitDefinition.objects.filter(
-            organization_id=org, key__in=[k.get("kit") for k in vehicle.get("kits") or []]
+            organization_id=org,
+            key__in=[
+                k.get("kit") for k in vehicle.get("kits") or [] if isinstance(k.get("kit"), str)
+            ],
         )
     }
     in_force = kit_list_effective_at(org, str(found.pk), now) if found else None
@@ -407,14 +458,20 @@ def build_plan(organization_id, vehicle, source=""):
     file_keys = {}
     for index, entry in enumerate(vehicle.get("kits") or []):
         where = f"kits[{index}]"
-        definition = definitions.get(entry.get("kit"))
+        kit_key = entry.get("kit")
+        definition = definitions.get(kit_key) if isinstance(kit_key, str) else None
         if definition is None or not definition.active:
             errors.append(f"{where}.kit: no active kit definition has that key")
             continue
+        if entry.get("compartment") is None:
+            errors.append(f"{where}.compartment: name the compartment the kits are in")
+            continue
         key = position("COMPARTMENT", entry.get("compartment"), f"{where}.compartment")
+        if key is None:
+            continue
         count = entry.get("count")
-        if type(count) is not int or count < 1:
-            errors.append(f"{where}.count: must be a whole number of at least 1")
+        if type(count) is not int or not 1 <= count <= STORED_COUNT_MAX:
+            errors.append(f"{where}.count: must be a whole number from 1 to {STORED_COUNT_MAX}")
             continue
         if (definition.key, key) in file_keys:
             errors.append(f"{where}: kit {definition.key!r} is listed twice in that compartment")
@@ -444,6 +501,11 @@ def build_plan(organization_id, vehicle, source=""):
         )
         if present < count:
             plan.new_kits.append((definition, key, count - present))
+    adding = sum(missing for _d, _k, missing in plan.new_kits)
+    if adding > MAX_NEW_KITS:
+        errors.append(
+            f"kits: the file would add {adding} kits; one import adds at most {MAX_NEW_KITS}"
+        )
     plan.kit_lines_in_force = current_lines
 
     # Schedule binding (IMP-5, IMP-7).
@@ -457,6 +519,9 @@ def build_plan(organization_id, vehicle, source=""):
                 latest.setdefault(binding.slot, binding)
             bound = {slot for slot, b in latest.items() if b.action == "BIND"}
         schedule = vehicle.get("schedule")
+        if schedule is not None and not isinstance(schedule, str):
+            errors.append("schedule: must be a schedule name")
+            schedule = None
         if bound:
             if schedule is not None and schedule not in bound:
                 errors.append(
@@ -484,7 +549,17 @@ def build_plan(organization_id, vehicle, source=""):
             "source": source,
             "vehicle": [found.pk, found.display_name, found.number] if found else None,
             "rows": sorted(
-                (k, s, r.pk, r.revision, r.label) for k in rows for s, r in rows[k].items()
+                (
+                    k,
+                    s,
+                    r.pk,
+                    r.revision,
+                    r.label,
+                    r.effective_at.isoformat(),
+                    getattr(r, "sealable", None),
+                )
+                for k in rows
+                for s, r in rows[k].items()
             ),
             "keys": sorted((k, key, s) for k in slots for key, s in slots[k].items()),
             "version": plan.version_id,
@@ -568,6 +643,8 @@ def _apply(org, plan, receipt, current, vehicle_id, kit_ids):
             revision=revision,
             label=p["label"],
             effective_at=at,
+            # A relabel keeps the position's sealable designation (SPEC 10.2 CAB-1).
+            **({"sealable": p["row"].sealable} if model is Compartment and p["row"] else {}),
         )
         if p["action"] == "NEW_POSITION":
             PositionKey.objects.create(
@@ -770,6 +847,16 @@ def import_vehicle_file(*, data, fmt, base_token, **context):
     applied = {}
 
     def build(actor):
+        # Every writer of a vehicle's configuration (kits, kit lists, overrides, bindings,
+        # compartment designations) locks the vehicle row first. Holding it while the plan is
+        # recomputed (READ COMMITTED reads the latest commits) means none of them can change
+        # what the plan read before this command commits. Organization, then vehicle.
+        try:
+            vin = key_rules.check_vin(vehicle.get("vin"))
+        except key_rules.KeyRuleError:
+            vin = None  # build_plan reports it
+        if vin is not None:
+            list(Vehicle.objects.select_for_update().filter(organization_id=org, key=vin))
         plan = build_plan(org, vehicle, source=digest_bytes(data))
         if plan.errors:
             raise ImportRefused(plan.errors)

@@ -253,3 +253,248 @@ class RoundTripTests(VehicleImportCase):
                     },
                 )
         self.assertEqual(copy.deepcopy(exported)["vin"], VIN)
+
+
+class ReviewFindingTests(VehicleImportCase):
+    """Codex review 5907353408 of PR #150: findings 1 to 5."""
+
+    def drawer(self, vehicle):
+        slot = PositionKey.objects.get(kind="COMPARTMENT", key="drawer").stable_slot_id
+        return Compartment.objects.filter(vehicle=vehicle, stable_slot_id=slot)
+
+    def compartments(self, drawer_label="Synthetic drawer"):
+        return [
+            {"key": "cabinet", "label": "Synthetic cabinet"},
+            {"key": "drawer", "label": drawer_label},
+        ]
+
+    def errors(self, data, fmt="json"):
+        return preview_vehicle_file(str(self.org.pk), data, fmt).errors
+
+    def test_1_a_relabel_keeps_the_sealable_designation(self):
+        from cya.kits.sealable import designate_compartment_sealable
+
+        self.import_(self.file())
+        vehicle = Vehicle.objects.get(key=VIN)
+        first = self.drawer(vehicle).get()
+        designate_compartment_sealable(
+            vehicle_id=str(vehicle.pk),
+            compartment_id=str(first.pk),
+            sealable=True,
+            **self.context(),
+        )
+        self.import_(self.file(compartments=self.compartments("Renamed drawer")))
+        history = list(
+            self.drawer(vehicle).order_by("revision").values_list("revision", "label", "sealable")
+        )
+        self.assertEqual(
+            history,
+            [
+                (1, "Synthetic drawer", False),
+                (2, "Synthetic drawer", True),
+                (3, "Renamed drawer", True),
+            ],
+        )
+
+    def schedule_designation(self, vehicle):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from cya.kits.sealable import designate_compartment_sealable
+
+        designate_compartment_sealable(
+            vehicle_id=str(vehicle.pk),
+            compartment_id=str(self.drawer(vehicle).get().pk),
+            sealable=True,
+            effective_at=timezone.now() + timedelta(days=1),
+            **self.context(),
+        )
+
+    def test_5_a_scheduled_revision_refuses_a_relabel_but_not_an_unchanged_file(self):
+        self.import_(self.file())
+        vehicle = Vehicle.objects.get(key=VIN)
+        self.schedule_designation(vehicle)
+        self.assertEqual(self.errors(self.file()), [])
+        errors = self.errors(self.file(compartments=self.compartments("Renamed drawer")))
+        self.assertTrue(any("already scheduled" in e for e in errors), errors)
+        self.assertEqual(self.drawer(vehicle).count(), 2)
+
+    def test_5_a_revision_scheduled_after_the_preview_makes_it_stale(self):
+        self.import_(self.file())
+        vehicle = Vehicle.objects.get(key=VIN)
+        data = self.file(compartments=self.compartments("Renamed drawer"))
+        plan = preview_vehicle_file(str(self.org.pk), data, "json")
+        self.assertEqual(plan.errors, [])
+        self.schedule_designation(vehicle)
+        with self.assertRaises(ImportRefused):
+            import_vehicle_file(data=data, fmt="json", base_token=plan.base_token, **self.context())
+        self.assertEqual(self.drawer(vehicle).count(), 2)
+
+    def test_3_kit_counts_and_entries_are_bounded_before_anything_is_allocated(self):
+        from cya.kits import vehicle_import
+        from cya.kits.models import STORED_COUNT_MAX
+
+        for count, fragment in (
+            (STORED_COUNT_MAX + 1, "kits[0].count"),
+            (10**30, "kits[0].count"),
+            (vehicle_import.MAX_NEW_KITS + 1, "kits: the file would add"),
+        ):
+            with self.subTest(count=count):
+                kits = [{"kit": "jump-kit", "compartment": "drawer", "count": count}]
+                errors = self.errors(self.file(kits=kits))
+                self.assertTrue(any(e.startswith(fragment) for e in errors), errors)
+        at_limit = [
+            {"kit": "jump-kit", "compartment": "drawer", "count": vehicle_import.MAX_NEW_KITS}
+        ]
+        self.assertEqual(self.errors(self.file(kits=at_limit)), [])
+        many = [{"key": f"bay-{i}", "label": f"Bay {i}"} for i in range(1001)]
+        errors = self.errors(self.file(compartments=many))
+        self.assertTrue(any(e.startswith("compartments: more than") for e in errors), errors)
+
+    def test_4_malformed_values_are_input_errors_in_preview_and_confirmation(self):
+        import json
+
+        def raw(**changes):
+            document = json.loads(self.file())
+            document["vehicle"].update(changes)
+            return json.dumps(document).encode()
+
+        cases = {
+            "kit key is a list": raw(
+                kits=[{"kit": ["jump-kit"], "compartment": "drawer", "count": 1}]
+            ),
+            "compartment key is an object": raw(
+                kits=[{"kit": "jump-kit", "compartment": {"k": 1}, "count": 1}]
+            ),
+            "kit without a compartment": raw(
+                kits=[{"kit": "jump-kit", "compartment": None, "count": 1}]
+            ),
+            "item position is a list": raw(
+                items=[
+                    {
+                        "item": "Synthetic oxygen wrench",
+                        "compartment": ["drawer"],
+                        "system": None,
+                        "kind": "PRESENCE_CONDITION",
+                        "quantity": None,
+                        "unit": None,
+                    }
+                ]
+            ),
+            "template is a list": raw(template=["daily"]),
+            "schedule is an object": raw(schedule={"s": 1}),
+            "deep nesting": b'{"file_type": "vehicle", "vehicle": '
+            + b"[" * 100_000
+            + b"]" * 100_000
+            + b"}",
+            "a number of 5000 digits": b'{"file_type": "vehicle", "schema_version": '
+            + b"9" * 5000
+            + b"}",
+        }
+        for name, data in cases.items():
+            with self.subTest(case=name):
+                self.assertNotEqual(self.errors(data), [])
+                with self.assertRaises(ImportRefused):
+                    import_vehicle_file(
+                        data=data, fmt="json", base_token="0" * 64, **self.context()
+                    )
+        csv_text = vehicle_files.render(self._normal(), "csv").decode()
+        for bad in ("²", "9" * 20):
+            with self.subTest(csv_count=bad):
+                data = csv_text.replace(",jump-kit,2", f",jump-kit,{bad}").encode()
+                self.assertNotEqual(data.decode(), csv_text)
+                errors = self.errors(data, "csv")
+                self.assertTrue(any("whole number" in e for e in errors), errors)
+        self.assertFalse(Vehicle.objects.filter(key=VIN).exists())
+
+    def _normal(self):
+        return vehicle_files.parse(self.file(), "json")
+
+    def test_2_an_import_holds_the_vehicle_so_a_concurrent_kit_add_waits(self):
+        self.race_kit_add()
+
+    def test_2_the_vehicle_lock_alone_makes_a_concurrent_kit_add_wait(self):
+        # The organization lock already blocks every other command (each inserts a receipt that
+        # references the organization row), so turn it off to show the vehicle lock suffices.
+        from unittest import mock
+
+        from cya.kits import vehicle_import
+
+        original = vehicle_import._authorize
+
+        def without_organization_lock(*args, **kwargs):
+            return original(*args, **{**kwargs, "lock_organization": False})
+
+        with mock.patch.object(vehicle_import, "_authorize", without_organization_lock):
+            self.race_kit_add()
+
+    def race_kit_add(self):
+        import threading
+        from unittest import mock
+
+        from django.db import close_old_connections
+
+        from cya.kits import vehicle_import
+        from cya.kits.commands import add_kit_instance
+
+        self.import_(self.file())
+        vehicle = Vehicle.objects.get(key=VIN)
+        drawer = self.drawer(vehicle).get()
+        data = self.file(kits=[{"kit": "jump-kit", "compartment": "drawer", "count": 3}])
+        plan = preview_vehicle_file(str(self.org.pk), data, "json")
+        self.assertEqual(plan.errors, [])
+        planned, release = threading.Event(), threading.Event()
+        order, errors = [], []
+        original = vehicle_import.build_plan
+
+        def paused(*args, **kwargs):
+            result = original(*args, **kwargs)
+            planned.set()
+            release.wait(timeout=30)  # the kit add runs meanwhile, unless it is blocked
+            return result
+
+        def run_import():
+            try:
+                with mock.patch.object(vehicle_import, "build_plan", paused):
+                    import_vehicle_file(
+                        data=data, fmt="json", base_token=plan.base_token, **self.context()
+                    )
+                order.append("imported")
+            except Exception as error:  # noqa: BLE001 - asserted below
+                errors.append(error)
+            finally:
+                close_old_connections()
+
+        def add_kit():
+            try:
+                planned.wait(timeout=30)
+                add_kit_instance(  # another actor, so no shared identity lock
+                    label="Concurrent kit",
+                    vehicle_id=str(vehicle.pk),
+                    compartment_id=str(drawer.pk),
+                    definition_id=self.definition,
+                    **self.context(self.supervisor),
+                )
+                order.append("added")
+            except Exception as error:  # noqa: BLE001 - asserted below
+                errors.append(error)
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=run_import), threading.Thread(target=add_kit)]
+        for thread in threads:
+            thread.start()
+        self.assertTrue(planned.wait(timeout=30))
+        threads[1].join(timeout=3)  # an add that is not blocked finishes here
+        release.set()
+        for thread in threads:
+            thread.join(timeout=60)
+        self.assertEqual(errors, [])
+        self.assertEqual(order, ["imported", "added"])
+        self.assertEqual(
+            KitInstance.objects.filter(
+                vehicle=vehicle, compartment__stable_slot_id=drawer.stable_slot_id, active=True
+            ).count(),
+            4,
+        )
