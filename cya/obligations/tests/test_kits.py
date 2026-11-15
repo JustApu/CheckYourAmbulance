@@ -6,6 +6,7 @@ from uuid import uuid4, uuid5
 from django.apps import apps as django_apps
 from django.db import DatabaseError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.test import tag
 
 from cya.checklists.models import Compartment
 from cya.conditions.models import ObligationDetermination
@@ -348,6 +349,7 @@ class GuardTests(KitObligationCase):
         self.refused(lambda: self.clone(event, selected_obligation_id=mine.pk))
 
 
+@tag("migration_rollback")
 class MigrationTests(KitObligationCase):
     def check_record_schema(self):
         """The partial rollback must restore every check key, index and append-only trigger."""

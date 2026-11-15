@@ -2,7 +2,7 @@
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 
 BEFORE = ("cya_obligations", "0010_projection_vehicle_lookup")
 AFTER = ("cya_obligations", "0011_routine_scope_indexes")
@@ -21,6 +21,7 @@ def index_columns(table, name):
     return None if found is None else found["columns"]
 
 
+@tag("migration_rollback")
 class RoutineIndexMigrationTests(TransactionTestCase):
     def test_indexes_exist_with_the_scope_columns_in_order(self):
         for table, (name, columns) in INDEXES.items():

@@ -49,3 +49,13 @@ The PR proposes three conservative routing changes:
 3. Keep HTML and context-bearing client-script changes on the owning focused Django tests. Client scripts also run the current offline Node harnesses. Unknown, server, migration, security, authorization, inspection/deficiency, and CI-config paths keep their existing full routing.
 
 A CSS-only change currently starts both MariaDB jobs and accounts for 6.8 of the 7.0 runner-minutes in the sampled focused UI workflow. The browser-only route removes those database jobs. The browser job on PR #114 full-check run 42958166677 took 35 seconds (about 0.6 runner-minutes), so the estimated net saving for a CSS-only change is about 6.2 runner-minutes. This estimate subtracts the measured browser cost from the prior UI-run database cost; an actual CSS-only lane total has not yet been observed. Playwright 1.65.0 installs its matching Chromium revision; the downloaded browser archive is not separately verified against a pinned digest. Shared shell templates use the full suite, while the four shell leaf pages use `cya.tests.test_shell`; savings for those leaf pages are estimated pending a representative shell-leaf PR. These are estimates, not promised percentages. Compare new action job durations before claiming observed lane savings.
+
+## Issue #158: migration test tags
+
+Tests that reverse or reapply migrations carry the Django test tag `migration_rollback`, and `tools/migration_test_tags.py` (run with the tool tests) fails if a migrating test class is missing it. CI does not use the tag yet: the server lane still runs every test, so coverage is unchanged. The tag is groundwork for issue #158 item 4. That item, which needs an owner decision, proposes running the tagged tests only when a PR changes migrations or migration tests, plus a scheduled full run, and splitting the Django suite across parallel jobs.
+
+Measured on the Rocky 9 / MariaDB 10.11 test host on 2026-11-15 (NFS-backed storage, synthetic data):
+- `AuditSchemaLifecycleTests.test_integrity_migrations_reverse_and_reapply_on_empty_disposable_schema`: 410 s;
+- nine deficiency migration rollback tests: 59 to 144 s each.
+
+Those ten tests took about 22 of the 22.5 minutes of a 26-test run. These are test-host timings; compare GitHub job durations before claiming CI savings.

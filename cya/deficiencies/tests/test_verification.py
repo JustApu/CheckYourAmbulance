@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 
 from cya.checklists.models import Compartment, VehicleSystem
 from cya.checks.commands import (
@@ -34,6 +34,7 @@ from cya.kits.commands import add_kit_instance
 NO_KIT = "00000000-0000-0000-0000-000000000000"
 
 
+@tag("migration_rollback")
 class VerificationMigrationTests(TransactionTestCase):
     def trigger(self, name):
         with connection.cursor() as cursor:

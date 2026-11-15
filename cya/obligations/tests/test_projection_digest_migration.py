@@ -4,6 +4,7 @@ import hashlib
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.test import tag
 
 from cya.obligations.models import ObligationProjection
 from cya.obligations.tests.test_generation import GenerationCase
@@ -28,6 +29,7 @@ def stored_rows():
         return cursor.fetchall()
 
 
+@tag("migration_rollback")
 class ProjectionDigestMigrationTests(GenerationCase):
     def assert_digests_match_text(self):
         rows = stored_rows()

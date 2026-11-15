@@ -6,7 +6,7 @@ from unittest import mock
 
 from django.db import DatabaseError, close_old_connections, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 
 from cya.checklists.models import ChecklistItemDef, Compartment
 from cya.deficiencies.commands import record_correction, report_deficiency, start_work
@@ -21,6 +21,7 @@ from cya.deficiencies.tests.support import DeficiencyCase
 from cya.kits.commands import add_kit_instance
 
 
+@tag("migration_rollback")
 class CorrectionScopeMigrationTests(TransactionTestCase):
     def trigger_statement(self):
         with connection.cursor() as cursor:

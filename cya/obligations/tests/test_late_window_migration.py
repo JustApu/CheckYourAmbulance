@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import override_settings
+from django.test import override_settings, tag
 
 from cya.obligations.models import Obligation, OdometerObligation
 from cya.obligations.tests.test_generation import GenerationCase
@@ -49,6 +49,7 @@ def triggers():
         return set(cursor.fetchall())
 
 
+@tag("migration_rollback")
 class LateWindowMigrationTests(GenerationCase):
     def assert_pinned_schema(self):
         for table, check in TABLES.items():

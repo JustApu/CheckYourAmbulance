@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from django.db import DatabaseError, close_old_connections, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 from django.utils import timezone
 
 from cya.checklists.models import Compartment, Item
@@ -565,6 +565,7 @@ class DatabaseGuardTests(ExpansionBase):
         self.assertIn("scope expansion instance key mismatch", str(caught.exception))
 
 
+@tag("migration_rollback")
 class MigrationTests(TransactionTestCase):
     def trigger(self, name):
         with connection.cursor() as cursor:

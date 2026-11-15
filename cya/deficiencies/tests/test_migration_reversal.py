@@ -12,7 +12,7 @@ from unittest import mock
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 from django.utils import timezone
 
 from cya.deficiencies import age, closure, extensions
@@ -93,6 +93,7 @@ def event_trigger_text(name):
     return None
 
 
+@tag("migration_rollback")
 class EmptyReversalTests(TransactionTestCase):
     """No lifecycle data: reversal restores the previous triggers and constraints."""
 

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from django.db import DatabaseError, close_old_connections, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 
 from cya.attention.tests.support import AttentionCase
 from cya.checklists.models import Compartment, Item
@@ -657,6 +657,7 @@ class DatabaseGuardTests(SuspensionMixin, VerificationBase):
             CheckSuspension.objects.filter(pk=start.pk).delete()
 
 
+@tag("migration_rollback")
 class MigrationTests(SuspensionMixin, VerificationBase):
     def trigger(self, name):
         with connection.cursor() as cursor:

@@ -6,7 +6,7 @@ from uuid import uuid4
 from django.core.management import call_command
 from django.db import DatabaseError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, tag
 from django.utils import timezone
 
 from cya.accounts.models import Organization, User
@@ -243,6 +243,7 @@ class AuditIntegrityTests(TestCase):
             self.assertFalse(set(baseline[kind]) & self.AFTER_BASELINE[kind])
 
 
+@tag("migration_rollback")
 class AuditSchemaLifecycleTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(call_command, "flush", verbosity=0, interactive=False, reset_sequences=True)
