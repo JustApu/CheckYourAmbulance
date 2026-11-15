@@ -302,13 +302,13 @@ def publish_template_version(*, version_id, effective_at=None, **context):
         definitions = list(ChecklistItemDef.objects.filter(checklist_version=version))
         if not definitions:
             raise ChecklistValidationError("cannot publish a version without items")
-        from cya.kits.positions import vehicles_bound_to
+        from cya.kits.positions import vehicles_bound_now_or_later
 
         # SPEC 4.8 CFG-2: the version applies to the vehicles bound to its template, now or by a
         # binding recorded for later, active or not. Lock them before the template, as
         # bind_requirement does (vehicle, then template), so a retirement and this
         # publication serialize on the vehicle row.
-        applies_to = vehicles_bound_to(org, version.template_id)
+        applies_to = vehicles_bound_now_or_later(org, version.template_id)
         _lock_vehicles(org, applies_to)
         _locked(ChecklistTemplate, org, version.template_id, "checklist template")
         placements = placements_of(version.pk)

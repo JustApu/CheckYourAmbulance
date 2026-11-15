@@ -138,16 +138,41 @@ def _in_force_and_later(publications, now, group):
     return list(current.values()) + later
 
 
-def bound_template_ids(organization_id, vehicle_id):
-    """Templates the vehicle is bound to now or by a binding recorded to take effect later."""
+def _bound_now_or_later(revisions, now):
+    """True when the binding is in force at `now` or a later revision schedules a BIND.
+
+    revisions are one (vehicle, template, slot) chain in revision order. The revision in force
+    is the latest one effective by `now` (as cya.obligations.requirements._bound_at), so an
+    UNBIND recorded for later does not hide a BIND still in force (PR #157 review).
+    """
+    in_force = None
+    for row in revisions:
+        if row.effective_at <= now:
+            in_force = row
+    if in_force is not None and in_force.action == "BIND":
+        return True
+    return any(row.effective_at > now and row.action == "BIND" for row in revisions)
+
+
+def _binding_chains(**filters):
     from cya.obligations.models import RequirementBinding
 
-    latest = {}
-    for binding in RequirementBinding.objects.filter(
-        organization_id=organization_id, vehicle_id=vehicle_id
-    ).order_by("template_id", "slot", "-revision"):
-        latest.setdefault((str(binding.template_id), binding.slot), binding)
-    return sorted({template for (template, _slot), b in latest.items() if b.action == "BIND"})
+    chains = {}
+    for binding in RequirementBinding.objects.filter(**filters).order_by(
+        "vehicle_id", "template_id", "slot", "revision"
+    ):
+        key = (str(binding.vehicle_id), str(binding.template_id), binding.slot)
+        chains.setdefault(key, []).append(binding)
+    return chains
+
+
+def templates_bound_now_or_later(organization_id, vehicle_id, now=None):
+    """Templates bound to the vehicle at `now` or by a binding scheduled to take effect later."""
+    now = now or timezone.now()
+    chains = _binding_chains(organization_id=organization_id, vehicle_id=vehicle_id)
+    return sorted(
+        {template for (_v, template, _s), rows in chains.items() if _bound_now_or_later(rows, now)}
+    )
 
 
 def retired_blockers(organization_id, vehicle_id, kind, stable_slot_id, now):
@@ -159,7 +184,7 @@ def retired_blockers(organization_id, vehicle_id, kind, stable_slot_id, now):
         .objects.filter(organization_id=org, stable_slot_id=slot)
         .values_list("pk", flat=True)
     )
-    templates = bound_template_ids(org, vehicle_id)
+    templates = templates_bound_now_or_later(org, vehicle_id, now)
     versions = _in_force_and_later(
         ChecklistPublication.objects.filter(
             checklist_version__template_id__in=templates
@@ -449,20 +474,17 @@ def positions(organization_id, vehicle_id, kind, at=None):
     return [(row, keys.get(row.stable_slot_id)) for row in rows]
 
 
-def vehicles_bound_to(organization_id, template_id):
-    """Vehicles bound to the template now or by a binding recorded to take effect later.
+def vehicles_bound_now_or_later(organization_id, template_id, now=None):
+    """Vehicles bound to the template at `now` or by a binding scheduled to take effect later.
 
     Inactive vehicles are included: a binding survives deactivation, and reactivation would
     make a retired position required again.
     """
-    from cya.obligations.models import RequirementBinding
-
-    latest = {}
-    for binding in RequirementBinding.objects.filter(
-        organization_id=organization_id, template_id=template_id
-    ).order_by("vehicle_id", "slot", "-revision"):
-        latest.setdefault((str(binding.vehicle_id), binding.slot), binding)
-    return sorted({vehicle for (vehicle, _slot), b in latest.items() if b.action == "BIND"})
+    now = now or timezone.now()
+    chains = _binding_chains(organization_id=organization_id, template_id=template_id)
+    return sorted(
+        {vehicle for (vehicle, _t, _s), rows in chains.items() if _bound_now_or_later(rows, now)}
+    )
 
 
 def template_slot_rows(organization_id, template_id, now):

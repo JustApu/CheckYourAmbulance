@@ -368,3 +368,29 @@ class RetiredSealTests(PositionCase):
             start_inspection(
                 vehicle_id=str(self.vehicle.pk), slot_id=slot, **self.context(self.crew)
             )
+
+
+class ScheduledUnbindTests(PositionCase):
+    """PR #157 review: an UNBIND scheduled for later leaves the binding in force until then."""
+
+    def setUp(self):
+        super().setUp()
+        self.publish_schedule("test-0600")
+        self.tomorrow = self.clock.now + timedelta(days=1)
+
+    def test_retirement_stays_blocked_while_a_scheduled_unbind_is_pending(self):
+        self.published_version()
+        self.bind()
+        self.bind(action="UNBIND", effective_at=self.tomorrow)
+        with self.assertRaises(PositionError) as raised:
+            self.revise(retired=True)
+        self.assertIn("checklist template", str(raised.exception))
+
+    def test_publication_checks_a_vehicle_bound_until_a_scheduled_unbind(self):
+        self.revise(retired=True)  # A's cabinet, while A is unbound
+        self.bind()  # the template has no version yet, so nothing uses the cabinet
+        self.bind(action="UNBIND", effective_at=self.tomorrow)
+        with self.assertRaises(ChecklistValidationError):
+            self.publish(
+                self.draft([self.spec(self.suction, 10, compartment_id=str(self.cabinet_b.pk))])
+            )
