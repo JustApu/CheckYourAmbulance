@@ -38,10 +38,7 @@ class ContractManifestTests(unittest.TestCase):
     def test_recent_product_tables_have_catalogue_rows(self):
         text = CONTRACT.read_text(encoding="utf-8")
         catalogued = {
-            name
-            for match in CATALOGUE_ROW.finditer(text)
-            for name in match.groups()[:2]
-            if name
+            name for match in CATALOGUE_ROW.finditer(text) for name in match.groups()[:2] if name
         }
         # Keep this targeted: a full Django-model crosswalk needs explicit
         # exemptions for grouped and implementation-only tables.
