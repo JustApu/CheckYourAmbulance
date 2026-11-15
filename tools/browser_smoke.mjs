@@ -507,7 +507,7 @@ async function testAdministratorRoleChange(viewport) {
     assert.equal(await search.evaluate((element) => element === document.activeElement), true, `${viewport.name}: search is not first after navigation`);
     await page.keyboard.press("Tab"); // Search users
     await page.keyboard.press("Tab"); // User
-    const target = page.getByLabel("User");
+    const target = page.getByLabel("User", { exact: true });
     assert.equal(await target.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips user selection`);
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Tab"); // Role
@@ -523,7 +523,7 @@ async function testAdministratorRoleChange(viewport) {
     assert.equal(await role.inputValue(), "SUPERVISOR", `${viewport.name}: keyboard could not select Supervisor`);
     assert.equal(await action.inputValue(), "GRANT", `${viewport.name}: keyboard could not choose Grant`);
     for (const label of ["Find an active user by name or email", "User", "Role", "Action"]) {
-      const box = await page.getByLabel(label).boundingBox();
+      const box = await page.getByLabel(label, { exact: true }).boundingBox();
       assert.ok(box && box.height >= 48, `${viewport.name}: ${label} is shorter than 48 CSS pixels`);
     }
     await page.keyboard.press("Tab"); // Review change
