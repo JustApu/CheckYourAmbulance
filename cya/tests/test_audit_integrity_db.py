@@ -209,6 +209,7 @@ class AuditIntegrityTests(TestCase):
             "vehicle_kit_list_publication",  # issue #129: publication of a vehicle kit list
             "position_key",  # issue #129: organization-wide compartment and system keys
             "kit_instance_definition",  # issue #129: the kit definition a kit instance has
+            "vehicle_activity_event",  # issue #130: vehicle activity history (SPEC 4.8 CFG-1)
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
             "deficiency_age_rule",  # issue 150 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/150): administrator-set age highlighting revisions

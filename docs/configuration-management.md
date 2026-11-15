@@ -45,7 +45,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 `vehicle.active` is a current-state flag with no history, but CFG-1 needs the instant a vehicle stopped or resumed owing obligations.
 
 - **New table `vehicle_activity_event`** (append-only, kind A): `vehicle_id`, `sequence` (gapless per vehicle), `active`, `basis` (`CHANGE` or `BASELINE`), `recorded_at` and the usual command attribution. The insert guard accepts:
-  - `basis = CHANGE` only under a `VEHICLE_CREATE`, `VEHICLE_ACTIVE_SET` or `VEHICLE_DUPLICATE` receipt;
+  - `basis = CHANGE` only under a `VEHICLE_CREATE`, `VEHICLE_IMPORT` (a vehicle created by a vehicle file), `VEHICLE_ACTIVE_SET` or `VEHICLE_DUPLICATE` receipt;
   - `basis = BASELINE` only under a `VEHICLE_ACTIVITY_BASELINE` receipt, only as sequence 1 of a vehicle that has no events, and only with `active` equal to the vehicle's current flag.
   - A deploy-time management command, `record_vehicle_activity_baseline`, runs one audited `VEHICLE_ACTIVITY_BASELINE` command. It is attributed to a service identity, as scheduled obligation generation is, with no user actor. Under the organization lock and each vehicle's lock, it appends a `BASELINE` event for every vehicle without events, recording its current flag at the command's recorded instant.
   - Rerunning it adds nothing for vehicles already baselined, and a replay of the same operation returns the original result.
