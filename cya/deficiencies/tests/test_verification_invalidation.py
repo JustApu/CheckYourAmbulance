@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import SimpleTestCase, TransactionTestCase
+from django.test import SimpleTestCase, TransactionTestCase, tag
 
 from cya.checklists.models import Compartment
 from cya.checks.commands import CheckError, correct_check, invalidate_chain
@@ -489,6 +489,7 @@ class DatabaseGuardTests(ReopenBase):
         self.assertEqual(self.status(deficiency_id), "OPEN")
 
 
+@tag("migration_rollback")
 class MigrationTests(TransactionTestCase):
     def trigger(self):
         with connection.cursor() as cursor:

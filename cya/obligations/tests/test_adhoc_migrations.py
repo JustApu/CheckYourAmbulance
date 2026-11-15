@@ -2,6 +2,7 @@
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.test import tag
 
 from cya.obligations.adhoc import request_inspection
 from cya.obligations.tests.test_generation import GenerationCase
@@ -10,6 +11,7 @@ OLD = ("cya_obligations", "0005_obligations_command_type_guards")
 NEW = ("cya_obligations", "0006_ad_hoc_obligations")
 
 
+@tag("migration_rollback")
 class AdHocMigrationTests(GenerationCase):
     def test_reverse_and_forward_preserve_ascii_binary_keys_and_guards(self):
         executor = MigrationExecutor(connection)

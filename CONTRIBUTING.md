@@ -26,6 +26,7 @@ The [`checks` workflow](.github/workflows/checks.yml) runs at handoff for PRs wi
 python3 -m unittest discover -s tools/tests   # tests for the check tools themselves
 python3 tools/check_markdown_links.py         # relative links and heading anchors in tracked *.md files
 python3 tools/validate_scenarios.py           # tests/ scenario, contract and fixture structure and coverage
+python3 tools/migration_test_tags.py         # every migration-reversing test class carries @tag("migration_rollback")
 gitleaks git --redact --no-banner --timeout 300 .  # Markdown-only handoff secret scan (Gitleaks 8.30.1)
 ```
 
@@ -120,6 +121,13 @@ The [authorization operator procedure](docs/authorization-implementation.md#sign
   local/venv/bin/python manage.py test cya.kits.tests.test_history.ActiveKitsTests.test_membership_follows_the_recorded_history_in_time --noinput
   ```
 - **Order and parallel runs:** Run the tests of the module you changed (and DB-free ones such as the transition-table tests) first, then the whole application suite, so mistakes in new tests show up in minutes rather than after a long run. Every run creates and migrates its own test database, so batch several labels into one command. Concurrent runs need distinct `CYA_DB_TEST_NAME` values (for example `test_cya_a` and `test_cya_b`), and a wrapper `timeout` must exceed the suite's runtime because a killed run prints no result summary.
+- **Skip the slow migration tests while iterating** ([issue #158](https://github.com/JustApu/CheckYourAmbulance/issues/158)): the classes that reverse or reapply migrations carry `@tag("migration_rollback")`. Together they take most of a run's time; one deficiency rollback test takes one to two and a half minutes on the test hosts, and the audit lifecycle test about seven. Skip them in day-to-day targeted runs:
+  ```sh
+  local/venv/bin/python manage.py test cya.deficiencies --exclude-tag migration_rollback --noinput
+  ```
+  Run them, without the exclusion, when your change adds or edits a migration, or changes a migration test, and before handoff. CI always runs them. `python3 tools/migration_test_tags.py` fails if a migrating test class is missing the tag.
+- **Keep the test database between runs:** `--keepdb` reuses the test database (and its parallel clones) instead of creating and migrating it again, which saves several minutes per run. Django applies only migrations that are not yet applied, so do not use `--keepdb` after editing an existing migration or switching to a branch whose migrations differ. Drop the kept database first, or run once without the flag.
+- **One heavy job per database server:** two full or migration-heavy runs against the same MariaDB server slow each other down considerably, and the slower run is not more thorough. Run them one after the other, or use the test hosts for one of them.
 - **Token-saving and debugging flags:**
   - `--failfast`: Stop on the first failure instead of running the remaining tests and generating voluminous traceback logs.
   - `-v 1` (default): Minimal output per test (`.` for pass, `F` for fail). Avoid `-v 2` or `-v 3` in automated agent contexts unless debugging a specific test to keep terminal output and context sizes compact.

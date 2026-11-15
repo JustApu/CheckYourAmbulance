@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
+from django.test import tag
 
 from cya.attention.tests.support import AttentionCase
 from cya.core.audit_commands import CommandDenied
@@ -344,6 +345,7 @@ class EarlyEndDatabaseGuardTests(EndMixin, VerificationBase):
             CheckSuspension.objects.filter(pk=end.pk).delete()
 
 
+@tag("migration_rollback")
 class EarlyEndMigrationTests(EndMixin, VerificationBase):
     def trigger(self, name):
         with connection.cursor() as cursor:
