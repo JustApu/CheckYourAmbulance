@@ -358,9 +358,7 @@ class EarlyEndMigrationTests(EndMixin, VerificationBase):
     def target(self, leaves):
         graph = MigrationExecutor(connection).loader.graph
         rollback_boundary = ("cya_deficiencies", "0019_check_suspension_end")
-        target = [
-            leaf for leaf in leaves if rollback_boundary not in graph.forwards_plan(leaf)
-        ]
+        target = [leaf for leaf in leaves if rollback_boundary not in graph.forwards_plan(leaf)]
         target.append(("cya_deficiencies", "0018_acknowledgement_maximum_cap"))
         return target
 

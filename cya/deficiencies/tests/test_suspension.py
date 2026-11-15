@@ -671,9 +671,7 @@ class MigrationTests(SuspensionMixin, VerificationBase):
     def target(self, leaves):
         graph = MigrationExecutor(connection).loader.graph
         rollback_boundary = ("cya_deficiencies", "0017_check_suspension")
-        target = [
-            leaf for leaf in leaves if rollback_boundary not in graph.forwards_plan(leaf)
-        ]
+        target = [leaf for leaf in leaves if rollback_boundary not in graph.forwards_plan(leaf)]
         target.append(("cya_deficiencies", "0016_scope_expansion"))
         return target
 

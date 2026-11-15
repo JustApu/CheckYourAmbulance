@@ -215,9 +215,7 @@ class ResealTests(KitCase):
             **self.context(self.supervisor),
         )
         initial_start = self.context(self.crew)
-        start_inspection(
-            vehicle_id=str(self.vehicle.pk), slot_id=self.slot, **initial_start
-        )
+        start_inspection(vehicle_id=str(self.vehicle.pk), slot_id=self.slot, **initial_start)
         initial_nested = verify_seal(
             vehicle_id=str(self.vehicle.pk),
             kit_id=self.kit_id,
