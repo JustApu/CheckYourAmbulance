@@ -43,7 +43,7 @@ For committed content, obtain the ID from the repository root with `git rev-pars
 | [/docs/engineering-standards.md](docs/engineering-standards.md) | `6a257f572234461e028004ef6865525a97ff3f1e` | Normative |
 | [/docs/ci-routing.md](docs/ci-routing.md) | `fbe98e9c99364a23c1bc101bde2a2b06d59b4fe3` | Non-normative |
 | [/docs/model-efficiency.md](docs/model-efficiency.md) | `9abf40f5511a0c4996bfd78c5ca0c11f9900e476` | Non-normative |
-| [/CONTRIBUTING.md](CONTRIBUTING.md) | `b9a2a01cc080c77226de0f576e1c378aa08400e5` | Non-normative |
+| [/CONTRIBUTING.md](CONTRIBUTING.md) | `9480a374f27b59772027ee20a925162ca91a828c` | Non-normative |
 | [/docs/deployment-runbook.md](docs/deployment-runbook.md) | `8308eed300d0528857e03e54e8f00ee0a308db71` | Non-normative |
 
 ## Model and reasoning efficiency
