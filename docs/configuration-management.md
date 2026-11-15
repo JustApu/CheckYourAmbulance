@@ -63,7 +63,6 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   - Reactivation resumes from the event instant; due instants in the inactive interval stay exempt, so nothing is backfilled.
   - Ad hoc inspection requests for an inactive vehicle are refused.
 - **Projection.** Activity is attached to the current-obligation projection at read time, exactly as the operational status already is (`status_timeline` and `attach_status_fact` in `cya/obligations/current.py`). Stored projection facts and their digest do not change, so deploying this part needs no projection rebuild. The rebuild command's `--verify` replays activity too, and still reports `Different: 0` after deployment.
-
 - **Coordination.** Issue #131 (seal substitution, Codex), merged in PR #154, also changes obligation state and projection replay. This part builds on it. As agreed with Codex, the inactive-vehicle `EXEMPT` takes the same precedence as the out-of-service one, ahead of waivers, checks, seal substitution and suspensions.
 
 ## Compartments and systems (CFG-2)
