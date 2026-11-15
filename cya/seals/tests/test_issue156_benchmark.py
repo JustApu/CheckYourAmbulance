@@ -27,8 +27,8 @@ from cya.kits.kit_lists import publish_vehicle_kit_list, save_vehicle_kit_list_d
 from cya.kits.models import KitDefinition, VehicleKitRequirement
 from cya.kits.sealable import designate_compartment_sealable, designate_kit_sealable
 from cya.kits.tests.support import KitCase
-from cya.seals.commands import break_seal, start_inspection, verify_seal
 from cya.seals import locking as seal_locking
+from cya.seals.commands import break_seal, start_inspection, verify_seal
 from cya.seals.reseal import reseal
 
 
@@ -41,10 +41,23 @@ class Issue156LockBenchmark(KitCase):
         super().setUp()
         self.publish_schedule("benchmark-0600")
         self.published_version(self.base_items())
-        for vehicle in self.vehicles:
+        self.vehicle_b_template = ChecklistTemplate.objects.create(
+            organization=self.org,
+            label="Synthetic vehicle B checklist",
+        )
+        version_b = checklist_commands.save_template_draft(
+            template_id=str(self.vehicle_b_template.pk),
+            items=self.base_items(),
+            **self.context(self.supervisor),
+        ).body["version_id"]
+        checklist_commands.publish_template_version(
+            version_id=version_b,
+            **self.context(self.supervisor),
+        )
+        for index, vehicle in enumerate(self.vehicles):
             self.bind(
                 vehicle=vehicle,
-                template=self.template,
+                template=self.template if index == 0 else self.vehicle_b_template,
                 slot="benchmark-0600",
                 reconcile=False,
             )
@@ -223,8 +236,6 @@ class Issue156LockBenchmark(KitCase):
                         "action": getattr(self.action, "name", "setup"),
                         "resource": resource,
                         "wait_s": ended - started,
-                        "start": started,
-                        "end": ended,
                     }
                 )
 
@@ -430,13 +441,13 @@ class Issue156LockBenchmark(KitCase):
                 for name, values in self.samples.items()
                 if name.startswith("contended:")
             },
-            "max_lock_wait_s": max(
+            "max_lock_query_elapsed_s": max(
                 (sample["wait_s"] for sample in self.lock_samples), default=0
             ),
-            "max_lock_wait_detail": max(
+            "max_lock_query_detail": max(
                 self.lock_samples, key=lambda sample: sample["wait_s"], default=None
             ),
-            "lock_wait_samples": len(self.lock_samples),
+            "lock_query_samples": len(self.lock_samples),
             "innodb_lock_wait_event_count": len(self.innodb_wait_events),
             "innodb_lock_waits_by_mode": {
                 mode: self._summary(
