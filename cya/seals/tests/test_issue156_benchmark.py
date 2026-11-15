@@ -66,44 +66,51 @@ class Issue156LockBenchmark(KitCase):
                 reconcile=False,
             )
 
-        self.definition_id = create_kit_definition(
-            key="issue156-benchmark-kit",
-            label="Synthetic benchmark kit",
-            **self.context(self.supervisor),
-        ).body["definition_id"]
-        kit_version = save_kit_definition_draft(
-            definition_id=self.definition_id,
-            contents=[
-                {
-                    "item_id": str(self.kit_item.pk),
-                    "display_order": 1,
-                    "kind": "QUANTITY",
-                    "expected_quantity": 2,
-                    "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"],
-                }
-            ],
-            **self.context(self.supervisor),
-        ).body["version_id"]
-        publish_kit_definition_version(version_id=kit_version, **self.context(self.supervisor))
-        self.presence_item = str(
-            KitDefinition.objects.get(pk=self.definition_id).presence_item_id
-        )
+        self.definitions = []
+        for index, _vehicle in enumerate(self.vehicles):
+            definition_id = create_kit_definition(
+                key=f"issue156-benchmark-kit-{index}",
+                label=f"Synthetic benchmark kit {index}",
+                **self.context(self.supervisor),
+            ).body["definition_id"]
+            kit_version = save_kit_definition_draft(
+                definition_id=definition_id,
+                contents=[
+                    {
+                        "item_id": str(self.kit_item.pk),
+                        "display_order": 1,
+                        "kind": "QUANTITY",
+                        "expected_quantity": 2,
+                        "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"],
+                    }
+                ],
+                **self.context(self.supervisor),
+            ).body["version_id"]
+            publish_kit_definition_version(
+                version_id=kit_version,
+                **self.context(self.supervisor),
+            )
+            presence_item = str(
+                KitDefinition.objects.get(pk=definition_id).presence_item_id
+            )
+            self.definitions.append((definition_id, presence_item))
 
         self.subjects = []
         for index, vehicle in enumerate(self.vehicles):
             compartment = self.cabinet if index == 0 else self.cabinet_b
+            definition_id, presence_item = self.definitions[index]
             kit_id = add_kit_instance(
                 label=f"Synthetic benchmark kit {index}",
                 vehicle_id=str(vehicle.pk),
                 compartment_id=str(compartment.pk),
-                definition_id=self.definition_id,
+                definition_id=definition_id,
                 **self.context(self.supervisor),
             ).body["kit_id"]
             list_version = save_vehicle_kit_list_draft(
                 vehicle_id=str(vehicle.pk),
                 lines=[
                     {
-                        "definition_id": self.definition_id,
+                        "definition_id": definition_id,
                         "compartment_id": str(compartment.pk),
                         "required_count": 1,
                         "display_order": 1,
@@ -150,6 +157,7 @@ class Issue156LockBenchmark(KitCase):
                     "compartment": compartment,
                     "kit_id": kit_id,
                     "line_id": str(line.pk),
+                    "presence_item": presence_item,
                     "seal_id": initial.body["event_id"],
                     "actor": worker,
                     "publisher": publisher,
@@ -325,7 +333,7 @@ class Issue156LockBenchmark(KitCase):
             "standalone-count",
             lambda: record_check(
                 vehicle_id=str(subject["vehicle"].pk),
-                item_id=self.presence_item,
+                item_id=subject["presence_item"],
                 checklist_version_id=None,
                 kit_requirement_id=subject["line_id"],
                 inspection_start_operation_id=start["operation_id"],
