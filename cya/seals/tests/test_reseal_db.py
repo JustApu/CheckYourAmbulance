@@ -9,7 +9,7 @@ from cya.kits.sealable import designate_compartment_sealable, designate_kit_seal
 from cya.kits.tests.support import KitCase
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import State
-from cya.seals.commands import start_inspection, verify_seal
+from cya.seals.commands import break_seal, request_seal_audit, start_inspection, verify_seal
 from cya.seals.models import SealEvent, SealInspectionKitVerification, SealInspectionObligation
 from cya.seals.reseal import reseal
 
@@ -188,3 +188,101 @@ class ResealTests(KitCase):
             **self.context(self.crew),
         )
         self.assertEqual(verified.body["code"], "SEAL_SUBSTITUTED")
+
+    def test_pending_cabinet_audit_cannot_be_fulfilled_by_nested_seal_verification(self):
+        kit = reseal(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            marking="kit-id",
+            inspected_attestation=True,
+            written_attestation=True,
+            observations=[
+                {
+                    "item_id": str(self.kit_item.pk),
+                    "kit_id": self.kit_id,
+                    "outcome": "PASSED",
+                    "count": 2,
+                    "expiration": None,
+                    "measurement": None,
+                }
+            ],
+            **self.context(self.crew),
+        )
+        designate_compartment_sealable(
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(self.cabinet.pk),
+            sealable=True,
+            **self.context(self.supervisor),
+        )
+        initial_start = self.context(self.crew)
+        start_inspection(
+            vehicle_id=str(self.vehicle.pk), slot_id=self.slot, **initial_start
+        )
+        initial_nested = verify_seal(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            marking="kit-id",
+            attested=True,
+            expected_tip_id=kit.body["event_id"],
+            **self.context(self.crew),
+        )
+        cabinet = reseal(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            marking="cabinet-id",
+            inspected_attestation=True,
+            written_attestation=True,
+            observations=[],
+            start_operation_id=initial_start["operation_id"],
+            nested_substitution_ids=[initial_nested.body["substitution_id"]],
+            **self.context(self.crew),
+        )
+        audit = request_seal_audit(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            expected_tip_id=cabinet.body["event_id"],
+            **self.context(self.supervisor),
+        )
+        broken = break_seal(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            expected_tip_id=audit.body["event_id"],
+            reason="Synthetic audit",
+            **self.context(self.crew),
+        )
+        audit_start = self.context(self.crew)
+        start_inspection(
+            vehicle_id=str(self.vehicle.pk),
+            slot_id=self.slot,
+            expected_tip_id=broken.body["event_id"],
+            **audit_start,
+        )
+        audit_nested = verify_seal(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            marking="kit-id",
+            attested=True,
+            expected_tip_id=kit.body["event_id"],
+            **self.context(self.crew),
+        )
+
+        with self.assertRaisesRegex(ValueError, "full-content audit requires inspecting"):
+            reseal(
+                vehicle_id=str(self.vehicle.pk),
+                slot_id=self.slot,
+                marking="cabinet-id",
+                inspected_attestation=True,
+                written_attestation=True,
+                observations=[],
+                start_operation_id=audit_start["operation_id"],
+                nested_substitution_ids=[audit_nested.body["substitution_id"]],
+                **self.context(self.crew),
+            )
+
+        events = list(
+            SealEvent.objects.filter(vehicle_id=self.vehicle.pk, compartment_slot_id=self.slot)
+            .order_by("sequence")
+            .values_list("event_type", flat=True)
+        )
+        self.assertEqual(events[-1], "BREAK")
+        self.assertNotIn("AUDIT_FULFILLED", events)

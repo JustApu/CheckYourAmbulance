@@ -172,6 +172,8 @@ def reseal(
         )
         if audit_pending and (prior_break is None or prior_break.sequence < audit_request.sequence):
             raise SealError("the audit requires a break after it was requested")
+        if audit_pending and slot_id is not None and nested_substitution_ids:
+            raise SealError("a full-content audit requires inspecting every nested kit item")
         scope, assignments = resolve_scope(
             organization_id, vehicle_id, now, kit_id=kit_id, slot_id=slot_id
         )

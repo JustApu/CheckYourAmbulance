@@ -356,12 +356,13 @@ class EarlyEndMigrationTests(EndMixin, VerificationBase):
         return None if row is None else row[0]
 
     def target(self, leaves):
-        return [
-            ("cya_deficiencies", "0018_acknowledgement_maximum_cap")
-            if leaf[0] == "cya_deficiencies"
-            else leaf
-            for leaf in leaves
+        graph = MigrationExecutor(connection).loader.graph
+        rollback_boundary = ("cya_deficiencies", "0019_check_suspension_end")
+        target = [
+            leaf for leaf in leaves if rollback_boundary not in graph.forwards_plan(leaf)
         ]
+        target.append(("cya_deficiencies", "0018_acknowledgement_maximum_cap"))
+        return target
 
     def test_reversal_restores_the_previous_triggers_and_forward_reinstalls_them(self):
         executor = MigrationExecutor(connection)

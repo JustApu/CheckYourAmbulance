@@ -505,11 +505,13 @@ class MigrationTests(TransactionTestCase):
         leaves = executor.loader.graph.leaf_nodes()
         before = self.trigger()
         self.assertIn("VERIFICATION_REOPENED", before)
+        rollback_boundary = ("cya_deficiencies", "0015_verification_reopen")
         target = [
-            ("cya_deficiencies", "0014_verification_events") if app == "cya_deficiencies" else leaf
+            leaf
             for leaf in leaves
-            for app in [leaf[0]]
+            if rollback_boundary not in executor.loader.graph.forwards_plan(leaf)
         ]
+        target.append(("cya_deficiencies", "0014_verification_events"))
         try:
             executor.migrate(target)
             self.assertNotIn("VERIFICATION_REOPENED", self.trigger())
