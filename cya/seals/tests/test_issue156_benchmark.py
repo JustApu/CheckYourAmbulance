@@ -130,10 +130,11 @@ class Issue156LockBenchmark(KitCase):
                 kit_id=kit_id, sealable=True, **self.context(self.supervisor)
             )
             # Create the initial intact kit seal using only synthetic, versioned kit contents.
+            marking = f"synthetic-{kit_id}-0"
             initial = reseal(
                 vehicle_id=str(vehicle.pk),
                 kit_id=kit_id,
-                marking=f"synthetic-{index}",
+                marking=marking,
                 inspected_attestation=True,
                 written_attestation=True,
                 observations=[
@@ -159,6 +160,8 @@ class Issue156LockBenchmark(KitCase):
                     "line_id": str(line.pk),
                     "presence_item": presence_item,
                     "seal_id": initial.body["event_id"],
+                    "marking": marking,
+                    "reseal_sequence": 0,
                     "actor": worker,
                     "publisher": publisher,
                 }
@@ -282,7 +285,7 @@ class Issue156LockBenchmark(KitCase):
                 vehicle_id=str(subject["vehicle"].pk),
                 kit_id=subject["kit_id"],
                 expected_tip_id=subject["seal_id"],
-                marking=f"synthetic-{subject['kit_id']}",
+                marking=subject["marking"],
                 attested=True,
                 **self.context(subject["actor"]),
             ),
@@ -297,13 +300,15 @@ class Issue156LockBenchmark(KitCase):
             **self.context(subject["actor"]),
         )
         subject["seal_id"] = broken.body["event_id"]
+        reseal_sequence = subject["reseal_sequence"] + 1
+        marking = f"synthetic-{subject['kit_id']}-{reseal_sequence}"
         result = self._timed(
             "reseal",
             lambda: reseal(
                 vehicle_id=str(subject["vehicle"].pk),
                 kit_id=subject["kit_id"],
                 expected_tip_id=subject["seal_id"],
-                marking=f"synthetic-{subject['kit_id']}",
+                marking=marking,
                 inspected_attestation=True,
                 written_attestation=True,
                 observations=[
@@ -320,6 +325,8 @@ class Issue156LockBenchmark(KitCase):
             ),
         )
         subject["seal_id"] = result.body["event_id"]
+        subject["marking"] = marking
+        subject["reseal_sequence"] = reseal_sequence
         return result
 
     def _count(self, subject):
