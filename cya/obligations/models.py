@@ -129,7 +129,8 @@ class RequirementBinding(Evidence):
     so this records that "Ambulance 1" follows slots first-due-0600 and first-due-1800 over the
     ambulance template. One revision per
     (vehicle, template, slot); the latest revision effective at an instant decides whether it
-    is bound then. Appended by administrators; nothing is updated or deleted.
+    is bound then. Appended by an authorized command and attributed to its human actor; nothing
+    is updated or deleted.
     """
 
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
