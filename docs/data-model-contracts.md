@@ -517,7 +517,7 @@ references a command receipt with an authorized `command_type`:
 | `vehicle_status_event` | `cya_vehicle_status_event_bi` | `'VEHICLE_STATUS_SET'`, `'STATUS_REQUEST_DECIDE'` |
 | `vehicle_activity_event` | `cya_vehicle_activity_event_bi` | `CHANGE`: `'VEHICLE_CREATE'`, `'VEHICLE_IMPORT'`, `'VEHICLE_ACTIVE_SET'`, `'VEHICLE_DUPLICATE'`; `BASELINE`: `'VEHICLE_ACTIVITY_BASELINE'` |
 | `schedule_rule` | `cya_schedule_rule_bi` | `'SCHEDULE_PUBLISH'`, `'SCHEDULE_SEED'` |
-| `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'` |
+| `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'`, `'VEHICLE_DUPLICATE'` |
 | `requirement_version` | `cya_requirement_version_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by binding origin |
 | `obligation` | `cya_obligation_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by routine flag |
 | `obligation_selection` | `cya_obligation_selection_bi` | `'OBLIGATIONS_RECONCILE'` |
