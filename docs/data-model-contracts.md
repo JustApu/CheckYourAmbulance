@@ -320,7 +320,10 @@ seal expiration is the earliest tracked date, including verified nested kit seal
 if none is tracked it is marked no expiration. Substitution requires an intact,
 matching, unexpired seal, no pending audit or blocking deficiency, and current
 certified configuration and assignments. Evidence names the satisfied obligations;
-it does not create fabricated item checks. Event-tip conflicts fail without writing.
+it does not create fabricated item checks. An ordinary cabinet reseal may use a
+fresh verification of an intact nested kit seal, but a pending full-content audit
+requires direct inspection of every nested kit item; nested seal substitution
+cannot fulfill the audit. Event-tip conflicts fail without writing.
 
 ### Command, audit and delivery infrastructure
 
