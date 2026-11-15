@@ -298,7 +298,7 @@ jobs:
     needs: [stack-neutral]
     if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'synchronize')) && needs.stack-neutral.outputs.run-django == 'true'
     runs-on: ubuntu-24.04
-    # The serial suite reached the old 15-minute cap (PR 186 (https://github.com/JustApu/CheckYourAmbulance-archive/pull/186)); tests now run in two processes
+    # The serial suite reached the old 15-minute cap (PR 186 (https://github.com/JustApu/CheckYourAmbulance-archive/pull/186)); tests now run in up to 4 processes (issue #158)
     # and the cap keeps a margin. MariaDB 11.8 ran about 30% slower on the rehearsal hosts (issue
     # 56), so the cap is 30 minutes.
     timeout-minutes: 30
@@ -393,8 +393,14 @@ jobs:
         run: |
           test "${CYA_DB_SECURITY_TESTS:-}" = 1
           test -n "$DJANGO_LABELS"
+          # One test process per runner CPU, at most 4 (issue #158). Each process gets its own
+          # copy of the test database (about 15 MB each) on the service's 1 GiB tmpfs.
+          cpus=$(nproc)
+          test "$cpus" -ge 1
+          workers=$(( cpus < 4 ? cpus : 4 ))
+          echo "Runner CPUs: ${cpus}; test processes: ${workers}"
           # Word splitting of the label list is intended.
-          local/venv/bin/python manage.py test $DJANGO_LABELS --noinput -v 2 --parallel 2
+          local/venv/bin/python manage.py test $DJANGO_LABELS --noinput -v 2 --parallel "$workers"
 
       - name: Audit helper and transaction tests
         if: needs.stack-neutral.outputs.django-mode == 'full'

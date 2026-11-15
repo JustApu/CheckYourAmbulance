@@ -71,19 +71,34 @@ def untagged_classes(source: str) -> list[str]:
     return found
 
 
+def test_modules(root: Path) -> list[Path]:
+    """The test modules under root, in a stable order."""
+    return sorted(root.glob("**/tests/**/test_*.py"))
+
+
 def scan(root: Path) -> list[str]:
     """`path::Class` for every untagged migrating test class under root's test modules."""
     offenders = []
-    for path in sorted(root.glob("**/tests/**/test_*.py")):
+    for path in test_modules(root):
         for name in untagged_classes(path.read_text(encoding="utf-8")):
             offenders.append(f"{path.relative_to(root)}::{name}")
     return offenders
 
 
 def main(argv: list[str]) -> int:
-    """Exit 0 when every migrating test class is tagged, 1 when some are not, 2 on a read error."""
+    """Exit 0 when every migrating test class is tagged, 1 when some are not, 2 when it cannot check.
+
+    It cannot check a missing root, a root without test modules, or an unreadable module.
+    """
     root = Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parents[1] / "cya"
+    # A wrong root would otherwise scan nothing and pass.
+    if not root.is_dir():
+        print(f"{root}: not a directory")
+        return 2
     try:
+        if not test_modules(root):
+            print(f"{root}: no test modules found")
+            return 2
         offenders = scan(root)
     except (OSError, SyntaxError, UnicodeDecodeError) as error:
         print(f"{root}: cannot read test modules ({error})")
