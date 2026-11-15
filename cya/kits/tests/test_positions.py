@@ -235,6 +235,7 @@ class RetireRaceTests(PositionCase):
         exceptions, in completion order.
         """
         module, name = first_pause
+        self.race_messages = []
         reached, release = threading.Event(), threading.Event()
         order, errors = [], []
         original = getattr(module, name)
@@ -256,6 +257,7 @@ class RetireRaceTests(PositionCase):
                 order.append(label)
             except Exception as error:  # noqa: BLE001 - asserted by callers
                 errors.append((label, type(error).__name__))
+                self.race_messages.append(str(error))
             finally:
                 close_old_connections()
 
@@ -325,6 +327,36 @@ class RetireRaceTests(PositionCase):
             self.retire_as_supervisor,
         )
         self.assertEqual((order, errors), (["first"], [("second", "PositionError")]))
+
+
+class PublicationBindingRaceTests(PositionCase):
+    """Issue #164: a binding committed while a publication runs cannot skip the retired check."""
+
+    race = RetireRaceTests.race
+
+    def setUp(self):
+        super().setUp()
+        self.publish_schedule("test-0600")
+        self.revise(retired=True)  # A's cabinet, while A is unbound
+
+    def test_a_binding_during_publication_makes_the_publication_refuse(self):
+        from cya.checklists.models import ChecklistPublication
+
+        # The version places an item in the cabinet slot, which A has retired. The template
+        # has no published version, so binding A passes its own retired check.
+        version = self.draft([self.spec(self.suction, 10, compartment_id=str(self.cabinet_b.pk))])
+        order, errors = self.race(
+            lambda: self.publish(version, actor=self.supervisor),
+            (positions, "vehicles_bound_now_or_later"),  # paused after the first read
+            lambda: self.bind(actor=self.admin),
+        )
+        self.assertEqual((order, errors), (["second"], [("first", "ChecklistValidationError")]))
+        self.assertIn("while it was being published", self.race_messages[0])
+        self.assertFalse(ChecklistPublication.objects.filter(checklist_version_id=version))
+        # Publishing again reads the new set and refuses for the retired position.
+        with self.assertRaises(ChecklistValidationError) as again:
+            self.publish(version, actor=self.supervisor)
+        self.assertNotIn("while it was being published", str(again.exception))
 
 
 class RetiredSealTests(PositionCase):

@@ -19,6 +19,7 @@
     - Part 3 changes template publication from version-then-template to version, then the vehicles bound to the template (including inactive ones and later-effective bindings), then template.
     - Position revisions and retirement take only level 3; `add_position` takes levels 1 and 3.
   - **Retirement against publication and binding:** both lock the same vehicle rows before checking positions (CFG-2). Whichever commits first, the other then reads the committed state (READ COMMITTED) and refuses. Part 3 tests both orders for template publication and binding, with distinct actors, and shows that each test fails without its vehicle lock.
+  - **Binding against template publication** ([issue #164](https://github.com/JustApu/CheckYourAmbulance/issues/164)): publication reads its vehicles before taking any lock, so a binding can commit in between. After locking the template, publication reads the bound vehicles again. If a vehicle was added, it refuses with "publish again" instead of locking that vehicle out of order. Binding first, then publication: the publication refuses. Publication first: the binding waits on the template, then sees the published version.
 - **Preview, then confirm.** Consequential changes show a preview with a base token, and confirmation recomputes the plan under the locks and refuses a stale token (CFG-6). This is the pattern of the vehicle-file import.
 
 ## Permissions

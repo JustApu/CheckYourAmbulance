@@ -311,6 +311,17 @@ def publish_template_version(*, version_id, effective_at=None, **context):
         applies_to = vehicles_bound_now_or_later(org, version.template_id)
         _lock_vehicles(org, applies_to)
         _locked(ChecklistTemplate, org, version.template_id, "checklist template")
+        # Issue #164: a binding committed after that first read added a vehicle we did not
+        # lock or check (bind_requirement takes the template lock after the vehicle, so it has
+        # finished by now). Locking that vehicle here would invert the vehicle-then-template
+        # order, so refuse; publishing again reads the new set from the start.
+        added = {str(v) for v in vehicles_bound_now_or_later(org, version.template_id)} - {
+            str(v) for v in applies_to
+        }
+        if added:
+            raise ChecklistValidationError(
+                "a vehicle was bound to this template while it was being published; publish again"
+            )
         placements = placements_of(version.pk)
         check_publishable(placements)
         publication_id = new_id()
