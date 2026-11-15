@@ -325,3 +325,46 @@ class RetireRaceTests(PositionCase):
             self.retire_as_supervisor,
         )
         self.assertEqual((order, errors), (["first"], [("second", "PositionError")]))
+
+
+class RetiredSealTests(PositionCase):
+    """Designations and the seal workflow respect order and retirement (CFG-2, CAB-1)."""
+
+    def designate(self, sealable=True):
+        return designate_compartment_sealable(
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(self.cabinet.pk),
+            sealable=sealable,
+            **self.context(),
+        )
+
+    def test_a_designation_keeps_the_order_and_the_retirement(self):
+        self.revise(display_order=7)
+        self.designate()
+        self.assertEqual(self.history()[-1][2:], (7, False, True))
+        self.revise(retired=True)
+        self.designate(sealable=False)  # making it not sealable is still allowed
+        self.assertEqual(self.history()[-1][2:], (7, True, False))
+
+    def test_a_retired_compartment_cannot_be_designated_sealable(self):
+        from cya.kits.sealable import SealableError
+
+        self.revise(retired=True)
+        with self.assertRaises(SealableError):
+            self.designate()
+
+    def test_a_retired_cabinet_is_no_seal_subject(self):
+        from cya.seals.commands import SealError, start_inspection
+        from cya.seals.readers import subjects
+
+        self.designate()
+        slot = self.slot
+        listed = subjects(str(self.org.pk), str(self.vehicle.pk))
+        self.assertTrue(any(slot in str(subject) for subject in listed))
+        self.revise(retired=True)
+        listed = subjects(str(self.org.pk), str(self.vehicle.pk))
+        self.assertFalse(any(slot in str(subject) for subject in listed))
+        with self.assertRaises(SealError):
+            start_inspection(
+                vehicle_id=str(self.vehicle.pk), slot_id=slot, **self.context(self.crew)
+            )

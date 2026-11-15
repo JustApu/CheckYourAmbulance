@@ -45,7 +45,7 @@ def subjects(organization_id, vehicle_id, *, at=None):
     latest = {}
     for row in compartments:
         latest.setdefault(str(row.stable_slot_id), row)
-    latest = {slot: row for slot, row in latest.items() if row.sealable}
+    latest = {slot: row for slot, row in latest.items() if row.sealable and not row.retired}
     kits = _bounded(
         KitInstance.objects.filter(
             organization_id=organization_id, vehicle_id=vehicle_id, active=True

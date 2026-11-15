@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
     dependencies = [
         ("cya_accounts", "0002_identity_guards"),
-        ("cya_checklists", "0005_stable_keys"),
+        ("cya_checklists", "0006_item_expiration_tracking"),
     ]
 
     operations = [

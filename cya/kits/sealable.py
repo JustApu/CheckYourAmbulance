@@ -126,6 +126,9 @@ def designate_compartment_sealable(
         )
         if tail.sealable is sealable:
             raise SealableError("the compartment's latest revision already has that designation")
+        if sealable and tail.retired:
+            # SPEC 4.8 CFG-2: a retired position receives nothing new.
+            raise SealableError("the compartment is retired")
         row_id = new_id()
         revision = tail.revision + 1
 
@@ -144,6 +147,9 @@ def designate_compartment_sealable(
                 label=tail.label,
                 effective_at=starts,
                 sealable=sealable,
+                # A designation changes only sealable; order and retirement carry over (CFG-2).
+                display_order=tail.display_order,
+                retired=tail.retired,
             )
 
         values = {
