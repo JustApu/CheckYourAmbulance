@@ -175,6 +175,20 @@ class ImportTests(VehicleImportCase):
         binding = RequirementBinding.objects.get(vehicle=vehicle)
         self.assertEqual((binding.slot, binding.action), ("test-0600", "BIND"))
 
+    def test_an_imported_vehicle_starts_its_activity_history(self):
+        from cya.operations.models import VehicleActivityEvent
+
+        self.import_(self.file())
+        vehicle = Vehicle.objects.get(key=VIN)
+        self.assertEqual(
+            list(
+                VehicleActivityEvent.objects.filter(vehicle=vehicle).values_list(
+                    "sequence", "active", "basis"
+                )
+            ),
+            [(1, True, "CHANGE")],
+        )
+
     def test_a_stale_preview_is_refused_and_a_replay_returns_the_result(self):
         data = self.file()
         plan = preview_vehicle_file(str(self.org.pk), data, "json")

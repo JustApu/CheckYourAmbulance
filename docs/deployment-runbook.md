@@ -518,6 +518,19 @@ safe. A database restore can lose accepted writes and requires owner approval
 audit history and binary logs; do not prune or recreate tables to recover.
 The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove either.
 
+**Release step: vehicle activity baseline** ([issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130) part 2). The release that adds `vehicle_activity_event` needs one extra step, run before traffic reopens:
+1. Apply the migration plan and install the runtime grants as usual.
+2. In the protected runtime environment, record each existing vehicle's current active flag as its activity baseline:
+
+   ```sh
+   local/venv/bin/python manage.py record_vehicle_activity_baseline --organization <org-uuid> --dry-run
+   local/venv/bin/python manage.py record_vehicle_activity_baseline --organization <org-uuid>
+   ```
+
+   The dry run reports how many vehicles, and how many inactive ones, would get a baseline. The real run is one audited command attributed to a service identity, with a fixed operation id, so rerunning it replays the first result and writes nothing.
+
+Until it has run, deactivating or reactivating a vehicle is refused. Obligation projections need no rebuild for this release: activity is attached at read time, like operational status.
+
 ## Backup and point-in-time recovery
 
 [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) Parts A and B; SPEC DEP-6–DEP-9. Rehearsed on 2026-11-03

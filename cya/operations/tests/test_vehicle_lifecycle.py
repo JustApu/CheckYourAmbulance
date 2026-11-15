@@ -82,6 +82,29 @@ class LifecycleCommandTests(ObligationCase):
         with self.assertRaises(CommandDenied):
             set_vehicle_active(vehicle_id=str(old.pk), active=True, **self.context(self.crew))
 
+    def test_the_baseline_command_counts_first_then_writes_once(self):
+        import io
+
+        from django.core.management import call_command
+
+        Vehicle.objects.filter(pk=self.vehicles[1].pk).update(active=False)
+        out = io.StringIO()
+        call_command(
+            "record_vehicle_activity_baseline",
+            organization=str(self.org.pk),
+            dry_run=True,
+            stdout=out,
+        )
+        self.assertIn("Would record baselines: 2 vehicles (1 inactive)", out.getvalue())
+        self.assertFalse(VehicleActivityEvent.objects.exists())
+        out = io.StringIO()
+        call_command("record_vehicle_activity_baseline", organization=str(self.org.pk), stdout=out)
+        self.assertIn("Baselines recorded: 2 vehicles (1 inactive)", out.getvalue())
+        out = io.StringIO()
+        call_command("record_vehicle_activity_baseline", organization=str(self.org.pk), stdout=out)
+        self.assertIn("replayed the earlier run", out.getvalue())
+        self.assertEqual(VehicleActivityEvent.objects.count(), 2)
+
     def test_the_database_refuses_activity_rows_that_skip_the_rules(self):
         from django.db import IntegrityError, OperationalError, transaction
 
