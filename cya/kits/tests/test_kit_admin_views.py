@@ -211,12 +211,21 @@ class EffectiveAtTests(SimpleTestCase):
         with timezone.override("America/New_York"):
             self.assertIsNone(_effective_at({"when": "now"}))
             aware = _effective_at({"when": "at", "at": "2026-07-01T06:00"})
+            self.assertEqual(_effective_at({"when": "at", "at": "2026-07-01T06:00:30"}).second, 30)
             self.assertEqual(aware.utcoffset().total_seconds(), -4 * 3600)
             with self.assertRaises(KitListError):  # skipped by the spring-forward change
                 _effective_at({"when": "at", "at": "2026-03-08T02:30"})
             repeated = _effective_at({"when": "at", "at": "2026-11-01T01:30"})
             self.assertEqual(repeated.fold, 0)  # the first of the repeated hour
-            for bad in ("", "tomorrow", "2026-07-01T06:00+02:00"):
+            for bad in (
+                "",
+                "tomorrow",
+                "2026-07-01T06:00+02:00",
+                "2026-07-01",  # a date alone would parse as midnight (PR #172 review)
+                "2026-07-01 06:00",
+                "2026-07-01T06",
+                "2026-07-01T06:00:00.5",
+            ):
                 with self.subTest(at=bad), self.assertRaises(KitListError):
                     _effective_at({"when": "at", "at": bad})
             # Only an explicit "now" publishes now (PR #172 review).
