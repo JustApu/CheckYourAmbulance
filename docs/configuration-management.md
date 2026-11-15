@@ -110,7 +110,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 |---|---|
 | The vehicle, with the VIN, name and number its creator gives (SPEC 4.0.0), inactive, and its first activity event (inactive) | — |
 | One revision-1 row per position, with a new row id and the **same `stable_slot_id`** as the source position (so copied placements, kit-list lines and bindings resolve on the copy), effective when recorded | Each position's label, order and sealable designation in effect now; retired positions are left out |
-| One draft kit list | The lines in force, mapped to the copy's compartment rows |
+| One draft kit list, empty if the list in force is empty; none if no list is in force | The lines in force, mapped to the copy's compartment rows |
 | One draft override per bound template, over the same template version | Each override in force (none when there is none) |
 | One binding per bound template and slot, effective when recorded | The source's bindings in force |
 | Item locks for the bound templates' items | — |
