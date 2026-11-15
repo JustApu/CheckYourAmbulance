@@ -210,8 +210,9 @@ class Issue156LockBenchmark(KitCase):
             while not self.monitor_stop.wait(0.02):
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        "SELECT wait_age_secs, waiting_pid, waiting_query, locked_table, "
-                        "blocking_pid, blocking_query FROM sys.innodb_lock_waits"
+                        "SELECT waiting_lock_id, blocking_lock_id, waiting_pid, "
+                        "waiting_query, locked_table, blocking_pid, blocking_query "
+                        "FROM sys.innodb_lock_waits"
                     )
                     rows = cursor.fetchall()
                 self._record_innodb_wait_snapshot(rows)
@@ -225,25 +226,34 @@ class Issue156LockBenchmark(KitCase):
         now = time.monotonic()
         with self.lock_guard:
             seen = set()
-            for age, waiting_pid, _waiting_query, table_name, blocking_pid, _blocking_query in rows:
+            for (
+                waiting_lock_id,
+                blocking_lock_id,
+                waiting_pid,
+                _waiting_query,
+                table_name,
+                blocking_pid,
+                _blocking_query,
+            ) in rows:
                 waiting_pid, blocking_pid = int(waiting_pid), int(blocking_pid)
-                key = (waiting_pid, blocking_pid, table_name)
+                # Lock IDs distinguish successive waits by the same connections and table.
+                key = (waiting_lock_id, blocking_lock_id)
                 seen.add(key)
                 current = self.active_innodb_waits.get(key)
                 if current is None:
                     self.active_innodb_waits[key] = {
                         "mode": self.current_mode,
-                        "wait_s": float(age),
                         "first_seen": now,
+                        "last_seen": now,
                         "waiting_action": self.connection_actions.get(waiting_pid),
                         "blocking_action": self.connection_actions.get(blocking_pid),
                         "locked_table": table_name,
                     }
                 else:
-                    current["wait_s"] = max(current["wait_s"], float(age))
+                    current["last_seen"] = now
             for key in set(self.active_innodb_waits) - seen:
                 event = self.active_innodb_waits.pop(key)
-                event["observed_s"] = now - event.pop("first_seen")
+                event["observed_s"] = event.pop("last_seen") - event.pop("first_seen")
                 self.innodb_wait_events.append(event)
 
     def _record_lock(self, resource, original, *args, **kwargs):
@@ -493,12 +503,12 @@ class Issue156LockBenchmark(KitCase):
             "innodb_lock_wait_event_count": len(self.innodb_wait_events),
             "innodb_lock_waits_by_mode": {
                 mode: self._summary(
-                    [row["wait_s"] for row in self.innodb_wait_events if row["mode"] == mode]
+                    [row["observed_s"] for row in self.innodb_wait_events if row["mode"] == mode]
                 )
                 for mode in ("alone", "contended")
             },
             "longest_innodb_lock_wait": max(
-                self.innodb_wait_events, key=lambda row: row["wait_s"], default=None
+                self.innodb_wait_events, key=lambda row: row["observed_s"], default=None
             ),
             "innodb_monitor_error": str(self.monitor_error[0]) if self.monitor_error else None,
         }
