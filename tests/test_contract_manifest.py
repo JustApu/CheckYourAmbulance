@@ -35,9 +35,22 @@ class ContractManifestTests(unittest.TestCase):
                 )
                 self.assertFalse(found[kind] & ((APPEND_ONLY | VERSIONED | MUTABLE) - manifest))
 
-    def test_implicit_child_and_lock_tables_are_classified(self):
-        # Explicitly documented outside single-table catalogue rows.
-        self.assertIn("vehicle_override_item", VERSIONED)
+    def test_recent_product_tables_have_catalogue_rows(self):
+        text = CONTRACT.read_text(encoding="utf-8")
+        catalogued = {
+            name
+            for match in CATALOGUE_ROW.finditer(text)
+            for name in match.groups()[:2]
+            if name
+        }
+        # Keep this targeted: a full Django-model crosswalk needs explicit
+        # exemptions for grouped and implementation-only tables.
+        for name in ("odometer_threshold", "vehicle_override_item", "requirement_binding"):
+            with self.subTest(table=name):
+                self.assertIn(name, catalogued)
+
+    def test_implicit_lock_tables_are_classified(self):
+        # Lock tables are explicitly documented outside single-table catalogue rows.
         for name in ("item_lock", "kit_lock", "vehicle_lock", "deficiency_lock"):
             self.assertIn(name, MUTABLE)
 
