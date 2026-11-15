@@ -125,9 +125,9 @@ class Evidence(models.Model):
 class RequirementBinding(Evidence):
     """Which checklist template and schedule slot govern a vehicle's routine inspections.
 
-    The contract names no table for this: the checklist definitions carry no schedule and the
-    schedule rules are not tied to vehicles, so something must say that "Ambulance 1" follows
-    slots first-due-0600 and first-due-1800 over the ambulance template. One revision per
+    The checklist definitions carry no schedule and the schedule rules are not tied to vehicles,
+    so this records that "Ambulance 1" follows slots first-due-0600 and first-due-1800 over the
+    ambulance template. One revision per
     (vehicle, template, slot); the latest revision effective at an instant decides whether it
     is bound then. Appended by administrators; nothing is updated or deleted.
     """
