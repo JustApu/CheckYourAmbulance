@@ -1,9 +1,10 @@
 # Obligation generation, the selection stream and publication reconciliation
 
 [issue #59](https://github.com/JustApu/CheckYourAmbulance-archive/issues/59) implements [SPEC §5.1, §5.7–§5.9 and §6.4 (ODO-2)](../SPEC.md#5-inspection-obligations-windows-and-scheduling),
-TIME-1 and TIME-3, and the `requirement_version`, `obligation`, `obligation_selection` and
-`odometer_obligation` rows of [contracts §2](data-model-contracts.md#2-table-catalogue). It also adds one table
-the contracts do not name, `requirement_binding` ([why](#requirement_binding-a-table-the-contract-does-not-name)).
+TIME-1 and TIME-3, and the `requirement_version`, `obligation`, `obligation_selection`,
+`requirement_binding` and `odometer_obligation` rows of [contracts §2](data-model-contracts.md#2-table-catalogue).
+Issue #168 added the explicit `requirement_binding` catalogue row for the existing implementation
+([design rationale](#requirement_binding)).
 SPEC and the contracts win if they disagree with this page.
 
 It does **not** record checks, link them to obligations, derive obligation state (Due, Overdue, Satisfied,
@@ -29,15 +30,15 @@ triggers refuse changes even for the schema owner.
 
 ## Data
 
-### `requirement_binding`: a table the contract does not name
+### `requirement_binding`
 
 A checklist definition carries no schedule, and a schedule slot is not tied to a vehicle, yet "Ambulance 1 is
 inspected at 06:00 and 18:00 against the ambulance checklist" has to be stored somewhere. A binding states that a
 vehicle follows one checklist **template** and one schedule **slot**, from an effective instant. A vehicle may have
 several (two slots for Ambulance 1; weekday and weekend slots for Ambulance 2). Revisions per
 (vehicle, template, slot) are consecutive, strictly later in effective time, never retroactive, and either `BIND`
-or `UNBIND`; the latest revision in force at an instant decides. Only an active administrator appends them
-(`bind_requirement`).
+or `UNBIND`; the latest revision in force at an instant decides. Authorized commands append each
+binding with the initiating human actor attributed; they are never produced by a worker.
 
 This is a reversible implementation choice made to satisfy the issue, not a product decision. **Item-specific
 schedules** (SPEC §5.2, "item-specific schedules override fleet defaults where defined") are not modelled: nothing
@@ -252,7 +253,7 @@ continue to follow routine selections only.
 
 Reversible choices; none changes SPEC behavior.
 
-1. **`requirement_binding`** is new (above), and `requirement_version` also pins the binding revision.
+1. **`requirement_binding`** is the implementation table described above and is now explicitly catalogued by issue #168; `requirement_version` also pins the binding revision.
 2. **Job key per unit and plan.** The contract keys generation on vehicle/item/D plus requirement revision and
    reconciliation on publication plus prior selection. One command per (vehicle, D) with a plan digest covers both
    with fewer receipts and, because the digest includes every predecessor and requirement, is replayed exactly when

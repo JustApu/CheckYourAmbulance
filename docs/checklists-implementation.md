@@ -64,7 +64,8 @@ Reversible choices made so the contract rows can coexist; none changes SPEC beha
 3. **Slots across vehicles.** A central template cannot reference per-vehicle rows directly. A definition references one `compartment` / `vehicle_system` row; the slot is its `stable_slot_id`, and a vehicle's own placement is that vehicle's latest effective row with the same `stable_slot_id`. Vehicles share slot ids for the same physical position. The seed references the first ambulance's rows.
 4. **Deviation revisions.** One chain per vehicle and item (a unique `prior_revision_id` stops forks; a trigger checks the chain). `valid_from` may be omitted to start at the recording instant; an active deviation keeps its start. Termination is a revision ending at the termination instant. A crew member's early-termination *request* (SPEC §4.5) is not built; it belongs with the request workflow.
 5. **`NOT_APPLICABLE`.** Not accepted in `allowed_outcomes` until the administrator-defined `na_rule` exists (SPEC §7.1). `na_rule_id` and `asset_id` are omitted until their tables exist (`equipment_asset` is R3).
-6. **Vehicle to template.** The contract has no vehicle-to-template link; callers pass the template id.
+6. **Vehicle to template.** The checklist-specific rows have no vehicle-to-template link; the
+   `requirement_binding` row and rationale are recorded under obligations (issue #168).
 
 ## Not in this issue
 

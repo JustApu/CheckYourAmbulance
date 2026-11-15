@@ -125,11 +125,12 @@ class Evidence(models.Model):
 class RequirementBinding(Evidence):
     """Which checklist template and schedule slot govern a vehicle's routine inspections.
 
-    The contract names no table for this: the checklist definitions carry no schedule and the
-    schedule rules are not tied to vehicles, so something must say that "Ambulance 1" follows
-    slots first-due-0600 and first-due-1800 over the ambulance template. One revision per
+    The checklist definitions carry no schedule and the schedule rules are not tied to vehicles,
+    so this records that "Ambulance 1" follows slots first-due-0600 and first-due-1800 over the
+    ambulance template. One revision per
     (vehicle, template, slot); the latest revision effective at an instant decides whether it
-    is bound then. Appended by administrators; nothing is updated or deleted.
+    is bound then. Appended by an authorized command and attributed to its human actor; nothing
+    is updated or deleted.
     """
 
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
@@ -160,7 +161,7 @@ class RequirementBinding(Evidence):
             ),
             models.CheckConstraint(condition=non_blank("slot"), name="binding_slot"),
             actor_kind("binding_actor_kind"),
-            # Bindings are administrator decisions, never produced by a worker.
+            # Bindings require a human actor and are never produced by a worker.
             models.CheckConstraint(
                 condition=models.Q(actor_user__isnull=False), name="binding_human_only"
             ),

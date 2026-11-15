@@ -107,7 +107,7 @@ window opened; or skip a threshold revision number.
 
 ## Where the schema completes or differs from the contract
 
-- `odometer_threshold` is new (the contract has no threshold table; §3.3 and ODO-3 require one).
+- `odometer_threshold` is explicitly catalogued in contracts §2 (added by [issue #168](https://github.com/JustApu/CheckYourAmbulance/issues/168)); §3.3 and ODO-3 require it.
 - `engine_hours_entry.unit` is always `h`; `odometer_entry.unit` is `mi` or `km`.
 - Correction entries keep their root, name their immediate predecessor, and retain an
   independent `prior_entry` baseline for anomaly validation. `reading_event` has nullable

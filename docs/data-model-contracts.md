@@ -99,7 +99,8 @@ No deletion frees an identity for a different person (AUTH-2).
 | `checklist_publication` | A | checklist_version_id ref unique, effective_at, override_version_id? ref; published versions and children frozen |
 | `item` | M | stable logical item/slot identity, label, active; used across versions |
 | `checklist_item_def` | V | checklist_version_id ref, item_id ref, compartment_id? ref, system_id? ref, kit_id? ref, asset_id? ref, display_order, instructions, kind, expected_quantity?, unit?, allowed_outcomes, na_rule_id? ref; unique version/item; bulk_eligible reserved false |
-| `vehicle_override_version` | V | vehicle_id ref, template_version_id ref, revision, publication ref?; overlay entries in `vehicle_override_item` name item, ADD/REMOVE/REPLACE and replacement definition ref |
+| `vehicle_override_version` | V | vehicle_id ref, template_version_id ref, revision, publication ref? |
+| `vehicle_override_item` | V | override_version_id ref, item_id ref, action (`ADD`, `REMOVE`, `REPLACE`), definition_id? ref; unique override_version/item; `REMOVE` iff definition is null, while `ADD`/`REPLACE` require one; frozen with its published override version |
 | `schedule_rule` | V | revision, zone, closed recurrence type and typed parameters, early_seconds, grace_seconds, effective_at; nonnegative windows |
 | `conditional_rule` | V | revision, type (`CARRY_OVER_FROM_PRIOR_SHIFT`, `SEAL_SUBSTITUTION`), typed inputs, effective_at |
 | `na_rule` | V | revision, administrator-defined applicability parameters, effective_at; closed validated conditions |
@@ -164,7 +165,7 @@ selected publication/slot is a no-op. This preserves §5.7 and TIME-1 together.
 
 ### Obligations, sessions and readings
 
-[issue #59](https://github.com/JustApu/CheckYourAmbulance-archive/issues/59) implemented `requirement_version`, `obligation`, `obligation_selection` and `odometer_obligation`; [where the physical schema completes or differs from the rows below](obligation-generation.md#where-the-schema-completes-or-differs-from-the-contract-text) is recorded there, including the `requirement_binding` table that the contract does not name.
+[issue #59](https://github.com/JustApu/CheckYourAmbulance-archive/issues/59) implemented `requirement_version`, `obligation`, `obligation_selection` and `odometer_obligation`; [where the physical schema completes or differs from the rows below](obligation-generation.md#where-the-schema-completes-or-differs-from-the-contract-text) is recorded there. The `requirement_binding` table row was added by [issue #168](https://github.com/JustApu/CheckYourAmbulance/issues/168).
 
 [issue #78](https://github.com/JustApu/CheckYourAmbulance-archive/issues/78) Part A implements the session header, participant and event tables
 and a rebuildable projection; [the implemented command and storage boundary](inspection-sessions.md)
@@ -176,6 +177,7 @@ remain in Part B after [issue #73](https://github.com/JustApu/CheckYourAmbulance
 | `obligation` | A | vehicle_id ref, item_id ref, requirement_version_id ref, due_at, early_at, grace_at, late_seconds (the w_late captured at creation, never changed; SCH-2/SCH-3, [issue #80](https://github.com/JustApu/CheckYourAmbulance/issues/80)), late_limit_at (stored generated grace_at + late_seconds, indexed for late linking), late_seconds ≤ 604800 (the setting's 0–168 h range), routine flag, explanation? (required for non-routine ADH-1 orders); kit_instance_id? ref (SPEC 1.8.0, OQ-53: set for an item inside a kit, null otherwise; implemented by [issue #92](https://github.com/JustApu/CheckYourAmbulance-archive/issues/92)); unique `(vehicle_id,item_id,kit_instance_id,due_at,requirement_version_id)` with a missing kit instance compared as a value, because MariaDB `UNIQUE` treats NULLs as distinct; early_at ≤ due_at ≤ grace_at |
 | `obligation_selection` | A | vehicle_id ref, item_id ref, due_at, selected_obligation_id? ref, previous_selection_id? ref, supersession_determination_id? ref, type (`SELECT`, `REPLACE`, `RETIRE`); sequence and keys as above; latest selection determines routine effectiveness; explicit non-routine orders have no selection stream |
 | `obligation_determination` | A | obligation_id ref, type (waive/reinstate/supervisor-complete/invalidate/supersede), rule_id? ref, prior_determination_id? ref, explanation?, immutable evaluated-input snapshot |
+| `requirement_binding` | A | vehicle_id ref, template_id ref, slot, revision, action (`BIND`, `UNBIND`), effective_at; unique vehicle/template/slot/revision; consecutive append-only revisions with strictly increasing effective instants; human actor attributed by an authorized command; latest revision in force decides whether the template is bound (SPEC §5; CFG-2, CFG-4) |
 | `determination_check` | A | organization_id, receipt/time and human actor attribution; determination_id and check_id refs; unique pair; UTI completion references its supporting Unable check(s) |
 | `inspection_session` | M | vehicle_id ref, pinned checklist_version_id ref, opened_at; immutable header protected by trigger; cached state/activity only in separate `session_projection` |
 | `session_participant` | A | session_id ref, user_id ref; unique pair |
@@ -187,6 +189,7 @@ remain in Part B after [issue #73](https://github.com/JustApu/CheckYourAmbulance
 | `reading_event` | A | reading type and exactly one odometer/engine_hours FK, correction_entry FK? of same kind, type, explanation?; author/chain rules match checks |
 | `odometer_obligation` | A | vehicle_id ref, scheduled inspection key, due/early/grace instants, late_seconds and generated late_limit_at as for `obligation`; unique vehicle/scheduled inspection key |
 | `odometer_obligation_link` | A | obligation_id ref, entry_id ref; at most one *effective* link per obligation (an invalidated chain's link remains historical); same vehicle, eligible time; invalidation voids derived satisfaction |
+| `odometer_threshold` | A | operation_id, unit (`mi` or `km`), revision, positive `max_increase` below the reading limit; unique organization/unit/revision and organization/operation; consecutive append-only revisions; latest revision per unit applies, with the configured default when none exists (ODO-3) |
 
 State is always derived. Determination input references include all roster
 corrections considered, the scheduled snapshot and fetched age, supporting
