@@ -511,12 +511,12 @@ async function testAdministratorRoleChange(viewport) {
     assert.equal(await target.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips user selection`);
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Tab"); // Role
-    const role = page.getByLabel("Role");
+    const role = page.getByLabel("Role", { exact: true });
     assert.equal(await role.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips role selection`);
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Tab"); // Action
-    const action = page.getByLabel("Action");
+    const action = page.getByLabel("Action", { exact: true });
     assert.equal(await action.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips action selection`);
     await page.keyboard.press("ArrowDown");
     assert.equal(await target.inputValue(), "user-1", `${viewport.name}: keyboard could not select the role target`);
@@ -593,13 +593,13 @@ async function testSupervisorStatusDecisions(viewport) {
     assert.equal(await page.getByRole("heading", { name: "Pending requests" }).count(), 1);
     assert.equal(await page.getByRole("heading", { name: "Limited Service requested by Sam Example" }).count(), 1);
     assert.equal(await page.getByRole("heading", { name: "Out of Service requested by Sam Example" }).count(), 1);
-    const restrictionBox = await page.getByLabel("Restrictions").boundingBox();
+    const restrictionBox = await page.getByLabel("Restrictions", { exact: true }).boundingBox();
     assert.ok(restrictionBox && restrictionBox.height >= 48, `${viewport.name}: required restrictions field is shorter than 48 CSS pixels`);
     await page.keyboard.press("Tab");
-    assert.equal(await page.getByLabel("Restrictions").evaluate((element) => element === document.activeElement), true, `${viewport.name}: restricted-service field is not first in keyboard order`);
+    assert.equal(await page.getByLabel("Restrictions", { exact: true }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: restricted-service field is not first in keyboard order`);
     await page.keyboard.type("Synthetic restricted-service limit");
     await page.keyboard.press("Tab");
-    assert.equal(await page.getByLabel("Explanation").first().evaluate((element) => element === document.activeElement), true, `${viewport.name}: approval explanation is not keyboard reachable`);
+    assert.equal(await page.getByLabel("Explanation", { exact: true }).first().evaluate((element) => element === document.activeElement), true, `${viewport.name}: approval explanation is not keyboard reachable`);
     await page.keyboard.type("Synthetic supervisor approval");
     await page.keyboard.press("Tab");
     assert.equal(await page.getByRole("button", { name: "Approve" }).first().evaluate((element) => element === document.activeElement), true, `${viewport.name}: Approve is not keyboard reachable`);
@@ -611,10 +611,10 @@ async function testSupervisorStatusDecisions(viewport) {
     assert.equal(decisions[0].restrictions, "Synthetic restricted-service limit");
     await page.getByRole("heading", { name: "Limited Service requested by Sam Example" }).waitFor({ state: "detached" });
     await page.keyboard.press("Tab");
-    assert.equal(await page.getByLabel("Explanation").evaluate((element) => element === document.activeElement), true, `${viewport.name}: refreshed request explanation is not first in keyboard order`);
+    assert.equal(await page.getByLabel("Explanation", { exact: true }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: refreshed request explanation is not first in keyboard order`);
     await page.keyboard.press("Tab"); // Approve
     await page.keyboard.press("Tab"); // Deny reason
-    assert.equal(await page.getByLabel("Reason for denying").evaluate((element) => element === document.activeElement), true, `${viewport.name}: denial reason is not keyboard reachable`);
+    assert.equal(await page.getByLabel("Reason for denying", { exact: true }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: denial reason is not keyboard reachable`);
     await page.keyboard.type("Synthetic denial reason");
     await page.keyboard.press("Tab");
     assert.equal(await page.getByRole("button", { name: "Deny" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: Deny is not keyboard reachable`);
