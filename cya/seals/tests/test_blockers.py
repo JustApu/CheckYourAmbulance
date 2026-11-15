@@ -1,0 +1,145 @@
+"""Seal substitution respects the physical scope of deficiencies and suspensions."""
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from django.test import SimpleTestCase
+
+from cya.deficiencies.effects import NO_KIT_KEY
+from cya.seals.blockers import seal_blockers
+from cya.seals.locking import SealLockError
+
+
+class SealBlockerTests(SimpleTestCase):
+    def test_open_kit_deficiency_blocks_even_when_kit_has_no_contents(self):
+        deficiency = SimpleNamespace(pk="d", kit_id="kit-a", item_id=None)
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.service.correction_scope", return_value=[]),
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            self.assertEqual(
+                seal_blockers(
+                    "org",
+                    {"d": SimpleNamespace(status="OPEN")},
+                    set(),
+                    at="instant",
+                    covered_kit_ids={"kit-a"},
+                ),
+                (True, False),
+            )
+
+    def test_open_deficiency_on_unbound_kit_content_still_blocks(self):
+        deficiency = SimpleNamespace(pk="d", kit_id="kit-a", item_id="item")
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.service.correction_scope", return_value=[]),
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            self.assertEqual(
+                seal_blockers(
+                    "org",
+                    {"d": SimpleNamespace(status="OPEN")},
+                    {("item", "kit-a")},
+                    at="instant",
+                ),
+                (True, False),
+            )
+
+    def test_only_the_covered_physical_kit_blocks_substitution(self):
+        deficiency = SimpleNamespace(pk="d")
+        projections = {"d": SimpleNamespace(status="OPEN")}
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.service.correction_scope") as scope,
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            scope.return_value = [("item", "definition", "kit-a")]
+            self.assertEqual(
+                seal_blockers("org", projections, {("item", "kit-b")}, at="instant"),
+                (False, False),
+            )
+            self.assertEqual(
+                seal_blockers("org", projections, {("item", "kit-a")}, at="instant"),
+                (True, False),
+            )
+
+    def test_in_force_suspension_blocks_its_loose_item(self):
+        deficiency = SimpleNamespace(pk="d")
+        projections = {"d": SimpleNamespace(status="OPEN")}
+        suspension = SimpleNamespace(
+            item_id="item", instance_key=NO_KIT_KEY, kit_requirement_id=None
+        )
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.service.correction_scope", return_value=[]),
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[suspension]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            self.assertEqual(
+                seal_blockers("org", projections, {("item", None)}, at="instant"), (False, True)
+            )
+
+    def test_missing_locked_deficiency_fails_closed(self):
+        with patch("cya.seals.blockers.Deficiency.objects") as manager:
+            manager.filter.return_value.order_by.return_value = []
+            with self.assertRaises(SealLockError):
+                seal_blockers("org", {"d": SimpleNamespace(status="OPEN")}, set(), at="instant")
+
+    def test_presence_deficiency_and_suspension_are_specific_to_the_line(self):
+        deficiency = SimpleNamespace(pk="d")
+        projections = {"d": SimpleNamespace(status="OPEN")}
+        suspension = SimpleNamespace(item_id="presence", kit_requirement_id="line-a")
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.DeficiencyAffectedItem.objects") as affected,
+            patch(
+                "cya.seals.blockers.line_unit_keys",
+                side_effect=lambda lines: {line: line for line in lines},
+            ),
+            patch("cya.seals.blockers.service.correction_scope", return_value=[]),
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[suspension]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            affected.filter.return_value.values_list.return_value = [("presence", "line-a")]
+            self.assertEqual(
+                seal_blockers(
+                    "org", projections, set(), at="instant", presence_lines={("presence", "line-a")}
+                ),
+                (True, True),
+            )
+            self.assertEqual(
+                seal_blockers(
+                    "org", projections, set(), at="instant", presence_lines={("presence", "line-b")}
+                ),
+                (False, False),
+            )
+
+    def test_presence_deficiency_and_suspension_follow_the_slot_across_list_revisions(self):
+        deficiency = SimpleNamespace(pk="d")
+        suspension = SimpleNamespace(item_id="presence", kit_requirement_id="old-line")
+        with (
+            patch("cya.seals.blockers.Deficiency.objects") as manager,
+            patch("cya.seals.blockers.DeficiencyAffectedItem.objects") as affected,
+            patch(
+                "cya.seals.blockers.line_unit_keys",
+                side_effect=lambda lines: {line: "same-slot" for line in lines},
+            ),
+            patch("cya.seals.blockers.service.correction_scope", return_value=[]),
+            patch("cya.seals.blockers.service.suspensions_in_force", return_value=[suspension]),
+        ):
+            manager.filter.return_value.order_by.return_value = [deficiency]
+            affected.filter.return_value.values_list.return_value = [("presence", "old-line")]
+            self.assertEqual(
+                seal_blockers(
+                    "org",
+                    {"d": SimpleNamespace(status="OPEN")},
+                    set(),
+                    at="instant",
+                    presence_lines={("presence", "new-line")},
+                ),
+                (True, True),
+            )

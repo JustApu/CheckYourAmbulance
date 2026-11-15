@@ -56,6 +56,17 @@ def refresh_for_receipt(receipt):
             "previous_selection__selected_obligation_id",
         ):
             ids.update(i for i in (current, previous) if i)
+    if kind in ("SEAL_RESEAL", "SEAL_SUBSTITUTE"):
+        # These links are distinct evidence, but their effects must reach the current
+        # projection in the same transaction as the receipt and historical evidence.
+        from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
+
+        for model in (SealInspectionObligation, SealSubstitutionObligation):
+            ids.update(
+                model.objects.filter(organization_id=org, command=receipt).values_list(
+                    "obligation_id", flat=True
+                )
+            )
     # Vehicle status is read-time evidence. Keeping it out of projection facts means a status
     # command never refreshes and locks every future routine obligation on the vehicle.
     if kind in CHECK_COMMANDS or kind.startswith("DEFICIENCY_"):

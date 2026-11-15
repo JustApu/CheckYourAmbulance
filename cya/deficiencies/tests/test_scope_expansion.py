@@ -582,12 +582,13 @@ class MigrationTests(TransactionTestCase):
         names = ("cya_deficiency_event_bi", "cya_verification_scope_row_bi")
         before = [self.trigger(n) for n in names]
         self.assertIn("SCOPE_EXPANDED", before[0])
+        rollback_boundary = ("cya_deficiencies", "0016_scope_expansion")
         target = [
-            ("cya_deficiencies", "0015_verification_reopen")
-            if leaf[0] == "cya_deficiencies"
-            else leaf
+            leaf
             for leaf in leaves
+            if rollback_boundary not in executor.loader.graph.forwards_plan(leaf)
         ]
+        target.append(("cya_deficiencies", "0015_verification_reopen"))
         try:
             executor.migrate(target)
             self.assertNotIn("SCOPE_EXPANDED", self.trigger(names[0]))

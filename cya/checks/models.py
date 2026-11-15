@@ -56,7 +56,7 @@ class CheckRecord(Evidence):
         db_constraint=False,
     )
     checklist_version = models.ForeignKey(
-        ChecklistVersion, on_delete=models.PROTECT, related_name="+"
+        ChecklistVersion, null=True, on_delete=models.PROTECT, related_name="+"
     )
     # The vehicle's own kit that was present, frozen at check time; null when none or ambiguous.
     kit = models.ForeignKey(KitInstance, null=True, on_delete=models.PROTECT, related_name="+")
@@ -100,6 +100,16 @@ class CheckRecord(Evidence):
                 fields=["organization", "operation_id"], name="check_org_operation"
             ),
             models.CheckConstraint(condition=models.Q(outcome__in=OUTCOMES), name="check_outcome"),
+            models.CheckConstraint(
+                condition=models.Q(checklist_version__isnull=False)
+                | models.Q(
+                    checklist_version__isnull=True,
+                    kit_requirement__isnull=False,
+                    session__isnull=True,
+                    purpose="ROUTINE",
+                ),
+                name="check_standalone_presence_shape",
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(

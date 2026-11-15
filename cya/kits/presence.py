@@ -6,6 +6,8 @@ commands and the kit-library importer refuse it), and its label follows the defi
 """
 
 import uuid
+from datetime import timedelta
+from types import SimpleNamespace
 
 from cya.accounts.fields import new_id
 from cya.checklists.models import Item
@@ -132,3 +134,48 @@ def presence_resolved_item(organization_id, resolved, kit_requirement_id, item_i
         deviation_id=None,
         kits=(),
     )
+
+
+def standalone_presence_item(organization_id, vehicle_id, kit_requirement_id, item_id, as_of):
+    """Resolve a current line only if no bound checklist inspects its definition."""
+    from cya.checklists.overlay import resolve_checklist
+    from cya.kits.kit_lists import kit_list_effective_at
+    from cya.kits.models import VehicleKitRequirement
+    from cya.obligations.requirements import bound_template_ids
+
+    line = (
+        VehicleKitRequirement.objects.filter(
+            organization_id=organization_id, pk=kit_requirement_id, version__vehicle_id=vehicle_id
+        )
+        .select_related("definition")
+        .first()
+    )
+    if line is None or str(line.definition.presence_item_id) != str(item_id):
+        return None
+    current = kit_list_effective_at(
+        organization_id, vehicle_id, as_of, as_of + timedelta(microseconds=1)
+    )
+    if current is None or str(current.pk) != str(line.version_id):
+        return None
+    templates = bound_template_ids(organization_id, vehicle_id, as_of)
+    if len(templates) > 2000:
+        raise ValueError("too many bound checklists to resolve kit presence")
+    for template_id in templates:
+        resolved = resolve_checklist(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            template_id=template_id,
+            as_of=as_of,
+            recorded_before=as_of + timedelta(microseconds=1),
+        )
+        if any(
+            placement.definition_id == str(line.definition_id) for placement in resolved.placements
+        ):
+            return None
+    # Reuse the same line validation and quantity construction as the checklist-linked path;
+    # the synthetic placement is not persisted and is allowed only after the bound-template check.
+    resolved = SimpleNamespace(
+        vehicle_id=vehicle_id,
+        placements=(SimpleNamespace(definition_id=str(line.definition_id)),),
+    )
+    return presence_resolved_item(organization_id, resolved, kit_requirement_id, item_id, as_of)

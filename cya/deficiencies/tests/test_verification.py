@@ -57,9 +57,19 @@ class VerificationMigrationTests(TransactionTestCase):
             "cya_deficiencies": "0013_empty_scope_closure",
             "cya_checks": "0009_unable_check_chain_effects",
         }
+        rollback_boundaries = {
+            ("cya_deficiencies", "0014_verification_events"),
+            ("cya_checks", "0010_verification_checks"),
+        }
         target = [
-            (app, older.get(app, name)) if app in older else (app, name) for app, name in leaves
+            leaf
+            for leaf in leaves
+            if not any(
+                boundary in executor.loader.graph.forwards_plan(leaf)
+                for boundary in rollback_boundaries
+            )
         ]
+        target.extend((app, name) for app, name in older.items())
         try:
             executor.migrate(target)
             self.assertNotIn("VERIFICATION_CLOSED", self.trigger("cya_deficiency_event_bi"))

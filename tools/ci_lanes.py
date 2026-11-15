@@ -50,9 +50,11 @@ UI_TESTS = {
         "cya.inspections",
         "cya.attention",
         "cya.operations",
+        "cya.seals",
         "cya.tests.test_background_refresh",
     ),
     "operations": ("cya.operations", "cya.tests.test_background_refresh"),
+    "seals": ("cya.seals", "cya.inspections", "cya.attention", "cya.tests.test_background_refresh"),
     "shell": ("cya.tests.test_shell",),
 }
 
@@ -90,6 +92,7 @@ SCRIPT_HARNESSES = {
     "cya/inspections/templates/inspections/workflows.js": "cya/inspections/tests/workflow_script_harness.js",
     "cya/inspections/templates/inspections/vehicle.js": "cya/inspections/tests/vehicle_script_harness.js",
     "cya/operations/templates/operations/status.js": "cya/operations/tests/status_script_harness.js",
+    "cya/seals/templates/seals/vehicle.js": "cya/seals/tests/vehicle_script_harness.js",
 }
 
 # Shared shell behavior is executed in Chromium rather than a mock-DOM harness.

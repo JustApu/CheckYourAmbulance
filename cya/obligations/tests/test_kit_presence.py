@@ -6,6 +6,7 @@ from django.db import DatabaseError, transaction
 
 from cya.checklists.models import Compartment
 from cya.checks.commands import CheckError, correct_check, record_check
+from cya.checks.conflicts import CheckConflict
 from cya.checks.models import CheckObligationLink, CheckRecord
 from cya.kits.kit_lists import publish_vehicle_kit_list, save_vehicle_kit_list_draft
 from cya.kits.models import KitDefinition, VehicleKitRequirement
@@ -218,6 +219,30 @@ class PresenceCheckTests(PresenceCase):
         )
         row = CheckRecord.objects.get(pk=corrected.body["check_id"])
         self.assertEqual(str(row.kit_requirement_id), self.lines[str(self.cabinet.pk)])
+        (link,) = CheckObligationLink.objects.filter(check_record=row)
+        self.assertEqual(link.obligation.kit_key, self.unit(self.cabinet))
+
+    def test_conflict_warning_is_scoped_to_the_physical_kit_count(self):
+        self.check(self.cabinet, 2)
+        common = {
+            "vehicle_id": str(self.vehicle.pk),
+            "item_id": self.presence_item,
+            "checklist_version_id": self.checklist_version,
+            "purpose": "ROUTINE",
+        }
+        record_check(
+            **common,
+            kit_requirement_id=self.lines[str(self.drawer.pk)],
+            quantity=1,
+            **self.context(self.supervisor),
+        )
+        with self.assertRaises(CheckConflict):
+            record_check(
+                **common,
+                kit_requirement_id=self.lines[str(self.cabinet.pk)],
+                quantity=2,
+                **self.context(self.supervisor),
+            )
 
     def test_each_line_has_its_own_latest_check(self):
         """Review of the KDEF-12 keying: one line's check is never another line's latest."""

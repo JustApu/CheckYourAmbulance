@@ -669,10 +669,11 @@ class MigrationTests(SuspensionMixin, VerificationBase):
         return None if row is None else row[0]
 
     def target(self, leaves):
-        return [
-            ("cya_deficiencies", "0016_scope_expansion") if leaf[0] == "cya_deficiencies" else leaf
-            for leaf in leaves
-        ]
+        graph = MigrationExecutor(connection).loader.graph
+        rollback_boundary = ("cya_deficiencies", "0017_check_suspension")
+        target = [leaf for leaf in leaves if rollback_boundary not in graph.forwards_plan(leaf)]
+        target.append(("cya_deficiencies", "0016_scope_expansion"))
+        return target
 
     def test_reversal_restores_the_previous_trigger_and_forward_reinstalls_it(self):
         executor = MigrationExecutor(connection)

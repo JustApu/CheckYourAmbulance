@@ -20,6 +20,7 @@
 <p id="session-message" class="notice" role="status"></p>
 <form id="csrf-holder">{% csrf_token %}</form>
 <p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent deficiency report</a></p>
+{% if not verification %}<p><a class="button" href="{% url 'inspection-vehicle-seals' vehicle.pk %}">Sealed kits and cabinets</a></p>{% endif %}
 
 {% if verification %}
 <section class="notice"><p>Verification for <a href="{% url 'deficiencies-detail' verification.pk %}">{{ verification.summary }}</a>. Each outstanding row needs a Pass; a Fail returns the deficiency to In Progress. Unable to Inspect does not verify.</p></section>

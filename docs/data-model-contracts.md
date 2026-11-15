@@ -224,7 +224,7 @@ and auto-close compare under the same lock so a delayed job cannot erase work.
 
 | Table | Kind | Columns and keys beyond common identity |
 |---|---|---|
-| `check_record` | A | operation_id, vehicle_id ref, item_id ref, item_def_id ref, checklist_version_id ref, session_id? ref, kit_id? ref, asset_id? ref, outcome, quantity?, measurement?, explanation?, client_observed_at?, roster_snapshot_id? ref, root_check_id ref, predecessor_check_id? ref, basis_check_id? ref, acknowledges_check_id? ref, purpose, verification_for_deficiency_id? ref, bulk_group_id? (must be null in R1) Exactly one content source: item_def_id ref, or kit_definition_item_id ref (placed kit content, with kit_id required; issue #129), or kit_requirement_id ref (a kit presence check: the line it counted, no kit; links only to obligations pinning that line; KDEF-12). |
+| `check_record` | A | operation_id, vehicle_id ref, item_id ref, item_def_id? ref, checklist_version_id? ref, session_id? ref, kit_id? ref, asset_id? ref, outcome, quantity?, measurement?, explanation?, client_observed_at?, roster_snapshot_id? ref, root_check_id ref, predecessor_check_id? ref, basis_check_id? ref, acknowledges_check_id? ref, purpose, verification_for_deficiency_id? ref, bulk_group_id? (must be null in R1) Exactly one content source: item_def_id ref, or kit_definition_item_id ref (placed kit content, with kit_id required; issue #129), or kit_requirement_id ref (a kit presence check: the line it counted, no kit; links only to obligations pinning that line; KDEF-12). A null checklist version is limited to a standalone cabinet-inspection kit-presence count for an unbound kit type. |
 | `check_event` | A | root_check_id ref, selected_check_id ref, type (`CORRECTION`, `INVALIDATION`), replacement_check_id? ref, explanation?; correction replacement unique; invalidation unique per root |
 | `check_obligation_link` | A | check_id ref, obligation_id ref, ordinal, shared_rule_id? ref; unique check/obligation and check/ordinal |
 | `deficiency_category` | V | label, supply_related, revision, effective_at; category flag changes audited |
@@ -234,7 +234,7 @@ and auto-close compare under the same lock so a delayed job cannot erase work.
 | `deficiency_event` | A | deficiency_id ref, predecessor_event_id? ref, type, from_status?, to_status?, explanation?, assignee_id? ref, deadline?, proposed_deadline?, follow_up_at?, decision? (`APPROVED`, `DENIED`, `DIFFERENT_DATE`), request_event_id? ref (one decision per request), acknowledgement_until?, action_plan? (required with explanation for ESCALATION_ACKNOWLEDGED; [issue #151](https://github.com/JustApu/CheckYourAmbulance-archive/issues/151)), `suspensions_ended` (the `check_suspension` START ids a closing event ended, [issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13), or the one id an early `SUSPENSION_ENDED` ended, [issue #32](https://github.com/JustApu/CheckYourAmbulance/issues/32); empty on every other event), correction_ref?, previous_severity_version_id? ref, severity_version_id? ref (re-grade only), verification_check_id? ref (only `VERIFICATION_CLOSED` and `VERIFICATION_FAILED`, written by the verification check's own command, [issue #154](https://github.com/JustApu/CheckYourAmbulance-archive/issues/154); and `VERIFICATION_REOPENED`, naming the verification chain whose invalidation or non-Pass correction left the closing scope revision unsatisfied, [issue #155](https://github.com/JustApu/CheckYourAmbulance-archive/issues/155)); administrator close/reopen events require an explanation and have distinct event types ([issue #152](https://github.com/JustApu/CheckYourAmbulance-archive/issues/152)); `EMPTY_SCOPE_CLOSED` requires an explanation, its own receipt and Supervisor/Administrator actor ([issue #153](https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); the assignment events `ASSIGNED` (assignee only), `DEADLINE_SET` (deadline only) and `WORK_STARTED` (neither) are written by their own command types ([issue #146](https://github.com/JustApu/CheckYourAmbulance-archive/issues/146)), and `DEPENDENCY_ENTERED`, `DEPENDENCY_REVISED` (explanation and optional follow_up_at), `DEPENDENCY_ENDED` (neither) and `PROGRESS_NOTE` (the note in explanation) likewise ([issue #149](https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); unique deficiency/sequence and predecessor successor |
 | `deficiency_age_rule` | A | revision, age_thresholds_days (up to five ascending), long_running_age_days?, long_running_extensions?, operation_id; administrator-set age-highlighting revisions, newest recorded by an instant applies, no defaults (SPEC DEF-6, AUD-4) |
 | `deficiency_acknowledgement_rule` | A | revision, maximum_days (1–30 days, [issue #20](https://github.com/JustApu/CheckYourAmbulance/issues/20)), operation_id; administrator-set bound for acknowledgement periods; no default (SPEC DEF-7, [issue #151](https://github.com/JustApu/CheckYourAmbulance-archive/issues/151)) |
-| `deficiency_evidence` | A | deficiency_id ref, check_id? ref, kit_inspection_item_id? ref, note?; exactly one evidence source; evidence never removed on invalidation |
+| `deficiency_evidence` | A | deficiency_id ref, check_id? ref, seal_inspection_item_id? ref, seal_kit_count_id? ref, note?; exactly one evidence source; evidence never removed on invalidation |
 | `deficiency_link` | A | two deficiency FKs in canonical ID order, type (`ADD`, `REMOVE`), prior_link_event_id? ref; no self-link; no transferred responsibility |
 | `verification_scope_row` | A | deficiency_id, correction_event_id, item_id + definition_id refs, nullable kit_instance_id ref, non-null instance_key (physical kit UUID or all-zero UUID for no-kit), required_after, scope_revision; unique deficiency/scope_revision/item/instance_key; composite org-pair and definition/item FKs; correction-time kit/compartment scope or report-time vehicle scope; expansion appends, never shrinks past evidence Exactly one content source: definition_id ref, kit_definition_item_id ref, or kit_requirement_id ref (a kit presence line, KDEF-12; issue #129). |
 | `deficiency_scope_expansion` | A | deficiency_id, event_id (SCOPE_EXPANDED or VERIFICATION_ADDED), item_id + definition_id refs, nullable kit_instance_id ref, non-null instance_key; composite org-pair FKs; items a supervisor added, included in every later correction's scope ([issue #156](https://github.com/JustApu/CheckYourAmbulance-archive/issues/156), SPEC 1.22.0) Exactly one content source: definition_id ref, kit_definition_item_id ref, or kit_requirement_id ref (a kit presence line, KDEF-12; issue #129). |
@@ -295,29 +295,35 @@ COR-3/COR-4 correction chain is invalidated; evidence remains marked invalid.
 It neither restores the original Failed outcome nor implies a repair. This
 edge follows INV-7; other transitions follow approved §8.2.
 
-### Sealed kits
+### Sealed kits and cabinets
 
 | Table | Kind | Columns and keys beyond common identity |
 |---|---|---|
-| `kit_seal_event` | A | kit_id ref, operation_id? (present on primary client event only), predecessor_event_id? ref, type (`BREAK`, `RESEAL`, `AUDIT_REQUEST`, `AUDIT_FULFILLED`), seal_marking?, earliest_expiration?, reason?, inspection_id? ref, audit_request_id? ref; unique kit/sequence and org/operation_id |
-| `kit_inspection` | A | kit_id ref, checklist_version_id ref, break_event_id ref, fresh_entry_attestation, written_marking_attestation |
-| `kit_inspection_item` | A | inspection_id ref, item_def_id ref, entered_count, entered_expiration DATE; unique inspection/item; exact complete membership required |
-| `seal_substitution` | A | kit_id ref, reseal_event_id ref, operation_id, entered_marking, intact_attestation; unique org/operation_id |
-| `seal_substitution_obligation` | A | substitution_id ref, obligation_id ref, conditional_rule_id ref; unique pair; explicit evidence, never a fabricated check |
+| `seal_event` | A | vehicle and exactly one kit or compartment slot; sequence, prior event, type (`BREAK`, `RESEAL`, `AUDIT_REQUEST`, `AUDIT_FULFILLED`), marking, expiration or no-expiration flag, reason and audit request as applicable |
+| `seal_inspection` | A | reseal event, optional break and start receipt, fresh-entry and written-marking attestations |
+| `seal_inspection_item` | A | inspection, item, optional kit, content source, outcome, fresh count, expiration and measurement as applicable; unique physical item per inspection |
+| `seal_inspection_obligation` | A | inspected item and obligation, with shared-satisfaction evidence when applicable |
+| `seal_inspection_kit_count` | A | inspection, kit-list line, attributed fresh check and count; unique inspection/line |
+| `seal_inspection_kit_instance` | A | certified count, kit and assignment event |
+| `seal_inspection_kit_verification` | A | inspection, nested kit and its seal substitution |
+| `seal_substitution` | A | vehicle, reseal event, entered marking and intact attestation |
+| `seal_substitution_obligation` | A | substitution, obligation and item scope, with conditional/shared-satisfaction evidence when applicable |
 
-One precreated `kit_lock` serializes verify/break/reseal/audit commands with
-changes to deficiencies on listed kit items. It is acquired before item locks.
-Reseal validates a break since the previous reseal and every current listed
-item's fresh count/date. No missing, duplicate or unlisted entries; no prefilled
-certified values. Dates before station-local today are rejected; today is valid.
-Compute the minimum across all entries. Count mismatches create deficiencies
-atomically but permit sealing. A seal cannot substitute while any affected
-listed item has an open deficiency, audit is pending, seal is broken/expired,
-or the particular obligation is supervisor-suspended. A matching entered crew
-marking is required, but that marking is not the authenticated actor identity
-and is not unique. Audit fulfillment requires break + complete inspection +
-reseal and references the fulfilled request. Compare expected kit event tip:
-concurrent commands based on one tip yield one success and one conflict.
+Seal commands serialize on the vehicle and lock current scope, item and deficiency
+inputs. A full inspection covers each current physical item and every cabinet kit-list
+line. Quantity items require fresh counts and expiration-tracked items require dates;
+untracked contents do not. A cabinet line's ordinary presence check must be made by
+the inspecting actor after the inspection start and remain effective at reseal.
+For an unbound kit type this check has no checklist version and creates no routine
+obligation. A mismatch opens a deficiency atomically while allowing reseal. The
+seal expiration is the earliest tracked date, including verified nested kit seals;
+if none is tracked it is marked no expiration. Substitution requires an intact,
+matching, unexpired seal, no pending audit or blocking deficiency, and current
+certified configuration and assignments. Evidence names the satisfied obligations;
+it does not create fabricated item checks. An ordinary cabinet reseal may use a
+fresh verification of an intact nested kit seal, but a pending full-content audit
+requires direct inspection of every nested kit item; nested seal substitution
+cannot fulfill the audit. Event-tip conflicts fail without writing.
 
 ### Command, audit and delivery infrastructure
 
@@ -332,7 +338,7 @@ concurrent commands based on one tip yield one success and one conflict.
 | `notification_pref` | M | user_id ref, event/channel, enabled; unique user/event/channel; cannot override mandatory organization policy |
 | `notification_policy` | M | organization_id, event_type, channel, mandatory; unique organization/event/channel; administrator-set through an audited command; no default rows |
 | `notification_recipient_rule` | M | organization_id, event_type, recipient kind (`ASSIGNEE`, `REPORTER`, `REQUESTER`, `PARTICIPANTS`, `SUPERVISORS`, `ADMINISTRATORS`), enabled; unique organization/event/recipient; an administrator override of the documented default recipients, set through an audited command ([issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)) |
-| `item_lock`, `kit_lock`, `vehicle_lock`, `deficiency_lock` | M | organization_id and target FK unique; no business state; prepared at publication/entity creation |
+| `item_lock`, `vehicle_lock`, `deficiency_lock` | M | organization_id and target FK unique; no business state; prepared at publication/entity creation |
 | `session_projection`, `deficiency_projection` | M | session_id/deficiency_id ref unique, cached state/activity or status/assignee/deadline/severity_version_id, last applied event ref; disposable, rebuildable, never historical authority |
 | `obligation_projection` | M | obligation_id ref primary key, organization_id ref, vehicle_id denormalized UUID (no mutable-vehicle FK), due_at, routine, selected, effective evidence JSON, refreshed_at; disposable current-read acceleration, indexed by organization/vehicle/due; historical authority remains the event rows |
 
@@ -681,15 +687,16 @@ from §3.3 are denied rather than inferred from HTTP verbs.
 
 ### Seal commands and query results
 
-`POST /api/v1/kits/{id}/seal-verifications`, `/seal-breaks`, `/reseals`,
-`/audit-requests` take operation_id and expected_event_id. Verification adds
-`entered_marking`, `intact_attestation`; break adds `reason`; audit requests
-require Supervisor/Administrator. Reseal adds `new_marking`, both attestations,
-and `contents: [{item_def_id, count, expiration_date}]`. Success returns the
-created event/substitution, deficiency IDs, computed earliest expiration and
-fulfilled audit IDs. Stale kit tip gives 409 `KIT_CHANGED`; expired/open/audit/
-deficiency/suspension gates give 422 `SEAL_NOT_ELIGIBLE` with safe reason codes.
-No response claims that sealing resolved a deficiency.
+`POST /api/v1/seals/{action}` supports `break`, `audit`, `start`, `verify`, and
+`reseal`, with an operation ID, vehicle and exactly one kit or compartment slot.
+Commands compare the expected event tip; verification requires the entered marking
+and intact attestation. Reseal supplies fresh observations, attestations and, for a
+cabinet, inspection-start and line-check evidence. Audit requests require Supervisor
+or Administrator and an intact seal; an already open subject requires a full inspection
+before resealing. `GET /api/v1/vehicles/{vehicle}/seals` lists seal subjects, and
+`GET /api/v1/vehicles/{vehicle}/seals/{kit|slot}/{subject}` supplies the current
+inspection scope. Stale tips give 409; invalid requests give 422 and unavailable
+configuration fails closed. Seal commands never claim to resolve a deficiency.
 
 Query DTOs expose `obligation_state`, `item_attention`, `deficiency_status` and
 `operational_status` separately, with evidence IDs, server time and projection

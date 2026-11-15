@@ -10,6 +10,7 @@ EVENT_KINDS = frozenset(
         "odometer.corrected",
         "odometer.invalidated",
         "session.changed",
+        "seal.changed",
         "status.changed",
         "obligations.changed",
         "status.request",

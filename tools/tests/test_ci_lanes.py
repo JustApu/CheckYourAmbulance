@@ -36,6 +36,14 @@ def browser_smoke(*paths, **kwargs):
 
 
 class RoutingTests(unittest.TestCase):
+    def test_seal_page_changes_run_its_template_tests_and_script_harness(self):
+        template = ci_lanes.classify(["cya/seals/templates/seals/vehicle.html"])
+        self.assertEqual(template["django-mode"], "focused")
+        self.assertIn("cya.seals", template["django-labels"])
+        script = ci_lanes.classify(["cya/seals/templates/seals/vehicle.js"])
+        self.assertIn("cya.seals", script["django-labels"])
+        self.assertTrue(script["run-client-scripts"])
+
     def test_ui_only_runs_client_scripts_and_focused_template_tests(self):
         run, mode, labels, client = lanes(TEMPLATE, SCRIPT)
         self.assertEqual((run, mode, client), (True, "focused", True))
@@ -55,6 +63,7 @@ class RoutingTests(unittest.TestCase):
                     "cya.inspections",
                     "cya.attention",
                     "cya.operations",
+                    "cya.seals",
                     "cya.tests.test_background_refresh",
                 ),
                 False,

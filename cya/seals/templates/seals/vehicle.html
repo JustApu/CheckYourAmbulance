@@ -1,0 +1,20 @@
+{% extends "shell/base.html" %}
+{% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="{% url 'inspection-vehicle' vehicle.pk %}">&larr; {{ vehicle.display_name }}</a></p>
+<h1>Sealed kits and cabinets</h1>
+<p>Check the seal itself or break it to inspect its contents. A seal never closes an open deficiency.</p>
+<form id="seal-csrf">{% csrf_token %}</form>
+<p id="seal-message" class="notice" role="status" aria-live="polite"></p>
+<section aria-labelledby="seals-heading">
+  <h2 id="seals-heading">{{ vehicle.display_name }} seals</h2>
+  <div id="seal-subjects"></div>
+</section>
+<section id="seal-work" aria-labelledby="seal-work-heading" hidden>
+  <h2 id="seal-work-heading" tabindex="-1"></h2>
+  <div id="seal-form"></div>
+  <button type="button" id="seal-cancel" class="button">Cancel</button>
+</section>
+{{ config|json_script:"seal-config" }}
+{% endblock %}
+{% block scripts %}<script>{% include "seals/vehicle.js" %}</script>{% endblock %}

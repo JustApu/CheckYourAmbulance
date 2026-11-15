@@ -26,6 +26,7 @@ FIELDS = frozenset(
         "expected_quantity",
         "unit",
         "allowed_outcomes",
+        "expiration_tracked",
         "compartment_id",
         "system_id",
         "kit_id",
@@ -125,6 +126,9 @@ def validate_definition(organization_id, spec):
     if not isinstance(instructions, str) or len(instructions) > MAX_INSTRUCTIONS:
         raise ChecklistValidationError(f"instructions must be text of at most {MAX_INSTRUCTIONS}")
     quantity, unit = _quantity_and_unit(spec)
+    expiration_tracked = spec.get("expiration_tracked", False)
+    if type(expiration_tracked) is not bool:
+        raise ChecklistValidationError("expiration_tracked must be true or false")
     item_id = reference(spec, "item_id", Item, organization_id)
     if not Item.objects.get(pk=item_id).active:
         raise ChecklistValidationError(f"item {item_id} is inactive")
@@ -151,6 +155,7 @@ def validate_definition(organization_id, spec):
         "expected_quantity": quantity,
         "unit": unit,
         "allowed_outcomes": _outcomes(spec),
+        "expiration_tracked": expiration_tracked,
         "compartment_id": compartment,
         "system_id": system,
         "kit_id": kit,

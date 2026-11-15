@@ -874,8 +874,7 @@ effects or none, and the operation id makes the call idempotent. Verify with the
 - `deficiency_category` has `stable_category_id` (the id a client sends) beside the revision's
   own `id` (`category_version_id` on the header), as slots do. No command creates categories yet;
   administrator configuration of them, with the audit of flag changes, is separate work.
-- `deficiency_evidence.kit_inspection_item_id` waits for the sealed-kit tables; `note` exists but
-  nothing writes it yet. The "exactly one source" CHECK is widened with that column.
+- `deficiency_evidence` can name a seal inspection item or kit-count evidence as well as a check or note; the CHECK requires exactly one source. Seal-inspection discrepancies use this evidence without automatically closing the deficiency.
 - `deficiency_link` names its two keys `lower` and `upper`.
 - A target of one item may also carry the item's kit instance; a compartment target carries
   neither item nor kit (CHECK `deficiency_one_target`).

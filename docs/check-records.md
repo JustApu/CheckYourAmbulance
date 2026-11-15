@@ -389,7 +389,7 @@ several identical kits leaves the others unsatisfied. Obligations now carry the 
 ([issue #92](https://github.com/JustApu/CheckYourAmbulance-archive/issues/92), [obligations per kit instance](kit-obligations.md)); [issue #74](https://github.com/JustApu/CheckYourAmbulance-archive/issues/74) links a check only to
 the obligation whose kit instance equals the check's `kit_id`. The mid-window rules and the
 assignment record are settled in SPEC 1.10.0 (OQ-54) and implemented by [issue #92](https://github.com/JustApu/CheckYourAmbulance-archive/issues/92). Expiration
-dates are not stored on a check at all yet (they belong to the sealed-kit workflow, SPEC §10.1).
+dates are retained in seal inspection evidence rather than on individual check records (SPEC §10.1).
 
 ## Assumptions to confirm
 
