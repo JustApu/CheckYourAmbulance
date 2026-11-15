@@ -54,12 +54,13 @@ class CorrectionScopeMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         leaves = executor.loader.graph.leaf_nodes()
         before = self.trigger_statement()
+        rollback_boundary = ("cya_deficiencies", "0013_empty_scope_closure")
         target = [
             node
-            if node[0] != "cya_deficiencies"
-            else ("cya_deficiencies", "0012_correction_verification_scope")
             for node in leaves
+            if rollback_boundary not in executor.loader.graph.forwards_plan(node)
         ]
+        target.append(("cya_deficiencies", "0012_correction_verification_scope"))
         try:
             executor.migrate(target)
             reversed_trigger = self.trigger_statement()
