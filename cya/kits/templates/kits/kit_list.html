@@ -41,6 +41,9 @@
 {% endif %}
 
 <h2 id="edit-heading">{% if draft %}Edit the draft{% else %}Start a draft{% endif %}</h2>
+{% if not editable %}
+<p id="too-long">This list has {{ line_count }} line{{ line_count|pluralize }}. This page can edit at most {{ max_rows }} lines, so it is shown but not offered for editing; saving part of it would drop the rest. An Administrator can change it by importing a vehicle file.</p>
+{% else %}
 <p>Saving replaces the draft with exactly these lines. Leave a row's kit and compartment empty to skip it, or tick Remove.</p>
 <form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="edit-heading">
   {% csrf_token %}
@@ -71,5 +74,6 @@
   </div>
   <p><button type="submit" class="button">Save draft</button></p>
 </form>
+{% endif %}
 </div>
 {% endblock %}

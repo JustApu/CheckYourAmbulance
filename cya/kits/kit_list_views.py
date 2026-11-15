@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
@@ -39,7 +40,13 @@ logger = logging.getLogger(__name__)
 ACTION = "manage_vehicle_kit_lists"
 DENIAL = "MANAGE_VEHICLE_KIT_LISTS"
 BLANK_ROWS = 3
-MAX_ROWS = 300
+ROW_FIELDS = 5  # definition, compartment, count, order, remove
+FORM_FIELDS = 10  # csrf token, stage, operation id, row count, with room to spare
+# The editor saves a whole new draft, so it must post every line it shows: never more rows than
+# Django accepts in one form (DATA_UPLOAD_MAX_NUMBER_FIELDS), or a save would lose the rest.
+_FIELD_LIMIT = settings.DATA_UPLOAD_MAX_NUMBER_FIELDS
+MAX_ROWS = 300 if _FIELD_LIMIT is None else min(300, (_FIELD_LIMIT - FORM_FIELDS) // ROW_FIELDS)
+INVALID = "the form was not valid; reload the page and try again"
 SAVED = {"draft": "Draft saved. Publish it to put it in force.", "publish": "Kit list published."}
 
 
@@ -133,15 +140,21 @@ def _state(user, vehicle):
 
 def _page(request, user, vehicle, *, status=200, errors=None, rows=None):
     state = _state(user, vehicle)
-    if rows is None:
-        source = state["draft_lines"] if state["draft"] else state["in_force_lines"]
+    source = state["draft_lines"] if state["draft"] else state["in_force_lines"]
+    # A list longer than the editor holds is shown, not offered for editing: saving only part of
+    # it would replace the draft with that part (PR #172 review).
+    editable = len(source) <= MAX_ROWS
+    if rows is None and editable:
         rows = [_with_note(line) for line in source]
-        rows += [{} for _ in range(BLANK_ROWS)]
+        rows += [{} for _ in range(min(BLANK_ROWS, MAX_ROWS - len(source)))]
     context = {
         "title": f"Kit list: {vehicle.display_name}",
         "vehicle": vehicle,
         **state,
-        "rows": rows,
+        "rows": rows or [],
+        "editable": editable,
+        "line_count": len(source),
+        "max_rows": MAX_ROWS,
         "draft_operation_id": admin_pages.new_operation_id(),
         "publish_operation_id": admin_pages.new_operation_id(),
         "errors": errors or [],
@@ -169,11 +182,18 @@ def _with_note(line):
 
 
 def _posted_rows(post):
-    """The editor's rows as typed, kept for redisplay when saving fails."""
-    try:
-        count = int(post.get("rows", "0"))
-    except ValueError:
-        count = 0
+    """The editor's rows as typed, kept for redisplay when saving fails.
+
+    The draft is replaced by exactly these rows, so a missing, malformed or out-of-range row
+    count, or a row the form did not send, refuses the save instead of saving part of the list
+    (PR #172 review).
+    """
+    count = post.get("rows", "")
+    if not count.isascii() or not count.isdigit() or not 0 <= int(count) <= MAX_ROWS:
+        raise KitListError(INVALID)
+    count = int(count)
+    if any(f"line-{index}-definition" not in post for index in range(count)):
+        raise KitListError(INVALID)
     return [
         {
             "definition_id": post.get(f"line-{index}-definition", ""),
@@ -182,7 +202,7 @@ def _posted_rows(post):
             "display_order": post.get(f"line-{index}-order", "").strip(),
             "remove": post.get(f"line-{index}-remove") == "on",
         }
-        for index in range(max(0, min(count, MAX_ROWS)))
+        for index in range(count)
     ]
 
 
@@ -212,13 +232,17 @@ def _whole(value, what):
 
 
 def _effective_at(post):
-    """None for "now", else the aware instant of the station-local date and time entered.
+    """None for "now", the aware instant of the station-local date and time for "at".
 
     A wall time skipped by a daylight-saving change is refused; a repeated one means its first
     occurrence (fold=0).
     """
-    if post.get("when") != "at":
+    when = post.get("when")
+    if when == "now":
         return None
+    if when != "at":
+        # Only an explicit "now" publishes now; anything else is refused (PR #172 review).
+        raise KitListError("choose when it takes effect: now, or at a date and time")
     try:
         local = datetime.fromisoformat(post.get("at", ""))
     except ValueError:
