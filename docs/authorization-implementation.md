@@ -93,9 +93,9 @@ history through the web interface. It is not a general user-management screen.
 
 - **Reaching it:** an Administrator opens Administration in the navigation, whose
   page links to `/administration/roles/`; the Administration menu entry stays
-  highlighted there. Supervisors also see Administration (issue #130 part 5b), but
-  its landing page shows them only the pages they may open, never this link; other
-  roles are not shown the section.
+  highlighted there. Supervisors and Supply Officers also see Administration (issue
+  #130 parts 5b and 5c), but its landing page shows them only the pages they may
+  open, never this link; Crew members are not shown the section.
 - **GET** shows the organization's latest 50 role-history rows and a change form
   to an Administrator. Active users can be searched by display name or email;
   results are organization-scoped and capped at 50 per search, and search text is
