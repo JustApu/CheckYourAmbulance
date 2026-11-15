@@ -210,7 +210,7 @@ class Issue156LockBenchmark(KitCase):
             while not self.monitor_stop.wait(0.02):
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        "SELECT wait_age_secs, waiting_pid, waiting_query, locked_table_name, "
+                        "SELECT wait_age_secs, waiting_pid, waiting_query, locked_table, "
                         "blocking_pid, blocking_query FROM sys.innodb_lock_waits"
                     )
                     rows = cursor.fetchall()
