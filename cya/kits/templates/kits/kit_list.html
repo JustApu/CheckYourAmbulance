@@ -53,10 +53,10 @@
     <tbody>
     {% for row in rows %}
       <tr>
-        <td><select id="def-{{ forloop.counter0 }}" aria-label="Kit, line {{ forloop.counter }}" name="line-{{ forloop.counter0 }}-definition">
+        <td><select id="def-{{ forloop.counter0 }}" aria-label="Kit, line {{ forloop.counter }}"{% if row.note %} aria-describedby="note-{{ forloop.counter0 }}"{% endif %} name="line-{{ forloop.counter0 }}-definition">
             <option value="">(none)</option>
             {% for d in definitions %}<option value="{{ d.pk }}"{% if row.definition_id == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
-          </select></td>
+          </select>{% if row.note %}<br><span id="note-{{ forloop.counter0 }}">{{ row.note }}</span>{% endif %}</td>
         <td><select id="comp-{{ forloop.counter0 }}" aria-label="Compartment, line {{ forloop.counter }}" name="line-{{ forloop.counter0 }}-compartment">
             <option value="">(none)</option>
             {% for c in compartments %}<option value="{{ c.pk }}"{% if row.compartment_id == c.pk|stringformat:"s" %} selected{% endif %}>{{ c.label }}</option>{% endfor %}

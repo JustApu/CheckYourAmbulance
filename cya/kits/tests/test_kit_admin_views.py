@@ -13,6 +13,7 @@ from cya.kits.definitions import (
     create_kit_definition,
     publish_kit_definition_version,
     save_kit_definition_draft,
+    set_kit_definition_active,
 )
 from cya.kits.kit_list_views import _effective_at
 from cya.kits.kit_lists import KitListError
@@ -124,6 +125,29 @@ class KitListPageTests(KitAdminCase):
         )
         draft = VehicleKitListVersion.objects.get(vehicle=self.vehicle)
         self.assertEqual(VehicleKitRequirement.objects.filter(version=draft).count(), 1)
+
+    def test_a_half_filled_row_is_refused_and_an_inactive_kit_type_is_explained(self):
+        half = self.post(
+            self.client_,
+            self.url,
+            stage="draft",
+            rows="2",
+            **self.line(0),
+            **{"line-1-definition": "", "line-1-compartment": str(self.cabinet.pk)},
+        )
+        self.assertContains(half, "line 2: choose both a kit and a compartment", status_code=400)
+        self.assertFalse(VehicleKitListVersion.objects.exists())
+        self.post(self.client_, self.url, stage="draft", rows="1", **self.line(0))
+        set_kit_definition_active(
+            definition_id=self.definition, active=False, **self.context(self.supervisor)
+        )
+        page = self.client_.get(self.url)
+        self.assertContains(page, 'aria-describedby="note-0"')
+        self.assertContains(
+            page,
+            "Synthetic jump kit is no longer an active kit type: choose again or remove this line.",
+        )
+        self.assertNotContains(page, f'value="{self.definition}" selected')
 
     def test_a_publication_cannot_be_backdated_or_name_another_vehicle_draft(self):
         self.post(self.client_, self.url, stage="draft", rows="1", **self.line(0))

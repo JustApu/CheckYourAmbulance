@@ -86,6 +86,7 @@ def _lines(version, any_row):
         {
             "definition_id": str(line.definition_id),
             "definition": line.definition.label,
+            "definition_active": line.definition.active,
             "compartment_id": str(any_row[str(line.compartment_id)].pk)
             if str(line.compartment_id) in any_row
             else "",
@@ -134,7 +135,7 @@ def _page(request, user, vehicle, *, status=200, errors=None, rows=None):
     state = _state(user, vehicle)
     if rows is None:
         source = state["draft_lines"] if state["draft"] else state["in_force_lines"]
-        rows = [dict(line) for line in source]
+        rows = [_with_note(line) for line in source]
         rows += [{} for _ in range(BLANK_ROWS)]
     context = {
         "title": f"Kit list: {vehicle.display_name}",
@@ -148,6 +149,23 @@ def _page(request, user, vehicle, *, status=200, errors=None, rows=None):
         "zone": timezone.get_current_timezone_name(),
     }
     return render(request, "kits/kit_list.html", context, status=status)
+
+
+def _with_note(line):
+    """An editor row, saying why a line cannot be kept as it is.
+
+    The pickers offer only active kit types and compartments not retired, so such a line shows
+    no choice; the note names what it was, so the person can choose again or remove it.
+    """
+    row = dict(line)
+    if not line["definition_active"]:
+        row["note"] = f"{line['definition']} is no longer an active kit type"
+        row["definition_id"] = ""
+    if not line["compartment_id"]:
+        row["note"] = "; ".join(filter(None, [row.get("note"), "its compartment is retired"]))
+    if row.get("note"):
+        row["note"] += ": choose again or remove this line."
+    return row
 
 
 def _posted_rows(post):
@@ -174,6 +192,8 @@ def _lines_from(rows):
     for index, row in enumerate(rows):
         if row["remove"] or not (row["definition_id"] or row["compartment_id"]):
             continue
+        if not (row["definition_id"] and row["compartment_id"]):
+            raise KitListError(f"line {index + 1}: choose both a kit and a compartment")
         lines.append(
             {
                 "definition_id": row["definition_id"],
