@@ -336,3 +336,45 @@ class VehicleDuplicationTests(KitCase):
         body = self.duplicate(preview["base_token"]).body
         self.assertFalse(VehicleOverrideVersion.objects.filter(vehicle_id=body["vehicle_id"]))
         self.assertEqual(body["excluded"], preview["excluded"])
+
+    def test_old_revisions_are_not_read_to_build_the_plan(self):
+        # PR #166 review: position and binding histories only grow; the plan reads one row
+        # per position and per binding, so its cost must not follow their length.
+        from django.db import connection
+
+        from cya.kits.positions import revise_position
+        from cya.operations.duplication import plan_vehicle_copy
+
+        def rows_read():
+            total = [0]
+
+            def count(execute, sql, params, many, context):
+                result = execute(sql, params, many, context)
+                if sql.lstrip().upper().startswith("SELECT"):
+                    total[0] += max(context["cursor"].rowcount, 0)
+                return result
+
+            with connection.execute_wrapper(count):
+                plan = plan_vehicle_copy(str(self.org.pk), str(self.vehicle.pk))
+            return total[0], plan
+
+        before, _plan = rows_read()
+        slot = str(self.cabinet.stable_slot_id)
+        for number in range(25):
+            revise_position(
+                vehicle_id=str(self.vehicle.pk),
+                kind="COMPARTMENT",
+                stable_slot_id=slot,
+                label=f"Synthetic cabinet {number}",
+                **self.context(self.supervisor),
+            )
+        for _ in range(5):
+            self.bind(action="UNBIND", reconcile=False)
+            self.bind(reconcile=False)
+        after, plan = rows_read()
+        self.assertEqual(after, before, "rows read do not grow with history")
+        labels = {row.label for kind, row in plan.positions if kind == "COMPARTMENT"}
+        self.assertIn("Synthetic cabinet 24", labels)
+        self.assertEqual(
+            plan.bindings, [(str(self.template.pk), "test-0600")], "the latest revision is a BIND"
+        )

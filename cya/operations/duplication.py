@@ -7,6 +7,7 @@ first: keys are unique across the organization. See docs/configuration-managemen
 
 from dataclasses import dataclass, field
 
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from cya.accounts.fields import new_id
@@ -185,6 +186,7 @@ class VehicleCopyPlan:
     overrides: list = field(default_factory=list)  # (template_id, override, [(entry, def)])
     bindings: list = field(default_factory=list)  # (template_id, slot)
     excluded: list = field(default_factory=list)  # what the copy leaves out, and why
+    slot_of: dict = field(default_factory=dict)  # named source row id -> (kind, stable slot)
 
     def shown(self):
         """The preview, and the basis of its token (CFG-6): every row the copy would take."""
@@ -227,17 +229,31 @@ class VehicleCopyPlan:
         return digest(self.shown())
 
 
+def _latest_rows(model, group, **filters):
+    """The highest-revision row of each `group` among the rows matching `filters`.
+
+    One grouped query finds each group's latest revision, then only those rows are fetched,
+    so the cost follows the number of positions or bindings, not the length of their
+    append-only histories (PR #166 review).
+    """
+    tops = list(
+        model.objects.filter(**filters).values(*group).annotate(top=Max("revision")).order_by()
+    )
+    if not tops:
+        return []
+    wanted = Q()
+    for top in tops:
+        wanted |= Q(**{name: top[name] for name in group}, revision=top["top"])
+    return list(model.objects.filter(wanted, **filters))
+
+
 def _positions_now(vehicle, now):
     """(kind, row) for each position of the vehicle in effect now, retired ones left out."""
     found = []
     for kind, model in SLOT_MODELS:
-        latest = {}
-        for row in model.objects.filter(vehicle=vehicle, effective_at__lte=now).order_by(
-            "stable_slot_id", "revision"
-        ):
-            latest[row.stable_slot_id] = row
+        rows = _latest_rows(model, ("stable_slot_id",), vehicle=vehicle, effective_at__lte=now)
         for row in sorted(
-            latest.values(), key=lambda r: (r.display_order is None, r.display_order or 0, r.label)
+            rows, key=lambda r: (r.display_order is None, r.display_order or 0, r.label)
         ):
             if not row.retired:
                 found.append((kind, row))
@@ -246,12 +262,26 @@ def _positions_now(vehicle, now):
 
 def _bindings_now(org, vehicle_id, now):
     """(template_id, slot) of each binding in force now (its revision in force is a BIND)."""
-    in_force = {}
-    for row in RequirementBinding.objects.filter(
-        organization_id=org, vehicle_id=vehicle_id, effective_at__lte=now
-    ).order_by("template_id", "slot", "revision"):
-        in_force[(str(row.template_id), row.slot)] = row.action
-    return sorted(key for key, action in in_force.items() if action == "BIND")
+    rows = _latest_rows(
+        RequirementBinding,
+        ("template_id", "slot"),
+        organization_id=org,
+        vehicle_id=vehicle_id,
+        effective_at__lte=now,
+    )
+    return sorted((str(row.template_id), row.slot) for row in rows if row.action == "BIND")
+
+
+def _slots_of(vehicle, row_ids):
+    """{row id: (kind, stable slot)} for just the source rows the copied configuration names."""
+    wanted = {str(row_id) for row_id in row_ids if row_id is not None}
+    found = {}
+    for kind, model in SLOT_MODELS:
+        for pk, slot in model.objects.filter(vehicle=vehicle, pk__in=wanted).values_list(
+            "pk", "stable_slot_id"
+        ):
+            found[str(pk)] = (kind, str(slot))
+    return found
 
 
 def plan_vehicle_copy(organization_id, source_vehicle_id, now=None):
@@ -264,26 +294,19 @@ def plan_vehicle_copy(organization_id, source_vehicle_id, now=None):
     plan = VehicleCopyPlan(source=source)
     plan.positions = _positions_now(source, now)
     copied_slots = {(kind, str(row.stable_slot_id)) for kind, row in plan.positions}
-    slot_of = {}  # any revision row id of the source -> (kind, stable slot)
-    for kind, model in SLOT_MODELS:
-        for pk, slot in model.objects.filter(vehicle=source).values_list("pk", "stable_slot_id"):
-            slot_of[str(pk)] = (kind, str(slot))
 
     in_force = kit_list_effective_at(org, str(source.pk), now)
-    if in_force is not None:
-        for line in (
+    lines = (
+        list(
             VehicleKitRequirement.objects.filter(version=in_force)
             .select_related("compartment", "definition")
             .order_by("display_order", "id")
-        ):
-            if slot_of.get(str(line.compartment_id)) in copied_slots:
-                plan.kit_lines.append(line)
-            else:
-                plan.excluded.append(
-                    f"kit list line {line.definition.key}: its compartment is retired"
-                )
-
+        )
+        if in_force is not None
+        else []
+    )
     plan.bindings = _bindings_now(org, str(source.pk), now)
+    candidates = []  # (template_id, override, [(entry, definition)])
     for template_id in sorted({t for t, _slot in plan.bindings}):
         try:
             _version, override = governing_versions(org, str(source.pk), template_id, now)
@@ -296,26 +319,42 @@ def plan_vehicle_copy(organization_id, source_vehicle_id, now=None):
             continue
         if override is None:
             continue
-        entries = []
-        for entry in (
-            VehicleOverrideItem.objects.filter(override_version=override)
+        entries = [
+            (entry, entry.definition)
+            for entry in VehicleOverrideItem.objects.filter(override_version=override)
             .select_related("definition", "item")
             .order_by("id")
-        ):
-            definition = entry.definition
+        ]
+        candidates.append((template_id, override, entries))
+
+    named = [line.compartment_id for line in lines]
+    for _template_id, _override, entries in candidates:
+        for _entry, definition in entries:
+            if definition is not None:
+                named += [definition.compartment_id, definition.system_id]
+    plan.slot_of = _slots_of(source, named)
+
+    for line in lines:
+        if plan.slot_of.get(str(line.compartment_id)) in copied_slots:
+            plan.kit_lines.append(line)
+        else:
+            plan.excluded.append(f"kit list line {line.definition.key}: its compartment is retired")
+    for template_id, override, entries in candidates:
+        kept = []
+        for entry, definition in entries:
             if definition is not None and definition.kit_id is not None:
                 plan.excluded.append(
                     f"override entry for {entry.item.label}: it names one of the source's kits"
                 )
                 continue
             row = definition and (definition.compartment_id or definition.system_id)
-            if row is not None and slot_of.get(str(row)) not in copied_slots:
+            if row is not None and plan.slot_of.get(str(row)) not in copied_slots:
                 plan.excluded.append(
                     f"override entry for {entry.item.label}: its position is retired"
                 )
                 continue
-            entries.append((entry, definition))
-        plan.overrides.append((template_id, override, entries))
+            kept.append((entry, definition))
+        plan.overrides.append((template_id, override, kept))
     return plan
 
 
@@ -401,12 +440,9 @@ def duplicate_vehicle(*, source_vehicle_id, vin, display_name, number=None, base
                     **({"sealable": row.sealable} if model is Compartment else {}),
                 )
                 by_slot[(kind, str(row.stable_slot_id))] = str(copy.pk)
-            for kind, model in SLOT_MODELS:
-                for pk, slot in model.objects.filter(vehicle=plan.source).values_list(
-                    "pk", "stable_slot_id"
-                ):
-                    if (kind, str(slot)) in by_slot:
-                        row_for[str(pk)] = by_slot[(kind, str(slot))]
+            for row_id, kind_slot in plan.slot_of.items():
+                if kind_slot in by_slot:
+                    row_for[row_id] = by_slot[kind_slot]
             if plan.kit_lines:
                 version = VehicleKitListVersion.objects.create(
                     id=new_id(),
