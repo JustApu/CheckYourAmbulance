@@ -71,7 +71,7 @@ def _locked(organization_id, vehicle_id):
     return vehicle
 
 
-def _run(context, command_type, request, build, *, lock_organization=False):
+def _run(context, command_type, request, build, *, lock_organization=False, action=ACTION):
     canonical_id(context["actor_id"])
     return run_command(
         organization_id=context["organization_id"],
@@ -83,7 +83,7 @@ def _run(context, command_type, request, build, *, lock_organization=False):
         authorize=definitions.authorizer(
             context["organization_id"],
             context["actor_id"],
-            ACTION,
+            action,
             lock_organization=lock_organization,
         ),
         prepare=build,
