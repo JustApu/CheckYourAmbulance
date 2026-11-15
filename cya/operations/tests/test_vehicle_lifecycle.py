@@ -96,6 +96,32 @@ class LifecycleCommandTests(ObligationCase):
             kind="obligations.changed",
         )
 
+    def test_a_failed_reconciliation_after_an_activity_change_is_logged(self):
+        # PR #162 review: reconcile_vehicle reports failed units in its summary, not by raising.
+        from datetime import UTC, datetime
+        from types import SimpleNamespace
+        from unittest import mock
+
+        record_activity_baseline(str(self.org.pk))
+        vehicle = str(self.vehicles[0].pk)
+        failure = SimpleNamespace(
+            vehicle_id=vehicle,
+            due_at=datetime(2026, 6, 1, 6, tzinfo=UTC),
+            error="synthetic failure",
+        )
+        with (
+            mock.patch(
+                "cya.obligations.generation.reconcile_vehicle",
+                return_value=SimpleNamespace(failures=[failure]),
+            ),
+            self.assertLogs("cya.operations.vehicles", level="ERROR") as logged,
+        ):
+            set_vehicle_active(vehicle_id=vehicle, active=False, **self.context())
+        self.assertEqual(len(logged.records), 1)
+        self.assertIn(f"vehicle {vehicle} due 2026-06-01T06:00:00+00:00", logged.output[0])
+        self.assertIn("synthetic failure", logged.output[0])
+        self.assertFalse(Vehicle.objects.get(pk=vehicle).active, "the change itself committed")
+
     def test_the_baseline_command_counts_first_then_writes_once(self):
         import io
 

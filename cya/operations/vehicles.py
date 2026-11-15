@@ -14,6 +14,8 @@ Locks follow docs/configuration-management.md: the organization row when a rule 
 (VIN uniqueness, the baseline), then the vehicle row.
 """
 
+import logging
+
 from cya.accounts.fields import new_id
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
@@ -23,6 +25,8 @@ from cya.kits import definitions
 from cya.kits import keys as key_rules
 from cya.operations.models import VehicleActivityEvent
 from tools.command_identity import worker_operation_id
+
+logger = logging.getLogger(__name__)
 
 ACTION = "manage_vehicles"
 CREATE_COMMAND = "VEHICLE_CREATE"
@@ -225,11 +229,23 @@ def set_vehicle_active(*, vehicle_id, active, **context):
     result = _run(context, ACTIVE_COMMAND, {"vehicle_id": vehicle_id, "active": active}, build)
     if not result.replayed:
         # Obligations reconcile after commit, as for bindings (a deactivated vehicle generates
-        # nothing new; a reactivated one is generated from now on).
-        from cya.obligations.generation import reconcile_vehicle
-
-        reconcile_vehicle(org, vehicle_id)
+        # nothing new; a reactivated one is generated from now on). A unit that fails is
+        # logged, as binding and kit commands do; the scheduled run repairs it.
+        _reconcile_after(org, vehicle_id)
     return result
+
+
+def _reconcile_after(organization_id, vehicle_id):
+    from cya.obligations.generation import reconcile_vehicle
+
+    summary = reconcile_vehicle(organization_id, vehicle_id)
+    for failure in summary.failures:
+        logger.error(
+            "obligation reconciliation failed after vehicle activity change: vehicle %s due %s: %s",
+            failure.vehicle_id,
+            failure.due_at.isoformat(),
+            failure.error,
+        )
 
 
 def record_activity_baseline(organization_id):
