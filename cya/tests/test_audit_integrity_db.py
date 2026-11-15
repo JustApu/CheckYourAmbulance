@@ -198,6 +198,13 @@ class AuditIntegrityTests(TestCase):
             # table, its guards and grants arrive with the implementation (issue 92 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/92))
             "kit_assignment_event",
             "kit_seal_designation",  # issue #131: Supervisor- or Administrator-set kit seal designation
+            "seal_event",  # issue #131: attributed seal state transitions
+            "seal_inspection",  # issue #131: full-inspection and reseal evidence
+            "seal_inspection_item",  # issue #131: attributed per-item inspection observations
+            "seal_inspection_obligation",  # issue #131: explicit inspected-obligation evidence
+            "seal_inspection_kit_count",  # issue #131: cabinet kit-list-line counts
+            "seal_inspection_kit_instance",  # issue #131: kit instances certified by a cabinet count
+            "seal_inspection_kit_verification",  # issue #131: nested kit-seal verification evidence
             "kit_definition_publication",  # issue #129: publication of a kit definition version
             "vehicle_kit_list_publication",  # issue #129: publication of a vehicle kit list
             "position_key",  # issue #129: organization-wide compartment and system keys
