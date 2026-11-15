@@ -169,6 +169,17 @@ class StatusEvidence:
 
 
 @dataclass(frozen=True)
+class ActivityEvidence:
+    """When a vehicle became active or inactive (vehicle_activity_event, SPEC 4.8 CFG-1)."""
+
+    id: str
+    vehicle_id: str
+    sequence: int
+    recorded_at: datetime
+    active: bool
+
+
+@dataclass(frozen=True)
 class SuspensionEvidence:
     """A supervisor check suspension (SPEC 8.9) covering one routine obligation.
 
@@ -280,6 +291,21 @@ def _status_for(obligation, status_events, instant):
     return max(statuses, key=lambda e: e.sequence, default=None)
 
 
+def _activity_for(obligation, activity_events, instant):
+    """The vehicle's activity event in force at min(D, T), or None (no history: as before).
+
+    Like an out-of-service status (SPEC 5.9), it is judged at the due instant, so reactivation
+    never backfills an obligation due while the vehicle was inactive.
+    """
+    activity_time = min(obligation.due_at, instant)
+    events = []
+    for event in activity_events:
+        aware(event.recorded_at)
+        if event.vehicle_id == obligation.vehicle_id and event.recorded_at <= activity_time:
+            events.append(event)
+    return max(events, key=lambda e: e.sequence, default=None)
+
+
 def _suspension_for(obligation, suspensions, instant):
     """The suspension in force for a routine obligation at min(T, G), or None (SPEC 8.9).
 
@@ -362,6 +388,7 @@ def evaluate_obligation(
     suspensions=(),
     seal_substitutions=(),
     seal_inspections=(),
+    activity_events=(),
 ):
     """Derive state from evidence known by T, without querying or reading the clock.
 
@@ -378,6 +405,7 @@ def evaluate_obligation(
         and not suspensions
         and not seal_substitutions
         and not seal_inspections
+        and not activity_events
     ):
         if instant < obligation.early_at:
             state = State.UPCOMING
@@ -391,6 +419,10 @@ def evaluate_obligation(
     status = _status_for(obligation, status_events, instant)
     if obligation.routine and status is not None and status.status == "OUT_OF_SERVICE":
         return ObligationState(obligation, State.EXEMPT, status.id)
+    # SPEC 4.8 CFG-1: an inactive vehicle owes no routine obligation; same precedence as 5.9.
+    activity = _activity_for(obligation, activity_events, instant)
+    if obligation.routine and activity is not None and not activity.active:
+        return ObligationState(obligation, State.EXEMPT, activity.id)
     determination = _determination_for(obligation, determinations, instant)
     if (
         obligation.routine
@@ -507,6 +539,7 @@ class ProjectionHistory:
     use_stored_checks: bool = True
     seal_substitutions: tuple[SealSubstitutionEvidence, ...] = ()
     seal_inspections: tuple[SealInspectionEvidence, ...] = ()
+    activities: tuple[ActivityEvidence, ...] = ()
 
 
 def rebuild_vehicle_projection(
@@ -575,6 +608,7 @@ def rebuild_vehicle_projection(
                 determinations=determinations_by_obligation.get(obligation.id, ()),
                 checks=checks_by_obligation.get(obligation.id, ()),
                 status_events=history.statuses,
+                activity_events=history.activities,
                 suspensions=suspensions_by_obligation.get(obligation.id, ()),
                 seal_substitutions=seals_by_obligation.get(obligation.id, ()),
                 seal_inspections=inspections_by_obligation.get(obligation.id, ()),
@@ -596,6 +630,7 @@ def rebuild_vehicle_projection(
                     determinations=determinations_by_obligation.get(obligation.id, ()),
                     checks=checks_by_obligation.get(obligation.id, ()),
                     status_events=history.statuses,
+                    activity_events=history.activities,
                     suspensions=suspensions_by_obligation.get(obligation.id, ()),
                     seal_substitutions=seals_by_obligation.get(obligation.id, ()),
                     seal_inspections=inspections_by_obligation.get(obligation.id, ()),

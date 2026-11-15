@@ -27,6 +27,7 @@ from cya.obligations.history import replay_checks
 from cya.obligations.models import Obligation, ObligationProjection, ObligationSelection
 from cya.obligations.projections import (
     MAX_ROWS,
+    _activity,
     _bounded,
     _determination,
     _history,
@@ -37,6 +38,7 @@ from cya.obligations.projections import (
     stored_suspensions,
 )
 from cya.obligations.state import (
+    ActivityEvidence,
     CheckEvidence,
     DeterminationEvidence,
     ObligationEvidence,
@@ -49,7 +51,7 @@ from cya.obligations.state import (
     aware,
     evaluate_obligation,
 )
-from cya.operations.models import VehicleStatusEvent
+from cya.operations.models import VehicleActivityEvent, VehicleStatusEvent
 
 BATCH_SIZE = 250
 # Version 2 adds the obligation's pinned late limit (issue #80); version-1 rows need a rebuild.
@@ -122,7 +124,7 @@ class CurrentFacts(dict):
     __slots__ = ("evidence",)
 
 
-def _evidence(facts, statuses=()):
+def _evidence(facts, statuses=(), activities=()):
     return (
         _restore(ObligationEvidence, facts["obligation"]),
         tuple(_restore(CheckEvidence, r) for r in facts["checks"]),
@@ -131,6 +133,7 @@ def _evidence(facts, statuses=()):
         statuses,
         tuple(_restore(SealSubstitutionEvidence, r) for r in facts.get("seal_substitutions", ())),
         tuple(_restore(SealInspectionEvidence, r) for r in facts.get("seal_inspections", ())),
+        activities,
     )
 
 
@@ -246,10 +249,16 @@ def evaluate_facts(facts, instant):
     evidence = getattr(facts, "evidence", None)
     if evidence is None:
         evidence = _evidence(
-            facts, tuple(_restore(StatusEvidence, r) for r in facts.get("statuses", ()))
+            facts,
+            tuple(_restore(StatusEvidence, r) for r in facts.get("statuses", ())),
+            tuple(_restore(ActivityEvidence, r) for r in facts.get("activities", ())),
         )
-    obligation, checks, determinations, suspensions, statuses, seals, inspections = evidence
-    if not (checks or determinations or statuses or suspensions or seals or inspections):
+    obligation, checks, determinations, suspensions, statuses, seals, inspections, activities = (
+        evidence
+    )
+    if not (
+        checks or determinations or statuses or suspensions or seals or inspections or activities
+    ):
         return evaluate_obligation(obligation, instant)
     return evaluate_obligation(
         obligation,
@@ -260,6 +269,7 @@ def evaluate_facts(facts, instant):
         suspensions=suspensions,
         seal_substitutions=seals,
         seal_inspections=inspections,
+        activity_events=activities,
     )
 
 
@@ -470,11 +480,14 @@ def refresh_obligations(organization_id, obligation_ids, *, dry_run=False):
     return differences
 
 
-def status_timeline(events):
-    """Build a searchable, sequence-correct status timeline for current reads/rebuild checks."""
+def status_timeline(events, convert=_status):
+    """Build a searchable, sequence-correct status timeline for current reads/rebuild checks.
+
+    Activity events (SPEC 4.8 CFG-1) use the same timeline with convert=_activity.
+    """
     grouped = {}
     for row in events:
-        grouped.setdefault(str(row.vehicle_id), []).append(_status(row))
+        grouped.setdefault(str(row.vehicle_id), []).append(convert(row))
     result = {}
     for vehicle, timeline in grouped.items():
         timeline.sort(key=lambda event: (event.recorded_at, event.sequence))
@@ -501,28 +514,40 @@ def _due_at(facts):
     return _instant(facts["obligation"]["due_at"])
 
 
-def attach_status_fact(facts, vehicle_id, due_at, instant, timelines):
+def activity_timeline(events):
+    """The activity timeline of vehicle_activity_event rows (SPEC 4.8 CFG-1)."""
+    return status_timeline(events, convert=_activity)
+
+
+def _at(timelines, vehicle_id, due_at, instant):
+    timeline = (timelines or {}).get(str(vehicle_id))
+    if timeline:
+        times, newest_by_sequence = timeline
+        index = bisect_right(times, min(instant, due_at))
+        if index:
+            fact, event = newest_by_sequence[index - 1]
+            return [fact], (event,)
+    return [], ()
+
+
+def attach_status_fact(facts, vehicle_id, due_at, instant, timelines, activity_timelines=None):
     """Return projection facts with the immutable status event applicable to this read.
 
     The input is never changed. A cached CurrentFacts gives a CurrentFacts copy whose evidence
     carries the same status, so its evaluation restores nothing.
     """
-    timeline = timelines.get(str(vehicle_id))
-    status_facts, status_events = [], ()
-    if timeline:
-        times, newest_by_sequence = timeline
-        index = bisect_right(times, min(instant, due_at))
-        if index:
-            status, event = newest_by_sequence[index - 1]
-            status_facts, status_events = [status], (event,)
+    status_facts, status_events = _at(timelines, vehicle_id, due_at, instant)
+    activity_facts, activity_events = _at(activity_timelines, vehicle_id, due_at, instant)
     evidence = getattr(facts, "evidence", None)
     if evidence is None:
         result = dict(facts)
         result["statuses"] = status_facts
+        result["activities"] = activity_facts
         return result
     result = CurrentFacts(facts)
     result["statuses"] = status_facts
-    result.evidence = (*evidence[:4], status_events, *evidence[5:])
+    result["activities"] = activity_facts
+    result.evidence = (*evidence[:4], status_events, *evidence[5:7], activity_events)
     return result
 
 
@@ -622,13 +647,24 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
         page_limit,
     )
     timelines = status_timeline(statuses)
+    activities = _bounded(
+        VehicleActivityEvent.objects.filter(
+            organization_id=organization_id,
+            vehicle_id__in=vehicle_ids,
+            recorded_at__lte=instant,
+        ).order_by("vehicle_id", "recorded_at", "sequence")[: page_limit + 1],
+        page_limit,
+    )
+    activity_timelines = activity_timeline(activities)
     result = {v: [] for v in vehicle_ids}
     for oid, vehicle, _digest, _newer, _selected in rows:
         if oid not in selected:
             continue
         facts = replayed[oid] if oid in newer else stored[str(oid)]
         result[str(vehicle)].append(
-            attach_status_fact(facts, vehicle, _due_at(facts), instant, timelines)
+            attach_status_fact(
+                facts, vehicle, _due_at(facts), instant, timelines, activity_timelines
+            )
         )
     for found in result.values():
         _bounded(found)

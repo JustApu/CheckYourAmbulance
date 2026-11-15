@@ -646,6 +646,10 @@ def _apply(org, plan, receipt, current, vehicle_id, kit_ids):
             active=True,
             key=fields["key"],
         )
+        # SPEC 4.8 CFG-1: a created vehicle starts its activity history (part 2, issue #130).
+        from cya.operations.vehicles import append_activity
+
+        append_activity(vehicle_id, True, "CHANGE", receipt, current)
     elif (vehicle.display_name, vehicle.number) != (fields["display_name"], fields["number"]):
         Vehicle.objects.filter(pk=vehicle.pk).update(
             display_name=fields["display_name"], number=fields["number"]
