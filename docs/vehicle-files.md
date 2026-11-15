@@ -66,7 +66,7 @@ Limits:
     "items": [
       {"item": "Example wrench", "compartment": "example-cabinet", "system": null,
        "kind": "PRESENCE_CONDITION", "quantity": null, "unit": null,
-       "outcomes": ["PASSED", "FAILED"], "instructions": ""}
+       "outcomes": ["PASSED", "FAILED"], "expiration_tracked": false, "instructions": ""}
     ],
     "kits": [{"kit": "example-airway-kit", "compartment": "example-cabinet", "count": 1}]
   }
@@ -79,11 +79,12 @@ Unknown fields are refused. Download the blank template for an exact, valid exam
 
 The header row must hold exactly these columns, in any order:
 
-`file_type, record, vin, display_name, number, template, schedule, key, label, item, compartment, system, kind, quantity, unit, outcomes, instructions, kit, count`
+`file_type, record, vin, display_name, number, template, schedule, key, label, item, compartment, system, kind, quantity, unit, outcomes, expiration_tracked, instructions, kit, count`
 
 - Every row's `file_type` is `vehicle`.
 - `record` says what the row is: `vehicle` (exactly one), `compartment`, `system`, `item` or `kit`. A row leaves empty every column its record type does not use.
 - `outcomes` separates values with `|`.
+- `expiration_tracked` is `yes` or `no`; an empty cell means no. A CSV file without this column is refused, so an older file cannot silently turn tracking off. Export again to get the current columns.
 - Formula-like cells are neutralized with a leading `'` exactly as in [kit-library files](kit-library-files.md#csv), so files round-trip.
 
 ## Fields
@@ -99,6 +100,7 @@ The header row must hold exactly these columns, in any order:
 | `item` | yes | Item label, matched as in [kit-library files](kit-library-files.md#items). An item appears once per file. |
 | `compartment` or `system` | exactly one | Position key of the item's place. It must be on the vehicle or in the file. |
 | `kind`, `quantity`, `unit`, `outcomes`, `instructions` | as a checklist item | As in a checklist template. `outcomes` defaults to all three. |
+| `expiration_tracked` | no | Whether the item's expiration is recorded, as in a checklist template ([issue #152](https://github.com/JustApu/CheckYourAmbulance/issues/152)). The default is no. Entries carried into a new draft override keep their value. |
 | `kit` | yes | Active kit definition key. |
 | kit `compartment` | yes | Compartment position key. |
 | `count` | yes | Exact required number of that kit there (KDEF-9), at least 1. A definition appears once per compartment. |
