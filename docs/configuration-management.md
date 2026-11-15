@@ -6,10 +6,19 @@
 
 - **Commands, not edits.** Every change is one audited command through `cya.core.audit_commands.run_command` (AUD-1). Screens and vehicle files call the same commands and validation, so the importer and the UI never diverge (issue #130, "Scope/sequence").
 - **History is appended.** Versioned records get new revisions or drafts; nothing published is edited, and nothing is deleted.
-- **Locks.** The vehicle row is the shared lock for a vehicle's configuration. Kits, kit lists, overrides, bindings, compartment designations and the importer already lock it first; position revisions and retirement do too.
-  - A publication or binding that must check a vehicle's positions (CFG-2) first takes its own locks: the version and template, or the override, or the kit list. Then, before the check, it locks every vehicle it applies to, in id order. That includes inactive vehicles and those whose binding takes effect later.
-  - Retirement locks only the vehicle and never a template, so the order (organization when needed, then the versioned record, then vehicles) has no cycle.
-  - Whichever commits first, the other then reads the committed state (READ COMMITTED) and refuses. Part 3 tests both orders for template publication, override publication, kit-list publication and binding.
+- **Locks.** The vehicle row is the shared lock for a vehicle's configuration. Every command takes locks in this one order, skipping the levels it does not need:
+  1. the organization row, only when a rule spans the organization (keys, imports);
+  2. the one versioned record being published, when there is one: the checklist version row, the override row, or the kit-list version (read without locking, then validated under the vehicle lock);
+  3. the affected vehicle rows, in id order;
+  4. kit instance rows (kit moves, seal commands; designating a kit sealable takes only this level);
+  5. checklist templates;
+  6. kit definitions;
+  7. item and deficiency lock rows.
+  - **Where today's writers fit:**
+    - Binding (vehicle, then template), kit commands, kit lists, override publication (override, then vehicle), compartment designations, the importer and the seal commands (vehicle, then kits, templates and definitions) already follow this order.
+    - Part 3 changes template publication from version-then-template to version, then the vehicles bound to the template (including inactive ones and later-effective bindings), then template.
+    - Position revisions and retirement take only level 3; `add_position` takes levels 1 and 3.
+  - **Retirement against publication and binding:** both lock the same vehicle rows before checking positions (CFG-2). Whichever commits first, the other then reads the committed state (READ COMMITTED) and refuses. Part 3 tests both orders for template publication and binding, with distinct actors, and shows that each test fails without its vehicle lock.
 - **Preview, then confirm.** Consequential changes show a preview with a base token, and confirmation recomputes the plan under the locks and refuses a stale token (CFG-6). This is the pattern of the vehicle-file import.
 
 ## Permissions
@@ -35,8 +44,11 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 
 `vehicle.active` is a current-state flag with no history, but CFG-1 needs the instant a vehicle stopped or resumed owing obligations.
 
-- **New table `vehicle_activity_event`** (append-only, kind A): `vehicle_id`, `sequence` (gapless per vehicle), `active`, `recorded_at` and the usual command attribution. The insert guard accepts only `VEHICLE_CREATE`, `VEHICLE_ACTIVE_SET` and `VEHICLE_DUPLICATE` receipts. **Existing vehicles** have no events.
-  - A deploy-time audited command, `record_vehicle_activity_baseline`, appends one baseline event for each one. The event records the vehicle's current flag, marked as a baseline, at the command's recorded instant.
+- **New table `vehicle_activity_event`** (append-only, kind A): `vehicle_id`, `sequence` (gapless per vehicle), `active`, `basis` (`CHANGE` or `BASELINE`), `recorded_at` and the usual command attribution. The insert guard accepts:
+  - `basis = CHANGE` only under a `VEHICLE_CREATE`, `VEHICLE_ACTIVE_SET` or `VEHICLE_DUPLICATE` receipt;
+  - `basis = BASELINE` only under a `VEHICLE_ACTIVITY_BASELINE` receipt, only as sequence 1 of a vehicle that has no events, and only with `active` equal to the vehicle's current flag.
+  - A deploy-time management command, `record_vehicle_activity_baseline`, runs one audited `VEHICLE_ACTIVITY_BASELINE` command. It is attributed to a service identity, as scheduled obligation generation is, with no user actor. Under the organization lock and each vehicle's lock, it appends a `BASELINE` event for every vehicle without events, recording its current flag at the command's recorded instant.
+  - Rerunning it adds nothing for vehicles already baselined, and a replay of the same operation returns the original result.
   - A baseline says only "known active, or inactive, from this instant". It never claims when an inactive vehicle was deactivated. Evaluation before the baseline instant is unchanged from today, with no inactivity exemption, and generation still skips a vehicle whose flag is false.
   - So an existing inactive vehicle reactivated later is exempt between its baseline and its reactivation, and nothing is backfilled.
   - `set_vehicle_active` refuses a vehicle that has no baseline yet, so the baseline can never come after a change.
