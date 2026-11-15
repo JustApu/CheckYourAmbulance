@@ -8,30 +8,26 @@ which blocks it, or asks for confirmation; the command checks again under the ve
 """
 
 import logging
-import uuid
 from urllib.parse import urlencode
 
-from django.http import Http404, HttpResponseRedirect
+from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods
 
-from cya.accounts.returns import sign_in_redirect
-from cya.checklists.models import Vehicle
 from cya.core.audit_commands import CommandDenied, OperationConflict
+from cya.kits import admin_pages
 from cya.kits import positions as position_rules
 from cya.kits.keys import KeyRuleError
 from cya.kits.positions import PositionError
-from cya.kits.views import UNAVAILABLE, _can, _context_ids
-from cya.shell import navigation
-from cya.shell.views import deny_section
+from cya.kits.views import UNAVAILABLE, _context_ids
 
 logger = logging.getLogger(__name__)
 
 ACTION = "manage_vehicle_positions"
-LIST_LIMIT = 500
+DENIAL = "MANAGE_VEHICLE_POSITIONS"
 KINDS = (("COMPARTMENT", "Compartments"), ("SYSTEM", "Systems"))
 SAVED = {
     "add": "Position added.",
@@ -40,38 +36,20 @@ SAVED = {
 }
 
 
-def _allowed(request):
-    """(user, roles) when the user may manage positions, else the response to return."""
-    user = request.cya_user
-    if user is None:
-        return None, sign_in_redirect(request)
-    roles = navigation.roles_for(user)
-    if not _can(user, roles, ACTION):
-        return None, deny_section(request, user, roles, "MANAGE_VEHICLE_POSITIONS")
-    return (user, roles), None
-
-
 @never_cache
 @require_GET
 def vehicles(request):
-    allowed, refused = _allowed(request)
+    allowed, refused = admin_pages.allowed(request, ACTION, DENIAL)
     if refused:
         return refused
     user, _roles = allowed
-    found = list(
-        Vehicle.objects.filter(organization_id=user.organization_id)
-        .order_by("-active", "display_name", "id")
-        .values("id", "display_name", "number", "key", "active")[:LIST_LIMIT]
+    return admin_pages.vehicle_choice(
+        request,
+        user,
+        title="Compartments and systems",
+        intro="Choose a vehicle to add, rename, reorder or retire its compartments and systems.",
+        url_name="vehicle-positions",
     )
-    context = {"title": "Compartments and systems", "vehicles": found, "list_limit": LIST_LIMIT}
-    return render(request, "kits/position_vehicles.html", context)
-
-
-def _vehicle(user, vehicle_id):
-    vehicle = Vehicle.objects.filter(organization_id=user.organization_id, pk=vehicle_id).first()
-    if vehicle is None:
-        raise Http404("no such vehicle")
-    return vehicle
 
 
 def _sections(user, vehicle):
@@ -90,7 +68,7 @@ def _sections(user, vehicle):
                         "display_order": row.display_order,
                         "retired": row.retired,
                         "sealable": getattr(row, "sealable", False),
-                        "operation_id": str(uuid.uuid4()),
+                        "operation_id": admin_pages.new_operation_id(),
                     }
                     for row, key in rows
                 ],
@@ -105,27 +83,13 @@ def _page(request, user, vehicle, *, status=200, errors=None, retiring=None, for
         "vehicle": vehicle,
         "sections": _sections(user, vehicle),
         "kinds": KINDS,
-        "add_operation_id": str(uuid.uuid4()),
+        "add_operation_id": admin_pages.new_operation_id(),
         "errors": errors or [],
         "retiring": retiring,
         "form": form or {},
         "saved": SAVED.get(request.GET.get("saved", "")),
     }
     return render(request, "kits/positions.html", context, status=status)
-
-
-def _operation_id(request):
-    """The form's operation id, only when it is exactly a canonical UUID v4 (PR #170 review).
-
-    UUID(value, version=4) would rewrite another version's bits into a different v4 id, so
-    several submitted strings could map to one idempotency key; anything else is refused.
-    """
-    raw = request.POST.get("operation_id", "")
-    try:
-        parsed = uuid.UUID(raw)
-    except ValueError:
-        return None
-    return raw if parsed.version == 4 and str(parsed) == raw else None
 
 
 def _display_order(value):
@@ -160,7 +124,7 @@ def _retire_preview(request, user, vehicle):
 
 
 def _command(request, user, vehicle, stage):
-    operation_id = _operation_id(request)
+    operation_id = admin_pages.operation_id_from(request)
     if operation_id is None:
         return _page(
             request, user, vehicle, status=400, errors=["the form was not valid; try again"]
@@ -229,11 +193,11 @@ def _command(request, user, vehicle, stage):
 @never_cache
 @require_http_methods(["GET", "POST"])
 def vehicle_positions(request, vehicle_id):
-    allowed, refused = _allowed(request)
+    allowed, refused = admin_pages.allowed(request, ACTION, DENIAL)
     if refused:
         return refused
     user, _roles = allowed
-    vehicle = _vehicle(user, vehicle_id)
+    vehicle = admin_pages.vehicle_of(user, vehicle_id)
     if request.method == "GET":
         return _page(request, user, vehicle)
     stage = request.POST.get("stage")

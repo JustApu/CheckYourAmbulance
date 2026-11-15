@@ -39,7 +39,7 @@ Existing actions cover the rest:
 - `manage_vehicle_kit_lists`: kit lists;
 - `set_configuration_keys`: VINs and keys (Administrator only).
 
-Part 5b opens the Administration section to Supervisors. The landing page lists only the pages the user may open, and each page checks its own action on the server: role administration stays Administrator-only, and import stays with `import_configuration`.
+Part 5b opens the Administration section to Supervisors, and part 5c to Supply Officers, who may manage kit instances (`manage_kit_assignment`). The landing page lists only the pages the user may open, and each page checks its own action on the server: role administration stays Administrator-only, and import stays with `import_configuration`.
 
 ## Vehicle lifecycle (CFG-1)
 
@@ -146,7 +146,12 @@ Each part is one PR, except part 5, which is three (owner decision 2026-11-15, t
      - the Supervisor access above;
      - per vehicle, add, rename, reorder and retire compartments and systems (`cya/kits/position_views.py`);
      - retiring previews what blocks it, or asks for confirmation (CFG-6).
-   - **5c, kit lists and kit instances:** edit and publish kit lists, add kit instances, and duplicate them (CFG-5).
+   - **5c, kit lists and kit instances** (`cya/kits/kit_list_views.py`, `cya/kits/kit_instance_views.py`):
+     - a vehicle's kit list in force, any publication scheduled for later, and its draft;
+     - saving a whole new draft. The editor holds at most as many lines as one form can carry (Django's `DATA_UPLOAD_MAX_NUMBER_FIELDS`, 198 lines by default). A longer list is shown but not offered for editing, and a malformed or partial save is refused, so a save never replaces the draft with part of it;
+     - publishing now, or at a station-local date and time (a time skipped by a clock change is refused). Only these two choices are accepted;
+     - adding a kit instance with its kit type;
+     - duplicating one (CFG-5): pick a vehicle, and its add form opens with the same type.
 6. Checklist screens: templates (create, duplicate, draft edit, publish with an effective date, current, draft and future versions), overrides, and the impact preview of affected vehicles.
 7. Kit definition screens: list, edit, duplicate, publish and deactivate.
 
