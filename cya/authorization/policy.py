@@ -69,6 +69,7 @@ POLICY = MappingProxyType(
         "set_configuration_keys": ("deny", "deny", "deny", "allow"),
         "manage_vehicle_positions": ("deny", "allow", "deny", "allow"),
         "manage_vehicles": ("deny", "allow", "deny", "allow"),
+        "duplicate_configuration": ("deny", "allow", "deny", "allow"),
         "configure_deficiency_categories_severities": ("deny", "deny", "deny", "allow"),
         "regrade_deficiency_severity": ("deny", "allow", "deny", "allow"),
         "record_deficiency_correction": ("allow", "allow", "allow", "allow"),

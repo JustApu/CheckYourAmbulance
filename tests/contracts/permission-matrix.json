@@ -490,6 +490,16 @@
         "Supply Officer": "deny",
         "Administrator": "allow"
       }
+    },
+    {
+      "id": "PERM-48",
+      "action": "duplicate_configuration",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
     }
   ]
 }

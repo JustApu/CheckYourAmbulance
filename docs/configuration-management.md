@@ -110,7 +110,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 |---|---|
 | The vehicle, with the VIN, name and number its creator gives (SPEC 4.0.0), inactive, and its first activity event (inactive) | — |
 | One revision-1 row per position, with a new row id and the **same `stable_slot_id`** as the source position (so copied placements, kit-list lines and bindings resolve on the copy), effective when recorded | Each position's label, order and sealable designation in effect now; retired positions are left out |
-| One draft kit list | The lines in force, mapped to the copy's compartment rows |
+| One draft kit list, empty if the list in force is empty; none if no list is in force | The lines in force, mapped to the copy's compartment rows |
 | One draft override per bound template, over the same template version | Each override in force (none when there is none) |
 | One binding per bound template and slot, effective when recorded | The source's bindings in force |
 | Item locks for the bound templates' items | — |
@@ -119,6 +119,14 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 - **Bindings:** the copy's bindings owe nothing while it is inactive (CFG-1).
 - **Guard change:** the binding insert guard must accept `VEHICLE_DUPLICATE`, as it accepts `VEHICLE_IMPORT` (`cya_kits` 0012).
 - **Preview:** it lists the copied rows and the exclusions above (CFG-6).
+  - `preview_vehicle_duplicate` only reads. The screen that calls it checks `duplicate_configuration`, as the vehicle-file preview's screen checks its own action.
+  - It returns a `base_token`, a digest of everything the copy would take.
+  - `duplicate_vehicle` recomputes the plan under the organization and source vehicle locks, and refuses if the token differs.
+- **Left out, and listed in the preview:**
+  - an override entry that names one of the source's kit instances (kits are not copied);
+  - an override that overlays an older template version than the one in force (stale);
+  - an entry or kit-list line whose position is retired on the source.
+  The copy is still made without them.
 
 ## Duplicating a kit instance (CFG-5)
 
@@ -131,7 +139,7 @@ Each part is one PR. Every part uses `Refs #130`; the last uses `Closes #130`. P
 1. This design page. Merged in PR #153.
 2. Vehicle lifecycle: activity events, commands, obligation exemption and projection, after agreement with issue #131.
 3. Positions: the schema, the commands and the retire checks, plus the vehicle-file changes for order and retirement. Implemented in `cya/kits/positions.py`, with `cya_checklists` 0007 and `cya_kits` 0013.
-4. Duplication: the template and vehicle commands with their previews.
+4. Duplication: the template and vehicle commands with their previews. Implemented in `cya/operations/duplication.py`, with `cya_kits` 0014.
 5. Fleet screens: vehicles (list, search, create, edit, deactivate), positions, kit lists and kit instances, and Supervisor access to the configuration section.
 6. Checklist screens: templates (create, duplicate, draft edit, publish with an effective date, current, draft and future versions), overrides, and the impact preview of affected vehicles.
 7. Kit definition screens: list, edit, duplicate, publish and deactivate.
