@@ -204,6 +204,15 @@ def set_vehicle_active(*, vehicle_id, active, **context):
             # The vehicle row first: the event's guard checks that the two agree.
             Vehicle.objects.filter(pk=vehicle.pk).update(active=active)
             append_activity(vehicle_id, active, "CHANGE", receipt, current, event_id)
+            # Owed obligations change: open screens refresh (delivered only if this commits).
+            from cya.live_updates.publish import publish_vehicle_update
+
+            publish_vehicle_update(
+                organization_id=org,
+                vehicle_id=vehicle_id,
+                event_id=event_id,
+                kind="obligations.changed",
+            )
 
         body = {
             "code": ACTIVE_COMMAND,

@@ -82,6 +82,20 @@ class LifecycleCommandTests(ObligationCase):
         with self.assertRaises(CommandDenied):
             set_vehicle_active(vehicle_id=str(old.pk), active=True, **self.context(self.crew))
 
+    def test_an_activity_change_sends_a_live_obligations_hint(self):
+        from unittest import mock
+
+        record_activity_baseline(str(self.org.pk))
+        vehicle = str(self.vehicles[0].pk)
+        with mock.patch("cya.live_updates.publish.publish_vehicle_update") as publish:
+            result = set_vehicle_active(vehicle_id=vehicle, active=False, **self.context())
+        publish.assert_called_once_with(
+            organization_id=str(self.org.pk),
+            vehicle_id=vehicle,
+            event_id=result.body["event_id"],
+            kind="obligations.changed",
+        )
+
     def test_the_baseline_command_counts_first_then_writes_once(self):
         import io
 
