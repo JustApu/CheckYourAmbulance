@@ -1,0 +1,59 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'vehicle-admin-list' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}</p>
+<dl>
+  <dt>VIN</dt><dd>{{ vehicle.key|default:"Not set" }}</dd>
+  <dt>Active</dt><dd id="vehicle-active">{% if vehicle.active %}Active: owes routine inspections{% else %}Inactive: owes no routine inspection{% endif %}</dd>
+  <dt>Operational status</dt><dd>{{ status_label }}</dd>
+</dl>
+
+{% if changing %}
+<section aria-labelledby="active-heading">
+{% if changing.active %}
+<h2 id="active-heading">Reactivate {{ vehicle.display_name }}</h2>
+<p>Reactivation takes effect when you confirm. Routine inspections are owed again from then on. Nothing is owed for the time it was inactive.</p>
+{% else %}
+<h2 id="active-heading">Deactivate {{ vehicle.display_name }}</h2>
+<p>Deactivation takes effect when you confirm. From then on the vehicle owes no routine inspection, and inspections due later are shown as exempt. Its earlier inspections, checks, deficiencies and other history are kept. It can be reactivated later.</p>
+{% endif %}
+<form method="post" action="{% url 'vehicle-admin' vehicle.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="active">
+  <input type="hidden" name="active" value="{% if changing.active %}1{% else %}0{% endif %}">
+  <input type="hidden" name="operation_id" value="{{ changing.operation_id }}">
+  <p><button type="submit" class="button">{% if changing.active %}Reactivate{% else %}Deactivate{% endif %}</button> <a class="button" href="{% url 'vehicle-admin' vehicle.pk %}">Cancel</a></p>
+</form>
+</section>
+{% endif %}
+
+<h2 id="edit-heading">Name and number</h2>
+<form method="post" action="{% url 'vehicle-admin' vehicle.pk %}" aria-labelledby="edit-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="update">
+  <input type="hidden" name="operation_id" value="{{ edit_operation_id }}">
+  <p><label for="edit-name">Name</label><br><input id="edit-name" name="display_name" value="{{ vehicle.display_name }}" maxlength="200" required></p>
+  <p><label for="edit-number">Number (optional)</label><br><input id="edit-number" name="number" value="{{ vehicle.number|default_if_none:'' }}" maxlength="50"></p>
+  <p><button type="submit" class="button">Save</button></p>
+</form>
+
+{% if links %}<h2>Configuration</h2>
+<ul>{% for link in links %}<li><a href="{{ link.url }}">{{ link.label }}</a></li>{% endfor %}</ul>{% endif %}
+
+<h2>Activity and copies</h2>
+{% if not changing %}
+<form method="post" action="{% url 'vehicle-admin' vehicle.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="active-preview">
+  <input type="hidden" name="active" value="{% if vehicle.active %}0{% else %}1{% endif %}">
+  <p><button type="submit" class="button">{% if vehicle.active %}Deactivate…{% else %}Reactivate…{% endif %}</button></p>
+</form>
+{% endif %}
+{% if can_duplicate %}<p><a class="button" href="{% url 'vehicle-duplicate' vehicle.pk %}">Duplicate…</a></p>{% endif %}
+<p>A vehicle is never deleted. Deactivate it instead.</p>
+</div>
+{% endblock %}

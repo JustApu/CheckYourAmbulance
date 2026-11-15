@@ -140,8 +140,12 @@ Each part is one PR, except part 5, which is three (owner decision 2026-11-15, t
 2. Vehicle lifecycle: activity events, commands, obligation exemption and projection, after agreement with issue #131.
 3. Positions: the schema, the commands and the retire checks, plus the vehicle-file changes for order and retirement. Implemented in `cya/kits/positions.py`, with `cya_checklists` 0007 and `cya_kits` 0013.
 4. Duplication: the template and vehicle commands with their previews. Implemented in `cya/operations/duplication.py`, with `cya_kits` 0014.
-5. Fleet screens, as three PRs, built in the order 5b, 5a, 5c:
-   - **5a, vehicles:** list, search, create, edit, deactivate and reactivate (with a preview), and the duplicate-vehicle screen for part 4's command and preview.
+5. Fleet screens, as three PRs. The owner's order was 5b, 5a, 5c. 5c was built before 5a, and 5a is stacked on it because it reuses 5c's shared page helpers (`cya/kits/admin_pages.py`):
+   - **5a, vehicles** (`cya/operations/vehicle_admin_views.py`, `manage_vehicles`):
+     - the fleet list, searchable by name, number or VIN, showing whether each vehicle is active apart from its operational status;
+     - creating a vehicle with its VIN, and editing its name and number;
+     - deactivating and reactivating: the page states the effect first (CFG-6), and the confirmation is refused if the vehicle is already in the other state;
+     - duplicating (`duplicate_configuration`): part 4's preview lists what is copied and what is not, and the confirmation carries its base token. A changed source refuses it and shows the new preview.
    - **5b, positions and access:**
      - the Supervisor access above;
      - per vehicle, add, rename, reorder and retire compartments and systems (`cya/kits/position_views.py`);

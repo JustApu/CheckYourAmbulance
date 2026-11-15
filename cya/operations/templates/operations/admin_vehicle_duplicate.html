@@ -1,0 +1,52 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'vehicle-admin-list' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}</p>
+{% if unavailable %}
+<p role="alert">The preview could not be loaded; nothing was changed. Try again.</p>
+{% else %}
+<p>The copy is a new, <strong>inactive</strong> vehicle: it owes nothing until it is reactivated. Its kit list and overrides are drafts to publish. {{ vehicle.display_name }} is not changed.</p>
+
+<h2 id="copied-heading">Copied</h2>
+<h3>Compartments and systems</h3>
+{% if copy.positions %}
+<ul id="copy-positions">{% for p in copy.positions %}<li>{% if p.kind == "COMPARTMENT" %}Compartment{% else %}System{% endif %}: {{ p.label }}{% if p.display_order is not None %} (order {{ p.display_order }}){% endif %}{% if p.sealable %} · Sealable{% endif %}</li>{% endfor %}</ul>
+{% else %}<p>None.</p>{% endif %}
+<h3>Kit list (as a draft)</h3>
+{% if not copy.kit_list_in_force %}<p id="copy-kit-list">None: no kit list is in force.</p>
+{% elif copy.kit_lines %}
+<ul id="copy-kit-list">{% for line in copy.kit_lines %}<li>{{ line.required_count }} × {{ line.definition }} in {{ line.compartment }}</li>{% endfor %}</ul>
+{% else %}<p id="copy-kit-list">An empty kit list: the vehicle carries no kits.</p>{% endif %}
+<h3>Overrides (as drafts)</h3>
+{% if copy.overrides %}
+<ul id="copy-overrides">{% for o in copy.overrides %}<li>{{ o.template }}: {{ o.entries }} entr{{ o.entries|pluralize:"y,ies" }}</li>{% endfor %}</ul>
+{% else %}<p>None.</p>{% endif %}
+<h3>Checklist schedules</h3>
+{% if copy.bindings %}
+<ul id="copy-bindings">{% for b in copy.bindings %}<li>{{ b.template }}: {{ b.slots|join:", " }}</li>{% endfor %}</ul>
+{% else %}<p>None.</p>{% endif %}
+
+<h2 id="excluded-heading">Not copied</h2>
+<ul id="copy-excluded">
+{% for reason in copy.excluded %}<li>{{ reason }}</li>{% endfor %}
+{% for what in copy.never_copied %}<li>{{ what }}</li>{% endfor %}
+</ul>
+
+<h2 id="new-heading">The new vehicle</h2>
+<form method="post" action="{% url 'vehicle-duplicate' vehicle.pk %}" aria-labelledby="new-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="duplicate">
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <input type="hidden" name="base_token" value="{{ copy.base_token }}">
+  <p><label for="dup-vin">VIN</label><br><input id="dup-vin" name="vin" value="{{ form.vin }}" maxlength="17" minlength="17" required autocapitalize="characters" spellcheck="false" aria-describedby="dup-vin-help">
+  <br><span id="dup-vin-help">The new vehicle's own VIN: 17 letters and digits, without I, O or Q. It can't be changed later.</span></p>
+  <p><label for="dup-name">Name</label><br><input id="dup-name" name="display_name" value="{{ form.display_name }}" maxlength="200" required></p>
+  <p><label for="dup-number">Number (optional)</label><br><input id="dup-number" name="number" value="{{ form.number }}" maxlength="50"></p>
+  <p><button type="submit" class="button">Duplicate</button> <a class="button" href="{% url 'vehicle-admin' vehicle.pk %}">Cancel</a></p>
+</form>
+<p>If {{ vehicle.display_name }}'s configuration changes before you confirm, nothing is copied and this page shows the new preview.</p>
+{% endif %}
+</div>
+{% endblock %}
