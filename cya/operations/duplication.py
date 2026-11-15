@@ -182,6 +182,7 @@ class VehicleCopyPlan:
 
     source: Vehicle
     positions: list = field(default_factory=list)  # (kind, row in effect now, not retired)
+    kit_list_in_force: bool = False  # an empty list in force ("carries no kits") still copies
     kit_lines: list = field(default_factory=list)  # VehicleKitRequirement rows in force
     overrides: list = field(default_factory=list)  # (template_id, override, [(entry, def)])
     bindings: list = field(default_factory=list)  # (template_id, slot)
@@ -202,6 +203,7 @@ class VehicleCopyPlan:
                 }
                 for kind, row in self.positions
             ],
+            "kit_list_in_force": self.kit_list_in_force,
             "kit_lines": [
                 {
                     "definition_id": str(line.definition_id),
@@ -296,6 +298,7 @@ def plan_vehicle_copy(organization_id, source_vehicle_id, now=None):
     copied_slots = {(kind, str(row.stable_slot_id)) for kind, row in plan.positions}
 
     in_force = kit_list_effective_at(org, str(source.pk), now)
+    plan.kit_list_in_force = in_force is not None
     lines = (
         list(
             VehicleKitRequirement.objects.filter(version=in_force)
@@ -443,7 +446,9 @@ def duplicate_vehicle(*, source_vehicle_id, vin, display_name, number=None, base
             for row_id, kind_slot in plan.slot_of.items():
                 if kind_slot in by_slot:
                     row_for[row_id] = by_slot[kind_slot]
-            if plan.kit_lines:
+            if plan.kit_list_in_force:
+                # CFG-4: one draft copying the lines in force, even when there are none: an
+                # empty list in force means the vehicle carries no kits, not "no list".
                 version = VehicleKitListVersion.objects.create(
                     id=new_id(),
                     organization_id=org,
@@ -515,7 +520,7 @@ def duplicate_vehicle(*, source_vehicle_id, vin, display_name, number=None, base
             "active": False,
             "source_vehicle_id": source_vehicle_id,
             "positions": len(shown["positions"]),
-            "kit_lines": len(shown["kit_lines"]),
+            "kit_list": len(shown["kit_lines"]) if plan.kit_list_in_force else None,
             "overrides": len(shown["overrides"]),
             "override_entries": sum(len(o["entries"]) for o in shown["overrides"]),
             "bindings": shown["bindings"],

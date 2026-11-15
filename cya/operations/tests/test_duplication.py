@@ -14,7 +14,11 @@ from cya.kits.definitions import (
     save_kit_definition_draft,
 )
 from cya.kits.keys import KeyRuleError
-from cya.kits.models import ChecklistKitPlacement, VehicleKitRequirement
+from cya.kits.models import (
+    ChecklistKitPlacement,
+    VehicleKitListPublication,
+    VehicleKitRequirement,
+)
 from cya.kits.tests.support import KitCase
 from cya.obligations.models import RequirementBinding
 from cya.operations.duplication import DEFINITION_FIELDS, DuplicationError, duplicate_template
@@ -377,4 +381,44 @@ class VehicleDuplicationTests(KitCase):
         self.assertIn("Synthetic cabinet 24", labels)
         self.assertEqual(
             plan.bindings, [(str(self.template.pk), "test-0600")], "the latest revision is a BIND"
+        )
+
+    def test_an_empty_kit_list_in_force_is_copied_and_no_list_is_not(self):
+        # PR #166 review: an empty list in force means "carries no kits", which differs from
+        # having no list; CFG-4 copies the list in force either way.
+        from cya.kits.kit_lists import publish_vehicle_kit_list, save_vehicle_kit_list_draft
+        from cya.kits.models import VehicleKitListVersion
+        from cya.operations.duplication import duplicate_vehicle, preview_vehicle_duplicate
+
+        def copy(vin):
+            preview = preview_vehicle_duplicate(str(self.org.pk), str(self.vehicle_b.pk))
+            body = duplicate_vehicle(
+                source_vehicle_id=str(self.vehicle_b.pk),
+                vin=vin,
+                display_name="Synthetic B copy",
+                base_token=preview["base_token"],
+                **self.context(self.supervisor),
+            ).body
+            return (
+                preview,
+                body,
+                VehicleKitListVersion.objects.filter(vehicle_id=body["vehicle_id"]),
+            )
+
+        preview, body, lists = copy("1FDXE4FS8KDC00011")
+        self.assertFalse(preview["kit_list_in_force"])
+        self.assertIsNone(body["kit_list"])
+        self.assertFalse(lists.exists(), "no list in force: the copy gets none")
+
+        empty = save_vehicle_kit_list_draft(
+            vehicle_id=str(self.vehicle_b.pk), lines=[], **self.context()
+        ).body["version_id"]
+        publish_vehicle_kit_list(version_id=empty, **self.context())
+        preview, body, lists = copy("1FDXE4FS8KDC00012")
+        self.assertTrue(preview["kit_list_in_force"])
+        self.assertEqual((preview["kit_lines"], body["kit_list"]), ([], 0))
+        self.assertEqual(lists.count(), 1, "an empty list in force is copied as an empty draft")
+        self.assertFalse(VehicleKitRequirement.objects.filter(version=lists.get()).exists())
+        self.assertFalse(
+            VehicleKitListPublication.objects.filter(version=lists.get()).exists(), "a draft"
         )
