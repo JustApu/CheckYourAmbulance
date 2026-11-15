@@ -107,7 +107,13 @@ class NavigationTests(ShellTestCase):
     def test_each_role_sees_its_sections(self):
         cases = {
             "CREW": ["Fleet", "Inspection", "Vehicle status", "Deficiencies"],
-            "SUPERVISOR": ["Fleet", "Inspection", "Vehicle status", "Deficiencies"],
+            "SUPERVISOR": [
+                "Fleet",
+                "Inspection",
+                "Vehicle status",
+                "Deficiencies",
+                "Administration",
+            ],
             "SUPPLY_OFFICER": ["Fleet", "Inspection", "Vehicle status", "Deficiencies"],
             "ADMINISTRATOR": [
                 "Fleet",
@@ -309,5 +315,5 @@ class SectionTableTests(TestCase):
             self.assertTrue(section.roles and section.roles <= navigation.ALL_ROLES)
         self.assertEqual(
             navigation.section_by_key("administration").roles,
-            frozenset({navigation.ADMINISTRATOR}),
+            frozenset({navigation.SUPERVISOR, navigation.ADMINISTRATOR}),
         )

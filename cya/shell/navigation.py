@@ -35,14 +35,20 @@ class Section:
 
 
 # Placeholders for the feature issues. Inspection, fleet and deficiency
-# records are open to every built-in role (SPEC 3.3); user and role
-# administration is Administrator-only.
+# records are open to every built-in role (SPEC 3.3). Administration is open to
+# Supervisors too (SPEC 2.2.0, issue #130 part 5b): its pages check their own
+# actions, and role administration and import stay Administrator-only.
 SECTIONS = (
     Section("fleet", "Fleet", "fleet", ALL_ROLES),
     Section("inspection", "Inspection", "inspection", ALL_ROLES),
     Section("status", "Vehicle status", "status", ALL_ROLES),
     Section("deficiencies", "Deficiencies", "deficiencies", ALL_ROLES),
-    Section("administration", "Administration", "administration", frozenset({ADMINISTRATOR})),
+    Section(
+        "administration",
+        "Administration",
+        "administration",
+        frozenset({SUPERVISOR, ADMINISTRATOR}),
+    ),
 )
 
 

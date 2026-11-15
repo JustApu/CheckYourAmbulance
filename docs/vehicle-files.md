@@ -9,7 +9,7 @@
 - **Supervisors and Administrators** (policy action `export_configuration`, PERM-43) see the active vehicles with their VINs, download blank templates, and export a vehicle that has a VIN.
 - **Administrators** (`import_configuration`, PERM-42) also import.
 
-Anyone else gets 403, and the denial is audited. The Administration menu entry is Administrator-only, so Supervisors open the page by its address for now.
+Anyone else gets 403, and the denial is audited. Supervisors and Administrators reach the page from Administration ([issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130) part 5b).
 
 ## Keys
 

@@ -39,7 +39,7 @@ Existing actions cover the rest:
 - `manage_vehicle_kit_lists`: kit lists;
 - `set_configuration_keys`: VINs and keys (Administrator only).
 
-The Administration menu entry is Administrator-only today. Part 5 makes the configuration screens reachable by Supervisors too, without showing them the Administrator-only role and import screens.
+Part 5b opens the Administration section to Supervisors. The landing page lists only the pages the user may open, and each page checks its own action on the server: role administration stays Administrator-only, and import stays with `import_configuration`.
 
 ## Vehicle lifecycle (CFG-1)
 
@@ -134,13 +134,19 @@ The screen calls `add_kit_instance` with the source instance's definition, a new
 
 ## Parts
 
-Each part is one PR. Every part uses `Refs #130`; the last uses `Closes #130`. Parts 3 and 4 do not change obligation state, so they need not wait for part 2; the screens (parts 5 to 7) follow the commands they use.
+Each part is one PR, except part 5, which is three (owner decision 2026-11-15, to keep each change reviewable). Every part uses `Refs #130`; the last uses `Closes #130`. Parts 3 and 4 do not change obligation state, so they need not wait for part 2; the screens (parts 5 to 7) follow the commands they use.
 
 1. This design page. Merged in PR #153.
 2. Vehicle lifecycle: activity events, commands, obligation exemption and projection, after agreement with issue #131.
 3. Positions: the schema, the commands and the retire checks, plus the vehicle-file changes for order and retirement. Implemented in `cya/kits/positions.py`, with `cya_checklists` 0007 and `cya_kits` 0013.
 4. Duplication: the template and vehicle commands with their previews. Implemented in `cya/operations/duplication.py`, with `cya_kits` 0014.
-5. Fleet screens: vehicles (list, search, create, edit, deactivate), positions, kit lists and kit instances, and Supervisor access to the configuration section.
+5. Fleet screens, as three PRs, built in the order 5b, 5a, 5c:
+   - **5a, vehicles:** list, search, create, edit, deactivate and reactivate (with a preview), and the duplicate-vehicle screen for part 4's command and preview.
+   - **5b, positions and access:**
+     - the Supervisor access above;
+     - per vehicle, add, rename, reorder and retire compartments and systems (`cya/kits/position_views.py`);
+     - retiring previews what blocks it, or asks for confirmation (CFG-6).
+   - **5c, kit lists and kit instances:** edit and publish kit lists, add kit instances, and duplicate them (CFG-5).
 6. Checklist screens: templates (create, duplicate, draft edit, publish with an effective date, current, draft and future versions), overrides, and the impact preview of affected vehicles.
 7. Kit definition screens: list, edit, duplicate, publish and deactivate.
 
