@@ -272,6 +272,7 @@ class ResealTests(KitCase):
                 inspected_attestation=True,
                 written_attestation=True,
                 observations=[],
+                expected_tip_id=broken.body["event_id"],
                 start_operation_id=audit_start["operation_id"],
                 nested_substitution_ids=[audit_nested.body["substitution_id"]],
                 **self.context(self.crew),
