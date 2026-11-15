@@ -260,6 +260,26 @@ def _require_slots(requirements, vehicle_ids, as_of):
             )
 
 
+def _refuse_retired(requirements, vehicle_ids):
+    """No placement may use a position retired on a vehicle it applies to (SPEC 4.8 CFG-2)."""
+    from cya.kits.positions import refuse_retired
+
+    compartments = [r.compartment_id for r in requirements if r.compartment_id]
+    systems = [r.system_id for r in requirements if r.system_id]
+    for vehicle_id in vehicle_ids:
+        refuse_retired("COMPARTMENT", vehicle_id, compartments, ChecklistValidationError, "it")
+        refuse_retired("SYSTEM", vehicle_id, systems, ChecklistValidationError, "it")
+
+
+def _lock_vehicles(org, vehicle_ids):
+    """Lock vehicle rows in id order: the shared configuration lock, taken before templates."""
+    list(
+        Vehicle.objects.select_for_update()
+        .filter(organization_id=org, pk__in=sorted({str(v) for v in vehicle_ids}))
+        .order_by("pk")
+    )
+
+
 def _active_vehicle_ids(org):
     return list(
         Vehicle.objects.filter(organization_id=org, active=True).values_list("pk", flat=True)
@@ -282,6 +302,14 @@ def publish_template_version(*, version_id, effective_at=None, **context):
         definitions = list(ChecklistItemDef.objects.filter(checklist_version=version))
         if not definitions:
             raise ChecklistValidationError("cannot publish a version without items")
+        from cya.kits.positions import vehicles_bound_to
+
+        # SPEC 4.8 CFG-2: the version applies to the vehicles bound to its template, now or by a
+        # binding recorded for later, active or not. Lock them before the template, as
+        # bind_requirement does (vehicle, then template), so a retirement and this
+        # publication serialize on the vehicle row.
+        applies_to = vehicles_bound_to(org, version.template_id)
+        _lock_vehicles(org, applies_to)
         _locked(ChecklistTemplate, org, version.template_id, "checklist template")
         placements = placements_of(version.pk)
         check_publishable(placements)
@@ -295,6 +323,7 @@ def publish_template_version(*, version_id, effective_at=None, **context):
             )
             requirements = [requirement_from_definition(d, "TEMPLATE") for d in definitions]
             _require_slots(requirements, _active_vehicle_ids(org), final)
+            _refuse_retired(requirements, applies_to)
             ChecklistPublication.objects.create(
                 id=publication_id,
                 organization_id=org,
@@ -506,6 +535,7 @@ def publish_override_version(*, override_version_id, effective_at=None, **contex
                 final,
             )
             _require_slots(_override_requirements(override), [override.vehicle_id], final)
+            _refuse_retired(_override_requirements(override), [override.vehicle_id])
             ChecklistPublication.objects.create(
                 id=publication_id,
                 organization_id=org,

@@ -2786,6 +2786,42 @@
       "action": "set_configuration_keys",
       "mode": "allow",
       "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
+    },
+    {
+      "id": "AUTH-PERM-46-CREW",
+      "criterion": "AC-24",
+      "permission_row": "PERM-46",
+      "actor_role": "Crew",
+      "action": "manage_vehicle_positions",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-46-SUPERVISOR",
+      "criterion": "AC-24",
+      "permission_row": "PERM-46",
+      "actor_role": "Supervisor",
+      "action": "manage_vehicle_positions",
+      "mode": "allow",
+      "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
+    },
+    {
+      "id": "AUTH-PERM-46-SUPPLY_OFFICER",
+      "criterion": "AC-24",
+      "permission_row": "PERM-46",
+      "actor_role": "Supply Officer",
+      "action": "manage_vehicle_positions",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-46-ADMINISTRATOR",
+      "criterion": "AC-24",
+      "permission_row": "PERM-46",
+      "actor_role": "Administrator",
+      "action": "manage_vehicle_positions",
+      "mode": "allow",
+      "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
     }
   ]
 }

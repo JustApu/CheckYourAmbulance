@@ -100,6 +100,9 @@ def _line(org, vehicle, index, entry):
     ).first()
     if compartment is None:
         raise KitListError(f"{where}.compartment_id is not a compartment of this vehicle")
+    from cya.kits.positions import refuse_retired
+
+    refuse_retired("COMPARTMENT", vehicle.pk, [compartment.pk], KitListError, where)
     return {
         "definition_id": str(definition.pk),
         "compartment": compartment,
@@ -199,6 +202,18 @@ def publish_vehicle_kit_list(*, version_id, effective_at=None, **context):
         if VehicleKitListPublication.objects.filter(version=version).exists():
             raise KitListError("vehicle kit list version is already published")
         check_listed_definitions(version)
+        from cya.kits.positions import refuse_retired
+
+        # SPEC 4.8 CFG-2: under the vehicle lock, as a retirement takes it.
+        refuse_retired(
+            "COMPARTMENT",
+            vehicle.pk,
+            VehicleKitRequirement.objects.filter(version=version).values_list(
+                "compartment_id", flat=True
+            ),
+            KitListError,
+            "the kit list",
+        )
         publication_id = new_id()
 
         def apply(receipt, current):

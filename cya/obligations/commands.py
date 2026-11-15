@@ -118,6 +118,16 @@ def bind_requirement(
                 f"the binding is already {'bound' if action == 'BIND' else 'unbound'}"
             )
         revision = prior.revision + 1 if prior else 1
+        if action == "BIND":
+            # SPEC 4.8 CFG-2: a binding cannot make a retired position required again. The
+            # vehicle row is locked above, as a retirement locks it.
+            from django.utils import timezone
+
+            from cya.kits.positions import refuse_retired, template_slot_rows
+
+            rows = template_slot_rows(organization_id, template_id, timezone.now())
+            for kind, row_ids in rows.items():
+                refuse_retired(kind, vehicle_id, row_ids, BindingError, "the template")
 
         def apply(receipt, current):
             effective = requested or receipt.recorded_at

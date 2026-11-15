@@ -89,6 +89,10 @@ def _placement(organization_id, vehicle, compartment_id):
         raise KitError("compartment is not a compartment of the vehicle")
     if not vehicle.active:
         raise KitError("vehicle is inactive")
+    from cya.kits.positions import refuse_retired
+
+    # SPEC 4.8 CFG-2: callers hold the vehicle lock, as a retirement does.
+    refuse_retired("COMPARTMENT", vehicle.pk, [compartment.pk], KitError, "the kit placement")
     return compartment
 
 
