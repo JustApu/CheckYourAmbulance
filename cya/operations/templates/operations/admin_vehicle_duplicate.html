@@ -35,7 +35,7 @@
 </ul>
 
 <h2 id="new-heading">The new vehicle</h2>
-<form method="post" action="{% url 'vehicle-duplicate' vehicle.pk %}" aria-labelledby="new-heading">
+<form method="post" action="{% url 'vehicle-duplicate' vehicle.pk %}" aria-labelledby="new-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="duplicate">
   <input type="hidden" name="operation_id" value="{{ operation_id }}">

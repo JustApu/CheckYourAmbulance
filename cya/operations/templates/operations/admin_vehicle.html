@@ -32,7 +32,7 @@
 {% endif %}
 
 <h2 id="edit-heading">Name and number</h2>
-<form method="post" action="{% url 'vehicle-admin' vehicle.pk %}" aria-labelledby="edit-heading">
+<form method="post" action="{% url 'vehicle-admin' vehicle.pk %}" aria-labelledby="edit-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="update">
   <input type="hidden" name="operation_id" value="{{ edit_operation_id }}">

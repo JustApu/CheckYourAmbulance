@@ -66,6 +66,12 @@ class VehiclePagesTests(KitCase):
         self.assertContains(page, f'href="{self.duplicate_url}"')
         self.assertContains(page, f'href="/administration/positions/{self.vehicle.pk}/"')
         self.assertEqual(self.client_.get(f"{LIST}{uuid.uuid4()}/").status_code, 404)
+        # Text fields use the full-size admin form style (48 px), not the browser default
+        # (issue #111 rendered check on PR #174).
+        self.assertContains(listing, 'class="admin-form"', count=2)
+        self.assertContains(page, 'class="admin-form"', count=1)
+        self.assertContains(self.client_.get(self.duplicate_url), 'class="admin-form"', count=1)
+        self.assertContains(listing, ".admin-form input:not([type=")
 
     def test_the_list_searches_and_keeps_active_apart_from_operational_status(self):
         status_commands.set_vehicle_status(
