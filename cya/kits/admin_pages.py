@@ -56,11 +56,17 @@ def vehicle_choice(request, user, *, title, intro, url_name):
 
 
 def operation_id_from(request):
-    """The form's operation id (a UUID v4), or None when it is missing or malformed."""
+    """The form's operation id, only when it is exactly a canonical UUID v4 (PR #170 review).
+
+    UUID(value, version=4) would rewrite another version's bits into a different v4 id, so
+    several submitted strings could map to one idempotency key; anything else is refused.
+    """
+    raw = request.POST.get("operation_id", "")
     try:
-        return str(uuid.UUID(request.POST.get("operation_id", ""), version=4))
+        parsed = uuid.UUID(raw)
     except ValueError:
         return None
+    return raw if parsed.version == 4 and str(parsed) == raw else None
 
 
 def new_operation_id():

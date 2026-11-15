@@ -202,6 +202,28 @@ class KitInstancePageTests(KitAdminCase):
         )
         self.assertContains(missing, "choose the kit type", status_code=400)
 
+    def test_only_a_canonical_uuid_v4_operation_id_is_accepted(self):
+        # A v1 or non-canonical id is refused rather than rewritten into some other
+        # idempotency key (PR #170 review, applied to the shared helper).
+        for other in (
+            "not-a-uuid",
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",  # version 1
+            str(uuid.uuid4()).upper(),
+            "{" + str(uuid.uuid4()) + "}",
+        ):
+            with self.subTest(operation_id=other):
+                response = self.post(
+                    self.client_,
+                    self.url,
+                    stage="add",
+                    definition_id=self.definition,
+                    compartment_id=str(self.cabinet.pk),
+                    label="Synthetic jump kit 2",
+                    operation_id=other,
+                )
+                self.assertEqual(response.status_code, 400)
+        self.assertFalse(KitInstance.objects.filter(label="Synthetic jump kit 2").exists())
+
     def test_duplicate_opens_the_target_vehicles_form_with_the_type_filled_in(self):
         target = self.vehicle_b
         response = self.client_.get(
