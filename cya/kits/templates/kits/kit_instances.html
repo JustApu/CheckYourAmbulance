@@ -1,0 +1,54 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'kit-instance-vehicles' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} · Inactive{% endif %}</p>
+
+<h2 id="kits-heading">Kits on this vehicle</h2>
+{% if kits %}
+<div class="table-scroll" role="region" aria-labelledby="kits-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Kit</th><th scope="col">Type</th><th scope="col">Compartment</th><th scope="col">Duplicate</th></tr></thead>
+  <tbody>
+  {% for kit in kits %}
+    <tr>
+      <td>{{ kit.label }}</td><td>{{ kit.definition|default:"(no kit type)" }}</td><td>{{ kit.compartment }}</td>
+      <td>{% if kit.definition_id %}
+        <form method="get" action="{% url 'kit-instance-duplicate' %}">
+          <input type="hidden" name="definition" value="{{ kit.definition_id }}">
+          <input type="hidden" name="label" value="{{ kit.label }} (copy)">
+          <select name="vehicle" aria-label="Vehicle for a copy of {{ kit.label }}">
+            {% for v in vehicles %}<option value="{{ v.id }}"{% if v.id == vehicle.pk %} selected{% endif %}>{{ v.display_name }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="button" aria-label="Duplicate {{ kit.label }}">Duplicate…</button>
+        </form>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p>No active kits.</p>{% endif %}
+
+<h2 id="add-heading">Add a kit</h2>
+<form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}" aria-labelledby="add-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="add">
+  <input type="hidden" name="operation_id" value="{{ add_operation_id }}">
+  <p><label for="add-definition">Kit type</label><br>
+  <select id="add-definition" name="definition_id" required>
+    <option value="">(choose)</option>
+    {% for d in definitions %}<option value="{{ d.pk }}"{% if form.definition_id == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
+  </select></p>
+  <p><label for="add-compartment">Compartment</label><br>
+  <select id="add-compartment" name="compartment_id" required>
+    <option value="">(choose)</option>
+    {% for c in compartments %}<option value="{{ c.pk }}"{% if form.compartment_id == c.pk|stringformat:"s" %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
+  </select></p>
+  <p><label for="add-label">Label</label><br><input id="add-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
+  <p><button type="submit" class="button">Add kit</button></p>
+</form>
+</div>
+{% endblock %}

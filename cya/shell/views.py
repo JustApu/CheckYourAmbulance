@@ -83,6 +83,18 @@ ADMINISTRATION_LINKS = (
         "export_configuration",
     ),
     (
+        "kit-list-vehicles",
+        "Kit lists",
+        "edit and publish the kits each vehicle must carry.",
+        "manage_vehicle_kit_lists",
+    ),
+    (
+        "kit-instance-vehicles",
+        "Kit instances",
+        "add a kit to a vehicle, or duplicate one.",
+        "manage_kit_assignment",
+    ),
+    (
         "position-vehicles",
         "Compartments and systems",
         "add, rename, reorder and retire a vehicle's positions.",

@@ -114,7 +114,13 @@ class NavigationTests(ShellTestCase):
                 "Deficiencies",
                 "Administration",
             ],
-            "SUPPLY_OFFICER": ["Fleet", "Inspection", "Vehicle status", "Deficiencies"],
+            "SUPPLY_OFFICER": [
+                "Fleet",
+                "Inspection",
+                "Vehicle status",
+                "Deficiencies",
+                "Administration",
+            ],
             "ADMINISTRATOR": [
                 "Fleet",
                 "Inspection",
@@ -315,5 +321,5 @@ class SectionTableTests(TestCase):
             self.assertTrue(section.roles and section.roles <= navigation.ALL_ROLES)
         self.assertEqual(
             navigation.section_by_key("administration").roles,
-            frozenset({navigation.SUPERVISOR, navigation.ADMINISTRATOR}),
+            frozenset({navigation.SUPERVISOR, navigation.SUPPLY_OFFICER, navigation.ADMINISTRATOR}),
         )

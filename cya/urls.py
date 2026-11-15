@@ -12,7 +12,7 @@ from cya.deficiencies import api as deficiency_api
 from cya.inspections import api as inspection_api
 from cya.inspections import views as inspection_views
 from cya.inspections import workflow_views
-from cya.kits import position_views, vehicle_views
+from cya.kits import kit_instance_views, kit_list_views, position_views, vehicle_views
 from cya.kits import views as kit_views
 from cya.notifications import api as notifications_api
 from cya.odometer import api as odometer_api
@@ -98,6 +98,27 @@ urlpatterns = [
         name="kit-library-template",
     ),
     path("administration/kits/export.<str:fmt>", kit_views.export, name="kit-library-export"),
+    path("administration/kit-lists/", kit_list_views.vehicles, name="kit-list-vehicles"),
+    path(
+        "administration/kit-lists/<uuid:vehicle_id>/",
+        kit_list_views.vehicle_kit_list,
+        name="vehicle-kit-list",
+    ),
+    path(
+        "administration/kit-instances/",
+        kit_instance_views.vehicles,
+        name="kit-instance-vehicles",
+    ),
+    path(
+        "administration/kit-instances/duplicate/",
+        kit_instance_views.duplicate,
+        name="kit-instance-duplicate",
+    ),
+    path(
+        "administration/kit-instances/<uuid:vehicle_id>/",
+        kit_instance_views.vehicle_kit_instances,
+        name="vehicle-kit-instances",
+    ),
     path("administration/positions/", position_views.vehicles, name="position-vehicles"),
     path(
         "administration/positions/<uuid:vehicle_id>/",
