@@ -406,8 +406,13 @@ class Issue156LockBenchmark(KitCase):
             # Baseline with one command thread at a time on each vehicle.
             self.mode.name = "alone"
             self.current_mode = "alone"
-            for _ in range(self.iterations):
-                for subject in self.subjects:
+            for iteration in range(self.iterations):
+                for subject_index, subject in enumerate(self.subjects):
+                    print(
+                        f"ISSUE156_PROGRESS mode=alone iteration={iteration + 1}/"
+                        f"{self.iterations} vehicle={subject_index + 1}",
+                        flush=True,
+                    )
                     self._verify(subject)
                     self._reseal(subject)
                     self._count(subject)
@@ -421,7 +426,12 @@ class Issue156LockBenchmark(KitCase):
                     barrier.wait(timeout=20)
                     self.mode.name = "contended"
                     self.current_mode = "contended"
-                    for _ in range(self.iterations):
+                    for iteration in range(self.iterations):
+                        print(
+                            f"ISSUE156_PROGRESS mode=contended iteration={iteration + 1}/"
+                            f"{self.iterations} vehicle={self.subjects.index(subject) + 1}",
+                            flush=True,
+                        )
                         self._verify(subject)
                         self._reseal(subject)
                         self._count(subject)
@@ -433,7 +443,13 @@ class Issue156LockBenchmark(KitCase):
                     barrier.wait(timeout=20)
                     self.mode.name = "contended"
                     self.current_mode = "contended"
-                    return self._publish(self.subjects[0])
+                    print(
+                        "ISSUE156_PROGRESS mode=contended action=template-publication",
+                        flush=True,
+                    )
+                    result = self._publish(self.subjects[0])
+                    print("ISSUE156_PROGRESS mode=contended publication=complete", flush=True)
+                    return result
                 finally:
                     connection.close()
 
