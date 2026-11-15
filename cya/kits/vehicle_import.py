@@ -169,11 +169,16 @@ def _check_item(entry, where, errors):
     if not isinstance(instructions, str) or len(instructions) > MAX_INSTRUCTIONS:
         errors.append(f"{where}.instructions: at most {MAX_INSTRUCTIONS} characters")
         return None
+    tracked = entry.get("expiration_tracked", False)
+    if type(tracked) is not bool:
+        errors.append(f"{where}.expiration_tracked: must be true or false")
+        return None
     return {
         "kind": spec["kind"],
         "expected_quantity": quantity,
         "unit": unit,
         "allowed_outcomes": list(outcomes),
+        "expiration_tracked": tracked,
         "instructions": instructions,
     }
 
@@ -184,6 +189,7 @@ def _signature(fields, kind, slot):
         fields["expected_quantity"],
         fields["unit"],
         tuple(fields["allowed_outcomes"]),
+        fields["expiration_tracked"],
         fields["instructions"],
         kind,
         str(slot),
@@ -199,6 +205,7 @@ def _requirement_signature(requirement, slot_of):
             "expected_quantity": requirement.expected_quantity,
             "unit": requirement.unit,
             "allowed_outcomes": list(requirement.allowed_outcomes),
+            "expiration_tracked": requirement.expiration_tracked,
             "instructions": requirement.instructions,
         },
         kind,
@@ -729,6 +736,7 @@ def _apply(org, plan, receipt, current, vehicle_id, kit_ids):
                     expected_quantity=old.expected_quantity,
                     unit=old.unit,
                     allowed_outcomes=old.allowed_outcomes,
+                    expiration_tracked=old.expiration_tracked,
                     compartment_id=old.compartment_id,
                     system_id=old.system_id,
                     kit_id=old.kit_id,
@@ -1016,6 +1024,7 @@ def vehicle_file(organization_id, vehicle_id, template_id=None):
                 "expected_quantity": requirement.expected_quantity,
                 "unit": requirement.unit,
                 "allowed_outcomes": list(requirement.allowed_outcomes),
+                "expiration_tracked": requirement.expiration_tracked,
                 "instructions": requirement.instructions,
             }
         )

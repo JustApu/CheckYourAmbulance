@@ -8,7 +8,8 @@ The normal form is one dict:
   vin, display_name, number (or None), template (template key), schedule (schedule slot or None),
   compartments / systems: [{"key", "label"}], in file order,
   items: [{"item" (label), "compartment" or "system" (position key), "kind",
-           "expected_quantity", "unit", "allowed_outcomes", "instructions"}], in file order,
+           "expected_quantity", "unit", "allowed_outcomes", "expiration_tracked",
+           "instructions"}], in file order,
   kits:  [{"kit" (kit definition key), "compartment" (position key), "count"}], in file order.
 
 CSV has one row per record, the record type in the "record" column (vehicle, compartment,
@@ -25,6 +26,7 @@ from cya.kits.library_files import (
     FORMATS,
     FileErrors,
     _Collector,
+    _csv_bool,
     _csv_int,
     _neutralize,
     _text,
@@ -53,6 +55,7 @@ CSV_COLUMNS = (
     "quantity",
     "unit",
     "outcomes",
+    "expiration_tracked",
     "instructions",
     "kit",
     "count",
@@ -72,7 +75,17 @@ VEHICLE_FIELDS = frozenset(
 )
 POSITION_FIELDS = frozenset({"key", "label"})
 ITEM_FIELDS = frozenset(
-    {"item", "compartment", "system", "kind", "quantity", "unit", "outcomes", "instructions"}
+    {
+        "item",
+        "compartment",
+        "system",
+        "kind",
+        "quantity",
+        "unit",
+        "outcomes",
+        "expiration_tracked",
+        "instructions",
+    }
 )
 KIT_FIELDS = frozenset({"kit", "compartment", "count"})
 
@@ -117,6 +130,7 @@ def _json_item(raw, where, found):
         "expected_quantity": raw.get("quantity"),
         "unit": raw.get("unit"),
         "allowed_outcomes": raw.get("outcomes", list(DEFAULT_OUTCOMES)),
+        "expiration_tracked": raw.get("expiration_tracked", False),
         "instructions": raw.get("instructions", ""),
     }
 
@@ -211,6 +225,7 @@ RECORD_COLUMNS = {
         "quantity",
         "unit",
         "outcomes",
+        "expiration_tracked",
         "instructions",
     },
     "kit": {"kit", "compartment", "count"},
@@ -273,6 +288,9 @@ def _parse_csv(text):
                     ),
                     "unit": row["unit"].strip() or None,
                     "allowed_outcomes": outcomes,
+                    "expiration_tracked": _csv_bool(
+                        row["expiration_tracked"], f"{where}, expiration_tracked", found
+                    ),
                     "instructions": row["instructions"],
                 }
             )
@@ -308,6 +326,7 @@ def _json_document(vehicle):
             "quantity": entry["expected_quantity"],
             "unit": entry["unit"],
             "outcomes": entry["allowed_outcomes"],
+            "expiration_tracked": entry.get("expiration_tracked", False),
             "instructions": entry["instructions"],
         }
 
@@ -365,6 +384,7 @@ def render(vehicle, fmt):
             quantity=entry["expected_quantity"],
             unit=entry["unit"],
             outcomes="|".join(entry["allowed_outcomes"]),
+            expiration_tracked="yes" if entry.get("expiration_tracked") else "no",
             instructions=entry["instructions"],
         )
     for kit in vehicle["kits"]:
@@ -392,6 +412,7 @@ TEMPLATE_VEHICLE = {
             "expected_quantity": None,
             "unit": None,
             "allowed_outcomes": list(DEFAULT_OUTCOMES),
+            "expiration_tracked": False,
             "instructions": "",
         },
         {
@@ -402,6 +423,7 @@ TEMPLATE_VEHICLE = {
             "expected_quantity": None,
             "unit": None,
             "allowed_outcomes": list(DEFAULT_OUTCOMES),
+            "expiration_tracked": False,
             "instructions": "Switch on and walk around the vehicle.",
         },
     ],

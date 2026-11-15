@@ -26,6 +26,26 @@ class RoundTripTests(SimpleTestCase):
         self.assertIn(b"'=HYPERLINK(1)", data)
         self.assertEqual(vehicle_files.parse(data, "csv"), vehicle)
 
+    def test_expiration_tracked_round_trips_and_defaults_to_no(self):
+        # Issue #152: the setting is never silently dropped.
+        vehicle = copy.deepcopy(vehicle_files.TEMPLATE_VEHICLE)
+        vehicle["items"][0]["expiration_tracked"] = True
+        for fmt in vehicle_files.FORMATS:
+            with self.subTest(fmt=fmt):
+                parsed = vehicle_files.parse(vehicle_files.render(vehicle, fmt), fmt)
+                self.assertEqual(parsed, vehicle)
+        document = json.loads(vehicle_files.render(vehicle, "json"))
+        del document["vehicle"]["items"][0]["expiration_tracked"]
+        parsed = vehicle_files.parse(json.dumps(document).encode(), "json")
+        self.assertIs(parsed["items"][0]["expiration_tracked"], False)
+        csv_text = vehicle_files.render(vehicle, "csv").decode()
+        self.assertIn(",yes,", csv_text)
+        parsed = vehicle_files.parse(csv_text.replace(",yes,", ",,").encode(), "csv")
+        self.assertIs(parsed["items"][0]["expiration_tracked"], False)
+        with self.assertRaises(FileErrors) as caught:
+            vehicle_files.parse(csv_text.replace(",yes,", ",maybe,").encode(), "csv")
+        self.assertTrue(any("expiration_tracked" in e for e in caught.exception.errors))
+
 
 class MalformedFileTests(SimpleTestCase):
     def errors(self, data, fmt):

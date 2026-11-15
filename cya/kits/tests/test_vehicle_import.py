@@ -255,6 +255,72 @@ class RoundTripTests(VehicleImportCase):
         self.assertEqual(copy.deepcopy(exported)["vin"], VIN)
 
 
+class ExpirationTrackedTests(VehicleImportCase):
+    """Issue #152: vehicle files carry expiration_tracked for items outside kits."""
+
+    WRENCH = "Synthetic oxygen wrench"
+
+    def item(self, label=WRENCH, tracked=True, **changes):
+        return {
+            "item": label,
+            "compartment": "drawer",
+            "system": None,
+            "kind": "PRESENCE_CONDITION",
+            "expected_quantity": None,
+            "unit": None,
+            "allowed_outcomes": ["PASSED", "FAILED", "UNABLE_TO_INSPECT"],
+            "expiration_tracked": tracked,
+            "instructions": "",
+            **changes,
+        }
+
+    def entries(self, override):
+        return {
+            e.item.label: e.definition.expiration_tracked
+            for e in VehicleOverrideItem.objects.filter(override_version=override).select_related(
+                "item", "definition"
+            )
+        }
+
+    def publish_override(self, vehicle):
+        from cya.checklists import commands
+
+        override = VehicleOverrideVersion.objects.filter(vehicle=vehicle).latest("revision")
+        commands.publish_override_version(override_version_id=str(override.pk), **self.context())
+        return override
+
+    def test_imports_write_it_carry_it_and_export_it(self):
+        self.import_(self.file(items=[self.item()]))
+        vehicle = Vehicle.objects.get(key=VIN)
+        first = self.publish_override(vehicle)
+        self.assertEqual(self.entries(first), {self.WRENCH: True})
+        # A later file that changes another item carries the wrench entry, setting and all.
+        self.import_(self.file(items=[self.item(), self.item("Synthetic spare fuse", False)]))
+        second = VehicleOverrideVersion.objects.filter(vehicle=vehicle).latest("revision")
+        self.assertNotEqual(second.pk, first.pk)
+        self.assertEqual(self.entries(second), {self.WRENCH: True, "Synthetic spare fuse": False})
+        self.publish_override(vehicle)
+        exported = vehicle_file(str(self.org.pk), str(vehicle.pk))
+        tracked = {e["item"]: e["expiration_tracked"] for e in exported["items"]}
+        self.assertEqual(tracked[self.WRENCH], True)
+        self.assertEqual(tracked["Synthetic spare fuse"], False)
+        # Turning the setting off is a change, not a no-op.
+        plan = preview_vehicle_file(
+            str(self.org.pk),
+            self.file(items=[self.item(tracked=False), self.item("Synthetic spare fuse", False)]),
+            "json",
+        )
+        self.assertEqual(plan.errors, [])
+        # Only the wrench changes; the fuse already matches the published override.
+        self.assertEqual(plan.summary()["override_entries"], 1)
+
+    def test_a_value_other_than_true_or_false_is_an_input_error(self):
+        plan = preview_vehicle_file(
+            str(self.org.pk), self.file(items=[self.item(tracked="yes")]), "json"
+        )
+        self.assertTrue(any("expiration_tracked: must be true or false" in e for e in plan.errors))
+
+
 class ReviewFindingTests(VehicleImportCase):
     """Codex review 5907353408 of PR #150: findings 1 to 5."""
 
