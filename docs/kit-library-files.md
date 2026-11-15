@@ -9,7 +9,7 @@
 - **Supervisors and Administrators** (policy action `export_configuration`, PERM-43) see the definitions and download blank templates and the current library.
 - **Administrators** (`import_configuration`, PERM-42) also import.
 
-Anyone else gets 403, and the denial is audited. The Administration menu entry is Administrator-only, so Supervisors open the page by its address for now. Issue #130 adds the management screens.
+Anyone else gets 403, and the denial is audited. Supervisors and Administrators reach the page from Administration ([issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130) part 5b), which also adds the management screens.
 
 ## Import
 

@@ -1,0 +1,88 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'position-vehicles' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} · Inactive{% endif %}</p>
+
+{% if retiring %}
+<section aria-labelledby="retire-heading">
+<h2 id="retire-heading">Retire {{ retiring.row.label }}</h2>
+{% if retiring.blockers %}
+<p>This position cannot be retired while these still use it:</p>
+<ul id="retire-blockers">{% for reason in retiring.blockers %}<li>{{ reason }}</li>{% endfor %}</ul>
+<p><a class="button" href="{% url 'vehicle-positions' vehicle.pk %}">Back</a></p>
+{% else %}
+<p>Nothing published uses this position. Retiring it keeps its history, removes it from this vehicle's lists and stops anything from being placed there. It cannot be undone here.</p>
+<form method="post" action="{% url 'vehicle-positions' vehicle.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="retire">
+  <input type="hidden" name="kind" value="{{ retiring.kind }}">
+  <input type="hidden" name="slot" value="{{ retiring.row.slot }}">
+  <input type="hidden" name="operation_id" value="{{ retiring.row.operation_id }}">
+  <p><button type="submit" class="button">Retire</button> <a class="button" href="{% url 'vehicle-positions' vehicle.pk %}">Cancel</a></p>
+</form>
+{% endif %}
+</section>
+{% endif %}
+
+{% for section in sections %}
+<h2 id="heading-{{ section.kind|lower }}">{{ section.heading }}</h2>
+{% if section.rows %}
+<div class="table-scroll" role="region" aria-labelledby="heading-{{ section.kind|lower }}" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Name and order</th><th scope="col">Key</th><th scope="col">Status</th><th scope="col">Retire</th></tr></thead>
+  <tbody>
+  {% for row in section.rows %}
+    <tr>
+      <td>{% if row.retired %}{{ row.label }}{% else %}
+        <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="stage" value="revise">
+          <input type="hidden" name="kind" value="{{ section.kind }}">
+          <input type="hidden" name="slot" value="{{ row.slot }}">
+          <input type="hidden" name="operation_id" value="{{ row.operation_id }}">
+          <label for="label-{{ row.slot }}">Name</label>
+          <input id="label-{{ row.slot }}" name="label" value="{{ row.label }}" maxlength="200" required>
+          <label for="order-{{ row.slot }}">Order</label>
+          <input id="order-{{ row.slot }}" name="display_order" value="{{ row.display_order|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*" size="4">
+          <button type="submit" class="button">Save</button>
+        </form>{% endif %}</td>
+      <td>{{ row.key|default:"Not set" }}</td>
+      <td>{% if row.retired %}Retired{% else %}In use{% if row.sealable %} · Sealable{% endif %}{% endif %}</td>
+      <td>{% if not row.retired %}
+        <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="stage" value="retire-preview">
+          <input type="hidden" name="kind" value="{{ section.kind }}">
+          <input type="hidden" name="slot" value="{{ row.slot }}">
+          <button type="submit" class="button" aria-label="Retire {{ row.label }}">Retire…</button>
+        </form>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p>None yet.</p>
+{% endif %}
+{% endfor %}
+
+<h2 id="add-heading">Add a position</h2>
+<form method="post" action="{% url 'vehicle-positions' vehicle.pk %}" aria-labelledby="add-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="add">
+  <input type="hidden" name="operation_id" value="{{ add_operation_id }}">
+  <fieldset><legend>Kind</legend>
+  {% for kind, heading in kinds %}<label><input type="radio" name="kind" value="{{ kind }}"{% if form.kind == kind or not form.kind and forloop.first %} checked{% endif %}> {{ heading|slice:":-1" }}</label> {% endfor %}
+  </fieldset>
+  <p><label for="add-label">Name</label><br><input id="add-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
+  <p><label for="add-key">Key</label><br><input id="add-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="add-key-help">
+  <br><span id="add-key-help">Lowercase letters, digits, dots, dashes and underscores. A key already used on another vehicle adds this vehicle's place in that position. A key can't be changed later.</span></p>
+  <p><label for="add-order">Order (optional)</label><br><input id="add-order" name="display_order" value="{{ form.display_order }}" inputmode="numeric" pattern="[0-9]*" size="4"></p>
+  <p><button type="submit" class="button">Add</button></p>
+</form>
+</div>
+{% endblock %}

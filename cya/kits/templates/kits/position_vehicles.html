@@ -1,0 +1,21 @@
+{% extends "shell/base.html" %}
+{% block content %}
+<div class="kit-library">
+<p>Choose a vehicle to add, rename, reorder or retire its compartments and systems.</p>
+{% if vehicles %}
+<div class="table-scroll" role="region" aria-label="Vehicles" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Vehicle</th><th scope="col">Number</th><th scope="col">VIN</th><th scope="col">Status</th></tr></thead>
+  <tbody>
+  {% for v in vehicles %}
+    <tr><td><a href="{% url 'vehicle-positions' v.id %}">{{ v.display_name }}</a></td><td>{{ v.number|default:"" }}</td><td>{{ v.key|default:"Not set" }}</td><td>{% if v.active %}Active{% else %}Inactive{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if vehicles|length == list_limit %}<p>Showing the first {{ list_limit }} vehicles.</p>{% endif %}
+{% else %}
+<p>No vehicles yet.</p>
+{% endif %}
+</div>
+{% endblock %}
