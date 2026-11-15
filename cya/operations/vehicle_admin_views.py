@@ -245,6 +245,10 @@ def vehicle(request, vehicle_id):
     if ids is None:
         return render_error(400, ["the form was not valid; try again"])
     if stage == "update":
+        # Both fields are always posted; a missing one is a malformed form, never a request to
+        # clear it (a blank number in the form does clear it).
+        if "display_name" not in request.POST or "number" not in request.POST:
+            return render_error(400, ["the form was not valid; try again"])
         saved = "updated"
 
         def call():

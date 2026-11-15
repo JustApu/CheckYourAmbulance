@@ -123,6 +123,14 @@ class VehiclePagesTests(KitCase):
         self.assertIsNone(self.vehicle.number)
         same = self.post(self.url, stage="update", display_name="Synthetic Renamed", number="")
         self.assertContains(same, "already has those values", status_code=400)
+        self.post(self.url, stage="update", display_name="Synthetic Renamed", number="7")
+        # A form without its number field is malformed, not a request to clear the number.
+        partial = self.post(self.url, stage="update", display_name="Synthetic Other")
+        self.assertContains(partial, "the form was not valid", status_code=400)
+        self.vehicle.refresh_from_db()
+        self.assertEqual(
+            (self.vehicle.display_name, self.vehicle.number), ("Synthetic Renamed", "7")
+        )
 
     def test_deactivation_previews_then_applies_and_a_stale_confirmation_is_refused(self):
         record_activity_baseline(self.org.pk)
