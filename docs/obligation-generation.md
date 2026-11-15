@@ -37,8 +37,8 @@ inspected at 06:00 and 18:00 against the ambulance checklist" has to be stored s
 vehicle follows one checklist **template** and one schedule **slot**, from an effective instant. A vehicle may have
 several (two slots for Ambulance 1; weekday and weekend slots for Ambulance 2). Revisions per
 (vehicle, template, slot) are consecutive, strictly later in effective time, never retroactive, and either `BIND`
-or `UNBIND`; the latest revision in force at an instant decides. Only an active administrator appends them
-(`bind_requirement`).
+or `UNBIND`; the latest revision in force at an instant decides. Authorized commands append each
+binding with the initiating human actor attributed; they are never produced by a worker.
 
 This is a reversible implementation choice made to satisfy the issue, not a product decision. **Item-specific
 schedules** (SPEC §5.2, "item-specific schedules override fleet defaults where defined") are not modelled: nothing

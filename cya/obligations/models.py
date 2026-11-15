@@ -161,7 +161,7 @@ class RequirementBinding(Evidence):
             ),
             models.CheckConstraint(condition=non_blank("slot"), name="binding_slot"),
             actor_kind("binding_actor_kind"),
-            # Bindings are administrator decisions, never produced by a worker.
+            # Bindings require a human actor and are never produced by a worker.
             models.CheckConstraint(
                 condition=models.Q(actor_user__isnull=False), name="binding_human_only"
             ),
