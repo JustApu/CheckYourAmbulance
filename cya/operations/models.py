@@ -122,3 +122,64 @@ class StatusRequest(Evidence):
 
     def __str__(self):
         return f"StatusRequest {self.pk}"
+
+
+ACTIVITY_BASES = ("CHANGE", "BASELINE")
+
+
+class VehicleActivityEvent(models.Model):
+    """When a vehicle became active or inactive (SPEC 4.8 CFG-1, issue #130).
+
+    Append-only, one linear chain per vehicle like vehicle_status_event. A CHANGE event is
+    written by vehicle creation, activation or duplication under that command's receipt. A
+    BASELINE event is written once per vehicle that predates this table, by the
+    VEHICLE_ACTIVITY_BASELINE command, which runs as a service identity: its receipt names the
+    service and the event has no user actor. A baseline records the vehicle's flag "as known
+    from this instant"; it never claims when an inactive vehicle was deactivated.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    sequence = models.PositiveBigIntegerField()
+    prior_event = models.OneToOneField(
+        "self", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    active = models.BooleanField()
+    basis = models.CharField(max_length=10)
+    command = models.ForeignKey(
+        "cya_core.CommandReceipt", on_delete=models.PROTECT, related_name="+"
+    )
+    recorded_at = models.DateTimeField()
+    actor_user = models.ForeignKey(
+        "cya_accounts.User", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    actor_roles_at_time = models.JSONField(default=list)
+
+    class Meta:
+        db_table = "vehicle_activity_event"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="activity_event_org_id"),
+            models.UniqueConstraint(fields=["vehicle", "sequence"], name="activity_event_sequence"),
+            models.CheckConstraint(condition=models.Q(sequence__gte=1), name="activity_event_seq"),
+            models.CheckConstraint(
+                condition=models.Q(basis__in=ACTIVITY_BASES), name="activity_event_basis"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(active__in=[True, False]), name="activity_event_active_bool"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(prior_event__isnull=False) | models.Q(sequence=1),
+                name="activity_event_first",
+            ),
+            # Only a baseline, written by the service, has no user actor; a baseline is always
+            # a vehicle's first event.
+            models.CheckConstraint(
+                condition=models.Q(basis="CHANGE", actor_user__isnull=False)
+                | models.Q(basis="BASELINE", sequence=1),
+                name="activity_event_actor",
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleActivityEvent {self.pk}"

@@ -10,6 +10,7 @@ from django.utils import timezone
 from cya.accounts.models import Organization
 from cya.checklists.models import Vehicle
 from cya.obligations.current import (
+    activity_timeline,
     attach_status_fact,
     evaluate_facts,
     refresh_obligations,
@@ -22,7 +23,7 @@ from cya.obligations.projections import (
     _bounded,
     get_vehicle_obligations_as_of,
 )
-from cya.operations.models import VehicleStatusEvent
+from cya.operations.models import VehicleActivityEvent, VehicleStatusEvent
 
 
 class Command(BaseCommand):
@@ -117,9 +118,19 @@ class Command(BaseCommand):
             MAX_ROWS,
         )
         timeline = status_timeline(statuses)
+        activity = activity_timeline(
+            _bounded(
+                VehicleActivityEvent.objects.filter(
+                    organization_id=org,
+                    vehicle_id=vehicle,
+                    recorded_at__lte=at,
+                ).order_by("vehicle_id", "recorded_at", "sequence")[: MAX_ROWS + 1],
+                MAX_ROWS,
+            )
+        )
         actual = {
             row.obligation_id: evaluate_facts(
-                attach_status_fact(row.facts, vehicle, row.due_at, at, timeline), at
+                attach_status_fact(row.facts, vehicle, row.due_at, at, timeline, activity), at
             )
             for row in rows
         }

@@ -34,6 +34,7 @@ from cya.obligations.history import (
 from cya.obligations.models import Obligation, ObligationSelection
 from cya.obligations.state import (
     NO_KIT,
+    ActivityEvidence,
     CheckEvidence,
     DeterminationEvidence,
     ObligationEvidence,
@@ -47,7 +48,7 @@ from cya.obligations.state import (
     aware,
     rebuild_vehicle_projection,
 )
-from cya.operations.models import VehicleStatusEvent
+from cya.operations.models import VehicleActivityEvent, VehicleStatusEvent
 from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
 
 MAX_ROWS = 10000
@@ -188,6 +189,12 @@ def _determination(row):
 def _status(row):
     return StatusEvidence(
         str(row.pk), str(row.vehicle_id), row.sequence, row.recorded_at, row.status
+    )
+
+
+def _activity(row):
+    return ActivityEvidence(
+        str(row.pk), str(row.vehicle_id), row.sequence, row.recorded_at, row.active
     )
 
 
@@ -844,6 +851,13 @@ def load_projection_history(
             recorded_at__lte=instant_T,
         ).order_by("sequence")[: MAX_ROWS + 1]
     )
+    activities = _bounded(
+        VehicleActivityEvent.objects.filter(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            recorded_at__lte=instant_T,
+        ).order_by("sequence")[: MAX_ROWS + 1]
+    )
     return ProjectionHistory(
         **_database_history(organization_id, vehicle_id, obligations, start, instant_T),
         organization_id=organization_id,
@@ -852,6 +866,7 @@ def load_projection_history(
         selections=tuple(_selection(e) for e in events),
         determinations=tuple(_determination(d) for d in determinations),
         statuses=tuple(_status(s) for s in statuses),
+        activities=tuple(_activity(a) for a in activities),
         seal_substitutions=stored_seal_substitutions(organization_id, ids, instant_T),
         seal_inspections=stored_seal_inspections(organization_id, ids, instant_T),
         checks=(
@@ -1050,6 +1065,20 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
             vehicle_ids,
         )
     )
+    activities = _per_vehicle(
+        _by_vehicle(
+            _bounded(
+                VehicleActivityEvent.objects.filter(
+                    organization_id=organization_id,
+                    vehicle_id__in=vehicle_ids,
+                    recorded_at__lte=instant_T,
+                ).order_by("sequence", "id")[: page + 1],
+                page,
+            ),
+            lambda a: str(a.vehicle_id),
+            vehicle_ids,
+        )
+    )
     database = _page_database_history(organization_id, obligations, start, instant_T)
     suspensions = _page_suspensions(organization_id, obligations, instant_T)
     seal_links = _per_vehicle(
@@ -1075,6 +1104,7 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
             selections=tuple(_selection(e) for e in selections[vehicle_id]),
             determinations=tuple(_determination(d) for d in determinations[vehicle_id]),
             statuses=tuple(_status(s) for s in statuses[vehicle_id]),
+            activities=tuple(_activity(a) for a in activities[vehicle_id]),
             checks=(),
             suspensions=suspensions[vehicle_id],
             seal_substitutions=tuple(seal_links[vehicle_id]),

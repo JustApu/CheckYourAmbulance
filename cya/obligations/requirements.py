@@ -493,11 +493,17 @@ def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None
 
 
 def is_exempt(organization_id, vehicle_id, due_at, now):
-    """Out of service when the obligation would be generated (SPEC 5.9, OQ-31).
+    """Out of service or inactive when the obligation would be generated (SPEC 5.9, 4.8 CFG-1).
 
     A due instant already reached is judged by the status at that instant, which never changes
     afterwards, so returning to service never backfills it. A future due instant is judged by
     the status now: if the vehicle is back in service before it, the next run generates it.
     """
     reference = due_at if due_at <= now else now
-    return out_of_service_at(organization_id, vehicle_id, reference) is not None
+    if out_of_service_at(organization_id, vehicle_id, reference) is not None:
+        return True
+    # SPEC 4.8 CFG-1: an inactive vehicle is exempt the same way, so no unit is selected while
+    # it is inactive and reactivation never backfills one.
+    from cya.operations.vehicles import inactive_at
+
+    return inactive_at(organization_id, vehicle_id, reference) is not None

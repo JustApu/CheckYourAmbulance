@@ -46,7 +46,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 `vehicle.active` is a current-state flag with no history, but CFG-1 needs the instant a vehicle stopped or resumed owing obligations.
 
 - **New table `vehicle_activity_event`** (append-only, kind A): `vehicle_id`, `sequence` (gapless per vehicle), `active`, `basis` (`CHANGE` or `BASELINE`), `recorded_at` and the usual command attribution. The insert guard accepts:
-  - `basis = CHANGE` only under a `VEHICLE_CREATE`, `VEHICLE_ACTIVE_SET` or `VEHICLE_DUPLICATE` receipt;
+  - `basis = CHANGE` only under a `VEHICLE_CREATE`, `VEHICLE_IMPORT` (a vehicle created by a vehicle file), `VEHICLE_ACTIVE_SET` or `VEHICLE_DUPLICATE` receipt;
   - `basis = BASELINE` only under a `VEHICLE_ACTIVITY_BASELINE` receipt, only as sequence 1 of a vehicle that has no events, and only with `active` equal to the vehicle's current flag.
   - A deploy-time management command, `record_vehicle_activity_baseline`, runs one audited `VEHICLE_ACTIVITY_BASELINE` command. It is attributed to a service identity, as scheduled obligation generation is, with no user actor. Under the organization lock and each vehicle's lock, it appends a `BASELINE` event for every vehicle without events, recording its current flag at the command's recorded instant.
   - Rerunning it adds nothing for vehicles already baselined, and a replay of the same operation returns the original result.
@@ -63,12 +63,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   - State evaluation (`cya/obligations/state.py`) shows a routine obligation whose due instant falls in an inactive interval as `EXEMPT`, naming the activity event. Its earlier history is untouched.
   - Reactivation resumes from the event instant; due instants in the inactive interval stay exempt, so nothing is backfilled.
   - Ad hoc inspection requests for an inactive vehicle are refused.
-- **Projection.** The current-obligation projection facts gain the activity events, so its digest changes and existing projection rows become stale. Deploying this part follows the runbook's [rebuild and comparison](deployment-runbook.md#obligation-projection-rebuild-and-comparison) with traffic closed:
-  1. `rebuild_obligation_projection --organization <uuid> --dry-run`. Differences are expected.
-  2. The same command without a flag. This is the write-capable rebuild. Each vehicle and due-instant group commits on its own, so a failed group rolls back and a rerun is safe.
-  3. `--verify`, which must report `Different: 0`.
-
-  Traffic reopens only after step 3 passes. If it does not, rerun step 2. If step 2 keeps failing, roll back to the previous release, whose projection rows the old digest still accepts.
+- **Projection.** Activity is attached to the current-obligation projection at read time, exactly as the operational status already is (`status_timeline` and `attach_status_fact` in `cya/obligations/current.py`). Stored projection facts and their digest do not change, so deploying this part needs no projection rebuild. The rebuild command's `--verify` replays activity too, and still reports `Different: 0` after deployment.
 - **Coordination.** Issue #131 (seal substitution, Codex), merged in PR #154, also changes obligation state and projection replay. This part builds on it. As agreed with Codex, the inactive-vehicle `EXEMPT` takes the same precedence as the out-of-service one, ahead of waivers, checks, seal substitution and suspensions.
 
 ## Compartments and systems (CFG-2)

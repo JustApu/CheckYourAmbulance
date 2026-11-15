@@ -52,6 +52,20 @@ class AdHocTests(GenerationCase):
             **self.context(actor or self.crew),
         )
 
+    def test_a_deactivated_vehicle_refuses_orders_until_reactivated(self):
+        # SPEC 4.8 CFG-1: an inactive vehicle owes nothing, so no one-off order is accepted.
+        from cya.operations.vehicles import record_activity_baseline, set_vehicle_active
+
+        record_activity_baseline(str(self.org.pk))
+        vehicle = str(self.vehicle.pk)
+        set_vehicle_active(vehicle_id=vehicle, active=False, **self.context(self.supervisor))
+        with self.assertRaises(StatusError) as refused:
+            self.order()
+        self.assertEqual((refused.exception.code, refused.exception.status), ("NOT_FOUND", 404))
+        self.assertFalse(Obligation.objects.filter(routine=False).exists())
+        set_vehicle_active(vehicle_id=vehicle, active=True, **self.context(self.supervisor))
+        self.assertEqual(len(self.order().body["obligation_ids"]), 1)
+
     def test_attributed_pinned_window_and_no_routine_selection(self):
         result = self.order()
         row = Obligation.objects.get(pk=result.body["obligation_ids"][0])

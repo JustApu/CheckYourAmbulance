@@ -878,7 +878,7 @@ class CurrentQueryLimitTests(SimpleTestCase):
 
         from cya.obligations import current
         from cya.obligations.models import Obligation, ObligationProjection
-        from cya.operations.models import VehicleStatusEvent
+        from cya.operations.models import VehicleActivityEvent, VehicleStatusEvent
 
         organization = "00000000-0000-0000-0000-000000000001"
         vehicle = "00000000-0000-0000-0000-000000000002"
@@ -896,8 +896,8 @@ class CurrentQueryLimitTests(SimpleTestCase):
                 return ((obligation, facts, "digest"),)  # the cache miss fetch
             if rows.model is ObligationProjection:
                 return ((obligation, vehicle, "digest", False, True),)
-            if rows.model is VehicleStatusEvent:
-                return ()
+            if rows.model in (VehicleStatusEvent, VehicleActivityEvent):
+                return ()  # activity is attached at read time like status (issue #130 part 2)
             self.fail(f"unexpected bounded query for {rows.model!r}")
 
         with (
@@ -912,7 +912,7 @@ class CurrentQueryLimitTests(SimpleTestCase):
         ):
             result = current_rows(organization, [vehicle], instant)
 
-        self.assertEqual(result[vehicle], [{**facts, "statuses": []}])
+        self.assertEqual(result[vehicle], [{**facts, "statuses": [], "activities": []}])
         current.FACTS_CACHE.clear()  # never leave the stubbed evidence for a later test
 
     def test_every_current_evidence_query_is_limited_before_it_can_be_evaluated(self):
@@ -943,6 +943,8 @@ class CurrentQueryLimitTests(SimpleTestCase):
                 datetime(2026, 6, 1, tzinfo=UTC),
             )
         self.assertEqual(result, {vehicle: []})
-        self.assertEqual(len(queries), 3)
+        # Stored rows, status events and, since issue #130 part 2, vehicle activity events:
+        # one bounded query each, independent of the number of rows.
+        self.assertEqual(len(queries), 4)
         self.assertTrue(all("LIMIT 3" in sql for sql in queries), queries)
         selected.assert_not_called()

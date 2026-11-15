@@ -58,6 +58,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "shared_satisfaction_rule_member",
                     "kit_assignment_event",
                     "kit_seal_designation",
+                    "vehicle_activity_event",
                     "seal_event",
                     "seal_substitution",
                     "seal_substitution_obligation",

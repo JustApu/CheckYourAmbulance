@@ -77,6 +77,7 @@ Every mutable change has an audit entry in the same transaction.
 | `vehicle_kit_list_publication` | A | version_id ref (unique), effective_at ≥ recorded_at, actor, command_id ref (`VEHICLE_KIT_LIST_PUBLISH`); one vehicle's publications have strictly increasing effective instants (KDEF-9, CHK-3) |
 | `position_key` | A | kind (`COMPARTMENT` or `SYSTEM`), stable_slot_id, key (lowercase key format); unique per organization and kind on both the slot and the key; the slot must exist; actor, command_id ref (`POSITION_KEY_SET`, `VEHICLE_IMPORT` or `POSITION_ADD`; the slot row must already exist); one key per position, never changed or removed (SPEC 2.1.0 IMP-6, [issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129)) |
 | `vehicle_status_event` | A | vehicle_id ref, prior_event_id? ref, status, explanation, restrictions?; sequence unique per vehicle |
+| `vehicle_activity_event` | A | vehicle_id ref, prior_event_id? ref, active, basis (`CHANGE` or `BASELINE`); sequence unique per vehicle. A baseline is only a vehicle's first event and has no user actor (its receipt names the service identity); active equals the vehicle's flag when written (SPEC 4.8 CFG-1, [issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130)) |
 | `status_request` | A | vehicle_id ref, requested_status, reason, request_id? ref, action (`REQUEST`, `APPROVE`, `DENY`), decision_explanation? |
 
 Role changes lock the affected user before reading grants; concurrent attempts
@@ -514,6 +515,7 @@ references a command receipt with an authorized `command_type`:
 | `stocking_deviation` | `cya_stocking_deviation_bi` | `'STOCKING_DEVIATION_RECORD'` |
 | `status_request` | `cya_status_request_bi` | `'STATUS_REQUEST'`, `'STATUS_REQUEST_DECIDE'` |
 | `vehicle_status_event` | `cya_vehicle_status_event_bi` | `'VEHICLE_STATUS_SET'`, `'STATUS_REQUEST_DECIDE'` |
+| `vehicle_activity_event` | `cya_vehicle_activity_event_bi` | `CHANGE`: `'VEHICLE_CREATE'`, `'VEHICLE_IMPORT'`, `'VEHICLE_ACTIVE_SET'`, `'VEHICLE_DUPLICATE'`; `BASELINE`: `'VEHICLE_ACTIVITY_BASELINE'` |
 | `schedule_rule` | `cya_schedule_rule_bi` | `'SCHEDULE_PUBLISH'`, `'SCHEDULE_SEED'` |
 | `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'` |
 | `requirement_version` | `cya_requirement_version_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by binding origin |
