@@ -50,6 +50,17 @@ class UntaggedClassTests(unittest.TestCase):
             module.write_text("class (:\n")
             self.assertEqual(tags.main(["prog", root]), 2)
 
+    def test_a_missing_or_empty_root_fails_instead_of_passing(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as root, redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(tags.main(["prog", str(Path(root) / "missing")]), 2)
+            self.assertIn("not a directory", out.getvalue())
+            self.assertEqual(tags.main(["prog", root]), 2)
+            self.assertIn("no test modules found", out.getvalue())
+
     def test_the_repository_has_no_untagged_migration_test(self):
         self.assertEqual(tags.scan(REPO / "cya"), [])
 

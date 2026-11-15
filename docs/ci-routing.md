@@ -59,3 +59,13 @@ Measured on the Rocky 9 / MariaDB 10.11 test host on 2026-11-15 (NFS-backed stor
 - nine deficiency migration rollback tests: 59 to 144 s each.
 
 Those ten tests took about 22 of the 22.5 minutes of a 26-test run. These are test-host timings; compare GitHub job durations before claiming CI savings.
+
+### Item 4, option 1: one test process per CPU
+
+The owner approved option 1 of the item 4 proposal on 2026-11-15 ([issue #158](https://github.com/JustApu/CheckYourAmbulance/issues/158)). The Django test step now runs one process per runner CPU, at most 4, and prints both numbers; previously it ran 2. Coverage is unchanged.
+
+Before the change, from PR runs 43675239946 and 43674589307:
+- Django jobs took 19 to 27 minutes, and the test step 1119 to 1507 s (about 94% of the job). Container start, dependency install and migrations together took about 1.5 minutes.
+- The tagged migration tests took roughly 214 to 242 s of the test step (15 to 18%). This was estimated from per-class result timestamps with 2 processes, so it is approximate. They are cheaper in CI than on the test hosts because the CI database runs on tmpfs with flushes off.
+
+Each process gets its own copy of the test database, about 15 MB each in a local run, on the service's 1 GiB tmpfs. The change's own CI run is the after measurement. Options 2 (skip tagged tests on PRs that do not touch migrations) and 3 (shard the suite) wait for that result and need a further owner decision.
