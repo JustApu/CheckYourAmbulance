@@ -84,6 +84,11 @@ class SlotRevision(models.Model):
     revision = models.PositiveIntegerField()
     label = models.CharField(max_length=200)
     effective_at = models.DateTimeField()
+    # SPEC 4.8 CFG-2: order and retirement belong to the revision. An empty order sorts after
+    # numbered positions, then by label; rows from before CFG-2 keep it empty (rows are never
+    # updated).
+    display_order = models.PositiveIntegerField(null=True, blank=True)
+    retired = models.BooleanField(default=False)
 
     class Meta:
         abstract = True
@@ -95,6 +100,13 @@ class SlotRevision(models.Model):
             ),
             models.CheckConstraint(condition=models.Q(revision__gte=1), name="%(class)s_revision"),
             models.CheckConstraint(condition=non_blank("label"), name="%(class)s_label"),
+            models.CheckConstraint(
+                condition=models.Q(display_order__isnull=True) | models.Q(display_order__gte=1),
+                name="%(class)s_display_order",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(retired__in=[True, False]), name="%(class)s_retired_bool"
+            ),
         ]
 
 

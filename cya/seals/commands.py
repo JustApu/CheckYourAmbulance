@@ -59,7 +59,11 @@ def _subject(organization_id, vehicle_id, kit_id, slot_id, *, require_sealable):
             .order_by("-effective_at", "-revision")
             .first()
         )
-        if compartment is None or (require_sealable and not compartment.sealable):
+        # SPEC 4.8 CFG-2: a retired cabinet is no seal subject; breaking a seal still left on it
+        # (require_sealable False) stays possible.
+        if compartment is None or (
+            require_sealable and (compartment.retired or not compartment.sealable)
+        ):
             raise SealError("compartment is unavailable or not designated sealable")
     return now
 

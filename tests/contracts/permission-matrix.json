@@ -470,6 +470,16 @@
         "Supply Officer": "deny",
         "Administrator": "allow"
       }
+    },
+    {
+      "id": "PERM-46",
+      "action": "manage_vehicle_positions",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
     }
   ]
 }

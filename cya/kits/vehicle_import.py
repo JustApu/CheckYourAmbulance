@@ -276,6 +276,10 @@ def build_plan(organization_id, vehicle, source=""):
             seen.add(key)
             slot = slots[kind].get(key)
             row = rows[kind].get(slot) if slot else None
+            if row is not None and row.retired:
+                # SPEC 4.8 CFG-2: a file never revives or relabels a retired position.
+                errors.append(f"{where}: position {key!r} is retired on this vehicle")
+                continue
             if row is not None and row.effective_at > now:
                 # A revision is scheduled. Matching the label in effect now writes nothing;
                 # anything else would overtake the scheduled revision, so it is refused.
@@ -316,6 +320,9 @@ def build_plan(organization_id, vehicle, source=""):
                 }
             )
     listed = {(p["kind"], p["key"]) for p in plan.positions}
+    retired = {
+        kind: {slot for slot, row in rows[kind].items() if row.retired} for kind in KIND_OF.values()
+    }
     has_row = {
         (kind, key)
         for kind in KIND_OF.values()
@@ -333,6 +340,8 @@ def build_plan(organization_id, vehicle, source=""):
             errors.append(
                 f"{where}: no {kind.lower()} position {key!r} on the vehicle or in the file"
             )
+        elif slots[kind].get(key) in retired[kind]:
+            errors.append(f"{where}: position {key!r} is retired on this vehicle")
         return key
 
     # Items outside kits (IMP-7), compared with the vehicle's checklist in force.
@@ -543,6 +552,21 @@ def build_plan(organization_id, vehicle, source=""):
                 errors.append("schedule: no schedule has that name")
             else:
                 plan.binding_slot = schedule
+        if plan.binding_slot is not None and found is not None:
+            # SPEC 4.8 CFG-2: a binding cannot make a retired position required again.
+            from cya.kits.positions import template_slot_rows
+
+            for kind, row_ids in template_slot_rows(org, template.pk, now).items():
+                placed = set(
+                    SLOT_MODEL[kind]
+                    .objects.filter(pk__in=row_ids)
+                    .values_list("stable_slot_id", flat=True)
+                )
+                if {str(s) for s in placed} & retired[kind]:
+                    errors.append(
+                        "schedule: the template places items in a position retired on this vehicle"
+                    )
+                    break
 
     plan.base_token = digest(
         {
@@ -645,6 +669,8 @@ def _apply(org, plan, receipt, current, vehicle_id, kit_ids):
             effective_at=at,
             # A relabel keeps the position's sealable designation (SPEC 10.2 CAB-1).
             **({"sealable": p["row"].sealable} if model is Compartment and p["row"] else {}),
+            # and its display order (CFG-2); a retired position never reaches here.
+            display_order=p["row"].display_order if p["row"] else None,
         )
         if p["action"] == "NEW_POSITION":
             PositionKey.objects.create(
@@ -951,7 +977,13 @@ def vehicle_file(organization_id, vehicle_id, template_id=None):
     for name, kind in KIND_OF.items():
         positions[name] = []
         for slot, row in sorted(
-            _latest_rows(vehicle, SLOT_MODEL[kind], now).items(), key=lambda x: x[1].label
+            # SPEC 4.8 CFG-2: display order (empty last), then label; retired positions left out.
+            (
+                (s, r)
+                for s, r in _latest_rows(vehicle, SLOT_MODEL[kind], now).items()
+                if not r.retired
+            ),
+            key=lambda x: (x[1].display_order is None, x[1].display_order or 0, x[1].label),
         ):
             if slot not in keys[kind]:
                 raise ImportRefused(

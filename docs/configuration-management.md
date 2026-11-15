@@ -1,6 +1,6 @@
 # Configuration management design
 
-[Issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130) part 1. This page is the schema and service design that the issue requires before any management screen is built. It implements [SPEC 2.2.0 §4.8](../SPEC.md) (CFG-1 to CFG-6, merged in PR #151) with the §3.3 rows of that amendment. It reuses the kit definitions (§4.6) and vehicle files (§4.7, [vehicle files](vehicle-files.md)) of issue #129. SPEC and the [contracts](data-model-contracts.md) win if they disagree with this page. Nothing here is implemented yet; later parts update this page as they land.
+[Issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130) part 1. This page is the schema and service design that the issue requires before any management screen is built. It implements [SPEC 2.2.0 §4.8](../SPEC.md) (CFG-1 to CFG-6, merged in PR #151) with the §3.3 rows of that amendment. It reuses the kit definitions (§4.6) and vehicle files (§4.7, [vehicle files](vehicle-files.md)) of issue #129. SPEC and the [contracts](data-model-contracts.md) win if they disagree with this page. Part 3 (positions) is implemented as described below; the other parts are design, and this page is updated as they land.
 
 ## Principles
 
@@ -84,6 +84,9 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   - an active kit instance is assigned to it.
 
   The refusal lists each dependency. A retired slot stays readable for history. It is left out of pickers and new placements, and an un-retire is one more revision.
+- **Designations and seals** (added once issue #131 merged):
+  - A sealable designation (`cya/kits/sealable.py`) copies the position's order and retirement into its new revision. Making a retired compartment sealable is refused.
+  - Seal commands refuse a retired cabinet, and the seal subject list leaves it out. Breaking a seal still left on it stays possible.
 - **Writers refuse a retired position.** A position whose newest revision is retired cannot receive:
   - a kit instance (`add_kit_instance` and `record_kit_assignment`, through `_placement` in `cya/kits/commands.py`);
   - a kit-list line (`cya/kits/kit_lists.py`);
@@ -129,9 +132,9 @@ The screen calls `add_kit_instance` with the source instance's definition, a new
 
 Each part is one PR. Every part uses `Refs #130`; the last uses `Closes #130`. Parts 3 and 4 do not change obligation state, so they need not wait for part 2; the screens (parts 5 to 7) follow the commands they use.
 
-1. This design page.
+1. This design page. Merged in PR #153.
 2. Vehicle lifecycle: activity events, commands, obligation exemption and projection, after agreement with issue #131.
-3. Positions: the schema, the commands and the retire checks, plus the vehicle-file changes for order and retirement.
+3. Positions: the schema, the commands and the retire checks, plus the vehicle-file changes for order and retirement. Implemented in `cya/kits/positions.py`, with `cya_checklists` 0007 and `cya_kits` 0013.
 4. Duplication: the template and vehicle commands with their previews.
 5. Fleet screens: vehicles (list, search, create, edit, deactivate), positions, kit lists and kit instances, and Supervisor access to the configuration section.
 6. Checklist screens: templates (create, duplicate, draft edit, publish with an effective date, current, draft and future versions), overrides, and the impact preview of affected vehicles.

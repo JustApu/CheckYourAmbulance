@@ -147,6 +147,17 @@ def validate_definition(organization_id, spec):
         )
     if kit is not None:
         _require_kit_in_compartment(kit, compartment)
+    # SPEC 4.8 CFG-2: a draft cannot place an item in a retired position. The referenced row
+    # names a slot on its own vehicle; publishing checks every vehicle the version applies to.
+    from cya.kits.positions import refuse_retired
+
+    for kind, model, row_id in (
+        ("COMPARTMENT", Compartment, compartment),
+        ("SYSTEM", VehicleSystem, system),
+    ):
+        if row_id is not None:
+            vehicle_id = model.objects.filter(pk=row_id).values_list("vehicle_id", flat=True).get()
+            refuse_retired(kind, vehicle_id, [row_id], ChecklistValidationError, "the definition")
     return {
         "item_id": item_id,
         "display_order": spec["display_order"],
