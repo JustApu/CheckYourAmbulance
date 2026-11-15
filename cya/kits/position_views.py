@@ -115,10 +115,17 @@ def _page(request, user, vehicle, *, status=200, errors=None, retiring=None, for
 
 
 def _operation_id(request):
+    """The form's operation id, only when it is exactly a canonical UUID v4 (PR #170 review).
+
+    UUID(value, version=4) would rewrite another version's bits into a different v4 id, so
+    several submitted strings could map to one idempotency key; anything else is refused.
+    """
+    raw = request.POST.get("operation_id", "")
     try:
-        return str(uuid.UUID(request.POST.get("operation_id", ""), version=4))
+        parsed = uuid.UUID(raw)
     except ValueError:
         return None
+    return raw if parsed.version == 4 and str(parsed) == raw else None
 
 
 def _display_order(value):

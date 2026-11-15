@@ -110,6 +110,24 @@ class PositionPagesTests(KitCase):
         self.assertFalse(PositionKey.objects.filter(key="drawer").exists())
         self.assertEqual(self.post(stage="unknown").status_code, 400)
         self.assertEqual(self.post(stage="add", operation_id="not-a-uuid").status_code, 400)
+        # Only an exact canonical UUID v4 is accepted; a v1 or non-canonical form is refused
+        # rather than rewritten into some other idempotency key (PR #170 review).
+        for other in (
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",  # version 1
+            str(uuid.uuid4()).upper(),
+            "{" + str(uuid.uuid4()) + "}",
+        ):
+            with self.subTest(operation_id=other):
+                response = self.post(
+                    stage="add",
+                    kind="COMPARTMENT",
+                    label="Synthetic drawer",
+                    key="drawer",
+                    display_order="",
+                    operation_id=other,
+                )
+                self.assertEqual(response.status_code, 400)
+        self.assertFalse(PositionKey.objects.filter(key="drawer").exists())
 
     def test_rename_and_reorder_append_a_revision(self):
         slot = str(self.cabinet.stable_slot_id)
