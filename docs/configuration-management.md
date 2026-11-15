@@ -41,7 +41,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   - So an existing inactive vehicle reactivated later is exempt between its baseline and its reactivation, and nothing is backfilled.
   - `set_vehicle_active` refuses a vehicle that has no baseline yet, so the baseline can never come after a change.
 - **Commands** (`manage_vehicles`):
-  - `create_vehicle`: VIN, name and optional number. Writes the vehicle and its first event, active. The creator enters the VIN, which is then set once (SPEC 3.0.0 IMP-6, PR #155, owner-approved major amendment).
+  - `create_vehicle`: VIN, name and optional number. Writes the vehicle and its first event, active. The creator enters the VIN, which is then set once (SPEC 4.0.0 IMP-6, merged in PR #155).
   - `update_vehicle`: name and number.
   - `set_vehicle_active`: appends an event, updates `vehicle.active` in the same command, then reconciles the vehicle after commit.
 - **Obligations.** This mirrors the out-of-service exemption (§5.9), which is derived from the status stream and never retires or backfills:
@@ -56,14 +56,14 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
   3. `--verify`, which must report `Different: 0`.
 
   Traffic reopens only after step 3 passes. If it does not, rerun step 2. If step 2 keeps failing, roll back to the previous release, whose projection rows the old digest still accepts.
-- **Coordination.** Issue #131 (seal substitution, Codex) also changes obligation state and projection replay. This part is sequenced after, or reconciled with, those changes, and the precedence between `EXEMPT` (inactive or out of service), waivers and seal substitution is agreed with Codex before code.
+- **Coordination.** Issue #131 (seal substitution, Codex), merged in PR #154, also changes obligation state and projection replay. This part builds on it. As agreed with Codex, the inactive-vehicle `EXEMPT` takes the same precedence as the out-of-service one, ahead of waivers, checks, seal substitution and suspensions.
 
 ## Compartments and systems (CFG-2)
 
 - **Schema.** Each `compartment` and `vehicle_system` revision gains `display_order` (a positive integer, or empty) and `retired` (boolean, default false). Revision rows cannot be updated (the `cya_compartment_immutable_bu` and `cya_vehicle_system_immutable_bu` triggers), so existing rows keep an empty order and are never rewritten. Positions sort by order, with empty last, then by label, which is today's label order. The first reorder of a vehicle writes explicit orders as new revisions.
 - **Migration.** The migration is `cya_checklists` 0007, after PR #150's 0005 and issue #131's 0006 (the merge order agreed with the owner).
 - **Commands** (`manage_vehicle_positions`). Each runs under the vehicle lock:
-  - `add_position`: either this vehicle's row in an existing position, named by its position key (IMP-6), or a new position. For a new position, the creator enters its key, which is then set once (SPEC 3.0.0 IMP-6, PR #155, owner-approved major amendment). The `position_key` insert guard then also accepts `POSITION_ADD` receipts. `set_position_key` stays the Administrator-only way to key an older keyless position.
+  - `add_position`: either this vehicle's row in an existing position, named by its position key (IMP-6), or a new position. For a new position, the creator enters its key, which is then set once (SPEC 4.0.0 IMP-6, merged in PR #155). The `position_key` insert guard then also accepts `POSITION_ADD` receipts. `set_position_key` stays the Administrator-only way to key an older keyless position.
   - `revise_position`: any of label, order and retired. It appends a revision effective when recorded and copies the compartment's `sealable` from the newest revision (CAB-1).
   - Like a designation, a revision is refused while a later revision of the slot is already scheduled.
 - **Retiring is refused** while any of these still use the slot:
@@ -87,7 +87,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 ## Duplicating a checklist template (CFG-3)
 
 `duplicate_template` (`duplicate_configuration`, command `TEMPLATE_DUPLICATE`):
-- Creates a template with the label and key its creator gives (SPEC 3.0.0).
+- Creates a template with the label and key its creator gives (SPEC 4.0.0).
 - Creates one draft version copying the chosen version's item definitions, placements (including kit placements, KDEF-4) and settings, through the same validation as `save_template_draft`.
 - Writes no publication, override, binding or obligation, and leaves the source unchanged.
 
@@ -97,7 +97,7 @@ The Administration menu entry is Administrator-only today. Part 5 makes the conf
 
 | Created for the copy | From the source |
 |---|---|
-| The vehicle, with the VIN, name and number its creator gives (SPEC 3.0.0), inactive, and its first activity event (inactive) | — |
+| The vehicle, with the VIN, name and number its creator gives (SPEC 4.0.0), inactive, and its first activity event (inactive) | — |
 | One revision-1 row per position, with a new row id and the **same `stable_slot_id`** as the source position (so copied placements, kit-list lines and bindings resolve on the copy), effective when recorded | Each position's label, order and sealable designation in effect now; retired positions are left out |
 | One draft kit list | The lines in force, mapped to the copy's compartment rows |
 | One draft override per bound template, over the same template version | Each override in force (none when there is none) |
@@ -115,7 +115,7 @@ The screen calls `add_kit_instance` with the source instance's definition, a new
 
 ## Parts
 
-Each part is one PR, in order. Every part uses `Refs #130`; the last uses `Closes #130`.
+Each part is one PR. Every part uses `Refs #130`; the last uses `Closes #130`. Parts 3 and 4 do not change obligation state, so they need not wait for part 2; the screens (parts 5 to 7) follow the commands they use.
 
 1. This design page.
 2. Vehicle lifecycle: activity events, commands, obligation exemption and projection, after agreement with issue #131.
