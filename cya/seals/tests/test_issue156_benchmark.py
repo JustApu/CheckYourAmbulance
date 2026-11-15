@@ -13,11 +13,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from unittest import mock
 
+from django.core.management import call_command
 from django.db import connection
 
 from cya.checklists import commands as checklist_commands
 from cya.checklists.models import ChecklistTemplate
 from cya.checks.commands import record_check
+from cya.kits.commands import add_kit_instance
 from cya.kits.definitions import (
     create_kit_definition,
     publish_kit_definition_version,
@@ -39,6 +41,8 @@ class Issue156LockBenchmark(KitCase):
 
     def setUp(self):
         super().setUp()
+        self._benchmark_setup_complete = False
+        self.addCleanup(self._flush_failed_setup)
         self.publish_schedule("benchmark-0600")
         self.published_version(self.base_items())
         self.vehicle_b_template = ChecklistTemplate.objects.create(
@@ -88,10 +92,12 @@ class Issue156LockBenchmark(KitCase):
         self.subjects = []
         for index, vehicle in enumerate(self.vehicles):
             compartment = self.cabinet if index == 0 else self.cabinet_b
-            kit_id = self.add_kit(
+            kit_id = add_kit_instance(
                 label=f"Synthetic benchmark kit {index}",
-                vehicle=vehicle,
-                actor=self.supervisor,
+                vehicle_id=str(vehicle.pk),
+                compartment_id=str(compartment.pk),
+                definition_id=self.definition_id,
+                **self.context(self.supervisor),
             ).body["kit_id"]
             list_version = save_vehicle_kit_list_draft(
                 vehicle_id=str(vehicle.pk),
@@ -176,6 +182,11 @@ class Issue156LockBenchmark(KitCase):
         self.active_innodb_waits = {}
         self.monitor_stop = threading.Event()
         self.monitor_error = []
+        self._benchmark_setup_complete = True
+
+    def _flush_failed_setup(self):
+        if not self._benchmark_setup_complete:
+            call_command("flush", verbosity=0, interactive=False, reset_sequences=True)
 
     def _connection_id(self):
         with connection.cursor() as cursor:
