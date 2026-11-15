@@ -189,13 +189,17 @@ def vehicles(request):
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "created"}))
 
 
-def _vehicle_page(request, user, roles, vehicle, *, status=200, errors=None, changing=None):
+def _vehicle_page(
+    request, user, roles, vehicle, *, status=200, errors=None, changing=None, edit=None
+):
     code = _statuses(str(user.organization_id), [vehicle.pk]).get(str(vehicle.pk))
     context = {
         "title": f"Vehicle: {vehicle.display_name}",
         "vehicle": vehicle,
         "status_label": STATUS_LABELS.get(code, "Not recorded"),
         "edit_operation_id": admin_pages.new_operation_id(),
+        # A refused edit shows what was typed, not the stored values (PR #174 review).
+        "edit": edit or {"display_name": vehicle.display_name, "number": vehicle.number or ""},
         "changing": changing,
         "can_duplicate": _can(user, roles, DUPLICATE_ACTION),
         "links": [
@@ -226,7 +230,13 @@ def vehicle(request, vehicle_id):
         return _vehicle_page(request, user, roles, vehicle)
 
     def render_error(status, errors):
-        return _vehicle_page(request, user, roles, vehicle, status=status, errors=errors)
+        edit = None
+        if request.POST.get("stage") == "update":
+            edit = {
+                "display_name": request.POST.get("display_name", ""),
+                "number": request.POST.get("number", ""),
+            }
+        return _vehicle_page(request, user, roles, vehicle, status=status, errors=errors, edit=edit)
 
     stage = request.POST.get("stage")
     active = _wanted_active(request)

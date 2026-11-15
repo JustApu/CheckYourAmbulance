@@ -36,8 +36,8 @@
   {% csrf_token %}
   <input type="hidden" name="stage" value="update">
   <input type="hidden" name="operation_id" value="{{ edit_operation_id }}">
-  <p><label for="edit-name">Name</label><br><input id="edit-name" name="display_name" value="{{ vehicle.display_name }}" maxlength="200" required></p>
-  <p><label for="edit-number">Number (optional)</label><br><input id="edit-number" name="number" value="{{ vehicle.number|default_if_none:'' }}" maxlength="50"></p>
+  <p><label for="edit-name">Name</label><br><input id="edit-name" name="display_name" value="{{ edit.display_name }}" maxlength="200" required></p>
+  <p><label for="edit-number">Number (optional)</label><br><input id="edit-number" name="number" value="{{ edit.number }}" maxlength="50"></p>
   <p><button type="submit" class="button">Save</button></p>
 </form>
 

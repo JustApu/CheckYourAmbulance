@@ -123,6 +123,12 @@ class VehiclePagesTests(KitCase):
         self.assertIsNone(self.vehicle.number)
         same = self.post(self.url, stage="update", display_name="Synthetic Renamed", number="")
         self.assertContains(same, "already has those values", status_code=400)
+        # A refused edit keeps what was typed (PR #174 review).
+        long_number = "9" * 51
+        refused = self.post(self.url, stage="update", display_name="Typed name", number=long_number)
+        self.assertContains(refused, "number must be empty or text", status_code=400)
+        self.assertContains(refused, 'value="Typed name"', status_code=400)
+        self.assertContains(refused, f'value="{long_number}"', status_code=400)
         self.post(self.url, stage="update", display_name="Synthetic Renamed", number="7")
         # A form without its number field is malformed, not a request to clear the number.
         partial = self.post(self.url, stage="update", display_name="Synthetic Other")
