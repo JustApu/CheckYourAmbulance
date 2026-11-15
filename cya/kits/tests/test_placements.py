@@ -480,11 +480,15 @@ class ConcurrentDeactivationTests(PlacementCase):
             thread.start()
         self.assertTrue(checked.wait(timeout=30))
         threads[1].join(timeout=3)  # a deactivation that is not blocked finishes here
+        # Judged while the first command still holds its locks (issue #173): once it commits,
+        # either thread may append its marker first, so the order of `order` proves nothing.
+        blocked = threads[1].is_alive()
         release.set()
         for thread in threads:
             thread.join(timeout=60)
         self.assertEqual(errors, [])
-        self.assertEqual(order, ["published", "deactivated"])
+        self.assertTrue(blocked, "the second command finished while the first held its locks")
+        self.assertCountEqual(order, ["published", "deactivated"])
 
     def test_a_deactivation_waits_for_a_checklist_publication_that_checked_the_definition(self):
         self.jump = self.definition()

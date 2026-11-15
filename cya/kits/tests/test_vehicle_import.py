@@ -567,11 +567,15 @@ class ReviewFindingTests(VehicleImportCase):
             thread.start()
         self.assertTrue(planned.wait(timeout=30))
         threads[1].join(timeout=3)  # an add that is not blocked finishes here
+        # Judged while the first command still holds its locks (issue #173): once it commits,
+        # either thread may append its marker first, so the order of `order` proves nothing.
+        blocked = threads[1].is_alive()
         release.set()
         for thread in threads:
             thread.join(timeout=60)
         self.assertEqual(errors, [])
-        self.assertEqual(order, ["imported", "added"])
+        self.assertTrue(blocked, "the second command finished while the first held its locks")
+        self.assertCountEqual(order, ["imported", "added"])
         self.assertEqual(
             KitInstance.objects.filter(
                 vehicle=vehicle, compartment__stable_slot_id=drawer.stable_slot_id, active=True
