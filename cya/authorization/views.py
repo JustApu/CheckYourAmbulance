@@ -55,10 +55,6 @@ ROLE_LABELS = {
 }
 
 
-class RoleEventLimitExceeded(Exception):
-    """Current-role evidence exceeded the bounded per-user read limit."""
-
-
 # Sanitized messages keyed by outcome; no exception text reaches the page.
 MESSAGES = {
     "INVALID": "The request was not valid. Check the user, role and action and try again.",
@@ -91,6 +87,7 @@ def _is_administrator(user):
 def _current_roles_by_user(organization_id, targets):
     target_ids = [str(target.pk) for target in targets]
     events = {target_id: [] for target_id in target_ids}
+    unavailable = set()
     rows = (
         RoleGrant.objects.filter(organization_id=organization_id, user_id__in=target_ids)
         .annotate(
@@ -114,9 +111,10 @@ def _current_roles_by_user(organization_id, targets):
         )
     )
     for row in rows:
-        if row["event_number"] > ROLE_EVENT_LIMIT:
-            raise RoleEventLimitExceeded
         target_id = str(row["user_id"])
+        if row["event_number"] > ROLE_EVENT_LIMIT:
+            unavailable.add(target_id)
+            continue
         events[target_id].append(
             RoleEvent(
                 id=str(row["id"]),
@@ -130,11 +128,18 @@ def _current_roles_by_user(organization_id, targets):
         )
     result = {}
     for target_id, target_events in events.items():
-        state = current_roles(
-            target_events,
-            organization_id=str(organization_id),
-            user_id=target_id,
-        )
+        if target_id in unavailable:
+            result[target_id] = None
+            continue
+        try:
+            state = current_roles(
+                target_events,
+                organization_id=str(organization_id),
+                user_id=target_id,
+            )
+        except InvalidRoleHistory:
+            result[target_id] = None
+            continue
         codes = {"CREW" if role.value in ("CREW", "EMT") else role.value for role in state.grants}
         result[target_id] = tuple(ROLE_LABELS[code] for code in sorted(codes))
     return result
@@ -167,7 +172,7 @@ def _render_roles(
     if targets:
         try:
             roles_by_user = _current_roles_by_user(user.organization_id, targets)
-        except (DatabaseError, InvalidRoleHistory, RoleEventLimitExceeded):
+        except DatabaseError:
             logger.error("role list unavailable")
             targets = []
             role_list_error = "The user list could not be loaded. Reload the page to try again."
@@ -175,7 +180,10 @@ def _render_roles(
         else:
             for target in targets:
                 target.current_role_labels = roles_by_user[str(target.pk)]
-                target.role_operation_id = str(uuid.uuid4())
+                target.role_history_unavailable = target.current_role_labels is None
+                target.role_operation_id = (
+                    None if target.role_history_unavailable else str(uuid.uuid4())
+                )
     context = {
         "title": "Role administration",
         "show": show,

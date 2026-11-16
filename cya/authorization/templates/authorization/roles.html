@@ -49,10 +49,15 @@
   <li class="role-user-card">
     <h3>{{ target.display_name|default:target.email }}</h3>
     {% if target.display_name %}<p class="role-user-email">{{ target.email }}</p>{% endif %}
+    {% if target.role_history_unavailable %}
+    <p class="banner banner-error" role="alert">Current roles could not be verified. Role changes for this user are unavailable. View role history or contact support.</p>
+    {% else %}
     <p><strong>Current roles:</strong>
       {% if target.current_role_labels %}{% for label in target.current_role_labels %}<span class="pill">{{ label }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}No roles assigned{% endif %}
     </p>
+    {% endif %}
     <p><a href="{% url 'administration-role-history' target.pk %}" aria-label="View role history for {{ target.email }}">View role history</a></p>
+    {% if not target.role_history_unavailable %}
     <form method="post" action="{% url 'administration-roles' %}" class="admin-form">
       {% csrf_token %}
       <input type="hidden" name="stage" value="preview">
@@ -69,6 +74,7 @@
         <button type="submit" name="action" value="REVOKE" class="button">Review removal</button>
       </div>
     </form>
+    {% endif %}
   </li>
   {% endfor %}
 </ul>

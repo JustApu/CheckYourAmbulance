@@ -166,42 +166,43 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertNotContains(second_page, "Older changes")
 
     def test_role_stream_query_reads_one_event_past_the_per_user_limit(self):
-        from cya.authorization.views import (
-            ROLE_EVENT_LIMIT,
-            RoleEventLimitExceeded,
-            _current_roles_by_user,
-        )
+        from cya.authorization.views import ROLE_EVENT_LIMIT, _current_roles_by_user
 
         _, crew = self.sign_in("crew-1")
-        rows = [{"event_number": ROLE_EVENT_LIMIT + 1}]
+        rows = [{"event_number": ROLE_EVENT_LIMIT + 1, "user_id": crew.pk}]
         with mock.patch("cya.authorization.views.RoleGrant.objects.filter") as role_filter:
             query = role_filter.return_value
             query.annotate.return_value.filter.return_value.order_by.return_value.values.return_value = rows
 
-            with self.assertRaises(RoleEventLimitExceeded):
-                _current_roles_by_user(self.org.pk, [crew])
+            roles = _current_roles_by_user(self.org.pk, [crew])
 
             query.annotate.return_value.filter.assert_called_once_with(
                 event_number__lte=ROLE_EVENT_LIMIT + 1
             )
+        self.assertEqual(roles, {str(crew.pk): None})
 
-    def test_user_list_fails_closed_when_role_history_exceeds_the_event_limit(self):
-        from cya.authorization.views import RoleEventLimitExceeded
+    def test_role_list_keeps_other_users_available_when_one_history_is_unavailable(self):
+        from cya.authorization.views import ROLE_LABELS
 
-        admin_client, _ = self.make_administrator("admin-1")
+        admin_client, admin = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        roles = {
+            str(admin.pk): (ROLE_LABELS["ADMINISTRATOR"], "Crew"),
+            str(crew.pk): None,
+        }
         with mock.patch(
             "cya.authorization.views._current_roles_by_user",
-            side_effect=RoleEventLimitExceeded,
+            return_value=roles,
         ):
             response = admin_client.get(URL)
 
-        self.assertEqual(response.status_code, 503)
-        self.assertContains(
-            response,
-            "The user list could not be loaded. Reload the page to try again.",
-            status_code=503,
-        )
-        self.assertEqual(response.context["targets"], [])
+        self.assertEqual(response.status_code, 200)
+        targets = {str(target.pk): target for target in response.context["targets"]}
+        self.assertTrue(targets[str(crew.pk)].role_history_unavailable)
+        self.assertIsNone(targets[str(crew.pk)].role_operation_id)
+        self.assertFalse(targets[str(admin.pk)].role_history_unavailable)
+        self.assertContains(response, "Current roles could not be verified.")
+        self.assertContains(response, "Review grant")
 
     def test_unauthorized_user_is_refused_and_a_denial_is_recorded(self):
         _, admin = self.make_administrator("admin-1")
