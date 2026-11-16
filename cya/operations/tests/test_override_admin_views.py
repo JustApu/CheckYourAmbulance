@@ -196,3 +196,46 @@ class OverridePageTests(KitCase):
         page = self.client_.get(f"/administration/checklists/{self.template.pk}/")
         self.assertContains(page, "Vehicle overrides")
         self.assertContains(page, self.url)
+
+
+class OverrideVehicleListTests(KitCase):
+    """PR #181 review: the template page's vehicle list puts real bound vehicles first."""
+
+    def setUp(self):
+        super().setUp()
+        self.publish_schedule("test-0600")
+        self.published_version()
+
+    def listed(self):
+        from unittest import mock
+
+        from cya.kits import admin_pages
+        from cya.operations.template_admin_views import _override_vehicles
+
+        with mock.patch.object(admin_pages, "LIST_LIMIT", 1):
+            rows, more = _override_vehicles(str(self.org.pk), self.template)
+        return [(row["vehicle"].display_name, row["bound"]) for row in rows], more
+
+    def test_a_bound_vehicle_sorted_after_unbound_ones_is_listed_as_bound(self):
+        # Synthetic A sorts first by name; only Synthetic B is bound.
+        self.bind(vehicle=self.vehicle_b)
+        self.assertEqual(self.listed(), ([("Synthetic B", True)], True))
+
+    def test_more_bound_vehicles_than_the_cap_say_so(self):
+        self.bind()
+        self.bind(vehicle=self.vehicle_b)
+        rows, more = self.listed()
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0][1])
+        self.assertTrue(more)
+
+    def test_unbound_vehicles_fill_the_rest_with_an_accurate_status(self):
+        from cya.operations.template_admin_views import _override_vehicles
+
+        self.bind(vehicle=self.vehicle_b)
+        rows, more = _override_vehicles(str(self.org.pk), self.template)
+        self.assertEqual(
+            [(row["vehicle"].display_name, row["bound"]) for row in rows],
+            [("Synthetic B", True), ("Synthetic A", False)],
+        )
+        self.assertFalse(more)

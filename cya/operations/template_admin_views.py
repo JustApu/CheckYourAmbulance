@@ -179,32 +179,27 @@ def _versions(template, before=None):
 def _override_vehicles(org, template):
     """(vehicles to open an override for, bound ones first; whether more exist) (part 6b).
 
-    Both reads are bounded (SPEC NFR-6): at most LIST_LIMIT vehicles, and bindings checked only
-    for at most LIST_LIMIT vehicles that have one.
+    Bounded (SPEC NFR-6) and accurate: up to LIST_LIMIT vehicles bound to the template now or
+    later come first, found by the database itself (bound_vehicles_first); unbound vehicles fill
+    the rest. A filler vehicle is unbound for certain, because the bound list is complete
+    whenever there is room to fill.
     """
-    from cya.obligations.models import RequirementBinding
-
     limit = admin_pages.LIST_LIMIT
-    with_binding = list(
-        RequirementBinding.objects.filter(organization_id=org, template_id=template.pk)
-        .order_by("vehicle_id")
-        .values_list("vehicle_id", flat=True)
-        .distinct()[: limit + 1]
-    )
-    bound = {
-        str(v)
-        for v in position_rules.vehicles_bound_now_or_later(
-            org, str(template.pk), vehicle_ids=with_binding[:limit]
+    bound_ids, more_bound = position_rules.bound_vehicles_first(org, str(template.pk), limit)
+    bound = list(
+        Vehicle.objects.filter(organization_id=org, pk__in=bound_ids).order_by(
+            "-active", "display_name", "pk"
         )
-    }
-    vehicles = list(
-        Vehicle.objects.filter(organization_id=org).order_by("-active", "display_name", "pk")[
-            : limit + 1
-        ]
     )
-    rows = [{"vehicle": v, "bound": str(v.pk) in bound} for v in vehicles[:limit]]
-    rows.sort(key=lambda row: not row["bound"])
-    return rows, len(vehicles) > limit or len(with_binding) > limit
+    room = limit - len(bound)
+    others = list(
+        Vehicle.objects.filter(organization_id=org)
+        .exclude(pk__in=bound_ids)
+        .order_by("-active", "display_name", "pk")[: room + 1]
+    )
+    rows = [{"vehicle": v, "bound": True} for v in bound]
+    rows += [{"vehicle": v, "bound": False} for v in others[:room]]
+    return rows, more_bound or len(others) > room
 
 
 def _latest(template):

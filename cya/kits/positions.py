@@ -498,17 +498,33 @@ def bound_vehicles_among(organization_id, template_id, vehicle_ids, now=None):
     does the per-chain work, so the rows read are at most the distinct vehicle ids given, however
     long the binding history is.
     """
+    ids = [str(v) for v in vehicle_ids]
+    if not ids:
+        return []
+    return _bound_vehicle_ids(organization_id, template_id, now, vehicle_ids=ids)
+
+
+def bound_vehicles_first(organization_id, template_id, limit, now=None):
+    """(up to `limit` vehicles bound to the template now or later, whether there are more).
+
+    Bounded (SPEC NFR-6): the database finds bound vehicles directly, and at most limit + 1 ids
+    of each kind (in force, later) are read, however many vehicles or revisions there are.
+    """
+    ids = _bound_vehicle_ids(organization_id, template_id, now, limit=limit + 1)
+    return ids[:limit], len(ids) > limit
+
+
+def _bound_vehicle_ids(organization_id, template_id, now=None, vehicle_ids=None, limit=None):
     from django.db.models import F, OuterRef, Subquery
 
     from cya.obligations.models import RequirementBinding
 
     now = now or timezone.now()
-    ids = [str(v) for v in vehicle_ids]
-    if not ids:
-        return []
     chains = RequirementBinding.objects.filter(
-        organization_id=organization_id, template_id=template_id, vehicle_id__in=ids
+        organization_id=organization_id, template_id=template_id
     )
+    if vehicle_ids is not None:
+        chains = chains.filter(vehicle_id__in=vehicle_ids)
     newest = (
         RequirementBinding.objects.filter(
             vehicle_id=OuterRef("vehicle_id"),
@@ -523,15 +539,20 @@ def bound_vehicles_among(organization_id, template_id, vehicle_ids, now=None):
         chains.filter(effective_at__lte=now, action="BIND")
         .annotate(newest=Subquery(newest))
         .filter(revision=F("newest"))
+        .order_by("vehicle_id")
         .values_list("vehicle_id", flat=True)
         .distinct()
     )
     later = (
         chains.filter(effective_at__gt=now, action="BIND")
+        .order_by("vehicle_id")
         .values_list("vehicle_id", flat=True)
         .distinct()
     )
-    return sorted({str(v) for v in in_force} | {str(v) for v in later})
+    if limit is not None:
+        in_force, later = in_force[:limit], later[:limit]
+    found = sorted({str(v) for v in in_force} | {str(v) for v in later})
+    return found[:limit] if limit is not None else found
 
 
 def template_slot_rows(organization_id, template_id, now):
