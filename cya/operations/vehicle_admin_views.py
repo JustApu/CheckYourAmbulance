@@ -52,6 +52,7 @@ SAVED = {
 EXPECTED = (vehicle_rules.VehicleError, KeyRuleError, ValueError)
 # The vehicle's other configuration pages, each shown only to those who may open it.
 CONFIGURATION_LINKS = (
+    ("vehicle-bindings", "Checklist bindings", "bind_unbind_template"),
     ("vehicle-positions", "Compartments and systems", "manage_vehicle_positions"),
     ("vehicle-kit-list", "Kit list", "manage_vehicle_kit_lists"),
     ("vehicle-kit-instances", "Kit instances", "manage_kit_assignment"),
