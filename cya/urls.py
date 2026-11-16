@@ -103,6 +103,11 @@ urlpatterns = [
     ),
     path("administration/", shell.administration, name="administration"),
     path("administration/roles/", authorization.roles, name="administration-roles"),
+    path(
+        "administration/roles/<uuid:target_id>/history/",
+        authorization.role_history,
+        name="administration-role-history",
+    ),
     path("administration/kits/", kit_views.library, name="kit-library"),
     path(
         "administration/kits/template.<str:fmt>",
