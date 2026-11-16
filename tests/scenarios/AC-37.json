@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "AC-37",
+  "criterion": "AC-37",
+  "requirements": [
+    "AUD-1",
+    "REC-4",
+    "CFG-1",
+    "CFG-2",
+    "CFG-7",
+    "CFG-8"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "an inactive vehicle with a valid template and schedule slot, and no binding",
+    "a Supervisor, an Administrator, a Crew member, and a Supply Officer",
+    "an item obligation created by a binding effective while the vehicle is active, with its due instant at or after a proposed unbind instant"
+  ],
+  "when": [
+    "the Supervisor records a binding while the vehicle is inactive, then the vehicle is activated",
+    "the Administrator records a future binding and time advances from before its effective instant to that instant",
+    "Crew and Supply Officer attempt the same binding through direct requests",
+    "a user requests an unbind preview, then relevant configuration changes before confirmation",
+    "the user refreshes the preview and confirms unbinding, then replays the same operation id"
+  ],
+  "then": [
+    "the Supervisor and Administrator are allowed to bind and unbind; Crew and Supply Officer are denied server-side",
+    "no obligations are generated while the vehicle is inactive; an in-force binding begins obligations at activation",
+    "the future binding creates no obligations before its effective instant and begins at that instant if the vehicle is active",
+    "the unbind preview identifies unsatisfied obligations due at or after unbinding that will retire, and states they are not satisfied",
+    "confirmation of a stale preview is refused and a refreshed preview is required",
+    "obligations due before unbinding retain their state; checks, deficiencies and audit history remain",
+    "replaying the confirmed operation id does not apply unbinding a second time"
+  ],
+  "status": "symbolic",
+  "notes": "Language-neutral contract for owner-approved SPEC amendment 4.1.0 (issue #177). The scenario is not yet bound to application commands.",
+  "database": "commit"
+}
