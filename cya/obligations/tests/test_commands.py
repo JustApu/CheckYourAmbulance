@@ -29,8 +29,11 @@ class BindingCase(ObligationCase):
 
 
 class AuthorizationTests(BindingCase):
-    def test_only_an_administrator_may_bind(self):
-        for actor in (self.supervisor, self.crew):
+    def test_crew_and_supply_officers_are_denied_binding(self):
+        # SPEC 3.3 and AC-37(1): the policy action bind_unbind_template.
+        supply = self.make_user("supply")
+        self.grant(supply, "SUPPLY_OFFICER")
+        for actor in (self.crew, supply):
             with self.subTest(actor=actor.idp_subject), self.assertRaises(CommandDenied):
                 self.bind(actor=actor)
         self.assertEqual(self.bindings(), [])
@@ -38,12 +41,24 @@ class AuthorizationTests(BindingCase):
             AuditEvent.objects.filter(action="REQUIREMENT_BIND", outcome="DENIED").count(), 2
         )
 
+    def test_a_supervisor_may_bind(self):
+        self.bind(actor=self.supervisor, reconcile=False)
+        self.assertEqual(self.bindings()[0].actor_user_id, str(self.supervisor.pk))
+
     def test_an_inactive_administrator_is_denied(self):
         self.admin.active = False
         self.admin.save(update_fields=["active"])
         with self.assertRaises(CommandDenied):
             self.bind()
         self.assertEqual(self.bindings(), [])
+
+    def test_an_inactive_vehicle_may_be_bound(self):
+        # SPEC CFG-7: recorded ahead; it owes nothing while inactive (test_unbinding).
+        inactive = self.new_vehicle("inactive")
+        inactive.active = False
+        inactive.save(update_fields=["active"])
+        self.bind(vehicle=inactive, reconcile=False)
+        self.assertEqual([b.vehicle_id for b in self.bindings()], [str(inactive.pk)])
 
 
 class HistoryTests(BindingCase):
@@ -117,19 +132,15 @@ class ValidationTests(BindingCase):
                 request_attempt_id=str(uuid4()),
             )
 
-    def test_inactive_unknown_and_foreign_vehicles_and_templates_are_refused(self):
+    def test_unknown_and_foreign_vehicles_and_inactive_templates_are_refused(self):
         other_org = Organization.objects.create(name="Other", station_zone="UTC")
         foreign_vehicle = Vehicle.objects.create(organization=other_org, display_name="Elsewhere")
         foreign_template = ChecklistTemplate.objects.create(organization=other_org, label="Other")
-        inactive = self.new_vehicle("inactive")
-        inactive.active = False
-        inactive.save(update_fields=["active"])
         retired = ChecklistTemplate.objects.create(
             organization=self.org, label="Retired", active=False
         )
         for kwargs, message in (
             ({"vehicle": foreign_vehicle}, "vehicle not found"),
-            ({"vehicle": inactive}, "vehicle not found or not active"),
             ({"template": foreign_template}, "template not found"),
             ({"template": retired}, "template not found or not active"),
         ):

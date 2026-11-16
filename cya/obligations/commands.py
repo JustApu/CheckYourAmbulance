@@ -34,8 +34,15 @@ logger = logging.getLogger(__name__)
 MAX_SHARED_RULE_MEMBERS = 1000
 
 
+BIND_ACTION = "bind_unbind_template"
+
+
 class BindingError(ValueError):
     """The requested binding is invalid or does not change anything."""
+
+
+class PreviewChanged(BindingError):
+    """The CFG-8 preview recomputed at confirmation differs from the one the user confirmed."""
 
 
 def _slot(value):
@@ -61,29 +68,30 @@ def bind_requirement(
     operation_id,
     correlation_id,
     request_attempt_id,
+    preview_token=None,
 ):
-    """Append a BIND or UNBIND revision for (vehicle, template, slot); history is never edited."""
+    """Append a BIND or UNBIND revision for (vehicle, template, slot); history is never edited.
+
+    preview_token is the digest of the CFG-8 preview the user confirmed. With it, an UNBIND takes
+    effect at the instant it is recorded, and is refused (PreviewChanged) unless the preview
+    recomputed then is identical.
+    """
     for value in (organization_id, actor_id, vehicle_id, template_id):
         canonical_id(value)
     _slot(slot)
     if action not in BINDING_ACTIONS:
         raise BindingError("action must be BIND or UNBIND")
     requested = _aware(effective_at)
+    if preview_token is not None:
+        if action != "UNBIND" or requested is not None:
+            raise BindingError("a preview applies only to an unbinding that takes effect now")
+        if not isinstance(preview_token, str) or not re.fullmatch(r"[0-9a-f]{64}", preview_token):
+            raise BindingError("preview token is malformed")
 
-    def authorize(org):
-        with locked_identities(organization_id, [actor_id], lock_organization=False) as (
-            current_org,
-            users,
-        ):
-            user = users[actor_id]
-            roles = load_state(DatabaseRoleBackend(), user).grants
-            actor = Actor(
-                user=user,
-                roles=tuple(sorted((Role.CREW if r == Role.EMT else r).value for r in roles)),
-            )
-            if not current_org.active or not user.active or Role.ADMINISTRATOR not in roles:
-                raise CommandDenied(actor)
-            return actor
+    # SPEC 3.3 and AC-37(1): Supervisors and Administrators, through the policy action.
+    from cya.kits.definitions import authorizer
+
+    authorize = authorizer(organization_id, actor_id, BIND_ACTION)
 
     def prepare(actor):
         vehicle = (
@@ -96,8 +104,10 @@ def bind_requirement(
             .filter(organization_id=organization_id, pk=template_id)
             .first()
         )
-        if vehicle is None or not vehicle.active:
-            raise BindingError("vehicle not found or not active")
+        # SPEC CFG-7: a binding may be recorded while the vehicle is inactive. Reconciliation
+        # covers active vehicles only, so it owes nothing until the vehicle is activated.
+        if vehicle is None:
+            raise BindingError("vehicle not found")
         if template is None or not template.active:
             raise BindingError("template not found or not active")
         if not ScheduleRule.objects.filter(organization_id=organization_id, slot=slot).exists():
@@ -136,6 +146,17 @@ def bind_requirement(
                 raise BindingError("a binding cannot take effect before it is recorded")
             if prior is not None and effective <= prior.effective_at:
                 raise BindingError("a revision must take effect after the previous revision")
+            if preview_token is not None:
+                from cya.obligations.unbinding import PreviewTooLarge, unbind_preview
+
+                try:
+                    fresh = unbind_preview(
+                        organization_id, vehicle_id, template_id, slot, receipt.recorded_at
+                    )
+                except PreviewTooLarge as exc:
+                    raise BindingError(str(exc)) from None
+                if fresh.token != preview_token:
+                    raise PreviewChanged("the obligations or binding changed since the preview")
             RequirementBinding.objects.create(
                 organization_id=organization_id,
                 command=receipt,
@@ -188,6 +209,7 @@ def bind_requirement(
                 "slot": slot,
                 "action": action,
                 "effective_at": requested.isoformat() if requested else None,
+                "preview_token": preview_token,
             }
         ),
         correlation_id=correlation_id,
