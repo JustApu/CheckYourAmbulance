@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "AC-38",
+  "criterion": "AC-38",
+  "requirements": [
+    "AUD-1",
+    "DEP-10",
+    "DEP-12",
+    "DEP-13"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "an organization designated for server operations, with an Administrator, a Supervisor, a Crew member and a Supply Officer",
+    "a synthetic SMTP relay that accepts TLS connections, one configured with a login and one that authenticates by the server's IP address",
+    "synthetic operator and deputy recipient addresses",
+    "a throwaway server with the host alert checks and the host-copy job installed",
+    "an outside probe on another host with its own copy of the relay settings, and a hosted uptime monitor whose recipients the owner has set to the same operator and deputy addresses"
+  ],
+  "when": [
+    "the Administrator saves relay settings with a password, then with IP authentication and no password, and sends a test email",
+    "the Supervisor, Crew member and Supply Officer request the relay settings page and post a change directly",
+    "a plaintext SMTP setting is submitted",
+    "the host-copy job runs, then the application and database are stopped",
+    "each server-side DEP-13 condition is induced in turn, held past the repeat interval, then cleared",
+    "the site is made unreachable from outside, held past the repeat interval, then restored"
+  ],
+  "then": [
+    "only the Administrator can view or change the settings; the others are denied server-side",
+    "the password is never shown back, and the audit record names the changed fields without it",
+    "the plaintext setting is refused and nothing changes",
+    "the host copy is root-owned mode 0600, and alerts still send while the application and database are stopped",
+    "each server-side alert reaches both recipients once when it starts and once when it clears, and repeats no sooner than 6 hours",
+    "the outside probe and the hosted uptime monitor each detect the outage and the recovery, and each delivers its outage and recovery alerts to both the operator and the deputy; neither repeats sooner than 6 hours",
+    "alert text and alert logs contain no secrets"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral contract for owner-approved SPEC amendment 4.2.0 (issue #8). The hosted uptime monitor notifies the operator and deputy and counts toward the DEP-12 delivery gate (owner decision 2026-11-16, PR #187 review); its repeat timing is the provider's, configured not to repeat sooner than 6 hours. The scenario is not yet bound to application commands.",
+  "database": "commit"
+}

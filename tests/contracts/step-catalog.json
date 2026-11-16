@@ -750,6 +750,52 @@
         "§5.7",
         "§23"
       ]
+    },
+    "AC-38": {
+      "setup": [
+        "operations_organization_with_four_roles",
+        "synthetic_tls_relays_login_and_ip",
+        "synthetic_operator_and_deputy_addresses",
+        "throwaway_server_with_alerting",
+        "outside_probe_and_hosted_monitor_to_operator_and_deputy"
+      ],
+      "actions": [
+        "administrator_saves_relay_with_password",
+        "administrator_saves_relay_with_ip_authentication",
+        "send_test_email",
+        "other_roles_request_relay_settings",
+        "submit_plaintext_relay",
+        "run_host_copy_job",
+        "stop_application_and_database",
+        "induce_each_alert_condition",
+        "hold_condition_past_repeat_interval",
+        "clear_each_alert_condition",
+        "make_site_unreachable_from_outside",
+        "restore_site_reachability"
+      ],
+      "assert": [
+        "only_administrator_manages_relay",
+        "password_never_shown_or_audited",
+        "plaintext_relay_refused",
+        "host_copy_root_only",
+        "alerts_send_with_application_down",
+        "alert_start_and_clear_reach_both_recipients",
+        "alert_repeat_not_sooner_than_six_hours",
+        "probe_detects_outage_and_recovery_and_alerts_both",
+        "hosted_monitor_detects_outage_and_recovery_and_alerts_both",
+        "alert_text_and_logs_hold_no_secrets"
+      ],
+      "requirements": [
+        "AUD-1",
+        "DEP-10",
+        "DEP-12",
+        "DEP-13"
+      ],
+      "spec_refs": [
+        "§3.3",
+        "§17.8",
+        "§23"
+      ]
     }
   }
 }
