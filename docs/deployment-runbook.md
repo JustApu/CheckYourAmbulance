@@ -123,6 +123,7 @@ does not claim a root-only source file prevents exposure by the running process.
 | `CYA_NOTIFICATION_SENDER` | Dotted path to the sender factory; unset leaves email queued and the delivery command refuses to run |
 | `CYA_NOTIFICATION_MAX_ATTEMPTS` | Attempts before `GAVE_UP`; default 5, allowed 1–20 |
 | `CYA_NOTIFICATION_RETRY_SECONDS` | Base retry delay, doubled per attempt; default 60 seconds, allowed 1–86400 |
+| `CYA_MAIL_RELAY_KEY` | Fernet key for the outgoing-mail relay password (SPEC DEP-10 exception, DEP-13). Generate privately with `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` and keep it only in the root-owned runtime file. Rotating it means re-entering the relay password on **Administration → Outgoing mail**. Not needed when the relay authenticates by IP address |
 | `CYA_LIVE_MAX_CONNECTIONS_PER_USER` | WebSocket connection limit per user per process; default 4, allowed 1–32 |
 | `CYA_LIVE_AUTH_RECHECK_SECONDS` | WebSocket authorization recheck interval; default 60 seconds, allowed 10–300 |
 | `CYA_TRUST_PROXY_SSL_HEADER` | `1`, only with the proxy rule below (the proxy overwrites `X-Forwarded-Proto` and the app is reachable only through it); default `0` |

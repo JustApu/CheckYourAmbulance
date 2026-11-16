@@ -1,0 +1,48 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+{% if test_result %}<p role="status" id="test-result">{% if test_result.ok %}&#10003; {% else %}&#9888; {% endif %}{{ test_result.text }}</p>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'administration' %}">Administration</a> · Outgoing mail</p>
+<p>The relay this server sends email through: operations alerts to the operator and deputy, and email notifications. The connection must be encrypted.</p>
+
+<h2 id="relay-heading">Relay settings</h2>
+<form method="post" action="{% url 'mail-relay' %}" class="admin-form" aria-labelledby="relay-heading" autocomplete="off">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="save">
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <input type="hidden" name="base_revision" value="{{ revision }}">
+  <p><label for="relay-host">Relay host</label><br><input id="relay-host" name="host" value="{{ form.host }}" maxlength="253" required></p>
+  <p><label for="relay-port">Port</label><br><input id="relay-port" name="port" value="{{ form.port }}" inputmode="numeric" pattern="[0-9]*" size="6" required></p>
+  <fieldset><legend>Encryption</legend>
+    <label><input type="radio" name="tls_mode" value="STARTTLS"{% if form.tls_mode != "TLS" %} checked{% endif %}> STARTTLS (usually port 587)</label>
+    <label><input type="radio" name="tls_mode" value="TLS"{% if form.tls_mode == "TLS" %} checked{% endif %}> TLS from the start (usually port 465)</label>
+  </fieldset>
+  <fieldset><legend>How the relay recognizes this server</legend>
+    <label><input type="radio" name="auth_mode" value="PASSWORD"{% if form.auth_mode != "IP" %} checked{% endif %}> Username and password</label>
+    <label><input type="radio" name="auth_mode" value="IP"{% if form.auth_mode == "IP" %} checked{% endif %}> This server's IP address (no login; the relay must allow it)</label>
+  </fieldset>
+  <p><label for="relay-username">Username (for username and password)</label><br><input id="relay-username" name="username" value="{{ form.username }}" maxlength="254" autocomplete="off"></p>
+  <p><label for="relay-password">Password</label><br><input id="relay-password" name="password" type="password" maxlength="1024" autocomplete="new-password" aria-describedby="relay-password-help">
+  <span id="relay-password-help" class="hint">{% if password_set %}A password is saved and is never shown. Leave this blank to keep it.{% else %}No password is saved.{% endif %}</span></p>
+  <p><label for="relay-sender">Sender address</label><br><input id="relay-sender" name="sender" type="email" value="{{ form.sender }}" maxlength="254" required></p>
+  <p><label for="relay-operator">Operator addresses (one per line, at most {{ max_recipients }})</label><br><textarea id="relay-operator" name="operator" rows="3" required>{{ form.operator }}</textarea></p>
+  <p><label for="relay-deputy">Deputy addresses (one per line, at most {{ max_recipients }})</label><br><textarea id="relay-deputy" name="deputy" rows="3" required>{{ form.deputy }}</textarea></p>
+  <p><button type="submit" class="button">Save</button></p>
+</form>
+
+{% if relay %}
+<h2 id="test-heading">Test</h2>
+<p>Sends one message through the saved relay to every operator and deputy address.</p>
+<form method="post" action="{% url 'mail-relay' %}" aria-labelledby="test-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="test">
+  <input type="hidden" name="operation_id" value="{{ test_operation_id }}">
+  <p><button type="submit" class="button">Send test email</button></p>
+</form>
+{% endif %}
+</div>
+{% endblock %}

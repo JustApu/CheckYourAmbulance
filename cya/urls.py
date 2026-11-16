@@ -21,6 +21,7 @@ from cya.kits import (
 )
 from cya.kits import views as kit_views
 from cya.notifications import api as notifications_api
+from cya.notifications import relay_views
 from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
 from cya.operations import (
@@ -103,6 +104,7 @@ urlpatterns = [
     ),
     path("administration/", shell.administration, name="administration"),
     path("administration/roles/", authorization.roles, name="administration-roles"),
+    path("administration/mail-relay/", relay_views.mail_relay, name="mail-relay"),
     path("administration/kits/", kit_views.library, name="kit-library"),
     path(
         "administration/kits/template.<str:fmt>",
