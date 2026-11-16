@@ -56,6 +56,12 @@ local/venv/bin/python manage.py test cya --noinput                  # offline te
 docker compose down                                                 # stop; add -v to delete the dev database
 ```
 
+**Parallel and concurrent test runs** ([issue #158](https://github.com/JustApu/CheckYourAmbulance/issues/158)). `--parallel N` makes database clones (`test_cya_1` to `test_cya_N`) with the MariaDB client tools, so install them first (`mariadb-client` on Debian and Ubuntu). `tools/dev-db/accounts.sql` grants `cya_owner` every `test_cya…` database. The script runs only when the compose volume is first created, so a volume created before that grant refuses the clones with error 1044. Add the grant once:
+
+```sh
+docker compose exec db mariadb -uroot -pdev-only-root-password -e "GRANT ALL PRIVILEGES ON \`test\\_cya%\`.* TO 'cya_owner'@'%'"
+```
+
 **Faster full local runs** ([issue #57](https://github.com/JustApu/CheckYourAmbulance/issues/57)). A full `manage.py test cya --parallel 8` run takes over an hour, mostly in a few migration-reversal and seeded-history classes whose schema changes are bound by the database's disk writes. For a full run you can use an opt-in test database kept in memory, which ran those classes about 30% faster in a measured comparison (starting them first instead made the run slower, so the order is unchanged):
 
 ```sh
