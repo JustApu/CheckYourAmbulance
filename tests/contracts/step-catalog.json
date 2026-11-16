@@ -709,16 +709,17 @@
     "AC-37": {
       "setup": [
         "inactive_vehicle_with_template_and_schedule",
-        "binding_effective_before_activation"
+        "binding_effective_before_activation",
+        "obligations_in_and_before_window_at_unbind_instant"
       ],
       "actions": [
         "supervisor_binds_inactive_vehicle",
         "record_future_binding",
         "advance_before_and_to_binding_effective_instant",
         "request_unbind_preview",
-        "change_configuration_after_preview",
+        "change_preview_lists_after_preview",
         "confirm_stale_preview",
-        "refresh_preview_and_confirm_unbind",
+        "confirm_fresh_preview_and_unbind",
         "replay_unbind_operation"
       ],
       "assert": [
@@ -729,7 +730,8 @@
         "future_binding_not_effective_early",
         "future_binding_effective_on_start",
         "stale_unbind_preview_refused",
-        "future_obligations_retired_not_satisfied",
+        "pre_window_obligation_superseded_not_owed_or_counted",
+        "in_window_obligation_continues",
         "prior_checks_deficiencies_and_audit_history_retained",
         "operation_replay_idempotent"
       ],
@@ -739,11 +741,13 @@
         "CFG-1",
         "CFG-2",
         "CFG-7",
-        "CFG-8"
+        "CFG-8",
+        "RPT-5a"
       ],
       "spec_refs": [
         "§3.3",
         "§4.8",
+        "§5.7",
         "§23"
       ]
     }
