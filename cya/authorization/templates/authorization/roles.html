@@ -1,5 +1,4 @@
 {% extends "shell/base.html" %}
-{% load station_time %}
 {% block content %}
 {% if saved %}{% include "shell/save_state.html" with state="saved" %}{% endif %}
 {% if error %}<p class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ error }}</p>{% endif %}
@@ -8,7 +7,7 @@
 <div class="role-administration">
 {% if preview %}
 <h2>Review role change</h2>
-<p id="role-change-summary">{% if preview.action == "GRANT" %}Grant {{ preview.role_label }} role to{% else %}Revoke {{ preview.role_label }} role from{% endif %} {{ preview.target.display_name|default:preview.target.email }} ({{ preview.target.email }}).</p>
+<p id="role-change-summary">{% if preview.action == "GRANT" %}Grant {{ preview.role_label }} role to{% else %}Remove {{ preview.role_label }} role from{% endif %} {{ preview.target.display_name|default:preview.target.email }} ({{ preview.target.email }}).</p>
 <form method="post" action="{% url 'administration-roles' %}">
   {% csrf_token %}
   <input type="hidden" name="stage" value="confirm">
@@ -29,62 +28,59 @@
   <p><button type="submit" class="button">Change selection</button></p>
 </form>
 {% else %}
-<h2>Change a role</h2>
+<h2>Organization users</h2>
 <form method="get" action="{% url 'administration-roles' %}" role="search">
   <p><label for="role-user-search">Find an active user by name or email</label></p>
   <p><input id="role-user-search" name="q" type="search" maxlength="100" value="{{ target_search_query }}" autocomplete="off">
     <button type="submit" class="button">Search users</button></p>
 </form>
 {% if target_search_error %}<p class="banner banner-error" role="alert">{{ target_search_error }}</p>{% endif %}
+{% if role_list_error %}<p class="banner banner-error" role="alert">{{ role_list_error }}</p>{% endif %}
 {% if target_search_error %}
   <p>The user list is hidden until you correct the search.</p>
 {% elif target_search_query %}
   <p>{{ target_total }} matching active user{{ target_total|pluralize }}{% if target_total > target_limit %}; showing the first {{ target_limit }}{% endif %}.</p>
-{% elif not target_search_query %}
+{% else %}
   <p>Showing the first {{ target_limit }} active users. Search to find someone else.</p>
 {% endif %}
-<form method="post" action="{% url 'administration-roles' %}">
-  {% csrf_token %}
-  <input type="hidden" name="stage" value="preview">
-  <input type="hidden" name="operation_id" value="{{ operation_id }}">
-  {% if target_search_query %}<input type="hidden" name="q" value="{{ target_search_query }}">{% endif %}
-  {% if targets %}
-  <p><label for="role-target">User</label>
-    <select id="role-target" name="target" required>
-      <option value=""{% if not form_values.target %} selected{% endif %}>Choose a user</option>
-      {% for target in targets %}<option value="{{ target.pk }}"{% if form_values.target == target.pk|stringformat:"s" %} selected{% endif %}>{{ target.display_name|default:target.email }} ({{ target.email }})</option>{% endfor %}
-    </select></p>
-  <p><label for="role-code">Role</label>
-    <select id="role-code" name="role" required><option value=""{% if not form_values.role %} selected{% endif %}>Choose a role</option>{% for option in role_options %}<option value="{{ option.0 }}"{% if form_values.role == option.0 %} selected{% endif %}>{{ option.1 }}</option>{% endfor %}</select></p>
-  <p><label for="role-action">Action</label>
-    <select id="role-action" name="action" required><option value=""{% if not form_values.action %} selected{% endif %}>Choose Grant or Revoke</option>{% for action in actions %}<option value="{{ action }}"{% if form_values.action == action %} selected{% endif %}>{{ action|title }}</option>{% endfor %}</select></p>
-  <p><button type="submit" class="button">Review change</button></p>
-  {% elif target_search_query %}
-  <p>No active users match that search.</p>
-  {% endif %}
-</form>
-{% endif %}
-
-<h2>Role history</h2>
-{% if history %}
-<div class="role-history-scroll" role="region" aria-label="Role history" tabindex="0">
-<table class="role-history-table">
-  <thead><tr><th scope="col">When (agency local time, {{ cya_user.organization.station_zone }})</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead>
-  <tbody>
-  {% for event in history %}
-    <tr>
-      <td>{{ event.recorded_at|station_time:"seconds" }}</td>
-      <td>{{ event.user.email }}</td>
-      <td>{{ event.action }}</td>
-      <td>{{ event.role }}</td>
-      <td>{% if event.actor_user %}{{ event.actor_user.email }}{% else %}System{% endif %}</td>
-    </tr>
+{% if targets %}
+<ul class="role-user-list">
+  {% for target in targets %}
+  <li class="role-user-card">
+    <h3>{{ target.display_name|default:target.email }}</h3>
+    {% if target.display_name %}<p class="role-user-email">{{ target.email }}</p>{% endif %}
+    {% if target.role_history_unavailable %}
+    <p class="banner banner-error">Current roles could not be verified. Role changes for this user are unavailable. View role history or contact support.</p>
+    {% else %}
+    <p><strong>Current roles:</strong>
+      {% if target.current_role_labels %}{% for label in target.current_role_labels %}<span class="pill">{{ label }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}No roles assigned{% endif %}
+    </p>
+    {% endif %}
+    <p><a href="{% url 'administration-role-history' target.pk %}" aria-label="View role history for {{ target.email }}">View role history</a></p>
+    {% if not target.role_history_unavailable %}
+    <form method="post" action="{% url 'administration-roles' %}" class="admin-form">
+      {% csrf_token %}
+      <input type="hidden" name="stage" value="preview">
+      <input type="hidden" name="operation_id" value="{{ target.role_operation_id }}">
+      <input type="hidden" name="target" value="{{ target.pk }}">
+      {% if target_search_query %}<input type="hidden" name="q" value="{{ target_search_query }}">{% endif %}
+      <label for="role-code-{{ forloop.counter }}">Role to change</label>
+      <select id="role-code-{{ forloop.counter }}" name="role" aria-label="Role to change for {{ target.display_name|default:target.email }}" required>
+        <option value="">Choose a role</option>
+        {% for option in role_options %}<option value="{{ option.0 }}"{% if form_values.target == target.pk|stringformat:"s" and form_values.role == option.0 %} selected{% endif %}>{{ option.1 }}</option>{% endfor %}
+      </select>
+      <div class="role-user-actions">
+        <button type="submit" name="action" value="GRANT" class="button">Review grant</button>
+        <button type="submit" name="action" value="REVOKE" class="button">Review removal</button>
+      </div>
+    </form>
+    {% endif %}
+  </li>
   {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p>No role changes have been recorded.</p>
+</ul>
+{% elif not target_search_error and not role_list_error %}
+  {% if target_search_query %}<p>No active users match that search.</p>{% else %}<p>No active users are listed yet.</p>{% endif %}
+{% endif %}
 {% endif %}
 </div>
 {% endif %}

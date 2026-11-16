@@ -75,6 +75,30 @@ h1 { font-size: 1.5rem; line-height: 1.25; margin: .5rem 0 1rem; }
 /* In a scrolling table a full-width field would shrink to its cell; keep it readable and let the table scroll. */
 .table-scroll .admin-form input:not([size]):not([type="checkbox"]):not([type="radio"]), .table-scroll .admin-form select { min-width: 10rem; }
 .admin-form input[type="checkbox"], .admin-form input[type="radio"] { width: 1.5rem; height: 1.5rem; margin: .25rem .5rem .25rem 0; vertical-align: middle; }
+.role-user-list { display: grid; gap: 1rem; list-style: none; margin: 1rem 0; padding: 0; }
+.role-user-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--bg); color: var(--fg); }
+.role-user-card h3 { margin: 0 0 .25rem; overflow-wrap: anywhere; }
+.role-user-card p { margin: .5rem 0; }
+.role-user-email { color: var(--muted); overflow-wrap: anywhere; }
+.role-administration .pill { display: inline-block; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 999px; color: var(--fg); }
+.role-user-card .admin-form label { display: block; margin-bottom: .25rem; }
+.role-user-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.role-history-pages { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }
+@media (forced-colors: active) {
+  :focus-visible { outline-color: Highlight; }
+  .role-user-card, .role-administration input[type="search"], .role-administration select,
+  .role-administration .pill, .role-administration .button, .role-history-scroll {
+    border-color: CanvasText;
+  }
+  .role-user-card { background: Canvas; color: CanvasText; }
+  .role-user-email { color: CanvasText; }
+  .role-administration input[type="search"], .role-administration select {
+    background: Field; color: FieldText;
+  }
+  .role-administration .button { background: ButtonFace; color: ButtonText; }
+  .role-administration a { color: LinkText; }
+  .role-history-table th, .role-history-table td { border-color: CanvasText; }
+}
 .field-error { display: block; margin-top: .25rem; font-weight: 600; }
 .admin-form [aria-invalid="true"] { border-width: 3px; border-style: dashed; }
 @media (min-width: 48rem) {
