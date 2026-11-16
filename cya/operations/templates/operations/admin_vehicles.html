@@ -1,0 +1,43 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<form method="get" action="{% url 'vehicle-admin-list' %}" role="search" class="admin-form">
+  <label for="vehicle-search">Search by name, number or VIN</label>
+  <input id="vehicle-search" type="search" name="q" value="{{ query }}" maxlength="100">
+  <button type="submit" class="button">Search</button>{% if query %} <a href="{% url 'vehicle-admin-list' %}">Show all</a>{% endif %}
+</form>
+
+{% if vehicles %}
+<div class="table-scroll" role="region" aria-label="Vehicles" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Vehicle</th><th scope="col">Number</th><th scope="col">VIN</th><th scope="col">Active</th><th scope="col">Operational status</th></tr></thead>
+  <tbody>
+  {% for v in vehicles %}
+    <tr><td><a href="{% url 'vehicle-admin' v.id %}">{{ v.display_name }}</a></td><td>{{ v.number|default:"" }}</td><td>{{ v.key|default:"Not set" }}</td><td>{% if v.active %}Active{% else %}Inactive{% endif %}</td><td>{{ v.status_label }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p>Active means the vehicle owes routine inspections. Operational status (in, limited or out of service) is set separately by a supervisor.</p>
+{% if vehicles|length == list_limit %}<p>Showing the first {{ list_limit }} vehicles. Search to narrow the list.</p>{% endif %}
+{% elif query %}
+<p>No vehicle matches “{{ query }}”.</p>
+{% else %}
+<p>No vehicles yet.</p>
+{% endif %}
+
+<h2 id="create-heading">Add a vehicle</h2>
+<form method="post" action="{% url 'vehicle-admin-list' %}" aria-labelledby="create-heading" class="admin-form">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="create">
+  <input type="hidden" name="operation_id" value="{{ create_operation_id }}">
+  <p><label for="create-vin">VIN</label><br><input id="create-vin" name="vin" value="{{ form.vin }}" maxlength="17" minlength="17" required autocapitalize="characters" spellcheck="false" aria-describedby="create-vin-help">
+  <br><span id="create-vin-help">17 letters and digits, without I, O or Q. The VIN can't be changed later.</span></p>
+  <p><label for="create-name">Name</label><br><input id="create-name" name="display_name" value="{{ form.display_name }}" maxlength="200" required></p>
+  <p><label for="create-number">Number (optional)</label><br><input id="create-number" name="number" value="{{ form.number }}" maxlength="50"></p>
+  <p><button type="submit" class="button">Add vehicle</button></p>
+</form>
+</div>
+{% endblock %}

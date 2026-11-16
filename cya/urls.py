@@ -17,6 +17,7 @@ from cya.kits import views as kit_views
 from cya.notifications import api as notifications_api
 from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
+from cya.operations import vehicle_admin_views
 from cya.operations import views as operations_views
 from cya.seals import api as seal_api
 from cya.seals import views as seal_views
@@ -118,6 +119,17 @@ urlpatterns = [
         "administration/kit-instances/<uuid:vehicle_id>/",
         kit_instance_views.vehicle_kit_instances,
         name="vehicle-kit-instances",
+    ),
+    path("administration/vehicles/", vehicle_admin_views.vehicles, name="vehicle-admin-list"),
+    path(
+        "administration/vehicles/<uuid:vehicle_id>/",
+        vehicle_admin_views.vehicle,
+        name="vehicle-admin",
+    ),
+    path(
+        "administration/vehicles/<uuid:vehicle_id>/duplicate/",
+        vehicle_admin_views.duplicate,
+        name="vehicle-duplicate",
     ),
     path("administration/positions/", position_views.vehicles, name="position-vehicles"),
     path(

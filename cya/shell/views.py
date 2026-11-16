@@ -71,6 +71,12 @@ ADMINISTRATION_LINKS = (
         None,
     ),
     (
+        "vehicle-admin-list",
+        "Vehicles",
+        "add, search, rename, deactivate, reactivate and duplicate vehicles.",
+        "manage_vehicles",
+    ),
+    (
         "kit-library",
         "Kit library",
         "kit definitions, templates, export and import.",
