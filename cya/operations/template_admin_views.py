@@ -85,6 +85,43 @@ class PageError(ValueError):
     """A form problem found before any command runs."""
 
 
+# Which field a refusal is about, by words in its message, so the page can show it next to that
+# field as well as in the summary (docs/application-shell.md, "Forms"). First match wins.
+ITEM_FIELDS = (
+    ("display_order", ("order",)),
+    ("expected_quantity", ("quantity",)),
+    ("unit", ("unit",)),
+    ("kit_id", ("kit",)),
+    (
+        "item",
+        (
+            "item's name",
+            "new item",
+            "existing item",
+            "already in this checklist",
+            "active item",
+            "item_id",
+            "presence item",
+        ),
+    ),
+    ("place", ("compartment", "system", "slot", "retired", "where the item is")),
+    ("kind", ("kind of check", "kind must")),
+)
+TEMPLATE_FIELDS = (("key", ("key",)), ("label", ("name",)), ("version_id", ("version",)))
+
+
+def field_errors(errors, rules):
+    """{field: message} for a single refusal that names a field of the form, else {}."""
+    if len(errors) != 1:
+        return {}
+    message = str(errors[0])
+    lowered = message.lower()
+    for name, words in rules:
+        if any(word in lowered for word in words):
+            return {name: message}
+    return {}
+
+
 # --- reading ---------------------------------------------------------------------------------
 
 
@@ -279,6 +316,7 @@ def _list_page(request, user, *, status=200, errors=None, form=None):
         "form": form or {},
         "create_operation_id": admin_pages.new_operation_id(),
         "errors": errors or [],
+        "field_errors": field_errors(errors or [], TEMPLATE_FIELDS) if form else {},
         "saved": SAVED.get(request.GET.get("saved", "")),
     }
     return render(request, "operations/admin_templates.html", context, status=status)
@@ -604,6 +642,7 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
         "items": _item_choices(org, [s["item_id"] for s in specs]) if item_id is None else [],
         "operation_id": admin_pages.new_operation_id(),
         "errors": errors or [],
+        "field_errors": field_errors(errors or [], ITEM_FIELDS),
     }
     return render(request, "operations/admin_template_item.html", context, status=status)
 
@@ -695,6 +734,7 @@ def duplicate(request, template_id):
             "form": form,
             "operation_id": admin_pages.new_operation_id(),
             "errors": errors or [],
+            "field_errors": field_errors(errors or [], TEMPLATE_FIELDS),
         }
         return render(request, "operations/admin_template_duplicate.html", context, status=status)
 

@@ -36,10 +36,10 @@
   <input type="hidden" name="stage" value="create">
   <input type="hidden" name="operation_id" value="{{ create_operation_id }}">
   <p><label for="create-label">Name</label><br>
-  <input id="create-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
+  <input id="create-label" name="label" value="{{ form.label }}" maxlength="200" required{% if field_errors.label %} aria-invalid="true" aria-describedby="create-label-error"{% endif %}>{% if field_errors.label %}<span id="create-label-error" class="field-error">Error: {{ field_errors.label }}</span>{% endif %}</p>
   <p><label for="create-key">Key</label><br>
-  <input id="create-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="create-key-help" autocapitalize="none" spellcheck="false"><br>
-  <span id="create-key-help">Lowercase letters, digits, and . _ - ; for example daily-ambulance.</span></p>
+  <input id="create-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="create-key-help{% if field_errors.key %} create-key-error{% endif %}"{% if field_errors.key %} aria-invalid="true"{% endif %} autocapitalize="none" spellcheck="false"><br>
+  <span id="create-key-help">Lowercase letters, digits, and . _ - ; for example daily-ambulance.</span>{% if field_errors.key %}<span id="create-key-error" class="field-error">Error: {{ field_errors.key }}</span>{% endif %}</p>
   <p><button type="submit" class="button">Create template</button></p>
 </form>
 </div>

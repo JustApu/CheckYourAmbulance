@@ -80,6 +80,7 @@ class TemplatePageTests(KitCase):
         self.assertContains(self.client_.get(LIST), "Synthetic weekly")
         taken = self.post(LIST, stage="create", label="Again", key="weekly")
         self.assertContains(taken, "another template has that key", status_code=400)
+        self.assertContains(taken, 'id="create-key-error" class="field-error"', status_code=400)
         self.assertContains(taken, 'value="Again"', status_code=400)
 
     def test_add_a_new_item_and_an_existing_one_then_edit_and_remove(self):
@@ -147,12 +148,17 @@ class TemplatePageTests(KitCase):
             f"{self.url}items/new/", new_item="Synthetic collar", **self.item_fields(place="")
         )
         self.assertContains(nowhere, "choose where the item is", status_code=400)
+        self.assertContains(nowhere, 'id="place-error" class="field-error"', status_code=400)
         bad_count = self.post(
             f"{self.url}items/new/",
             new_item="Synthetic collar",
             **self.item_fields(expected_quantity="four"),
         )
         self.assertContains(bad_count, "quantity must be a whole number", status_code=400)
+        self.assertContains(bad_count, 'id="quantity-error" class="field-error"', status_code=400)
+        self.assertContains(
+            bad_count, 'aria-invalid="true" aria-describedby="quantity-error"', status_code=400
+        )
         forged = self.post(
             f"{self.url}items/new/",
             new_item="Synthetic collar",

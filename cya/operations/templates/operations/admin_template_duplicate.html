@@ -10,14 +10,14 @@
   {% csrf_token %}
   <input type="hidden" name="operation_id" value="{{ operation_id }}">
   <p><label for="dup-version">Version to copy</label><br>
-  <select id="dup-version" name="version_id" required>
+  <select id="dup-version" name="version_id" required{% if field_errors.version_id %} aria-invalid="true" aria-describedby="dup-version-error"{% endif %}>
     {% for v in versions %}<option value="{{ v.version.pk }}"{% if form.version_id == v.version.pk|stringformat:"s" %} selected{% endif %}>Revision {{ v.version.revision }}{% if not v.published %} (draft){% endif %}</option>{% endfor %}
-  </select></p>
+  </select>{% if field_errors.version_id %}<span id="dup-version-error" class="field-error">Error: {{ field_errors.version_id }}</span>{% endif %}</p>
   <p><label for="dup-label">Name</label><br>
-  <input id="dup-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
+  <input id="dup-label" name="label" value="{{ form.label }}" maxlength="200" required{% if field_errors.label %} aria-invalid="true" aria-describedby="dup-label-error"{% endif %}>{% if field_errors.label %}<span id="dup-label-error" class="field-error">Error: {{ field_errors.label }}</span>{% endif %}</p>
   <p><label for="dup-key">Key</label><br>
-  <input id="dup-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="dup-key-help" autocapitalize="none" spellcheck="false"><br>
-  <span id="dup-key-help">Lowercase letters, digits, and . _ - ; set now and never changed.</span></p>
+  <input id="dup-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="dup-key-help{% if field_errors.key %} dup-key-error{% endif %}"{% if field_errors.key %} aria-invalid="true"{% endif %} autocapitalize="none" spellcheck="false"><br>
+  <span id="dup-key-help">Lowercase letters, digits, and . _ - ; set now and never changed.</span>{% if field_errors.key %}<span id="dup-key-error" class="field-error">Error: {{ field_errors.key }}</span>{% endif %}</p>
   <p><button type="submit" class="button primary">Duplicate</button> <a class="button" href="{% url 'checklist-template' template.pk %}">Cancel</a></p>
 </form>
 {% else %}
