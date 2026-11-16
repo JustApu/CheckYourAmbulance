@@ -705,6 +705,47 @@
         "RPT-5a",
         "SCH-2"
       ]
+    },
+    "AC-37": {
+      "setup": [
+        "inactive_vehicle_with_template_and_schedule",
+        "binding_effective_before_activation"
+      ],
+      "actions": [
+        "supervisor_binds_inactive_vehicle",
+        "record_future_binding",
+        "advance_before_and_to_binding_effective_instant",
+        "request_unbind_preview",
+        "change_configuration_after_preview",
+        "confirm_stale_preview",
+        "refresh_preview_and_confirm_unbind",
+        "replay_unbind_operation"
+      ],
+      "assert": [
+        "supervisor_binding_allowed",
+        "crew_and_supply_officer_binding_denied",
+        "no_obligations_while_inactive",
+        "obligations_start_on_activation",
+        "future_binding_not_effective_early",
+        "future_binding_effective_on_start",
+        "stale_unbind_preview_refused",
+        "future_obligations_retired_not_satisfied",
+        "prior_checks_deficiencies_and_audit_history_retained",
+        "operation_replay_idempotent"
+      ],
+      "requirements": [
+        "AUD-1",
+        "REC-4",
+        "CFG-1",
+        "CFG-2",
+        "CFG-7",
+        "CFG-8"
+      ],
+      "spec_refs": [
+        "§3.3",
+        "§4.8",
+        "§23"
+      ]
     }
   }
 }
