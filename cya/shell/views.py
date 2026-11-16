@@ -89,6 +89,12 @@ ADMINISTRATION_LINKS = (
         "export_configuration",
     ),
     (
+        "kit-definitions",
+        "Kit definitions",
+        "create, edit, duplicate, publish and deactivate kit definitions.",
+        "manage_kit_definitions",
+    ),
+    (
         "kit-list-vehicles",
         "Kit lists",
         "edit and publish the kits each vehicle must carry.",

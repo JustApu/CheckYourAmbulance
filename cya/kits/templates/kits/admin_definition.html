@@ -1,0 +1,150 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'kit-definitions' %}">All kit definitions</a> · {{ definition.label }} · Key {{ definition.key }}{% if not definition.active %} · Inactive{% endif %}</p>
+{% if latest %}<p><a href="{% url 'kit-definition-duplicate' definition.pk %}">Duplicate this kit definition</a></p>{% endif %}
+
+{% if activity %}
+<section aria-labelledby="activity-heading">
+<h2 id="activity-heading">{% if activity.active %}Reactivate{% else %}Deactivate{% endif %} {{ definition.label }}</h2>
+{% if activity.active %}
+<p>Reactivating lets this definition be drafted, published and placed again.</p>
+{% else %}
+<p>Deactivating stops new drafts and publications of this definition. Kit instances keep it. While it is inactive, a checklist that places it cannot be published.</p>
+{% endif %}
+<h3>Where it is used</h3>
+<ul id="activity-uses">
+  <li>Checklist templates that place it, now or later: {% if activity.uses.templates %}{{ activity.uses.templates|join:", " }}{% if activity.uses.more_templates %}, and more{% endif %}{% else %}none{% endif %}.</li>
+  <li>Vehicles whose kit list names it, now or later: {% if activity.uses.vehicles %}{{ activity.uses.vehicles|join:", " }}{% if activity.uses.more_vehicles %}, and more{% endif %}{% else %}none{% endif %}.</li>
+  <li>Active kit instances: {{ activity.uses.kit_count }}{% if activity.uses.kits %} ({{ activity.uses.kits|join:", " }}{% if activity.uses.kit_count > activity.uses.kits|length %}, and more{% endif %}){% endif %}.</li>
+</ul>
+<form method="post" action="{% url 'kit-definition' definition.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="activity">
+  <input type="hidden" name="active" value="{% if activity.active %}true{% else %}false{% endif %}">
+  <input type="hidden" name="token" value="{{ activity.token }}">
+  <input type="hidden" name="operation_id" value="{{ activity_operation_id }}">
+  <p><button type="submit" class="button primary">{% if activity.active %}Reactivate{% else %}Deactivate{% endif %}</button> <a class="button" href="{% url 'kit-definition' definition.pk %}">Cancel</a></p>
+</form>
+</section>
+{% endif %}
+
+{% if publish %}
+<section aria-labelledby="publish-check-heading">
+<h2 id="publish-check-heading">Before you publish revision {{ publish.version.revision }}</h2>
+<p>It would take effect {% if publish.when == "at" %}{{ publish.effective_at|date:"Y-m-d H:i" }} ({{ zone }}){% else %}now{% endif %}{% if in_force %}, replacing revision {{ in_force.version.revision }}{% endif %}. From then on, kit inspections use its contents:</p>
+<ul>
+  <li>Checklist templates that place it: {% if publish.uses.templates %}{{ publish.uses.templates|join:", " }}{% if publish.uses.more_templates %}, and more{% endif %}{% else %}none{% endif %}.</li>
+  <li>Vehicles whose kit list names it: {% if publish.uses.vehicles %}{{ publish.uses.vehicles|join:", " }}{% if publish.uses.more_vehicles %}, and more{% endif %}{% else %}none{% endif %}.</li>
+</ul>
+<form method="post" action="{% url 'kit-definition' definition.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="publish">
+  <input type="hidden" name="version_id" value="{{ publish.version.pk }}">
+  <input type="hidden" name="when" value="{{ publish.when }}">
+  <input type="hidden" name="at" value="{{ publish.at }}">
+  <input type="hidden" name="operation_id" value="{{ publish_operation_id }}">
+  <p><button type="submit" class="button primary">Publish revision {{ publish.version.revision }}</button> <a class="button" href="{% url 'kit-definition' definition.pk %}">Cancel</a></p>
+</form>
+</section>
+{% endif %}
+
+<h2 id="in-force-heading">In force</h2>
+{% if in_force %}
+<p>Revision {{ in_force.version.revision }}, in force since {{ in_force.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</p>
+<div class="table-scroll" role="region" aria-labelledby="in-force-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th></tr></thead>
+  <tbody>{% for row in in_force_rows %}<tr><td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.kind_label }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes_text }}</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% else %}<p>No version of this kit definition is in force.</p>{% endif %}
+{% if scheduled %}
+<h3>Scheduled</h3>
+<ul>{% for p in scheduled %}<li>Revision {{ p.version.revision }} takes effect {{ p.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</li>{% endfor %}</ul>
+{% endif %}
+
+<h2 id="edit-heading">{% if draft %}Draft revision {{ draft.revision }}{% else %}Edit{% endif %}</h2>
+{% if not definition.active %}
+<p>This kit definition is inactive. Reactivate it to edit or publish it.</p>
+{% else %}
+{% if not latest %}<p>This kit definition has no versions yet. Add its first content item to start a draft.</p>
+{% elif not draft %}<p>Every version is published. A change starts a new draft from revision {{ latest.revision }}.</p>
+{% else %}<p>Each change saves a new draft revision; nothing is in force until it is published.</p>{% endif %}
+<p><a class="button" href="{% url 'kit-definition-content-new' definition.pk %}">Add a content item</a></p>
+{% if edit_rows %}
+<div class="table-scroll" role="region" aria-labelledby="edit-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th><th scope="col">Change</th></tr></thead>
+  <tbody>
+  {% for row in edit_rows %}
+    <tr>
+      <td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.kind_label }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes_text }}</td>
+      <td>
+        <a href="{% url 'kit-definition-content' definition.pk row.item_id %}" aria-label="Edit {{ row.label }}">Edit</a>
+        <form method="post" action="{% url 'kit-definition' definition.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="stage" value="remove">
+          <input type="hidden" name="item_id" value="{{ row.item_id }}">
+          <input type="hidden" name="base_revision" value="{{ base_revision }}">
+          <input type="hidden" name="operation_id" value="{{ row.operation_id }}">
+          <button type="submit" class="button" aria-label="Remove {{ row.label }}">Remove</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if draft and can_publish and not publish %}
+<h2 id="publish-heading">Publish the draft</h2>
+<form method="post" action="{% url 'kit-definition' definition.pk %}" class="admin-form" aria-labelledby="publish-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="publish-preview">
+  <input type="hidden" name="version_id" value="{{ draft.pk }}">
+  <input type="hidden" name="operation_id" value="{{ publish_operation_id }}">
+  <fieldset><legend>Takes effect</legend>
+    <label><input type="radio" name="when" value="now" checked> Now</label>
+    <label><input type="radio" name="when" value="at"> At</label>
+    <label for="publish-at">Date and time ({{ zone }})</label>
+    <input id="publish-at" type="datetime-local" name="at">
+  </fieldset>
+  <p><button type="submit" class="button">Preview publication</button></p>
+</form>
+{% endif %}
+{% endif %}
+
+{% if not activity %}
+<h2 id="state-heading">{% if definition.active %}Deactivate{% else %}Reactivate{% endif %}</h2>
+<form method="post" action="{% url 'kit-definition' definition.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="activity-preview">
+  <input type="hidden" name="active" value="{% if definition.active %}false{% else %}true{% endif %}">
+  <input type="hidden" name="operation_id" value="{{ activity_operation_id }}">
+  <p><button type="submit" class="button">{% if definition.active %}See what deactivating affects{% else %}See what reactivating affects{% endif %}</button></p>
+</form>
+{% endif %}
+
+<h2 id="history-heading">Versions</h2>
+{% if versions %}
+<div class="table-scroll" role="region" aria-labelledby="history-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Revision</th><th scope="col">Saved</th><th scope="col">Published</th><th scope="col">Takes effect</th></tr></thead>
+  <tbody>
+  {% for v in versions %}
+    <tr><td>{{ v.version.revision }}</td><td>{{ v.version.created_at|date:"Y-m-d H:i" }}</td><td>{% if v.publication %}{{ v.publication.recorded_at|date:"Y-m-d H:i" }}{% else %}Draft{% endif %}</td><td>{% if v.publication %}{{ v.publication.effective_at|date:"Y-m-d H:i" }}{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p>Times are {{ zone }}.</p>
+{% if older or paged %}<p>{% if paged %}<a href="{% url 'kit-definition' definition.pk %}">Newest versions</a>{% endif %}{% if older and paged %} · {% endif %}{% if older %}<a href="{% url 'kit-definition' definition.pk %}?before={{ older }}">Older versions</a>{% endif %}</p>{% endif %}
+{% else %}<p>No versions yet.</p>{% endif %}
+</div>
+{% endblock %}
