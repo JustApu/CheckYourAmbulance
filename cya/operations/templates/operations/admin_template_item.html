@@ -1,0 +1,64 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'checklist-templates' %}">All templates</a> · <a href="{% url 'checklist-template' template.pk %}">{{ template.label }}</a></p>
+<p>Saving writes a new draft revision{% if latest %} from revision {{ latest.revision }}{% endif %}. Nothing is in force until the draft is published.</p>
+
+<form method="post" class="admin-form" aria-label="{% if item_id %}Edit {{ item_label }}{% else %}Add an item{% endif %}">
+  {% csrf_token %}
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <input type="hidden" name="base_revision" value="{{ base_revision }}">
+
+  {% if item_id %}
+  <h2>{{ item_label }}</h2>
+  {% else %}
+  <fieldset><legend>Item</legend>
+    <p><label for="item-existing">An existing item</label><br>
+    <select id="item-existing" name="item_id">
+      <option value="">(none)</option>
+      {% for item in items %}<option value="{{ item.id }}"{% if form.item_id == item.id|stringformat:"s" %} selected{% endif %}>{{ item.label }}</option>{% endfor %}
+    </select></p>
+    <p><label for="item-new">Or a new item's name</label><br>
+    <input id="item-new" name="new_item" value="{{ form.new_item|default:'' }}" maxlength="200" aria-describedby="item-new-help"><br>
+    <span id="item-new-help">Saving creates the item. Use it only when no existing item fits.</span></p>
+  </fieldset>
+  {% endif %}
+
+  <p><label for="item-place">Where it is</label><br>
+  <select id="item-place" name="place" required>
+    <option value="">(choose)</option>
+    {% for place in places %}<option value="{{ place.value }}"{% if form.place == place.value %} selected{% endif %}>{{ place.label }}</option>{% endfor %}
+  </select></p>
+  <p><label for="item-kit">In a kit (optional)</label><br>
+  <select id="item-kit" name="kit_id" aria-describedby="item-kit-help">
+    <option value="">(no kit)</option>
+    {% for kit in kits %}<option value="{{ kit.value }}"{% if form.kit_id == kit.value %} selected{% endif %}>{{ kit.label }}</option>{% endfor %}
+  </select><br>
+  <span id="item-kit-help">The kit must be in the compartment chosen above.</span></p>
+
+  <p><label for="item-kind">Check</label><br>
+  <select id="item-kind" name="kind" required>
+    {% for code, label in kinds %}<option value="{{ code }}"{% if form.kind == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select></p>
+  <p><label for="item-quantity">Expected quantity (Quantity only)</label><br>
+  <input id="item-quantity" name="expected_quantity" value="{{ form.expected_quantity|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*"></p>
+  <p><label for="item-unit">Unit (Measurement and Vehicle reading only)</label><br>
+  <input id="item-unit" name="unit" value="{{ form.unit|default:'' }}" maxlength="40"></p>
+  <p><label for="item-instructions">Instructions</label><br>
+  <textarea id="item-instructions" name="instructions" rows="4" maxlength="4000">{{ form.instructions|default:'' }}</textarea></p>
+
+  <fieldset><legend>Outcomes the crew may record</legend>
+    <p>Passed is always allowed.</p>
+    {% for code, label in optional_outcomes %}<label><input type="checkbox" name="outcome-{{ code }}"{% if code in form.outcomes %} checked{% endif %}> {{ label }}</label><br>{% endfor %}
+  </fieldset>
+  <p><label><input type="checkbox" name="expiration_tracked"{% if form.expiration_tracked %} checked{% endif %}> Record an expiration date</label></p>
+  <p><label for="item-order">Order</label><br>
+  <input id="item-order" name="display_order" value="{{ form.display_order|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*" aria-describedby="item-order-help"><br>
+  <span id="item-order-help">Lower numbers come first. Leave empty to put a new item last.</span></p>
+
+  <p><button type="submit" class="button primary">Save draft</button> <a class="button" href="{% url 'checklist-template' template.pk %}">Cancel</a></p>
+</form>
+</div>
+{% endblock %}

@@ -7,8 +7,6 @@ time. Publishing never backdates: the command refuses an instant before the publ
 """
 
 import logging
-import re
-from datetime import datetime
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -48,7 +46,6 @@ FORM_FIELDS = 10  # csrf token, stage, operation id, row count, with room to spa
 _FIELD_LIMIT = settings.DATA_UPLOAD_MAX_NUMBER_FIELDS
 MAX_ROWS = 300 if _FIELD_LIMIT is None else min(300, (_FIELD_LIMIT - FORM_FIELDS) // ROW_FIELDS)
 INVALID = "the form was not valid; reload the page and try again"
-LOCAL_DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?")
 SAVED = {"draft": "Draft saved. Publish it to put it in force.", "publish": "Kit list published."}
 
 
@@ -234,31 +231,7 @@ def _whole(value, what):
 
 
 def _effective_at(post):
-    """None for "now", the aware instant of the station-local date and time for "at".
-
-    A wall time skipped by a daylight-saving change is refused; a repeated one means its first
-    occurrence (fold=0).
-    """
-    when = post.get("when")
-    if when == "now":
-        return None
-    if when != "at":
-        # Only an explicit "now" publishes now; anything else is refused (PR #172 review).
-        raise KitListError("choose when it takes effect: now, or at a date and time")
-    value = post.get("at", "")
-    # Exactly what a datetime-local control sends: a date and a time, with no zone. A date alone
-    # would otherwise parse as midnight (PR #172 review).
-    if not LOCAL_DATETIME.fullmatch(value):
-        raise KitListError("enter the date and time it takes effect")
-    try:
-        local = datetime.fromisoformat(value)
-    except ValueError:
-        raise KitListError("enter the date and time it takes effect") from None
-    zone = timezone.get_current_timezone()
-    aware = local.replace(tzinfo=zone, fold=0)
-    if datetime.fromtimestamp(aware.timestamp(), zone).replace(tzinfo=None) != local:
-        raise KitListError("that local time does not exist on that day (a clock change)")
-    return aware
+    return admin_pages.local_effective_at(post, KitListError)
 
 
 def _command(request, user, vehicle, stage):

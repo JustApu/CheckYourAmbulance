@@ -66,6 +66,7 @@ from cya.kits.placements import (
 )
 
 MAX_EXPLANATION = 4000
+MAX_ITEM_LABEL = 200  # item.label
 OVERRIDE_ACTIONS = ("ADD", "REMOVE", "REPLACE")
 
 
@@ -99,14 +100,18 @@ def _execute(
     command_type,
     intent,
     build,
+    lock_organization=False,
 ):
     for value in (organization_id, actor_id):
         canonical_id(value)
     backend = DatabaseRoleBackend()
 
     def authorize(org):
-        # Only the actor is locked (no role change here); current roles are read after the lock.
-        with locked_identities(organization_id, [actor_id], lock_organization=False) as (
+        # The actor is locked (no role change here), after the organization when a rule spans
+        # it; current roles are read after the lock.
+        with locked_identities(
+            organization_id, [actor_id], lock_organization=lock_organization
+        ) as (
             current_org,
             users,
         ):
@@ -156,24 +161,87 @@ def _is_published(**target):
 # --- template drafts -------------------------------------------------------------------------
 
 
-def save_template_draft(*, template_id, items, placements=None, **context):
+def _with_new_items(org, items):
+    """(specs with item ids, {new item id: label}) for specs naming a new item by its label.
+
+    A spec may give "new_item": a label, in place of "item_id"; the command creates that item,
+    as a vehicle-file import creates an item by label (issue #130 part 6). A label that an active
+    item already has is refused, so the same thing does not get two identities.
+    """
+    if not isinstance(items, list):
+        return items, {}
+    labels = [s["new_item"] for s in items if isinstance(s, dict) and "new_item" in s]
+    if not labels:
+        return items, {}
+    created, specs = {}, []
+    for spec in items:
+        if not isinstance(spec, dict) or "new_item" not in spec:
+            specs.append(spec)
+            continue
+        if "item_id" in spec:
+            raise ChecklistValidationError("give either item_id or new_item, not both")
+        label = spec["new_item"]
+        if not isinstance(label, str) or not label.strip() or len(label.strip()) > MAX_ITEM_LABEL:
+            raise ChecklistValidationError(
+                f"a new item's name must be nonblank text of at most {MAX_ITEM_LABEL} characters"
+            )
+        label = label.strip()
+        if label in created.values():
+            raise ChecklistValidationError(f"the new item {label!r} is named twice")
+        item_id = new_id()
+        created[item_id] = label
+        specs.append({**{k: v for k, v in spec.items() if k != "new_item"}, "item_id": item_id})
+    from cya.kits.library_import import _active_items_by_label
+
+    taken = sorted(
+        label
+        for label, rows in _active_items_by_label(org, list(created.values())).items()
+        if any(active for _pk, active in rows)
+    )
+    if taken:
+        raise ChecklistValidationError(
+            f"an active item is already named {taken}; choose it instead of a new item"
+        )
+    return specs, created
+
+
+def save_template_draft(*, template_id, items, placements=None, base_revision=None, **context):
     """Create the next draft revision of a template with its complete item set (CHK-2).
 
     placements (optional) names the kit definitions this version inspects (SPEC 4.6 KDEF-4).
+    An item spec may name a new item by label ("new_item") instead of an item_id; the command
+    creates it. base_revision (optional) is the template's latest revision the edit started
+    from (0 for none): if another version was saved since, the save is refused rather than
+    silently replacing that change.
     """
     canonical_id(template_id)
     org = context["organization_id"]
+    if base_revision is not None and not is_count(base_revision):
+        raise ChecklistValidationError("base_revision must be a nonnegative integer")
+    creates_items = isinstance(items, list) and any(
+        isinstance(s, dict) and "new_item" in s for s in items
+    )
 
     def build(actor):
         template = _locked(ChecklistTemplate, org, template_id, "template")
         if not template.active:
             raise ChecklistValidationError("template is inactive")
-        definitions = validate_definitions(org, items)
+        latest = _next_revision(ChecklistVersion.objects.filter(template=template)) - 1
+        if base_revision is not None and base_revision != latest:
+            raise ChecklistValidationError(
+                "the template was changed since this edit started; reload it and try again"
+            )
+        specs, new_items = _with_new_items(org, items)
+        definitions = validate_definitions(org, specs, frozenset(new_items))
         placed = validate_placements(org, placements) if placements is not None else []
-        revision = _next_revision(ChecklistVersion.objects.filter(template=template))
+        revision = latest + 1
         version_id = new_id()
 
         def apply(receipt, current_actor):
+            Item.objects.bulk_create(
+                Item(id=item_id, organization_id=org, label=label, active=True)
+                for item_id, label in new_items.items()
+            )
             ChecklistVersion.objects.create(
                 id=version_id,
                 organization_id=org,
@@ -195,9 +263,15 @@ def save_template_draft(*, template_id, items, placements=None, **context):
                     for fields in placed
                 )
 
+        body = {"version_id": version_id, "revision": revision, "item_count": len(definitions)}
+        extra = {}
+        if new_items:
+            # Only when there are any, so an existing kind of save keeps its result and snapshot.
+            body["new_item_ids"] = sorted(new_items)
+            extra["new_items"] = [{"item_id": k, "label": v} for k, v in sorted(new_items.items())]
         return _plan(
             org,
-            {"version_id": version_id, "revision": revision, "item_count": len(definitions)},
+            body,
             apply,
             action="TEMPLATE_DRAFT_SAVED",
             template_id=template_id,
@@ -205,17 +279,23 @@ def save_template_draft(*, template_id, items, placements=None, **context):
             revision=revision,
             item_count=len(definitions),
             placement_count=len(placed),
+            **extra,
         )
 
     intent = {"template_id": template_id, "items": items}
+    # Each only when given, so the digest of an existing kind of request is unchanged.
     if placements is not None:
-        # Only when given, so the digest of an existing kind of request is unchanged.
         intent["placements"] = placements
+    if base_revision is not None:
+        intent["base_revision"] = base_revision
     return _execute(
         action="draft_edit_template",
         command_type="CHECKLIST_DRAFT_SAVE",
         intent=intent,
         build=build,
+        # New items: an active item label must stay unique, and that rule spans the
+        # organization, so take its lock first (docs/configuration-management.md, level 1).
+        lock_organization=creates_items,
         **context,
     )
 

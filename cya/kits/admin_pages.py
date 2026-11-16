@@ -5,10 +5,13 @@ audited denial. Every change is a form post carrying an operation id rendered in
 so a resubmitted form replays rather than repeats.
 """
 
+import re
 import uuid
+from datetime import datetime
 
 from django.http import Http404
 from django.shortcuts import render
+from django.utils import timezone
 
 from cya.accounts.returns import sign_in_redirect
 from cya.checklists.models import Vehicle
@@ -17,6 +20,7 @@ from cya.shell import navigation
 from cya.shell.views import deny_section
 
 LIST_LIMIT = 500
+LOCAL_DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?")
 
 
 def allowed(request, action, denial):
@@ -71,3 +75,31 @@ def operation_id_from(request):
 
 def new_operation_id():
     return str(uuid.uuid4())
+
+
+def local_effective_at(post, error):
+    """None for "now", the aware instant of the station-local date and time for "at".
+
+    A wall time skipped by a daylight-saving change is refused; a repeated one means its first
+    occurrence (fold=0). Refusals raise `error` with a message for the page.
+    """
+    when = post.get("when")
+    if when == "now":
+        return None
+    if when != "at":
+        # Only an explicit "now" publishes now; anything else is refused (PR #172 review).
+        raise error("choose when it takes effect: now, or at a date and time")
+    value = post.get("at", "")
+    # Exactly what a datetime-local control sends: a date and a time, with no zone. A date alone
+    # would otherwise parse as midnight (PR #172 review).
+    if not LOCAL_DATETIME.fullmatch(value):
+        raise error("enter the date and time it takes effect")
+    try:
+        local = datetime.fromisoformat(value)
+    except ValueError:
+        raise error("enter the date and time it takes effect") from None
+    zone = timezone.get_current_timezone()
+    aware = local.replace(tzinfo=zone, fold=0)
+    if datetime.fromtimestamp(aware.timestamp(), zone).replace(tzinfo=None) != local:
+        raise error("that local time does not exist on that day (a clock change)")
+    return aware
