@@ -181,3 +181,8 @@ class KitLibraryHttpTests(TransactionTestCase):
         again = self.preview(exported.content)
         self.assertContains(again, "0 kits to create, 0 to change (as a new draft), 1 unchanged")
         self.assertEqual(self.admin_client.get(URL + "export.xlsx").status_code, 404)
+
+    def test_the_import_form_uses_the_admin_field_style(self):
+        # Issue #176: the file field and format choice use the full-size admin field style.
+        page = self.admin_client.get(URL)
+        self.assertContains(page, 'enctype="multipart/form-data" class="admin-form"')

@@ -17,7 +17,7 @@
     <tr>
       <td>{{ kit.label }}</td><td>{{ kit.definition|default:"(no kit type)" }}</td><td>{{ kit.compartment }}</td>
       <td>{% if kit.definition_id %}
-        <form method="get" action="{% url 'kit-instance-duplicate' %}">
+        <form method="get" action="{% url 'kit-instance-duplicate' %}" class="admin-form">
           <input type="hidden" name="definition" value="{{ kit.definition_id }}">
           <input type="hidden" name="label" value="{{ kit.label }} (copy)">
           <select name="vehicle" aria-label="Vehicle for a copy of {{ kit.label }}">
@@ -33,7 +33,7 @@
 {% else %}<p>No active kits.</p>{% endif %}
 
 <h2 id="add-heading">Add a kit</h2>
-<form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}" aria-labelledby="add-heading">
+<form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}" aria-labelledby="add-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="add">
   <input type="hidden" name="operation_id" value="{{ add_operation_id }}">

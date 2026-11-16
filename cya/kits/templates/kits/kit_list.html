@@ -25,7 +25,7 @@
 {% if draft %}
 <h2 id="publish-heading">Publish the draft</h2>
 <p>Draft revision {{ draft.revision }} has {{ draft_lines|length }} line{{ draft_lines|length|pluralize }}.</p>
-<form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="publish-heading">
+<form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="publish-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="publish">
   <input type="hidden" name="version_id" value="{{ draft.pk }}">
@@ -45,7 +45,7 @@
 <p id="too-long">This list has {{ line_count }} line{{ line_count|pluralize }}. This page can edit at most {{ max_rows }} lines, so it is shown but not offered for editing; saving part of it would drop the rest. An Administrator can change it by importing a vehicle file.</p>
 {% else %}
 <p>Saving replaces the draft with exactly these lines. Leave a row's kit and compartment empty to skip it, or tick Remove.</p>
-<form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="edit-heading">
+<form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="edit-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="draft">
   <input type="hidden" name="operation_id" value="{{ draft_operation_id }}">

@@ -163,3 +163,8 @@ class VehicleFilesHttpTests(VehicleImportCase):
             response = self.preview(data)
             self.assertEqual(response.status_code, 400)
             self.assertContains(response, "not valid JSON", status_code=400)
+
+    def test_the_import_form_uses_the_admin_field_style(self):
+        # Issue #176: the file field and format choice use the full-size admin field style.
+        page = self.admin_client.get(URL)
+        self.assertContains(page, 'enctype="multipart/form-data" class="admin-form"')

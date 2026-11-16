@@ -63,6 +63,11 @@ class PositionPagesTests(KitCase):
         page = self.client_.get(self.url)
         self.assertContains(page, self.cabinet.label)
         self.assertContains(page, 'name="stage" value="add"')
+        # Issue #176: the add and rename/reorder fields use the full-size admin field style.
+        self.assertContains(page, 'aria-labelledby="add-heading" class="admin-form"')
+        self.assertGreaterEqual(
+            page.content.decode().count('class="admin-form">'), 2
+        )  # add + a row
         admin, _ = self.harness.sign_in("admin")
         self.assertContains(admin.get("/administration/"), 'href="/administration/roles/"')
 

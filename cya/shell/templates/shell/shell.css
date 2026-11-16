@@ -70,6 +70,10 @@ h1 { font-size: 1.5rem; line-height: 1.25; margin: .5rem 0 1rem; }
 .role-administration input[type="search"], .role-administration select { max-width: 100%; min-height: 48px; padding: .4rem .65rem; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .375rem; }
 .admin-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), .admin-form select, .admin-form textarea { box-sizing: border-box; width: min(100%, 24rem); min-height: 48px; padding: .4rem .65rem; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .375rem; }
 .admin-form textarea { width: min(100%, 36rem); }
+/* Compact numeric fields (order, count) keep their character width, with the full height (issue #176). */
+.admin-form input[size]:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]) { width: auto; }
+/* In a scrolling table a full-width field would shrink to its cell; keep it readable and let the table scroll. */
+.table-scroll .admin-form input:not([size]):not([type="checkbox"]):not([type="radio"]), .table-scroll .admin-form select { min-width: 10rem; }
 .admin-form input[type="checkbox"], .admin-form input[type="radio"] { width: 1.5rem; height: 1.5rem; margin: .25rem .5rem .25rem 0; vertical-align: middle; }
 .field-error { display: block; margin-top: .25rem; font-weight: 600; }
 .admin-form [aria-invalid="true"] { border-width: 3px; border-style: dashed; }

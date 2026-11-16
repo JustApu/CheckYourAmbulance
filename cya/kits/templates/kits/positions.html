@@ -38,7 +38,7 @@
   {% for row in section.rows %}
     <tr>
       <td>{% if row.retired %}{{ row.label }}{% else %}
-        <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}">
+        <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}" class="admin-form">
           {% csrf_token %}
           <input type="hidden" name="stage" value="revise">
           <input type="hidden" name="kind" value="{{ section.kind }}">
@@ -71,7 +71,7 @@
 {% endfor %}
 
 <h2 id="add-heading">Add a position</h2>
-<form method="post" action="{% url 'vehicle-positions' vehicle.pk %}" aria-labelledby="add-heading">
+<form method="post" action="{% url 'vehicle-positions' vehicle.pk %}" aria-labelledby="add-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="add">
   <input type="hidden" name="operation_id" value="{{ add_operation_id }}">
