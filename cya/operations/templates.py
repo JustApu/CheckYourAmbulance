@@ -204,18 +204,25 @@ def _placement_refusals(version):
     return refusals
 
 
-def _governing_override(org, vehicle_id, template_id, at):
-    return (
-        ChecklistPublication.objects.filter(
-            organization_id=org,
-            override_version__vehicle_id=vehicle_id,
-            override_version__template_version__template_id=template_id,
-            effective_at__lte=at,
-        )
+def _overrides_from(org, vehicle_id, template_id, at):
+    """The vehicle's override publications for the template in force at `at`, then later ones.
+
+    The draft is unpublished, so every one of them overlays another version: from `at` (or from
+    its own effective instant) the vehicle's checklist fails closed until an override over the
+    new version is published (StaleOverrideError).
+    """
+    publications = ChecklistPublication.objects.filter(
+        organization_id=org,
+        override_version__vehicle_id=vehicle_id,
+        override_version__template_version__template_id=template_id,
+    ).select_related("override_version")
+    current = (
+        publications.filter(effective_at__lte=at)
         .order_by("-effective_at", "-override_version__revision")
-        .select_related("override_version")
         .first()
     )
+    later = list(publications.filter(effective_at__gt=at).order_by("effective_at"))
+    return ([current] if current else []) + later
 
 
 def publication_impact(organization_id, version_id, effective_at=None):
@@ -316,12 +323,14 @@ def _vehicle_impacts(impact, org, version, definitions, at):
         if vehicle_id in bound:
             if retired := _retired(refs, vehicle_id):
                 entry.blocking.append(f"these positions are retired on it: {', '.join(retired)}")
-            override = _governing_override(org, vehicle_id, version.template_id, at)
-            if override is not None:
+            for override in _overrides_from(org, vehicle_id, version.template_id, at):
+                scheduled = override.effective_at > at
                 entry.notes.append(
-                    f"its override (revision {override.override_version.revision}) overlays an "
-                    "earlier version; its checklist cannot be resolved from then until an "
-                    "override over this version is published"
+                    f"its override (revision {override.override_version.revision}"
+                    + (f", taking effect {_local(override.effective_at)}" if scheduled else "")
+                    + ") overlays an earlier version; its checklist cannot be resolved from "
+                    + ("then" if scheduled else "this publication")
+                    + " until an override over this version is published"
                 )
         if vehicle_id in bound or entry.blocking:
             impact.vehicles.append(entry)

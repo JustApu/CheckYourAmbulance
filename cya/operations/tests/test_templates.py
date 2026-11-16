@@ -157,6 +157,25 @@ class ImpactTests(KitCase):
         )
         self.assertFalse(impact.refused)
 
+    def test_an_override_scheduled_for_later_is_also_listed(self):
+        v1 = self.published_version()
+        self.bind(vehicle=self.vehicle_b)
+        override = commands.save_override_draft(
+            vehicle_id=str(self.vehicle_b.pk),
+            template_version_id=v1,
+            entries=[{"item_id": str(self.siren.pk), "action": "REMOVE"}],
+            **self.context(),
+        ).body["override_version_id"]
+        commands.publish_override_version(
+            override_version_id=override,
+            effective_at=self.clock.now + timedelta(days=2),
+            **self.context(),
+        )
+        impact = self.impact(self.draft())
+        notes = {str(v.vehicle.pk): v.notes for v in impact.vehicles}[str(self.vehicle_b.pk)]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("override (revision 1, taking effect 2026-06-03 00:00)", notes[0])
+
     def test_a_retired_position_on_a_bound_vehicle_and_a_missing_slot_block_it(self):
         self.published_version(
             [self.spec(self.siren, 10, compartment_id=None, system_id=str(self.system.pk))]
