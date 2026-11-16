@@ -3,7 +3,7 @@
 **Version:** Discovery baseline 0.1 • **Updated:** 2026-10-15 • **Status:** Draft for owner review  
 **Source:** Owner's extended requirements interview (176 numbered decisions plus follow-up clarifications). This is a synthesis, **not a verbatim transcript**. Confirmed decisions are distinguished from provisional values and unresolved matters in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
-> **Historical record.** `SPEC.md` (v1.0.0, owner-approved 2026-10-16) is the authoritative product/architecture specification and supersedes this discovery baseline wherever they differ. Do not implement from this file; use it only for the original wording and rationale.
+> **Historical record.** `SPEC.md` (current approved version and approval record: see §25.6 and §27) is the authoritative product/architecture specification and supersedes this discovery baseline wherever they differ. Do not implement from this file; use it only for the original wording and rationale.
 
 ## 1. Purpose and boundaries
 

@@ -8,7 +8,7 @@
 1. Read [AGENTS.md](AGENTS.md) and its linked coordination, review and engineering procedures **before** claiming or modifying work.
 2. Read [REQUIREMENTS.md](REQUIREMENTS.md) for consolidated interview decisions and [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) for unresolved items.
 3. Inspect GitHub Issues and open PRs before working. One agent per claimed issue/branch, follow signed coordination conventions. Do not merge without owner authorization.
-4. **`SPEC.md`** (v1.0.0, owner-approved 2026-10-16) is the authoritative product and architecture source. This handoff and the interview documents are the **historical discovery record**; if they differ from `SPEC.md`, `SPEC.md` wins.
+4. **`SPEC.md`** (current approved version and approval record: see §25.6 and §27) is the authoritative product and architecture source. This handoff and the interview documents are the **historical discovery record**; if they differ from `SPEC.md`, `SPEC.md` wins.
 
 ## Product vision
 

@@ -40,6 +40,7 @@ Authoritative mappings: `contracts/step-catalog.json` (`cases[*].requirements`);
 | AC-34 | [AC-34.json](scenarios/AC-34.json) | SEAL-2, SEAL-5, SEAL-6, STK-D | Symbolic; unimplemented |
 | AC-35 | [AC-35.json](scenarios/AC-35.json) | SEAL-7, SEAL-8 | Symbolic; unimplemented |
 | AC-36 | [AC-36.json](scenarios/AC-36.json) | RPT-5a, SCH-2 | Bound and run (`cya/attention/scenario_steps.py`) |
+| AC-37 | [AC-37.json](scenarios/AC-37.json) | AUD-1, REC-4, CFG-1, CFG-2, CFG-7, CFG-8, RPT-5a | Symbolic; unimplemented |
 
 ## Supplemental coverage
 
