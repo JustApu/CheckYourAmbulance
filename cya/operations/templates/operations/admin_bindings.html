@@ -33,6 +33,7 @@
 </table>
 </div>
 {% else %}<p>None.</p>{% endif %}
+<p>Inspections due before now are not affected. They keep their state and history.</p>
 <p>If anything here changes before you confirm, nothing is changed and an updated preview is shown.</p>
 <form method="post" action="{% url 'vehicle-bindings' vehicle.pk %}">
   {% csrf_token %}
