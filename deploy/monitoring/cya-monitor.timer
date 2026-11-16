@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the operations alert checks every 5 minutes (SPEC DEP-13)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

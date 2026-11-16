@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Your Ambulance: outside reachability probe (SPEC DEP-13, issue #8)
+# Install on a host other than the application server. It needs its own copy of the relay file.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cya-alerts probe __SITE_URL__ --config /etc/check-your-ambulance/monitor.json
+TimeoutStartSec=2min
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes

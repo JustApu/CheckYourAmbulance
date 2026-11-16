@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Your Ambulance: operations alert checks (SPEC DEP-13, issue #8)
+# Deliberately no dependency on mariadb or the application: it must run while they are down.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cya-alerts check --config /etc/check-your-ambulance/monitor.json
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes

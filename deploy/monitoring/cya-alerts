@@ -1,0 +1,424 @@
+#!/usr/bin/python3
+"""Operations alerts by email for Check Your Ambulance (SPEC 4.2.0 DEP-13, DEP-10; issue #8).
+
+Standard library only, so it runs while the application, its virtual environment or the database
+is down. It reads only the relay host copy (written by `manage.py export_mail_relay`) and its own
+non-secret configuration.
+
+  cya-alerts check [--config FILE]        on the server, as root, every 5 minutes (cya-monitor.timer)
+  cya-alerts probe URL [--config FILE]    on another host: is the site reachable from outside?
+  cya-alerts send-test [--config FILE]    send one test message through the host copy
+
+Each condition is a key in a small state file. It is emailed to every operator and deputy address
+once when it starts, again at most every 6 hours while it lasts, and once when it clears. A send
+that fails leaves the state unchanged, so the next run retries it. Alert text names the host and
+the condition only: no secrets, no settings, no personal data beyond the recipients' addresses.
+Output goes to the journal (short lines, no addresses), which has its own short retention.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import smtplib
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from datetime import UTC, datetime
+from email.message import EmailMessage
+
+REPEAT_SECONDS = 6 * 3600
+DEFAULT_CONFIG = "/etc/check-your-ambulance/monitor.json"
+DEFAULTS = {
+    "relay_file": "/etc/check-your-ambulance/mail-relay.json",
+    "state_file": "/var/lib/cya-monitor/state.json",
+    "certificates": [],  # PEM certificate paths, e.g. the live certbot fullchain
+    "certificate_days": 14,
+    "disks": ["/", "/var/lib/mysql"],
+    "disk_min_free_percent": 10,
+    # A service whose last successful run is older than this is stale (seconds).
+    "stale_after": {"cya-backup-full.service": 26 * 3600, "cya-backup-binlog.service": 20 * 60},
+    # A recurring job whose last run failed alerts until a run succeeds.
+    "jobs": [
+        "cya-obligations.service",
+        "cya-sessions.service",
+        "cya-backup-full.service",
+        "cya-backup-binlog.service",
+        "cya-mail-relay-export.service",
+    ],
+    "relay_max_age": 2 * 3600,
+    "database_ping": ["mariadb-admin", "--connect-timeout=5", "ping"],
+    "access_log": "/var/log/nginx/access.log",
+    "errors_window_seconds": 600,
+    "errors_threshold": 20,
+    "access_log_tail_bytes": 4 * 1024 * 1024,
+    "probe_failures_to_alert": 2,
+    "probe_timeout": 15,
+}
+LOG_TIME = re.compile(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]")
+LOG_STATUS = re.compile(r'" (\d{3}) ')
+
+
+class SendError(Exception):
+    """The relay could not take the message; the code is safe to log."""
+
+
+def load_config(path):
+    config = dict(DEFAULTS)
+    if path and os.path.exists(path):
+        with open(path) as handle:
+            config.update(json.load(handle))
+    return config
+
+
+def now():
+    return time.time()
+
+
+# ---- conditions --------------------------------------------------------------------------
+
+
+def certificate_conditions(config, at):
+    """{key: title} for each certificate expiring within the configured days (or unreadable)."""
+    found = {}
+    for path in config["certificates"]:
+        key = f"certificate:{path}"
+        try:
+            pem = subprocess.run(
+                ["openssl", "x509", "-enddate", "-noout", "-in", path],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=True,
+            ).stdout
+            end = datetime.strptime(pem.strip().split("=", 1)[1], "%b %d %H:%M:%S %Y %Z")
+            days = (end.replace(tzinfo=UTC).timestamp() - at) / 86400
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            found[key] = f"The TLS certificate {os.path.basename(path)} could not be read"
+            continue
+        if days < config["certificate_days"]:
+            found[key] = (
+                f"The TLS certificate {os.path.basename(path)} expires in {max(days, 0):.1f} days"
+            )
+    return found
+
+
+def disk_conditions(config, at):
+    found = {}
+    for path in config["disks"]:
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue  # a path not present on this host is not a condition
+        free = 100 * usage.free / usage.total
+        if free < config["disk_min_free_percent"]:
+            found[f"disk:{path}"] = f"Low disk space on {path}: {free:.1f}% free"
+    return found
+
+
+def unit_property(unit, names):
+    output = subprocess.run(
+        ["systemctl", "show", unit, "--property=" + ",".join(names)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    ).stdout
+    return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+
+
+def systemd_time(value):
+    """Seconds since the epoch for a systemd timestamp in microseconds, or None."""
+    try:
+        micro = int(value)
+    except (TypeError, ValueError):
+        return None
+    return micro / 1_000_000 if micro > 0 else None
+
+
+def job_conditions(config, at, show=unit_property):
+    found = {}
+    for unit in config["jobs"]:
+        props = show(unit, ["LoadState", "Result"])
+        if props.get("LoadState") != "loaded":
+            continue
+        if props.get("Result", "success") != "success":
+            found[f"job:{unit}"] = f"The recurring job {unit} failed on its last run"
+    for unit, limit in config["stale_after"].items():
+        props = show(unit, ["LoadState", "Result", "ExecMainExitTimestampUSec"])
+        if props.get("LoadState") != "loaded":
+            found[f"stale:{unit}"] = f"{unit} is not installed, so its runs cannot be checked"
+            continue
+        ended = systemd_time(props.get("ExecMainExitTimestampUSec"))
+        if ended is None or at - ended > limit:
+            found[f"stale:{unit}"] = f"{unit} has not completed a run in the expected time"
+    return found
+
+
+def relay_copy_conditions(config, at):
+    try:
+        age = at - os.stat(config["relay_file"]).st_mtime
+    except OSError:
+        return {"relay-copy": "The mail relay host copy is missing"}
+    if age > config["relay_max_age"]:
+        return {"relay-copy": "The mail relay host copy has not been refreshed recently"}
+    return {}
+
+
+def database_conditions(config, at, run=subprocess.run):
+    try:
+        result = run(config["database_ping"], capture_output=True, timeout=20)
+        refused = result.returncode != 0
+    except (OSError, subprocess.SubprocessError):
+        refused = True
+    return {"database": "The database is refusing connections"} if refused else {}
+
+
+def errors_in_window(lines, at, window):
+    """How many responses in the last `window` seconds had a 5xx status."""
+    count = 0
+    for line in lines:
+        stamp = LOG_TIME.search(line)
+        status = LOG_STATUS.search(line)
+        if not stamp or not status or not status.group(1).startswith("5"):
+            continue
+        try:
+            when = datetime.strptime(stamp.group(1), "%d/%b/%Y:%H:%M:%S %z").timestamp()
+        except ValueError:
+            continue
+        if at - window <= when <= at + 60:
+            count += 1
+    return count
+
+
+def error_conditions(config, at):
+    path = config["access_log"]
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - config["access_log_tail_bytes"]))
+            lines = handle.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return {}
+    count = errors_in_window(lines, at, config["errors_window_seconds"])
+    if count >= config["errors_threshold"]:
+        minutes = config["errors_window_seconds"] // 60
+        return {"5xx": f"Repeated server errors: {count} 5xx responses in {minutes} minutes"}
+    return {}
+
+
+def server_conditions(config, at):
+    found = {}
+    for check in (
+        certificate_conditions,
+        disk_conditions,
+        job_conditions,
+        relay_copy_conditions,
+        database_conditions,
+        error_conditions,
+    ):
+        found.update(check(config, at))
+    return found
+
+
+# ---- sending -----------------------------------------------------------------------------
+
+
+def load_relay(path):
+    with open(path) as handle:
+        relay = json.load(handle)
+    if relay.get("tls_mode") not in ("STARTTLS", "TLS"):
+        raise SendError("TLS_REQUIRED")
+    return relay
+
+
+def send(relay, subject, body):
+    """Send one message to every operator and deputy address over TLS; raise SendError(code)."""
+    recipients = list(dict.fromkeys([*relay["operator_addresses"], *relay["deputy_addresses"]]))
+    message = EmailMessage()
+    message["From"] = relay["sender"]
+    message["To"] = ", ".join(recipients)
+    message["Subject"] = subject
+    message.set_content(body)
+    context = ssl.create_default_context()
+    try:
+        if relay["tls_mode"] == "TLS":
+            client = smtplib.SMTP_SSL(relay["host"], relay["port"], timeout=20, context=context)
+        else:
+            client = smtplib.SMTP(relay["host"], relay["port"], timeout=20)
+        with client:
+            if relay["tls_mode"] == "STARTTLS":
+                client.starttls(context=context)
+            if relay.get("auth_mode") == "PASSWORD":
+                client.login(relay["username"], relay["password"])
+            if client.send_message(message):
+                raise SendError("REJECTED")
+    except SendError:
+        raise
+    except smtplib.SMTPAuthenticationError:
+        raise SendError("AUTH_FAILED") from None
+    except (smtplib.SMTPNotSupportedError, ssl.SSLError, ssl.CertificateError):
+        raise SendError("TLS_FAILED") from None
+    except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError):
+        raise SendError("REJECTED") from None
+    except (TimeoutError, socket.timeout):
+        raise SendError("TIMEOUT") from None
+    except OSError:
+        raise SendError("CONNECT_FAILED") from None
+    except Exception:
+        raise SendError("UNKNOWN") from None
+
+
+def message_for(host, title, kind, at):
+    stamp = datetime.fromtimestamp(at, UTC).strftime("%Y-%m-%d %H:%M UTC")
+    heading = {"start": "ALERT", "repeat": "STILL ACTIVE", "clear": "CLEARED"}[kind]
+    subject = f"[Check Your Ambulance] {heading}: {title} ({host})"
+    if kind == "clear":
+        detail = "This condition has cleared. No action is needed for it now."
+    elif kind == "repeat":
+        detail = "This condition is still present. This reminder repeats every 6 hours."
+    else:
+        detail = "Check the server using the deployment runbook. You will be told when it clears."
+    body = f"{title}.\n\nHost: {host}\nTime: {stamp}\n\n{detail}\n"
+    return subject, body
+
+
+# ---- state machine -----------------------------------------------------------------------
+
+
+def read_state(path):
+    try:
+        with open(path) as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(path, state):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".state.", dir=directory)
+    with os.fdopen(descriptor, "w") as handle:
+        json.dump(state, handle, sort_keys=True)
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+
+
+def reconcile(state, current, at, notify):
+    """Apply start/repeat/clear for `current` ({key: title}); `notify(title, kind)` sends.
+
+    Returns the new state. A notify that raises SendError leaves that key as it was, so the next
+    run tries again.
+    """
+    new = {}
+    for key, title in current.items():
+        entry = state.get(key)
+        try:
+            if entry is None:
+                notify(title, "start")
+                new[key] = {"title": title, "since": at, "sent": at}
+            elif at - entry["sent"] >= REPEAT_SECONDS:
+                notify(title, "repeat")
+                new[key] = {**entry, "title": title, "sent": at}
+            else:
+                new[key] = entry
+        except SendError as error:
+            print(f"cya-alerts: could not send {key}: {error}", file=sys.stderr)
+            if entry is not None:
+                new[key] = entry
+    for key, entry in state.items():
+        if key in current or not isinstance(entry, dict) or "title" not in entry:
+            continue
+        try:
+            notify(entry["title"], "clear")
+        except SendError as error:
+            print(f"cya-alerts: could not send clear for {key}: {error}", file=sys.stderr)
+            new[key] = entry
+    return new
+
+
+def run(config, current, at, *, sender=send, keep=None):
+    """Reconcile `current` with the state file and send what is due. Returns the exit code."""
+    state = read_state(config["state_file"])
+    kept = {k: v for k, v in state.items() if keep and keep(k)}
+    managed = {k: v for k, v in state.items() if k not in kept}
+    try:
+        relay = load_relay(config["relay_file"])
+    except (OSError, ValueError, KeyError, SendError):
+        print("cya-alerts: the relay host copy cannot be read; nothing sent", file=sys.stderr)
+        return 2
+    host = socket.gethostname()
+
+    def notify(title, kind):
+        subject, body = message_for(host, title, kind, at)
+        sender(relay, subject, body)
+        print(f"cya-alerts: sent {kind}: {title}")
+
+    new = reconcile(managed, current, at, notify)
+    write_state(config["state_file"], {**kept, **new})
+    return 0
+
+
+def probe(config, url, at, *, fetch=None):
+    """{key: title} when the site has failed `probe_failures_to_alert` checks in a row."""
+    key = f"unreachable:{url}"
+    counts_path = config["state_file"] + ".probe"
+    counts = read_state(counts_path)
+    try:
+        if fetch is not None:
+            status = fetch(url)
+        else:
+            request = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(request, timeout=config["probe_timeout"]) as response:
+                status = response.status
+        failed = status >= 500
+    except urllib.error.HTTPError as error:
+        failed = error.code >= 500
+    except (OSError, ValueError):
+        failed = True
+    counts[key] = counts.get(key, 0) + 1 if failed else 0
+    write_state(counts_path, counts)
+    if counts[key] >= config["probe_failures_to_alert"]:
+        return {key: f"The site {url} is unreachable from outside the server"}
+    return {}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("command", choices=["check", "probe", "send-test"])
+    parser.add_argument("url", nargs="?")
+    parser.add_argument("--config", default=DEFAULT_CONFIG)
+    args = parser.parse_args(argv)
+    config = load_config(args.config)
+    at = now()
+    if args.command == "check":
+        current = server_conditions(config, at)
+        return run(config, current, at, keep=lambda k: k.startswith("unreachable:"))
+    if args.command == "probe":
+        if not args.url or not args.url.startswith("https://"):
+            parser.error("probe needs an https:// URL")
+        current = probe(config, args.url, at)
+        key = f"unreachable:{args.url}"
+        return run(config, current, at, keep=lambda k: k != key)
+    try:
+        relay = load_relay(config["relay_file"])
+        _subject, body = message_for(socket.gethostname(), "Test message from cya-alerts", "start", at)
+        send(relay, "[Check Your Ambulance] TEST: alert delivery", body)
+    except (OSError, ValueError, KeyError):
+        print("cya-alerts: the relay host copy cannot be read", file=sys.stderr)
+        return 2
+    except SendError as error:
+        print(f"cya-alerts: test not sent: {error}", file=sys.stderr)
+        return 1
+    print("cya-alerts: test sent")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
