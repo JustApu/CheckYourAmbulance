@@ -20,6 +20,10 @@ const shellScript = readFileSync(
   path.join(root, "cya/shell/templates/shell/shell.js"),
   "utf8",
 );
+const statusScript = readFileSync(
+  path.join(root, "cya/operations/templates/operations/status.js"),
+  "utf8",
+);
 const checklistScript = readFileSync(
   path.join(root, "cya/inspections/templates/inspections/checklist.js"),
   "utf8",
@@ -459,6 +463,180 @@ async function testDeficiencyFilters(viewport) {
   }
 }
 
+async function testAdministratorRoleChange(viewport) {
+  const page = await browser.newPage({ viewport });
+  const history = `<div class="role-history-scroll" role="region" aria-label="Role history" tabindex="0"><table class="role-history-table"><thead><tr><th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead><tbody><tr><td>2026-11-15 12:34 UTC</td><td>Sam Example (sam@example.test)</td><td>GRANT</td><td>SUPERVISOR</td><td>Alex Example (alex@example.test)</td></tr></tbody></table></div>`;
+  const rolePage = (stage, query = "") => {
+    const content = stage === "preview"
+      ? `<h2>Review role change</h2><p id="role-change-summary">Grant Supervisor role to Sam Example (sam@example.test).</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="confirm"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Confirm grant of Supervisor role</button></form><form><button class="button" type="button">Change selection</button></form>`
+      : `<h2>Change a role</h2><form method="get" action="/administration/roles/" role="search"><label for="role-user-search">Find an active user by name or email</label><input id="role-user-search" name="q" type="search" value="${query}" maxlength="100"><button type="submit" class="button">Search users</button></form><p>1 matching active user.</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="preview"><input type="hidden" name="operation_id" value="synthetic-operation"><label for="role-target">User</label><select id="role-target" name="target" required><option value="">Choose a user</option><option value="user-1">Sam Example (sam@example.test)</option></select><label for="role-code">Role</label><select id="role-code" name="role" required><option value="">Choose a role</option><option value="CREW">Crew</option><option value="SUPERVISOR">Supervisor</option></select><label for="role-action">Action</label><select id="role-action" name="action" required><option value="">Choose Grant or Revoke</option><option value="GRANT">Grant</option><option value="REVOKE">Revoke</option></select><button type="submit" class="button">Review change</button></form>`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Administration · Roles</title><style>${css}</style></head><body><main><h1>Role administration</h1><section class="role-administration">${stage === "saved" ? '<p class="save-state save-state-saved" role="status">Saved</p>' : ""}${content}<h2>Role history</h2>${history}</section></main></body></html>`;
+  };
+  let confirmed = false;
+  await page.route("http://roles.test/administration/roles/**", async (route) => {
+    if (route.request().method() !== "POST") {
+      const url = new URL(route.request().url());
+      await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("edit", url.searchParams.get("q") || "") });
+      return;
+    }
+    const form = new URLSearchParams(route.request().postData() || "");
+    if (form.get("stage") === "preview") {
+      assert.equal(form.get("target"), "user-1");
+      assert.equal(form.get("role"), "SUPERVISOR");
+      assert.equal(form.get("action"), "GRANT");
+      await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("preview") });
+      return;
+    }
+    assert.equal(form.get("stage"), "confirm");
+    assert.equal(form.get("operation_id"), "synthetic-operation");
+    assert.equal(form.get("target"), "user-1");
+    assert.equal(form.get("role"), "SUPERVISOR");
+    assert.equal(form.get("action"), "GRANT");
+    confirmed = true;
+    await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("saved") });
+  });
+  try {
+    await page.goto("http://roles.test/administration/roles/", { waitUntil: "load" });
+    await page.keyboard.press("Tab");
+    const search = page.getByRole("searchbox", { name: "Find an active user by name or email" });
+    assert.equal(await search.evaluate((element) => element === document.activeElement), true, `${viewport.name}: role search is not first in keyboard order`);
+    await page.keyboard.type("sam");
+    await Promise.all([page.waitForNavigation(), page.keyboard.press("Enter")]);
+    assert.equal(await search.inputValue(), "sam", `${viewport.name}: role search did not retain its query`);
+    await page.keyboard.press("Tab"); // Search field
+    assert.equal(await search.evaluate((element) => element === document.activeElement), true, `${viewport.name}: search is not first after navigation`);
+    await page.keyboard.press("Tab"); // Search users
+    await page.keyboard.press("Tab"); // User
+    const target = page.getByLabel("User", { exact: true });
+    assert.equal(await target.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips user selection`);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Tab"); // Role
+    const role = page.getByLabel("Role", { exact: true });
+    assert.equal(await role.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips role selection`);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Tab"); // Action
+    const action = page.getByLabel("Action", { exact: true });
+    assert.equal(await action.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips action selection`);
+    await page.keyboard.press("ArrowDown");
+    assert.equal(await target.inputValue(), "user-1", `${viewport.name}: keyboard could not select the role target`);
+    assert.equal(await role.inputValue(), "SUPERVISOR", `${viewport.name}: keyboard could not select Supervisor`);
+    assert.equal(await action.inputValue(), "GRANT", `${viewport.name}: keyboard could not choose Grant`);
+    for (const label of ["Find an active user by name or email", "User", "Role", "Action"]) {
+      const box = await page.getByLabel(label, { exact: true }).boundingBox();
+      assert.ok(box && box.height >= 48, `${viewport.name}: ${label} is shorter than 48 CSS pixels`);
+    }
+    await page.keyboard.press("Tab"); // Review change
+    assert.equal(await page.getByRole("button", { name: "Review change" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips review action`);
+    await page.keyboard.press("Enter");
+    assert.match(await page.locator("#role-change-summary").innerText(), /Grant Supervisor role to Sam Example/);
+    const confirm = page.getByRole("button", { name: "Confirm grant of Supervisor role" });
+    await page.keyboard.press("Tab");
+    assert.equal(await confirm.evaluate((element) => element === document.activeElement), true, `${viewport.name}: confirmation is not keyboard reachable`);
+    await page.keyboard.press("Enter");
+    await page.getByRole("status").getByText("Saved").waitFor();
+    assert.equal(confirmed, true, `${viewport.name}: confirmation request was not submitted`);
+    const roleHistory = page.getByRole("region", { name: "Role history" });
+    assert.equal(await roleHistory.count(), 1);
+    assert.match(await roleHistory.innerText(), /Sam Example \(sam@example\.test\)[\s\S]*GRANT[\s\S]*SUPERVISOR/);
+    await roleHistory.focus();
+    assert.equal(await roleHistory.evaluate((element) => element === document.activeElement), true, `${viewport.name}: role history is not keyboard focusable`);
+    assert.equal(await roleHistory.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: role history focus is not visible`);
+    const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
+    assert.ok(metrics.document <= metrics.viewport, `${viewport.name}: role page overflows horizontally ${JSON.stringify(metrics)}`);
+    await page.setViewportSize({ width: Math.max(320, Math.floor(viewport.width / 2)), height: viewport.height });
+    const zoom = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
+    assert.ok(zoom.document <= zoom.viewport, `${viewport.name} at 200% width: role page overflows ${JSON.stringify(zoom)}`);
+    assert.ok(zoom.body <= zoom.viewport, `${viewport.name} at 200% width: role page body overflows ${JSON.stringify(zoom)}`);
+    console.log(`${viewport.name}: administrator role search, preview, confirmation and history passed`);
+  } finally {
+    await page.close();
+  }
+}
+
+async function testSupervisorStatusDecisions(viewport) {
+  const page = await browser.newPage({ viewport });
+  const pending = new Set(["request-limited", "request-out-of-service"]);
+  const decisions = [];
+  const csrf = "synthetic-csrf";
+  const panel = () => {
+    const cards = [...pending].map((request) => {
+      const limited = request === "request-limited";
+      const status = limited ? "Limited Service" : "Out of Service";
+      return `<article class="panel"><h3>${status} requested by Sam Example</h3><p>Synthetic request reason.</p><form class="status-write" data-kind="decide" data-decision="APPROVE" data-request="${request}"><input type="hidden" name="csrfmiddlewaretoken" value="${csrf}">${limited ? '<label>Restrictions <input name="restrictions" required></label>' : ""}<label>Explanation <textarea name="explanation" required></textarea></label><button type="submit" class="button primary">Approve</button><p class="status-result" role="status"></p></form><form class="status-write" data-kind="decide" data-decision="DENY" data-request="${request}"><input type="hidden" name="csrfmiddlewaretoken" value="${csrf}"><label>Reason for denying <textarea name="explanation" required></textarea></label><button type="submit" class="button">Deny</button><p class="status-result" role="status"></p></form></article>`;
+    }).join("");
+    return `<section class="panel" aria-labelledby="pending-heading"><h2 id="pending-heading">Pending requests</h2>${cards || "<p>No requests are waiting.</p>"}</section>`;
+  };
+  const config = { panel_url: "/api/status/panel", set_url: "/api/status/set", request_url: "/api/status/request", decision_url_template: "/api/status/requests/REQUEST/decision", socket: "/ws/status" };
+  const markup = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Vehicle status requests</title><style>${css}</style></head><body><main><h1>Vehicle status requests</h1><p id="status-live-banner" role="status" hidden>Live updates are paused.</p><p id="status-stale" role="alert" hidden>This screen may be out of date.</p><p id="status-update" role="status" hidden>New status update. <button type="button" id="status-update-show">Show the update</button></p><div id="status-live">${panel()}</div></main><script id="status-config" type="application/json">${JSON.stringify(config)}</script><script>window.WebSocket = class { constructor() { setTimeout(() => { if (this.onopen) this.onopen(); }, 0); } close() {} };</script><script>${statusScript}</script></body></html>`;
+  await page.route("http://status.test/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/status/panel") {
+      await route.fulfill({ status: 200, contentType: "text/html", body: panel() });
+      return;
+    }
+    if (url.pathname.startsWith("/api/status/requests/") && route.request().method() === "POST") {
+      const requestId = url.pathname.split("/").at(-2);
+      const body = route.request().postDataJSON();
+      assert.equal(route.request().headers()["x-csrftoken"], csrf);
+      assert.equal(body.operation_id.length > 0, true);
+      assert.equal(body.explanation.length > 0, true);
+      decisions.push({ requestId, ...body });
+      pending.delete(requestId);
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "COMMITTED" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "text/html", body: markup });
+  });
+  try {
+    await page.goto("http://status.test/vehicles/synthetic-1/", { waitUntil: "load" });
+    assert.equal(await page.getByRole("heading", { name: "Pending requests" }).count(), 1);
+    assert.equal(await page.getByRole("heading", { name: "Limited Service requested by Sam Example" }).count(), 1);
+    assert.equal(await page.getByRole("heading", { name: "Out of Service requested by Sam Example" }).count(), 1);
+    const restrictionBox = await page.getByLabel("Restrictions", { exact: true }).boundingBox();
+    assert.ok(restrictionBox && restrictionBox.height >= 48, `${viewport.name}: required restrictions field is shorter than 48 CSS pixels`);
+    await page.keyboard.press("Tab");
+    assert.equal(await page.getByLabel("Restrictions", { exact: true }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: restricted-service field is not first in keyboard order`);
+    await page.keyboard.type("Synthetic restricted-service limit");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.getByLabel("Explanation", { exact: true }).first().evaluate((element) => element === document.activeElement), true, `${viewport.name}: approval explanation is not keyboard reachable`);
+    await page.keyboard.type("Synthetic supervisor approval");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.getByRole("button", { name: "Approve" }).first().evaluate((element) => element === document.activeElement), true, `${viewport.name}: Approve is not keyboard reachable`);
+    const approved = page.waitForResponse((response) => response.url().includes("request-limited/decision") && response.request().method() === "POST");
+    await page.keyboard.press("Enter");
+    await approved;
+    assert.equal(decisions[0].requestId, "request-limited", `${viewport.name}: wrong status request was approved`);
+    assert.equal(decisions[0].decision, "APPROVE");
+    assert.equal(decisions[0].restrictions, "Synthetic restricted-service limit");
+    await page.getByRole("heading", { name: "Limited Service requested by Sam Example" }).waitFor({ state: "detached" });
+    await page.keyboard.press("Tab");
+    assert.equal(await page.getByLabel("Explanation", { exact: true }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: refreshed request explanation is not first in keyboard order`);
+    await page.keyboard.press("Tab"); // Approve
+    await page.keyboard.press("Tab"); // Deny reason
+    assert.equal(await page.getByLabel("Reason for denying", { exact: true }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: denial reason is not keyboard reachable`);
+    await page.keyboard.type("Synthetic denial reason");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.getByRole("button", { name: "Deny" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: Deny is not keyboard reachable`);
+    const denied = page.waitForResponse((response) => response.url().includes("request-out-of-service/decision") && response.request().method() === "POST");
+    await page.keyboard.press("Enter");
+    await denied;
+    await page.getByText("No requests are waiting.").waitFor();
+    assert.equal(decisions[1].requestId, "request-out-of-service");
+    assert.equal(decisions[1].decision, "DENY");
+    assert.equal(decisions[1].explanation, "Synthetic denial reason");
+    const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
+    assert.ok(metrics.document <= metrics.viewport, `${viewport.name}: status page overflows horizontally ${JSON.stringify(metrics)}`);
+    await page.setViewportSize({ width: Math.max(320, Math.floor(viewport.width / 2)), height: viewport.height });
+    const zoom = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
+    assert.ok(zoom.document <= zoom.viewport, `${viewport.name} at 200% width: status page overflows ${JSON.stringify(zoom)}`);
+    assert.ok(zoom.body <= zoom.viewport, `${viewport.name} at 200% width: status page body overflows ${JSON.stringify(zoom)}`);
+    console.log(`${viewport.name}: supervisor approval/denial, required fields and live refresh passed`);
+  } finally {
+    await page.close();
+  }
+}
+
 try {
   await testAgencyTimezoneConversion();
   await testChecklistTimezoneFallback(viewports[0]);
@@ -467,6 +645,8 @@ try {
     try {
       await testReadinessSummary(viewport);
       await testDeficiencyFilters(viewport);
+      await testAdministratorRoleChange(viewport);
+      await testSupervisorStatusDecisions(viewport);
       await page.route("http://synthetic.test/**", (route) => route.fulfill({
         status: 200,
         contentType: "text/html",
