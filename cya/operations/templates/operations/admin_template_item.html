@@ -6,6 +6,15 @@
 <p><a href="{% url 'checklist-templates' %}">All templates</a> · <a href="{% url 'checklist-template' template.pk %}">{{ template.label }}</a></p>
 <p>Saving writes a new draft revision{% if latest %} from revision {{ latest.revision }}{% endif %}. Nothing is in force until the draft is published.</p>
 
+{% if not item_id %}
+<form method="get" class="admin-form" role="search" aria-label="Find an existing item">
+  <p><label for="item-search">Find an existing item by name</label><br>
+  <input id="item-search" type="search" name="q" value="{{ query }}" maxlength="100">
+  <button type="submit" class="button">Find</button></p>
+  {% if more_items %}<p>Showing the first {{ item_choices }} matching items. Search by name to find others.</p>{% endif %}
+</form>
+{% endif %}
+
 <form method="post" class="admin-form" aria-label="{% if item_id %}Edit {{ item_label }}{% else %}Add an item{% endif %}">
   {% csrf_token %}
   <input type="hidden" name="operation_id" value="{{ operation_id }}">

@@ -2,6 +2,7 @@
 
 import re
 import uuid
+from unittest import mock
 
 from django.test import override_settings
 
@@ -14,6 +15,7 @@ from cya.checklists.models import (
 )
 from cya.core.models import AuditEvent
 from cya.kits.tests.support import KitCase
+from cya.operations import template_admin_views
 from cya.testing.role_http import RoleHttpHarness, real_collaborator_settings
 
 LIST = "/administration/checklists/"
@@ -212,3 +214,48 @@ class TemplatePageTests(KitCase):
 
     def test_another_organizations_template_is_not_found(self):
         self.assertEqual(self.client_.get(f"{LIST}{uuid.uuid4()}/").status_code, 404)
+
+    def test_version_history_is_paged(self):
+        for _ in range(5):
+            self.draft()
+        with mock.patch.object(template_admin_views, "VERSION_PAGE", 3):
+            first = self.client_.get(self.url).content.decode()
+            history = first.split('id="history-heading"')[1]
+            self.assertEqual(re.findall(r"<tr><td>(\d+)</td>", history), ["5", "4", "3"])
+            self.assertIn("?before=3", history)
+            older = self.client_.get(f"{self.url}?before=3").content.decode()
+            history = older.split('id="history-heading"')[1]
+            self.assertEqual(re.findall(r"<tr><td>(\d+)</td>", history), ["2", "1"])
+            self.assertIn("Newest versions", history)
+            self.assertNotIn("Older versions", history)
+
+    def test_an_older_revision_is_duplicated_by_its_number(self):
+        self.draft(self.base_items()[:1])
+        self.draft()
+        self.draft()
+        url = f"{self.url}duplicate/"
+        with mock.patch.object(template_admin_views, "VERSION_PAGE", 2):
+            page = self.client_.get(url)
+            self.assertContains(page, "Or an older revision number")
+            self.assertNotContains(page, ">Revision 1 (draft)<")
+            copied = self.post(url, revision="1", label="Synthetic old copy", key="old-copy")
+        self.assertEqual(copied.status_code, 302)
+        copy = ChecklistTemplate.objects.get(key="old-copy")
+        self.assertEqual(
+            ChecklistItemDef.objects.filter(checklist_version__template=copy).count(), 1
+        )
+        bad = self.post(url, version_id="not-an-id", label="X", key="x")
+        self.assertContains(bad, "choose a version of this template", status_code=400)
+        unknown = self.post(url, revision="99", label="X", key="x")
+        self.assertContains(unknown, "choose a version of this template", status_code=400)
+
+    def test_existing_items_are_capped_and_found_by_name(self):
+        Item.objects.create(organization=self.org, label="Synthetic splint")
+        url = f"{self.url}items/new/"
+        with mock.patch.object(template_admin_views, "ITEM_CHOICES", 1):
+            capped = self.client_.get(url)
+            self.assertContains(capped, "Showing the first 1 matching items")
+            found = self.client_.get(f"{url}?q=splint")
+        self.assertContains(found, ">Synthetic splint</option>")
+        self.assertNotContains(found, ">Synthetic masks</option>")
+        self.assertNotContains(found, "Showing the first")

@@ -16,6 +16,7 @@ action; the commands check it on the server.
 import logging
 from urllib.parse import urlencode
 
+from django.core.exceptions import ValidationError
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
@@ -81,6 +82,13 @@ REFUSALS = (
 )
 
 
+VERSION_PAGE = 25  # versions per page of history, and offered for duplication (SPEC NFR-6)
+SCHEDULED_LIMIT = 25
+CHOICE_LIMIT = 500  # places and kits offered in the item form
+ITEM_CHOICES = 200  # existing items offered at once; a name search reaches the rest
+MAX_QUERY = 100
+
+
 class PageError(ValueError):
     """A form problem found before any command runs."""
 
@@ -134,24 +142,37 @@ def _template_of(user, template_id):
     return template
 
 
-def _published_ids(template):
-    return set(
-        ChecklistPublication.objects.filter(checklist_version__template=template).values_list(
-            "checklist_version_id", flat=True
-        )
+def _is_draft(version):
+    """True for a version no publication names."""
+    return (
+        version is not None
+        and not ChecklistPublication.objects.filter(checklist_version=version).exists()
     )
 
 
-def _versions(template):
-    """Every version, newest first, with its publication when it has one."""
+def _revision_param(value):
+    """A revision number from a query parameter, or None (SPEC NFR-6 keyset pages)."""
+    value = value or ""
+    return int(value) if value.isascii() and value.isdigit() and len(value) <= 9 else None
+
+
+def _versions(template, before=None):
+    """One page of versions, newest first, older than revision `before` (SPEC NFR-6).
+
+    Returns (rows with their publication, the revision to continue from, or None at the end).
+    """
+    versions = ChecklistVersion.objects.filter(template=template)
+    if before is not None:
+        versions = versions.filter(revision__lt=before)
+    page = list(versions.order_by("-revision")[: VERSION_PAGE + 1])
+    more = len(page) > VERSION_PAGE
+    page = page[:VERSION_PAGE]
     publications = {
         p.checklist_version_id: p
-        for p in ChecklistPublication.objects.filter(checklist_version__template=template)
+        for p in ChecklistPublication.objects.filter(checklist_version__in=page)
     }
-    return [
-        {"version": v, "publication": publications.get(v.pk)}
-        for v in ChecklistVersion.objects.filter(template=template).order_by("-revision")
-    ]
+    rows = [{"version": v, "publication": publications.get(v.pk)} for v in page]
+    return rows, (page[-1].revision if more else None)
 
 
 def _latest(template):
@@ -224,8 +245,9 @@ def _slot_choices(org):
     """
     choices, seen = [], set()
     vehicles = Vehicle.objects.filter(organization_id=org).order_by("-active", "display_name")
+    vehicle_ids = list(vehicles.values_list("pk", flat=True)[: admin_pages.LIST_LIMIT])
     for kind, heading in (("COMPARTMENT", "Compartment"), ("SYSTEM", "System")):
-        for vehicle_id in vehicles.values_list("pk", flat=True):
+        for vehicle_id in vehicle_ids:
             for row, key in position_rules.positions(org, str(vehicle_id), kind):
                 slot = (kind, str(row.stable_slot_id))
                 if row.retired or slot in seen:
@@ -239,6 +261,8 @@ def _slot_choices(org):
                         "label": f"{heading}: {label}",
                     }
                 )
+                if len(choices) >= CHOICE_LIMIT:
+                    return sorted(choices, key=lambda c: c["label"].lower())
     return sorted(choices, key=lambda c: c["label"].lower())
 
 
@@ -246,7 +270,7 @@ def _kit_choices(org):
     kits = (
         KitInstance.objects.filter(organization_id=org, active=True, compartment__isnull=False)
         .select_related("compartment", "vehicle")
-        .order_by("label", "id")
+        .order_by("label", "id")[:CHOICE_LIMIT]
     )
     return [
         {
@@ -257,17 +281,23 @@ def _kit_choices(org):
     ]
 
 
-def _item_choices(org, exclude):
+def _item_choices(org, exclude, query=""):
+    """(active items to choose from, whether more match than are shown), at most ITEM_CHOICES.
+
+    A query narrows the list by name, so every item stays reachable however many there are.
+    """
     presence = KitDefinition.objects.filter(organization_id=org).values_list(
         "presence_item_id", flat=True
     )
-    return list(
+    items = (
         Item.objects.filter(organization_id=org, active=True)
         .exclude(pk__in=presence)
         .exclude(pk__in=exclude)
-        .order_by("label", "id")
-        .values("id", "label")
     )
+    if query:
+        items = items.filter(label__icontains=query)
+    found = list(items.order_by("label", "id").values("id", "label")[: ITEM_CHOICES + 1])
+    return found[:ITEM_CHOICES], len(found) > ITEM_CHOICES
 
 
 def _base(template):
@@ -289,7 +319,6 @@ def _list_page(request, user, *, status=200, errors=None, form=None):
     for template in ChecklistTemplate.objects.filter(organization_id=org).order_by(
         "-active", "label", "id"
     )[: admin_pages.LIST_LIMIT]:
-        published = _published_ids(template)
         latest = _latest(template)
         in_force = (
             ChecklistPublication.objects.filter(
@@ -306,7 +335,7 @@ def _list_page(request, user, *, status=200, errors=None, form=None):
                 "scheduled": ChecklistPublication.objects.filter(
                     checklist_version__template=template, effective_at__gt=now
                 ).count(),
-                "draft": latest.revision if latest and latest.pk not in published else None,
+                "draft": latest.revision if _is_draft(latest) else None,
             }
         )
     context = {
@@ -327,9 +356,9 @@ def _template_page(
 ):
     roles = navigation.roles_for(user)
     now = timezone.now()
-    published = _published_ids(template)
     latest = _latest(template)
-    draft = latest if latest is not None and latest.pk not in published else None
+    draft = latest if _is_draft(latest) else None
+    versions, older = _versions(template, _revision_param(request.GET.get("before")))
     in_force = (
         ChecklistPublication.objects.filter(
             checklist_version__template=template, effective_at__lte=now
@@ -347,14 +376,16 @@ def _template_page(
             checklist_version__template=template, effective_at__gt=now
         )
         .select_related("checklist_version")
-        .order_by("effective_at"),
+        .order_by("effective_at")[:SCHEDULED_LIMIT],
         "latest": latest,
         "draft": draft,
         "edit_rows": [
             {**row, "operation_id": admin_pages.new_operation_id()} for row in _rows(latest)
         ],
         "base_revision": latest.revision if latest else 0,
-        "versions": _versions(template),
+        "versions": versions,
+        "older": older,
+        "paged": request.GET.get("before") is not None,
         "can_publish": _can(user, roles, "publish_template"),
         "can_duplicate": _can(user, roles, "duplicate_configuration"),
         "impact": impact,
@@ -481,10 +512,13 @@ def _remove(request, user, template):
 
 
 def _draft_of(template, post):
-    version = ChecklistVersion.objects.filter(
-        template=template, pk=post.get("version_id", "")
-    ).first()
-    if version is None or ChecklistPublication.objects.filter(checklist_version=version).exists():
+    try:
+        version = ChecklistVersion.objects.filter(
+            template=template, pk=post.get("version_id", "")
+        ).first()
+    except (ValueError, ValidationError):  # a malformed id
+        version = None
+    if not _is_draft(version):
         raise PageError("choose this template's draft to publish")
     return version
 
@@ -522,7 +556,7 @@ def _publish(request, user, template, stage):
 # --- one item --------------------------------------------------------------------------------
 
 
-def _item_form(spec, slot_rows):
+def _item_form(spec, choices):
     """The item form's values from a spec, or the defaults for a new item."""
     if spec is None:
         return {
@@ -530,11 +564,7 @@ def _item_form(spec, slot_rows):
             "outcomes": {"FAILED", "UNABLE_TO_INSPECT"},
             "display_order": "",
         }
-    place = ""
-    if spec["compartment_id"]:
-        place = slot_rows.get(("COMPARTMENT", spec["compartment_id"]), "")
-    elif spec["system_id"]:
-        place = slot_rows.get(("SYSTEM", spec["system_id"]), "")
+    place = _choice_for(spec, choices)
     return {
         "item_id": spec["item_id"],
         "kind": spec["kind"],
@@ -549,17 +579,17 @@ def _item_form(spec, slot_rows):
     }
 
 
-def _choice_by_slot(org, choices):
-    """{(kind, any row id of a slot): the choice value for that slot}."""
-    by_slot = {c["slot"]: c["value"] for c in choices}
-    found = {}
-    for kind, model in (("COMPARTMENT", Compartment), ("SYSTEM", VehicleSystem)):
-        for pk, slot in model.objects.filter(organization_id=org).values_list(
-            "pk", "stable_slot_id"
-        ):
-            if (kind, str(slot)) in by_slot:
-                found[(kind, str(pk))] = by_slot[(kind, str(slot))]
-    return found
+def _choice_for(spec, choices):
+    """The place choice for the slot a spec's row belongs to, or "" when it is not offered."""
+    for kind, model, row_id in (
+        ("COMPARTMENT", Compartment, spec["compartment_id"]),
+        ("SYSTEM", VehicleSystem, spec["system_id"]),
+    ):
+        if row_id:
+            slot = model.objects.filter(pk=row_id).values_list("stable_slot_id", flat=True).first()
+            wanted = (kind, str(slot))
+            return next((c["value"] for c in choices if c["slot"] == wanted), "")
+    return ""
 
 
 def _whole(value, what, *, required=True):
@@ -625,8 +655,12 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
         raise Http404("that item is not in the latest version")
     choices = _slot_choices(org)
     if form is None:
-        form = _item_form(spec, _choice_by_slot(org, choices))
+        form = _item_form(spec, choices)
     item_label = Item.objects.filter(pk=item_id).values_list("label", flat=True).first()
+    query = request.GET.get("q", "").strip()[:MAX_QUERY]
+    items, more_items = (
+        _item_choices(org, [s["item_id"] for s in specs], query) if item_id is None else ([], False)
+    )
     context = {
         "title": f"{'Edit' if item_id else 'Add'} an item: {template.label}",
         "template": template,
@@ -639,7 +673,10 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
         "optional_outcomes": OPTIONAL_OUTCOMES,
         "places": choices,
         "kits": _kit_choices(org),
-        "items": _item_choices(org, [s["item_id"] for s in specs]) if item_id is None else [],
+        "items": items,
+        "more_items": more_items,
+        "query": query,
+        "item_choices": ITEM_CHOICES,
         "operation_id": admin_pages.new_operation_id(),
         "errors": errors or [],
         "field_errors": field_errors(errors or [], ITEM_FIELDS),
@@ -718,10 +755,12 @@ def duplicate(request, template_id):
         return refused
     user, _roles = allowed
     template = _template_of(user, template_id)
-    versions = list(ChecklistVersion.objects.filter(template=template).order_by("-revision"))
-    published = _published_ids(template)
+    # The newest versions are offered in a list; any older one is chosen by its revision number
+    # (SPEC NFR-6: the list is bounded, every version stays reachable).
+    versions, older = _versions(template)
     form = {
         "version_id": request.POST.get("version_id", ""),
+        "revision": request.POST.get("revision", "").strip(),
         "label": request.POST.get("label", f"Copy of {template.label}"),
         "key": request.POST.get("key", ""),
     }
@@ -730,7 +769,8 @@ def duplicate(request, template_id):
         context = {
             "title": f"Duplicate a template: {template.label}",
             "template": template,
-            "versions": [{"version": v, "published": v.pk in published} for v in versions],
+            "versions": versions,
+            "older": older,
             "form": form,
             "operation_id": admin_pages.new_operation_id(),
             "errors": errors or [],
@@ -740,13 +780,23 @@ def duplicate(request, template_id):
 
     if request.method == "GET":
         return page()
-    if not any(str(v.pk) == form["version_id"] for v in versions):
+    chosen = ChecklistVersion.objects.filter(template=template)
+    if form["revision"]:
+        number = _revision_param(form["revision"])
+        chosen = chosen.filter(revision=number) if number is not None else chosen.none()
+    else:
+        chosen = chosen.filter(pk=form["version_id"]) if form["version_id"] else chosen.none()
+    try:
+        source = chosen.first()
+    except (ValueError, ValidationError):  # a malformed id
+        source = None
+    if source is None:
         return page(400, ["choose a version of this template to copy"])
     result, refused = _run(
         request,
         user,
         lambda ids: duplicate_template(
-            source_version_id=form["version_id"],
+            source_version_id=str(source.pk),
             label=form["label"],
             key=form["key"].strip(),
             **ids,

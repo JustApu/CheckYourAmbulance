@@ -35,6 +35,7 @@ from cya.kits.placements import placements_of
 from cya.operations.vehicles import MAX_NAME, VehicleError, _plan, _run
 
 ACTION = "draft_edit_template"
+VEHICLE_LIMIT = 500  # vehicles the impact preview checks (SPEC NFR-6)
 CREATE_COMMAND = "TEMPLATE_CREATE"
 # The definition fields a reader compares between two versions of an item.
 COMPARED = (
@@ -108,6 +109,7 @@ class PublicationImpact:
     changed: list = field(default_factory=list)  # (item label, [what changed])
     vehicles: list = field(default_factory=list)  # VehicleImpact, by name
     blocking: list = field(default_factory=list)  # refusals not tied to one vehicle
+    more_vehicles: bool = False  # more than VEHICLE_LIMIT vehicles; only those were checked
 
     @property
     def refused(self):
@@ -312,9 +314,15 @@ def _vehicle_impacts(impact, org, version, definitions, at):
             "pk", flat=True
         )
     }
-    for vehicle in Vehicle.objects.filter(organization_id=org, pk__in=bound | active).order_by(
-        "display_name", "pk"
-    ):
+    # SPEC NFR-6: the preview checks at most VEHICLE_LIMIT vehicles and says when there are more;
+    # the publication itself checks every one under its locks.
+    vehicles = list(
+        Vehicle.objects.filter(organization_id=org, pk__in=bound | active).order_by(
+            "display_name", "pk"
+        )[: VEHICLE_LIMIT + 1]
+    )
+    impact.more_vehicles = len(vehicles) > VEHICLE_LIMIT
+    for vehicle in vehicles[:VEHICLE_LIMIT]:
         vehicle_id = str(vehicle.pk)
         entry = VehicleImpact(vehicle=vehicle)
         if vehicle_id in active and (missing := _missing(refs, vehicle_id, at)):

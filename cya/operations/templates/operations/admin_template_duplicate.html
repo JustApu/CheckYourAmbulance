@@ -10,9 +10,12 @@
   {% csrf_token %}
   <input type="hidden" name="operation_id" value="{{ operation_id }}">
   <p><label for="dup-version">Version to copy</label><br>
-  <select id="dup-version" name="version_id" required{% if field_errors.version_id %} aria-invalid="true" aria-describedby="dup-version-error"{% endif %}>
-    {% for v in versions %}<option value="{{ v.version.pk }}"{% if form.version_id == v.version.pk|stringformat:"s" %} selected{% endif %}>Revision {{ v.version.revision }}{% if not v.published %} (draft){% endif %}</option>{% endfor %}
+  <select id="dup-version" name="version_id"{% if field_errors.version_id %} aria-invalid="true" aria-describedby="dup-version-error"{% endif %}>
+    {% for v in versions %}<option value="{{ v.version.pk }}"{% if form.version_id == v.version.pk|stringformat:"s" %} selected{% endif %}>Revision {{ v.version.revision }}{% if not v.publication %} (draft){% endif %}</option>{% endfor %}
   </select>{% if field_errors.version_id %}<span id="dup-version-error" class="field-error">Error: {{ field_errors.version_id }}</span>{% endif %}</p>
+  {% if older %}<p><label for="dup-revision">Or an older revision number</label><br>
+  <input id="dup-revision" name="revision" value="{{ form.revision }}" inputmode="numeric" pattern="[0-9]*" aria-describedby="dup-revision-help"><br>
+  <span id="dup-revision-help">The list shows the newest {{ versions|length }} revisions. A number here is used instead of the list.</span></p>{% endif %}
   <p><label for="dup-label">Name</label><br>
   <input id="dup-label" name="label" value="{{ form.label }}" maxlength="200" required{% if field_errors.label %} aria-invalid="true" aria-describedby="dup-label-error"{% endif %}>{% if field_errors.label %}<span id="dup-label-error" class="field-error">Error: {{ field_errors.label }}</span>{% endif %}</p>
   <p><label for="dup-key">Key</label><br>
