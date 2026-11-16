@@ -1,0 +1,103 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'vehicle-admin' vehicle.pk %}">{{ vehicle.display_name }}</a> · Checklist bindings</p>
+<p>A binding makes the vehicle follow a checklist template on a schedule slot. Times are {{ zone }}.</p>
+{% if not vehicle.active %}<p id="inactive-note">This vehicle is inactive. A binding recorded now owes no inspection until the vehicle is activated.</p>{% endif %}
+
+{% if preview %}
+<section aria-labelledby="unbind-heading">
+<h2 id="unbind-heading">Unbind {{ preview.template.label }} ({{ preview.slot }})</h2>
+<p>Unbinding takes effect when you confirm. It does not complete any inspection. Checks, deficiencies and audit history are kept.</p>
+<h3 id="superseded-heading">No longer owed ({{ preview.result.superseded_count }})</h3>
+{% if preview.result.superseded %}
+<p>These inspections have not opened yet. They will be superseded: not owed, and not counted as overdue or missed.</p>
+<div class="table-scroll" role="region" aria-labelledby="superseded-heading" tabindex="0">
+<table id="superseded">
+  <thead><tr><th scope="col">Due</th><th scope="col">Window opens</th><th scope="col">Items</th></tr></thead>
+  <tbody>{% for o in preview.result.superseded %}<tr><td>{{ o.due_at|date:"Y-m-d H:i" }}</td><td>{{ o.early_at|date:"Y-m-d H:i" }}</td><td>{{ o.count }}</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% else %}<p>None. No inspection from this binding is waiting for its window to open.</p>{% endif %}
+<h3 id="continuing-heading">Still owed ({{ preview.result.continuing_count }})</h3>
+{% if preview.continuing %}
+<p>These inspections are already open. They stay owed and keep their state.</p>
+<div class="table-scroll" role="region" aria-labelledby="continuing-heading" tabindex="0">
+<table id="continuing">
+  <thead><tr><th scope="col">Due</th><th scope="col">Window opened</th><th scope="col">Items</th></tr></thead>
+  <tbody>{% for o in preview.continuing %}<tr><td>{{ o.due_at|date:"Y-m-d H:i" }}</td><td>{{ o.early_at|date:"Y-m-d H:i" }}</td><td>{{ o.states }}</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% else %}<p>None.</p>{% endif %}
+<p>If anything here changes before you confirm, nothing is changed and an updated preview is shown.</p>
+<form method="post" action="{% url 'vehicle-bindings' vehicle.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="unbind">
+  <input type="hidden" name="template_id" value="{{ preview.template.pk }}">
+  <input type="hidden" name="slot" value="{{ preview.slot }}">
+  <input type="hidden" name="token" value="{{ preview.result.token }}">
+  <input type="hidden" name="operation_id" value="{{ preview.operation_id }}">
+  <p><button type="submit" class="button">Unbind</button> <a class="button" href="{% url 'vehicle-bindings' vehicle.pk %}">Cancel</a></p>
+</form>
+</section>
+{% endif %}
+
+<h2 id="bindings-heading">Bindings</h2>
+{% if rows %}
+<div class="table-scroll" role="region" aria-labelledby="bindings-heading" tabindex="0">
+<table id="bindings">
+  <thead><tr><th scope="col">Template</th><th scope="col">Slot</th><th scope="col">State</th><th scope="col">Change</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>{{ row.template.label }}</td>
+      <td>{{ row.slot }}</td>
+      <td>{{ row.state }} {{ row.effective_at|date:"Y-m-d H:i" }}</td>
+      <td>{% if row.can_unbind and not preview %}<form method="post" action="{% url 'vehicle-bindings' vehicle.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="stage" value="unbind-preview">
+        <input type="hidden" name="template_id" value="{{ row.template.pk }}">
+        <input type="hidden" name="slot" value="{{ row.slot }}">
+        <button type="submit" class="button" aria-label="Unbind {{ row.template.label }} ({{ row.slot }})…">Unbind…</button>
+      </form>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p>No template has been bound to this vehicle.</p>{% endif %}
+
+{% if not preview %}
+<h2 id="bind-heading">Bind a template</h2>
+{% if templates and slots %}
+<form method="post" action="{% url 'vehicle-bindings' vehicle.pk %}" class="admin-form" aria-labelledby="bind-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="bind">
+  <input type="hidden" name="operation_id" value="{{ bind_operation_id }}">
+  <p><label for="bind-template">Checklist template</label><br>
+  <select id="bind-template" name="template_id" required>
+    {% for t in templates %}<option value="{{ t.id }}"{% if form.template_id == t.id|stringformat:"s" %} selected{% endif %}>{{ t.label }}</option>{% endfor %}
+  </select></p>
+  <p><label for="bind-slot">Schedule slot</label><br>
+  <select id="bind-slot" name="slot" required>
+    {% for s in slots %}<option value="{{ s.slot }}"{% if form.slot == s.slot %} selected{% endif %}>{{ s.slot }} ({{ s.recurrence|lower }}{% if s.interval_days %} every {{ s.interval_days }} days{% endif %}, {{ s.wall_time|time:"H:i" }})</option>{% endfor %}
+  </select></p>
+  <fieldset><legend>Takes effect</legend>
+    <label><input type="radio" name="when" value="now"{% if form.when != "at" %} checked{% endif %}> Now</label>
+    <label><input type="radio" name="when" value="at"{% if form.when == "at" %} checked{% endif %}> At</label>
+    <label for="bind-at">Date and time ({{ zone }})</label>
+    <input id="bind-at" type="datetime-local" name="at" value="{{ form.at }}">
+  </fieldset>
+  <p>Inspections are owed from when the binding takes effect{% if not vehicle.active %} and the vehicle is active{% endif %}. Nothing earlier is owed.</p>
+  <p><button type="submit" class="button">Bind</button></p>
+</form>
+{% if templates|length >= list_limit or slots|length >= list_limit %}<p>Only the first {{ list_limit }} templates and slots are offered.</p>{% endif %}
+{% elif not templates %}<p>No active checklist template exists. Create one first.</p>
+{% else %}<p>No schedule slot has been published. A slot must exist before a template can be bound.</p>{% endif %}
+{% endif %}
+</div>
+{% endblock %}

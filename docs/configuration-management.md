@@ -32,6 +32,8 @@ New policy actions, each Supervisor and Administrator (SPEC 2.2.0 §3.3), with p
 | `manage_vehicle_positions` | Add, rename, reorder and retire compartments and systems (CFG-2) |
 | `duplicate_configuration` | Duplicate a checklist template or a vehicle (CFG-3, CFG-4) |
 
+SPEC 4.1.0 adds `bind_unbind_template` (PERM-49): bind or unbind a checklist template to a vehicle (CFG-7, CFG-8), also Supervisor and Administrator.
+
 Existing actions cover the rest:
 - `draft_edit_template` and `publish_template`: templates;
 - `manage_kit_definitions`: kit definitions;
@@ -118,8 +120,23 @@ The screens are in `cya/operations/override_admin_views.py`, one page per templa
 - **What an override overlays.** A draft is saved over the template's latest published version (by effective instant). The page shows the vehicle's resulting checklist, marking each row as from the template, added, changed or removed.
 - **One entry at a time.** Remove a template item, change one (6a's item form, prefilled with the template's definition), add one (an existing item or a new one by name), or undo an entry. Each saves a whole new draft through `save_override_draft`, from the vehicle's latest override of the template, with `base_revision`. Override revisions count per vehicle across templates, so a concurrent change to any of the vehicle's overrides refuses the save.
 - **Stale overrides.** An override over an older version stops the vehicle's checklist resolving once a newer version governs (`StaleOverrideError`; 6a's preview warns about it). The page offers to carry the entries over to the latest version. It first lists what cannot be carried: a REMOVE or REPLACE of an item the version no longer has, or an ADD of an item it now has. Confirmation saves a new draft with the rest.
-- **Publishing** is now or at a station-local date and time, never before the overlaid version's effective instant (the command refuses it). It shows a short preview first. By owner decision (2026-11-15), it is offered only for a vehicle bound to the template now or by a binding recorded for later; a draft may be prepared for any vehicle. Binding itself has no screen yet ([issue #177](https://github.com/JustApu/CheckYourAmbulance/issues/177)).
+- **Publishing** is now or at a station-local date and time, never before the overlaid version's effective instant (the command refuses it). It shows a short preview first. By owner decision (2026-11-15), it is offered only for a vehicle bound to the template now or by a binding recorded for later; a draft may be prepared for any vehicle. Binding has its own screen (below).
 - **The template page** lists vehicles for overrides, bound ones first, at most 500.
+
+## Checklist bindings (CFG-7, CFG-8)
+
+[Issue #177](https://github.com/JustApu/CheckYourAmbulance/issues/177), SPEC 4.1.0. The screen is `cya/operations/binding_admin_views.py`, one page per vehicle, linked from the vehicle page, behind `bind_unbind_template`. `bind_requirement` checks the same action, so a direct post by Crew or a Supply Officer is refused and audited.
+
+- **The page** lists each (template, schedule slot) binding of the vehicle with its latest revision: bound since, starts, unbound since or ends, with the instant.
+- **Binding** takes a template, a published slot and an effective time: now, or a station-local date and time (as in 6a). The command's refusals are unchanged: already bound, no published slot, a retired position, a time in the past or not after the previous revision.
+- **Inactive vehicles** (CFG-7). A binding may be recorded for an inactive vehicle. Reconciliation runs only for active vehicles, and obligations due while inactive are exempt (CFG-1). So nothing is owed until activation, and then only from the activation, or from the binding's start if it is later.
+- **Unbinding** is a preview, then a confirmation (CFG-8):
+  - `cya/obligations/unbinding.py` lists the binding's selected routine obligations due at or after the instant;
+  - those whose early window has not opened will be superseded. This matches the planner's freeze rule, so the reconciliation that follows the command retires exactly these with a `SUPERSEDED` determination. No check can have satisfied them;
+  - those whose window has opened continue, shown with their state;
+  - the page states that unbinding completes nothing, and that checks, deficiencies and audit history are kept.
+- **Confirmation.** The confirmation posts the preview's digest, which covers the binding revision, both lists and each continuing obligation's state. With `preview_token`, `bind_requirement` unbinds at the instant it records and recomputes the preview then. If anything differs, it refuses with `PreviewChanged`, and the page shows the fresh preview. The token is part of the request digest, so a resubmitted form replays.
+- **Limits.** The preview is limited to `MAX_PREVIEW_OBLIGATIONS` (2,000) obligations. Generation stops at its horizon, so a real binding is far below that; past the limit, the page refuses rather than show a partial list. An unbinding at a later instant stays a command-line operation.
 
 ## Duplicating a checklist template (CFG-3)
 

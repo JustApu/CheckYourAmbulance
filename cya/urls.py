@@ -23,7 +23,12 @@ from cya.kits import views as kit_views
 from cya.notifications import api as notifications_api
 from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
-from cya.operations import override_admin_views, template_admin_views, vehicle_admin_views
+from cya.operations import (
+    binding_admin_views,
+    override_admin_views,
+    template_admin_views,
+    vehicle_admin_views,
+)
 from cya.operations import views as operations_views
 from cya.seals import api as seal_api
 from cya.seals import views as seal_views
@@ -156,6 +161,11 @@ urlpatterns = [
         "administration/vehicles/<uuid:vehicle_id>/",
         vehicle_admin_views.vehicle,
         name="vehicle-admin",
+    ),
+    path(
+        "administration/vehicles/<uuid:vehicle_id>/bindings/",
+        binding_admin_views.bindings,
+        name="vehicle-bindings",
     ),
     path(
         "administration/vehicles/<uuid:vehicle_id>/duplicate/",

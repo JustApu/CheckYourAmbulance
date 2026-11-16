@@ -120,8 +120,8 @@ def unbind_preview(organization_id, vehicle_id, template_id, slot, at):
             end=max(due for _, due, _ in continuing),
         ):
             if str(state.obligation.id) in wanted:
-                states[str(state.obligation.id)] = state.display_text
-    continuing_states = [(i, due, early, states.get(i, "Owed")) for i, due, early in continuing]
+                states[str(state.obligation.id)] = state.state.value
+    continuing_states = [(i, due, early, states.get(i, "OWED")) for i, due, early in continuing]
     token = hashlib.sha256(
         json.dumps(
             {
@@ -135,7 +135,7 @@ def unbind_preview(organization_id, vehicle_id, template_id, slot, at):
     return UnbindPreview(
         binding=binding,
         at=at,
-        superseded=_group([(due, early, "Superseded") for _, due, early in superseded]),
+        superseded=_group([(due, early, "SUPERSEDED") for _, due, early in superseded]),
         continuing=_group([(due, early, s) for _, due, early, s in continuing_states]),
         superseded_count=len(superseded),
         continuing_count=len(continuing_states),
