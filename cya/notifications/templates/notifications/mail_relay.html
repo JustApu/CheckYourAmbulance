@@ -18,12 +18,12 @@
   <p><label for="relay-host">Relay host</label><br><input id="relay-host" name="host" value="{{ form.host }}" maxlength="253" required></p>
   <p><label for="relay-port">Port</label><br><input id="relay-port" name="port" value="{{ form.port }}" inputmode="numeric" pattern="[0-9]*" size="6" required></p>
   <fieldset><legend>Encryption</legend>
-    <label><input type="radio" name="tls_mode" value="STARTTLS"{% if form.tls_mode != "TLS" %} checked{% endif %}> STARTTLS (usually port 587)</label>
-    <label><input type="radio" name="tls_mode" value="TLS"{% if form.tls_mode == "TLS" %} checked{% endif %}> TLS from the start (usually port 465)</label>
+    <div><label><input type="radio" name="tls_mode" value="STARTTLS"{% if form.tls_mode != "TLS" %} checked{% endif %}> STARTTLS (usually port 587)</label></div>
+    <div><label><input type="radio" name="tls_mode" value="TLS"{% if form.tls_mode == "TLS" %} checked{% endif %}> TLS from the start (usually port 465)</label></div>
   </fieldset>
   <fieldset><legend>How the relay recognizes this server</legend>
-    <label><input type="radio" name="auth_mode" value="PASSWORD"{% if form.auth_mode != "IP" %} checked{% endif %}> Username and password</label>
-    <label><input type="radio" name="auth_mode" value="IP"{% if form.auth_mode == "IP" %} checked{% endif %}> This server's IP address (no login; the relay must allow it)</label>
+    <div><label><input type="radio" name="auth_mode" value="PASSWORD"{% if form.auth_mode != "IP" %} checked{% endif %}> Username and password</label></div>
+    <div><label><input type="radio" name="auth_mode" value="IP"{% if form.auth_mode == "IP" %} checked{% endif %}> This server's IP address (no login; the relay must allow it)</label></div>
   </fieldset>
   <p><label for="relay-username">Username (for username and password)</label><br><input id="relay-username" name="username" value="{{ form.username }}" maxlength="254" autocomplete="off"></p>
   <p><label for="relay-password">Password</label><br><input id="relay-password" name="password" type="password" maxlength="1024" autocomplete="new-password" aria-describedby="relay-password-help">
