@@ -14,7 +14,8 @@ from urllib.parse import urlencode
 
 from django.core.paginator import Paginator
 from django.db import DatabaseError
-from django.db.models import Q
+from django.db.models import F, Q, Window
+from django.db.models.functions import RowNumber
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 HISTORY_LIMIT = 50
 TARGET_LIMIT = 50
+ROLE_EVENT_LIMIT = 500
 SEARCH_LIMIT = 100
 ACTIONS = ("GRANT", "REVOKE")
 SELECTABLE_ROLES = tuple(role.value for role in Role if role != Role.EMT)  # EMT is a legacy alias
@@ -51,6 +53,11 @@ ROLE_LABELS = {
     "SUPPLY_OFFICER": "Supply Officer",
     "ADMINISTRATOR": "Administrator",
 }
+
+
+class RoleEventLimitExceeded(Exception):
+    """Current-role evidence exceeded the bounded per-user read limit."""
+
 
 # Sanitized messages keyed by outcome; no exception text reaches the page.
 MESSAGES = {
@@ -86,6 +93,14 @@ def _current_roles_by_user(organization_id, targets):
     events = {target_id: [] for target_id in target_ids}
     rows = (
         RoleGrant.objects.filter(organization_id=organization_id, user_id__in=target_ids)
+        .annotate(
+            event_number=Window(
+                expression=RowNumber(),
+                partition_by=[F("user_id")],
+                order_by=F("sequence").asc(),
+            )
+        )
+        .filter(event_number__lte=ROLE_EVENT_LIMIT + 1)
         .order_by("user_id", "sequence")
         .values(
             "id",
@@ -95,9 +110,12 @@ def _current_roles_by_user(organization_id, targets):
             "role",
             "action",
             "prior_grant_id",
+            "event_number",
         )
     )
     for row in rows:
+        if row["event_number"] > ROLE_EVENT_LIMIT:
+            raise RoleEventLimitExceeded
         target_id = str(row["user_id"])
         events[target_id].append(
             RoleEvent(
@@ -149,7 +167,7 @@ def _render_roles(
     if targets:
         try:
             roles_by_user = _current_roles_by_user(user.organization_id, targets)
-        except (DatabaseError, InvalidRoleHistory):
+        except (DatabaseError, InvalidRoleHistory, RoleEventLimitExceeded):
             logger.error("role list unavailable")
             targets = []
             role_list_error = "The user list could not be loaded. Reload the page to try again."
@@ -394,18 +412,22 @@ def role_history(request, target_id):
             request,
             "authorization/role_history.html",
             {
-                "title": "Role history",
+                "title": f"Role history for {target.display_name or target.email}",
                 "target": target,
                 "history": [],
                 "error": "Role history could not be loaded. Reload the page to try again.",
             },
             status=503,
         )
+    for event in history:
+        event.action_label = "Granted" if event.action == "GRANT" else "Removed"
+        role_code = "CREW" if event.role == "EMT" else event.role
+        event.role_label = ROLE_LABELS.get(role_code, role_code)
     return render(
         request,
         "authorization/role_history.html",
         {
-            "title": "Role history",
+            "title": f"Role history for {target.display_name or target.email}",
             "target": target,
             "history": history,
             "history_total": history_total,
