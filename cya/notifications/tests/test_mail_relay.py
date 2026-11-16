@@ -10,6 +10,7 @@ import stat
 import tempfile
 import uuid
 from io import StringIO
+from unittest import mock
 
 from cryptography.fernet import Fernet
 from django.core.management import call_command
@@ -311,3 +312,15 @@ class RelayPageTests(NotificationCase):
         self.assertEqual(
             AuditEvent.objects.filter(action="MAIL_RELAY_TEST", outcome="SUCCEEDED").count(), 2
         )
+
+    def test_a_test_never_sends_through_a_revision_it_did_not_audit(self):
+        # PR #188 review: the audited request names revision 1; a save before the send
+        # (simulated by the request reporting an older revision) sends nothing.
+        self.post(**self.form())
+        stale = type("Result", (), {"body": {"code": "TEST_REQUESTED", "revision": 0}})()
+        with mock.patch(
+            "cya.notifications.relay_views.request_mail_relay_test", return_value=stale
+        ):
+            response = self.post(stage="test")
+        self.assertContains(response, "The relay settings changed while the test was starting.")
+        self.assertEqual(StubTransport.sent, [])

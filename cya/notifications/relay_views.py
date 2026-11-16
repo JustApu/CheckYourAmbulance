@@ -41,6 +41,8 @@ TEST_RESULTS = {
     "KEY_MISSING": "The server cannot read the stored password. Ask the operator to check the "
     "mail relay key in the secrets file.",
     "UNKNOWN": "The test email could not be sent.",
+    "CHANGED": "The relay settings changed while the test was starting. Nothing was sent; try "
+    "again.",
 }
 
 
@@ -138,8 +140,12 @@ def mail_relay(request):
         result, failed = _run(request, render_error, lambda: request_mail_relay_test(**ids))
         if failed:
             return failed
-        relay = MailRelay.objects.filter(organization_id=user.organization_id).first()
-        code = relay_rules.send_test(relay) if relay is not None else "UNKNOWN"
+        # Send only through the revision the audited request named (PR #188 review): a save
+        # that lands in between is never tested under the earlier request.
+        relay = MailRelay.objects.filter(
+            organization_id=user.organization_id, revision=result.body["revision"]
+        ).first()
+        code = relay_rules.send_test(relay) if relay is not None else "CHANGED"
         logger.info("mail relay test: %s", code)
         return _page(request, user, test_result={"ok": code == "SENT", "text": TEST_RESULTS[code]})
     try:
