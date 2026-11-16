@@ -33,7 +33,7 @@
     "obligations due before unbinding retain their state; checks, deficiencies and audit history remain",
     "replaying the confirmed operation id does not apply unbinding a second time"
   ],
-  "status": "symbolic",
+  "status": "contract",
   "notes": "Language-neutral contract for owner-approved SPEC amendment 4.1.0 (issue #177). The scenario is not yet bound to application commands.",
   "database": "commit"
 }
