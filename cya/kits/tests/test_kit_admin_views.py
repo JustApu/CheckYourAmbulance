@@ -145,6 +145,8 @@ class KitListPageTests(KitAdminCase):
         )
         page = self.client_.get(self.url)
         self.assertContains(page, 'aria-describedby="note-0"')
+        # Issue #176: the line editor uses the admin field style.
+        self.assertContains(page, 'aria-labelledby="edit-heading" class="admin-form"')
         self.assertContains(
             page,
             "Synthetic jump kit is no longer an active kit type: choose again or remove this line.",
@@ -262,7 +264,11 @@ class KitInstancePageTests(KitAdminCase):
         self.assertEqual(
             str(KitInstanceDefinition.objects.get(kit=kit).definition_id), self.definition
         )
-        self.assertContains(self.client_.get(added["Location"]), "Synthetic jump kit 1")
+        page = self.client_.get(added["Location"])
+        self.assertContains(page, "Synthetic jump kit 1")
+        # Issue #176: the add form and the duplicate-to-vehicle select use the admin field style.
+        self.assertContains(page, 'aria-labelledby="add-heading" class="admin-form"')
+        self.assertContains(page, 'kit-instances/duplicate/" class="admin-form"')
         missing = self.post(
             self.client_,
             self.url,

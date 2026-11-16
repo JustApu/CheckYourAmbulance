@@ -34,7 +34,7 @@
 </form>
 {% else %}
 <h2>Import a file</h2>
-<form method="post" action="{% url 'vehicle-files' %}" enctype="multipart/form-data">
+<form method="post" action="{% url 'vehicle-files' %}" enctype="multipart/form-data" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="preview">
   <p><label for="vehicle-file">Vehicle file</label><br><input id="vehicle-file" type="file" name="vehicle" accept=".json,.csv,application/json,text/csv" required></p>
