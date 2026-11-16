@@ -51,7 +51,7 @@ const html = `<!doctype html>
 <section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title"><h2 id="deficiency-overview-title">Synthetic oxygen cylinder pressure issue</h2><p class="deficiency-state"><strong>In Progress</strong> · High severity</p><p>Synthetic Ambulance 12</p><dl class="deficiency-facts"><dt>Affected scope</dt><dd>Synthetic oxygen cylinder</dd><dt>Assignee</dt><dd>Sam Example</dd><dt>Governing deadline</dt><dd>2026-11-15 12:00 UTC · Overdue</dd></dl></section>
 <section class="panel deficiency-next-action" aria-labelledby="next-action-title"><h2 id="next-action-title">Next action</h2><form class="workflow-write"><p>Record that the repair is complete and request verification.</p><button class="button primary" type="button">Record repair</button></form></section>
 <details class="panel deficiency-details" id="deficiency-work-updates"><summary>Work updates and dependencies</summary><form class="panel workflow-write"><h2>Add progress note</h2><label>Progress note<textarea aria-label="Progress note"></textarea></label><button class="button" type="button">Add note</button></form></details>
-<section class="role-administration" aria-labelledby="role-history-heading"><h2 id="role-history-heading">Role history</h2><div class="role-history-scroll" role="region" aria-label="Role history rows" tabindex="0"><table class="role-history-table"><thead><tr><th>When (agency local time)</th><th>User</th><th>Action</th><th>Role</th><th>Changed by</th></tr></thead><tbody><tr><td>2026-11-12 12:34:56 UTC</td><td>Synthetic User With A Long Display Name (user@example.test)</td><td>GRANT</td><td>SUPERVISOR</td><td>Synthetic Administrator (admin@example.test)</td></tr></tbody></table></div></section>
+
 </main><script>${shellScript}</script></body></html>`;
 const viewports = [
   { name: "phone-375", width: 375, height: 812 },
@@ -288,7 +288,7 @@ const artifacts = process.env.BROWSER_SMOKE_OUTPUT_DIR || path.join(os.tmpdir(),
 const browser = await chromium.launch({ headless: true });
 const failures = [];
 async function testRoleHistoryResponsive(page, viewport) {
-  const region = page.getByRole("region", { name: "Role history rows" });
+  const region = page.getByRole("region", { name: "Role history for sam@example.test" });
   assert.equal(await region.count(), 1, `${viewport.name}: role history region is not exposed accessibly`);
   const metrics = await region.evaluate((element) => ({
     clientWidth: element.clientWidth,
@@ -300,8 +300,8 @@ async function testRoleHistoryResponsive(page, viewport) {
   }));
   assert.equal(metrics.tabIndex, 0, `${viewport.name}: role history region is not keyboard-focusable`);
   assert.ok(metrics.documentWidth <= metrics.viewportWidth, `${viewport.name}: role history makes the page overflow horizontally`);
-  assert.match(metrics.historyText, /2026-11-12 12:34:56 UTC/);
-  assert.match(metrics.historyText, /Synthetic User With A Long Display Name/);
+  assert.match(metrics.historyText, /2026-11-15 12:34 UTC/);
+  assert.match(metrics.historyText, /sam@example\.test/);
   await region.focus();
   assert.equal(await region.evaluate((element) => element === document.activeElement), true, `${viewport.name}: role history region did not receive focus`);
   assert.equal(await region.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: role history focus indicator is missing`);
@@ -465,17 +465,22 @@ async function testDeficiencyFilters(viewport) {
 
 async function testAdministratorRoleChange(viewport) {
   const page = await browser.newPage({ viewport });
-  const history = `<div class="role-history-scroll" role="region" aria-label="Role history" tabindex="0"><table class="role-history-table"><thead><tr><th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead><tbody><tr><td>2026-11-15 12:34 UTC</td><td>Sam Example (sam@example.test)</td><td>GRANT</td><td>SUPERVISOR</td><td>Alex Example (alex@example.test)</td></tr></tbody></table></div>`;
+  const history = '<div class="role-history-scroll" role="region" aria-label="Role history for sam@example.test" tabindex="0"><table class="role-history-table"><thead><tr><th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead><tbody><tr><td>2026-11-15 12:34 UTC</td><td>Sam Example (sam@example.test)</td><td>GRANT</td><td>SUPERVISOR</td><td>Alex Example (alex@example.test)</td></tr></tbody></table></div>';
+  const roleHistoryPage = () => '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Role history</title><style>' + css + '</style></head><body><main><h1>Role history</h1><h2>Changes to roles for Sam Example (sam@example.test)</h2><p><a href="/administration/roles/">Back to organization users</a></p>' + history + '</main></body></html>';
   const rolePage = (stage, query = "") => {
     const content = stage === "preview"
-      ? `<h2>Review role change</h2><p id="role-change-summary">Grant Supervisor role to Sam Example (sam@example.test).</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="confirm"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Confirm grant of Supervisor role</button></form><form><button class="button" type="button">Change selection</button></form>`
-      : `<h2>Change a role</h2><form method="get" action="/administration/roles/" role="search"><label for="role-user-search">Find an active user by name or email</label><input id="role-user-search" name="q" type="search" value="${query}" maxlength="100"><button type="submit" class="button">Search users</button></form><p>1 matching active user.</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="preview"><input type="hidden" name="operation_id" value="synthetic-operation"><label for="role-target">User</label><select id="role-target" name="target" required><option value="">Choose a user</option><option value="user-1">Sam Example (sam@example.test)</option></select><label for="role-code">Role</label><select id="role-code" name="role" required><option value="">Choose a role</option><option value="CREW">Crew</option><option value="SUPERVISOR">Supervisor</option></select><label for="role-action">Action</label><select id="role-action" name="action" required><option value="">Choose Grant or Revoke</option><option value="GRANT">Grant</option><option value="REVOKE">Revoke</option></select><button type="submit" class="button">Review change</button></form>`;
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Administration · Roles</title><style>${css}</style></head><body><main><h1>Role administration</h1><section class="role-administration">${stage === "saved" ? '<p class="save-state save-state-saved" role="status">Saved</p>' : ""}${content}<h2>Role history</h2>${history}</section></main></body></html>`;
+      ? '<h2>Review role change</h2><p id="role-change-summary">Grant Supervisor role to Sam Example (sam@example.test).</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="confirm"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Confirm grant of Supervisor role</button></form><form method="post" action="/administration/roles/"><input type="hidden" name="stage" value="edit"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Change selection</button></form>'
+      : '<section class="role-administration"><h2>Organization users</h2><form method="get" action="/administration/roles/" role="search"><label for="role-user-search">Find an active user by name or email</label><input id="role-user-search" name="q" type="search" value="' + query + '" maxlength="100"><button type="submit" class="button">Search users</button></form><p>1 matching active user.</p><ul class="role-user-list"><li class="role-user-card"><h3>Sam Example</h3><p class="role-user-email">sam@example.test</p><p><strong>Current roles:</strong> <span class="pill">Crew</span>' + (stage === "saved" ? ' <span class="pill">Supervisor</span>' : "") + '</p><p><a href="/administration/roles/user-1/history/" aria-label="View role history for sam@example.test">View role history</a></p><form method="post" action="/administration/roles/" class="admin-form"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="preview"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><label for="role-code-1">Role to change</label><select id="role-code-1" name="role" aria-label="Role to change for Sam Example" required><option value="">Choose a role</option><option value="CREW">Crew</option><option value="SUPERVISOR">Supervisor</option></select><div class="role-user-actions"><button type="submit" name="action" value="GRANT" class="button">Review grant</button><button type="submit" name="action" value="REVOKE" class="button">Review removal</button></div></form></li></ul></section>';
+    return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Administration - Roles</title><style>' + css + '</style></head><body><main><h1>Role administration</h1>' + (stage === "saved" ? '<p class="save-state save-state-saved" role="status">Saved</p>' : "") + content + '</main></body></html>';
   };
   let confirmed = false;
   await page.route("http://roles.test/administration/roles/**", async (route) => {
+    const url = new URL(route.request().url());
     if (route.request().method() !== "POST") {
-      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/history/")) {
+        await route.fulfill({ status: 200, contentType: "text/html", body: roleHistoryPage() });
+        return;
+      }
       await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("edit", url.searchParams.get("q") || "") });
       return;
     }
@@ -487,68 +492,108 @@ async function testAdministratorRoleChange(viewport) {
       await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("preview") });
       return;
     }
+    if (form.get("stage") === "edit") {
+      await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("edit", "sam") });
+      return;
+    }
     assert.equal(form.get("stage"), "confirm");
     assert.equal(form.get("operation_id"), "synthetic-operation");
     assert.equal(form.get("target"), "user-1");
     assert.equal(form.get("role"), "SUPERVISOR");
     assert.equal(form.get("action"), "GRANT");
     confirmed = true;
-    await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("saved") });
+    await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("saved", "sam") });
   });
   try {
     await page.goto("http://roles.test/administration/roles/", { waitUntil: "load" });
     await page.keyboard.press("Tab");
     const search = page.getByRole("searchbox", { name: "Find an active user by name or email" });
-    assert.equal(await search.evaluate((element) => element === document.activeElement), true, `${viewport.name}: role search is not first in keyboard order`);
+    assert.equal(await search.evaluate((element) => element === document.activeElement), true, viewport.name + ": role search is not first in keyboard order");
     await page.keyboard.type("sam");
     await Promise.all([page.waitForNavigation(), page.keyboard.press("Enter")]);
-    assert.equal(await search.inputValue(), "sam", `${viewport.name}: role search did not retain its query`);
-    await page.keyboard.press("Tab"); // Search field
-    assert.equal(await search.evaluate((element) => element === document.activeElement), true, `${viewport.name}: search is not first after navigation`);
+    assert.equal(await search.inputValue(), "sam", viewport.name + ": role search did not retain its query");
+    await page.keyboard.press("Tab");
+    assert.equal(await search.evaluate((element) => element === document.activeElement), true, viewport.name + ": search is not first after navigation");
     await page.keyboard.press("Tab"); // Search users
-    await page.keyboard.press("Tab"); // User
-    const target = page.getByLabel("User", { exact: true });
-    assert.equal(await target.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips user selection`);
+    await page.keyboard.press("Tab"); // Role history link
+    const historyLink = page.getByRole("link", { name: "View role history for sam@example.test" });
+    assert.equal(await historyLink.evaluate((element) => element === document.activeElement), true, viewport.name + ": role-history link is not keyboard reachable");
+    await page.keyboard.press("Tab"); // Role selector
+    const role = page.getByLabel("Role to change for Sam Example");
+    assert.equal(await role.evaluate((element) => element === document.activeElement), true, viewport.name + ": role selector is not keyboard reachable");
     await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Tab"); // Role
-    const role = page.getByLabel("Role", { exact: true });
-    assert.equal(await role.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips role selection`);
     await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Tab"); // Action
-    const action = page.getByLabel("Action", { exact: true });
-    assert.equal(await action.evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips action selection`);
-    await page.keyboard.press("ArrowDown");
-    assert.equal(await target.inputValue(), "user-1", `${viewport.name}: keyboard could not select the role target`);
-    assert.equal(await role.inputValue(), "SUPERVISOR", `${viewport.name}: keyboard could not select Supervisor`);
-    assert.equal(await action.inputValue(), "GRANT", `${viewport.name}: keyboard could not choose Grant`);
-    for (const label of ["Find an active user by name or email", "User", "Role", "Action"]) {
+    assert.equal(await role.inputValue(), "SUPERVISOR", viewport.name + ": keyboard could not select Supervisor");
+    for (const label of ["Find an active user by name or email", "Role to change for Sam Example"]) {
       const box = await page.getByLabel(label, { exact: true }).boundingBox();
-      assert.ok(box && box.height >= 48, `${viewport.name}: ${label} is shorter than 48 CSS pixels`);
+      assert.ok(box && box.height >= 48, viewport.name + ": " + label + " is shorter than 48 CSS pixels");
     }
-    await page.keyboard.press("Tab"); // Review change
-    assert.equal(await page.getByRole("button", { name: "Review change" }).evaluate((element) => element === document.activeElement), true, `${viewport.name}: keyboard order skips review action`);
+    await page.keyboard.press("Tab"); // Review grant
+    const reviewGrant = page.getByRole("button", { name: "Review grant" });
+    assert.equal(await reviewGrant.evaluate((element) => element === document.activeElement), true, viewport.name + ": keyboard skips the role-change review action");
     await page.keyboard.press("Enter");
     assert.match(await page.locator("#role-change-summary").innerText(), /Grant Supervisor role to Sam Example/);
     const confirm = page.getByRole("button", { name: "Confirm grant of Supervisor role" });
     await page.keyboard.press("Tab");
-    assert.equal(await confirm.evaluate((element) => element === document.activeElement), true, `${viewport.name}: confirmation is not keyboard reachable`);
+    assert.equal(await confirm.evaluate((element) => element === document.activeElement), true, viewport.name + ": confirmation is not keyboard reachable");
     await page.keyboard.press("Enter");
     await page.getByRole("status").getByText("Saved").waitFor();
-    assert.equal(confirmed, true, `${viewport.name}: confirmation request was not submitted`);
-    const roleHistory = page.getByRole("region", { name: "Role history" });
-    assert.equal(await roleHistory.count(), 1);
-    assert.match(await roleHistory.innerText(), /Sam Example \(sam@example\.test\)[\s\S]*GRANT[\s\S]*SUPERVISOR/);
-    await roleHistory.focus();
-    assert.equal(await roleHistory.evaluate((element) => element === document.activeElement), true, `${viewport.name}: role history is not keyboard focusable`);
-    assert.equal(await roleHistory.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: role history focus is not visible`);
+    assert.equal(confirmed, true, viewport.name + ": confirmation request was not submitted");
+    assert.equal(await page.getByRole("region", { name: "Role history for sam@example.test" }).count(), 0, viewport.name + ": history belongs on its separate detail page");
     const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-    assert.ok(metrics.document <= metrics.viewport, `${viewport.name}: role page overflows horizontally ${JSON.stringify(metrics)}`);
+    assert.ok(metrics.document <= metrics.viewport, viewport.name + ": role page overflows horizontally " + JSON.stringify(metrics));
     await page.setViewportSize({ width: Math.max(320, Math.floor(viewport.width / 2)), height: viewport.height });
     const zoom = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-    assert.ok(zoom.document <= zoom.viewport, `${viewport.name} at 200% width: role page overflows ${JSON.stringify(zoom)}`);
-    assert.ok(zoom.body <= zoom.viewport, `${viewport.name} at 200% width: role page body overflows ${JSON.stringify(zoom)}`);
-    console.log(`${viewport.name}: administrator role search, preview, confirmation and history passed`);
+    assert.ok(zoom.document <= zoom.viewport, viewport.name + " at 200% width: role page overflows " + JSON.stringify(zoom));
+    assert.ok(zoom.body <= zoom.viewport, viewport.name + " at 200% width: role page body overflows " + JSON.stringify(zoom));
+
+    await page.emulateMedia({ forcedColors: "active" });
+    const forcedColors = await page.evaluate(() => {
+      const card = document.querySelector(".role-user-card");
+      const pill = card.querySelector(".pill");
+      const searchInput = document.querySelector("#role-user-search");
+      const button = card.querySelector(".button");
+      const link = card.querySelector("a");
+      const probe = document.createElement("span");
+      document.body.append(probe);
+      const systemColor = (value) => {
+        probe.style.color = value;
+        return getComputedStyle(probe).color;
+      };
+      const result = {
+        active: matchMedia("(forced-colors: active)").matches,
+        cardBorder: getComputedStyle(card).borderTopColor,
+        canvasText: systemColor("CanvasText"),
+        cardBackground: getComputedStyle(card).backgroundColor,
+        canvas: systemColor("Canvas"),
+        pillBorder: getComputedStyle(pill).borderTopColor,
+        searchBackground: getComputedStyle(searchInput).backgroundColor,
+        field: systemColor("Field"),
+        buttonColor: getComputedStyle(button).color,
+        buttonText: systemColor("ButtonText"),
+        linkColor: getComputedStyle(link).color,
+        linkText: systemColor("LinkText"),
+      };
+      probe.remove();
+      return result;
+    });
+    assert.equal(forcedColors.active, true, viewport.name + ": forced-colors mode did not activate");
+    assert.equal(forcedColors.cardBorder, forcedColors.canvasText, viewport.name + ": role card boundary does not use a system color");
+    assert.equal(forcedColors.cardBackground, forcedColors.canvas, viewport.name + ": role card background does not use Canvas");
+    assert.equal(forcedColors.pillBorder, forcedColors.canvasText, viewport.name + ": role badge boundary does not use a system color");
+    assert.equal(forcedColors.searchBackground, forcedColors.field, viewport.name + ": search field does not use Field");
+    assert.equal(forcedColors.buttonColor, forcedColors.buttonText, viewport.name + ": role action does not use ButtonText");
+    assert.equal(forcedColors.linkColor, forcedColors.linkText, viewport.name + ": role history link does not use LinkText");
+    await page.emulateMedia({ forcedColors: "none" });
+
+    await page.goto("http://roles.test/administration/roles/user-1/history/", { waitUntil: "load" });
+    const historyRegion = page.getByRole("region", { name: "Role history for sam@example.test" });
+    assert.equal(await historyRegion.count(), 1, viewport.name + ": separate history detail is not exposed accessibly");
+    await historyRegion.focus();
+    assert.equal(await historyRegion.evaluate((element) => element === document.activeElement), true, viewport.name + ": role history is not keyboard focusable");
+    assert.equal(await historyRegion.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", viewport.name + ": role history focus is not visible");
+    assert.match(await historyRegion.innerText(), /Sam Example \(sam@example\.test\)[\s\S]*GRANT[\s\S]*SUPERVISOR/);
+    console.log(viewport.name + ": administrator user list, role review/confirmation and separate history passed");
   } finally {
     await page.close();
   }
@@ -662,7 +707,6 @@ try {
       const skipBox = await skipLink.boundingBox();
       assert.ok(skipBox && skipBox.y >= 0, `${viewport.name}: focused skip link is not visible`);
       assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: skip link focus indicator is missing`);
-      await testRoleHistoryResponsive(page, viewport);
       const navToggle = page.locator("#site-nav-toggle");
       const navList = page.locator("#site-nav-list");
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-header") !== null), true, `${viewport.name}: menu is outside the compact header`);

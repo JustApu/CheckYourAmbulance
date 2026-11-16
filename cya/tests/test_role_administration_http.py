@@ -56,7 +56,25 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual((audit.actor_user_id, audit.target_id), (admin.pk, str(crew.pk)))
         self.assertEqual(audit.command_id, grant.command_id)
         self.assertEqual((self.counts()[0] - before[0], self.counts()[1] - before[1]), (1, 1))
-        history = admin_client.get(URL + "?saved=1")
+        users_page = admin_client.get(URL + "?saved=1")
+        self.assertContains(users_page, "Saved")
+        self.assertContains(users_page, "Current roles:")
+        self.assertContains(users_page, "Crew")
+        self.assertContains(users_page, "Supervisor")
+        self.assertContains(users_page, "Review grant")
+        self.assertContains(users_page, "Review removal")
+        self.assertContains(
+            users_page,
+            f'aria-label="Role to change for {crew.display_name}"',
+        )
+        self.assertContains(users_page, 'Crew</span>, <span class="pill">Supervisor</span>')
+        self.assertContains(
+            users_page,
+            f'href="{URL}{crew.pk}/history/" aria-label="View role history for {crew.email}"',
+        )
+        self.assertNotContains(users_page, 'class="role-history-scroll"')
+
+        history = admin_client.get(f"{URL}{crew.pk}/history/")
         expected_time = grant.recorded_at.astimezone(ZoneInfo("America/New_York")).strftime(
             "%Y-%m-%d %H:%M:%S %Z (%z)"
         )
@@ -68,9 +86,78 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertContains(history, expected_time)
         self.assertContains(history, "SUPERVISOR")
         self.assertContains(history, crew.email)
-        self.assertContains(history, "Saved")
         self.assertContains(history, 'class="role-history-scroll"')
-        self.assertContains(history, 'aria-label="Role history"')
+        self.assertContains(history, f'aria-label="Role history for {crew.email}"')
+
+    def test_role_history_is_organization_scoped_and_denied_to_non_administrators(self):
+        admin_client, admin = self.make_administrator("admin-1")
+        crew_client, crew = self.sign_in("crew-1")
+        other = Organization.objects.create(name="Other Agency", station_zone="UTC")
+        stranger = User.objects.create(
+            organization=other,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="stranger",
+            email="stranger@other.example",
+        )
+
+        users_page = admin_client.get(URL)
+        self.assertNotContains(users_page, stranger.email)
+
+        missing = admin_client.get(f"{URL}{stranger.pk}/history/")
+        self.assertEqual(missing.status_code, 404)
+        self.assertNotContains(missing, stranger.email, status_code=404)
+
+        denied = crew_client.get(f"{URL}{crew.pk}/history/")
+        self.assertEqual(denied.status_code, 403)
+        self.assertNotContains(denied, admin.email, status_code=403)
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                actor_user=crew,
+                action="VIEW_ADMINISTRATION",
+                outcome="DENIED",
+            ).exists()
+        )
+
+    def test_history_detail_shows_empty_state_for_a_user_without_role_events(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        target = User.objects.create(
+            organization=self.org,
+            idp_issuer="https://accounts.google.com",
+            idp_subject="no-role-history",
+            email="no-history@agency.example",
+            display_name="No History",
+        )
+
+        response = admin_client.get(f"{URL}{target.pk}/history/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No role changes have been recorded for this user.")
+        self.assertContains(response, "Back to organization users")
+
+    def test_role_history_paginates_newest_first(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        for index in range(51):
+            action = "GRANT" if index % 2 == 0 else "REVOKE"
+            response = self.change(admin_client, crew, action=action)
+            self.assertEqual(response.status_code, 302)
+
+        first_page = admin_client.get(f"{URL}{crew.pk}/history/")
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.context["history_page"].number, 1)
+        self.assertEqual(len(first_page.context["history"]), 50)
+        self.assertGreater(
+            first_page.context["history"][0].sequence,
+            first_page.context["history"][-1].sequence,
+        )
+        self.assertContains(first_page, "Older changes")
+
+        second_page = admin_client.get(f"{URL}{crew.pk}/history/", {"page": "2"})
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(second_page.context["history_page"].number, 2)
+        self.assertEqual(len(second_page.context["history"]), 2)
+        self.assertContains(second_page, "Newer changes")
+        self.assertNotContains(second_page, "Older changes")
 
     def test_unauthorized_user_is_refused_and_a_denial_is_recorded(self):
         _, admin = self.make_administrator("admin-1")
@@ -157,7 +244,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         page = client.get("/administration/roles/")
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, 'aria-current="page">Administration')
-        self.assertContains(page, "Change a role")
+        self.assertContains(page, "Organization users")
 
     def test_preview_is_clear_and_does_not_change_roles_until_confirmation(self):
         admin_client, _ = self.make_administrator("admin-1")
@@ -231,7 +318,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
                 response = client.post(URL, data)
 
                 self.assertEqual(response.status_code, 403)
-                for private in (admin.email, crew.email, "Role history", "Change a role"):
+                for private in (admin.email, crew.email, "Role history", "Organization users"):
                     self.assertNotContains(response, private, status_code=403)
 
         self.assertEqual(RoleGrant.objects.count(), role_rows)
@@ -426,7 +513,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         }
         malformed = client.post(URL, {**base, "target": "not-a-uuid"})
         self.assertEqual(malformed.status_code, 400)
-        for private in (admin.email, "Role history", "Change a role"):
+        for private in (admin.email, "Role history", "Organization users"):
             self.assertNotContains(malformed, private, status_code=400)
         # A missing target must look like a denial, not reveal which ids exist.
         missing = client.post(URL, {**base, "target": str(uuid4())})

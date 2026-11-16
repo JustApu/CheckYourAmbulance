@@ -87,54 +87,17 @@ programmatic commands have no dry-run; the operator bootstrap below does.
 
 ## Role administration over HTTP ([issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25))
 
-`/administration/roles/` (`cya/authorization/views.py`) is the walking skeleton's
-end-to-end action: sign-in, server-side authorization, persistence, audit and
-history through the web interface. It is not a general user-management screen.
+The organization role-management page is at /administration/roles/. It manages roles only; it does not edit identity or profile details. Append-only role events remain the source of current roles and audit history.
 
-- **Reaching it:** an Administrator opens Administration in the navigation, whose
-  page links to `/administration/roles/`; the Administration menu entry stays
-  highlighted there. Supervisors and Supply Officers also see Administration (issue
-  #130 parts 5b and 5c), but its landing page shows them only the pages they may
-  open, never this link; Crew members are not shown the section.
-- **GET** shows the organization's latest 50 role-history rows and a change form
-  to an Administrator. Active users can be searched by display name or email;
-  results are organization-scoped and capped at 50 per search, and search text is
-  limited to 100 characters. Invalid or repeated search values show an error and
-  hide the user list. The history table scrolls horizontally in its own
-  keyboard-focusable region on narrow screens.
-  A signed-out visitor is redirected to sign-in; anyone else
-  gets 403 and an audited `VIEW_ADMINISTRATION` denial (503 if that audit fails).
-- The form first posts `stage=preview`, which validates the selection and renders
-  a plain-language summary without changing roles or writing audit records. A
-  separate confirmation posts `stage=confirm`; `Change selection` returns to the
-  form without making a change. Missing or unknown stages are rejected with 400
-  for an Administrator; preview and edit requests from other roles are audited
-  as `VIEW_ADMINISTRATION` denials.
-- **POST confirmation** takes `target` (user UUID), `role`, `action` (`GRANT` or
-  `REVOKE`) and `operation_id` (a canonical UUID4 retained from preview through
-  confirmation so a double submit replays). Django's CSRF check applies first.
-  The actor and organization
-  always come from the session user, never the form; `EMT` is not accepted.
-- The handler calls `commands.change_role`, which authorizes under the locks,
-  writes receipt, role row and audit together, or records a failure audit after
-  rollback. Responses: success is a 302 back to the history page; 400 malformed
-  input (nothing written or audited); 403 not permitted (a `DENIED` audit row is
-  committed); 404 target missing or in another organization (a non-administrator gets 403
-  instead, so user ids cannot be probed; error pages show them no history); 409 last
-  administrator or an operation id reused for a different request (the earlier
-  change stands, the new one is not applied and is never reported as saved); 503 audit,
-  database or unknown-outcome failure, with a message that does not say whether
-  the change saved. No exception text reaches the page.
-- Replaying the same `operation_id` returns the original acknowledgement and adds
-  no role, receipt or audit row.
+- **Reaching it:** an Administrator opens Administration in the navigation, then chooses Roles. Supervisors and Supply Officers see Administration (issue #130 parts 5b and 5c), but its landing page shows only the pages they may open; role management stays Administrator-only. Crew members are not shown the section.
+- **User list:** GET shows up to the first 50 active users in the Administrator's organization, ordered by email. Search matches display name or email, is limited to 100 characters, and can find users beyond the first 50. The list shows each user's current roles, one role selector, Review grant and Review removal actions, and a separate role-history link. Current roles are folded from the complete, sequence-checked grant history. Malformed or unavailable role evidence fails the list closed with a 503 response. Inactive users cannot receive role changes and are not shown in this list.
+- **Role history:** /administration/roles/{user-id}/history/ shows that organization's selected user's append-only role history, 50 rows per page, newest first. Newer changes and Older changes links page through the complete history. A user outside the organization or an unknown id gets the same 404. Non-Administrators receive 403 and a VIEW_ADMINISTRATION denial audit; audit failure returns 503.
+- **Preview and confirmation:** each row's role selector offers Review grant and Review removal. The first POST validates the selection and shows a plain-language summary without changing roles or writing audit records. A separate confirmation POST applies the change; Change selection returns to the user list without changing anything. Missing or unknown stages are rejected with 400 for an Administrator; preview and edit requests from other roles are audited denials.
+- **Confirmation request:** POST takes target (user UUID), role, action (GRANT or REVOKE) and operation_id (a canonical UUID4 kept from preview through confirmation so a double submit replays). Django's CSRF check applies first. The actor and organization always come from the signed-in user, never the form; EMT is not accepted.
+- **Command and outcomes:** the handler calls commands.change_role, which authorizes under locks, writes the receipt, role event and audit together, or records a failure audit after rollback. Success redirects to the user list. Malformed input returns 400; denied actions return 403 with a denial audit; an unknown or cross-organization target returns 404; last-administrator removal or an operation-id conflict returns 409; audit, database or unknown-outcome failures return a sanitized 503. An uncertain result never says the change saved. Reloading the success page does not repeat the write.
+- Replaying the same operation_id returns the original acknowledgement and adds no role event, receipt or audit row.
 
-`cya/tests/test_role_administration_http.py` and the bound scenario
-`EX-role-change-end-to-end` (`cya/authorization/scenario_steps.py`, run by the
-scenario-library runner with real commits) prove these paths on MariaDB with
-only the Google identity provider stubbed; role grants, receipts and audit are
-real. That stub test proves application logic. The separate real-Workspace
-verification in [issue #25](https://github.com/JustApu/CheckYourAmbulance-archive/issues/25) is performed outside CI by the owner and is not
-covered by it.
+The role administration HTTP tests and the bound EX-role-change-end-to-end scenario (run by the scenario-library runner with real commits) prove these paths on MariaDB with only the Google identity provider stubbed; role grants, receipts and audit are real. That stub test proves application logic. The separate real-Workspace verification in issue #25 is performed outside CI and is not covered by it.
 
 ## Sign-in and first-administrator operator procedure
 
