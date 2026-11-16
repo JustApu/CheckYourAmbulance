@@ -195,3 +195,26 @@ class BindingPagesTests(AttentionCase):
         bad = self.post(stage="unbind", template_id=str(self.template.pk), slot="test-0600")
         self.assertContains(bad, "malformed", status_code=400)
         self.assertEqual(self.actions(), ["BIND"])
+
+    def test_a_binding_that_has_not_started_cannot_be_unbound_here(self):
+        # PR #183 review: unbinding now would precede the binding's start, which the command
+        # refuses, so the page neither offers it nor previews it.
+        self.post(
+            self.other_url,
+            stage="bind",
+            template_id=str(self.template.pk),
+            slot="test-0600",
+            when="at",
+            at="2026-06-03T12:00",
+        )
+        page = self.client_.get(self.other_url)
+        self.assertContains(page, "Starts 2026-06-03 12:00")
+        self.assertNotContains(page, "Unbind…")
+        refused = self.post(
+            self.other_url,
+            stage="unbind-preview",
+            template_id=str(self.template.pk),
+            slot="test-0600",
+        )
+        self.assertContains(refused, "has not started yet", status_code=400)
+        self.assertEqual(self.actions(self.vehicles[1]), ["BIND"])

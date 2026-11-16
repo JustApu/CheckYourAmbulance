@@ -100,9 +100,9 @@ def _rows(organization_id, vehicle_id, now):
                 "slot": revision.slot,
                 "state": state,
                 "effective_at": revision.effective_at,
-                # The page unbinds now; a binding with a later unbinding already recorded is
-                # left to that revision.
-                "can_unbind": bound,
+                # The page unbinds now, and a revision must take effect after the previous one,
+                # so a binding that has not started yet cannot be unbound here (PR #183 review).
+                "can_unbind": bound and not upcoming,
             }
         )
     return rows
@@ -260,6 +260,14 @@ def bindings(request, vehicle_id):
             return render_error(503, ["the preview could not be prepared. Try again."])
         if not preview["result"].bound:
             return render_error(400, ["that template is not bound to this vehicle"])
+        if preview["result"].binding.effective_at > preview["result"].at:
+            return render_error(
+                400,
+                [
+                    "that binding has not started yet; it can be unbound once it takes effect, "
+                    "or from the command line"
+                ],
+            )
         return _page(request, user, vehicle, preview=preview)
 
     ids = _ids(request, user)

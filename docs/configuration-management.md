@@ -136,7 +136,7 @@ The screens are in `cya/operations/override_admin_views.py`, one page per templa
   - those whose window has opened continue, shown with their state;
   - the page states that unbinding completes nothing, and that checks, deficiencies and audit history are kept.
 - **Confirmation.** The confirmation posts the preview's digest, which covers the binding revision, both lists and each continuing obligation's state. With `preview_token`, `bind_requirement` unbinds at the instant it records and recomputes the preview then. If anything differs, it refuses with `PreviewChanged`, and the page shows the fresh preview. The token is part of the request digest, so a resubmitted form replays.
-- **Limits.** The preview is limited to `MAX_PREVIEW_OBLIGATIONS` (2,000) obligations. Generation stops at its horizon, so a real binding is far below that; past the limit, the page refuses rather than show a partial list. An unbinding at a later instant stays a command-line operation.
+- **Limits.** The preview is limited to `MAX_PREVIEW_OBLIGATIONS` (2,000) obligations. Generation stops at its horizon, so a real binding is far below that; past the limit, the page refuses rather than show a partial list. An unbinding at a later instant stays a command-line operation, and so does unbinding a binding that has not started yet: unbinding now would precede its start, which the command refuses, so the page does not offer it.
 
 ## Duplicating a checklist template (CFG-3)
 
