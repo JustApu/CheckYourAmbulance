@@ -114,6 +114,22 @@
 </form>
 {% endif %}
 
+{% if in_force or scheduled %}
+<h2 id="overrides-heading">Vehicle overrides</h2>
+<p>An override changes this checklist for one vehicle. Overrides are published only for vehicles bound to this template; you can prepare a draft for any vehicle.</p>
+<div class="table-scroll" role="region" aria-labelledby="overrides-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Vehicle</th><th scope="col">Bound to this template</th></tr></thead>
+  <tbody>
+  {% for row in override_vehicles.0 %}
+    <tr><td><a href="{% url 'checklist-override' template.pk row.vehicle.pk %}">{{ row.vehicle.display_name }}</a>{% if not row.vehicle.active %} (inactive){% endif %}</td><td>{% if row.bound %}Yes{% else %}No{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if override_vehicles.1 %}<p>Showing the first 500 vehicles.</p>{% endif %}
+{% endif %}
+
 <h2 id="history-heading">Versions</h2>
 {% if versions %}
 <div class="table-scroll" role="region" aria-labelledby="history-heading" tabindex="0">

@@ -3,8 +3,8 @@
 {% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
 
 <div class="kit-library">
-<p><a href="{% url 'checklist-templates' %}">All templates</a> · <a href="{% url 'checklist-template' template.pk %}">{{ template.label }}</a></p>
-<p>Saving writes a new draft revision{% if latest %} from revision {{ latest.revision }}{% endif %}. Nothing is in force until the draft is published.</p>
+<p><a href="{% url 'checklist-templates' %}">All templates</a> · <a href="{% url 'checklist-template' template.pk %}">{{ template.label }}</a>{% if vehicle %} · <a href="{{ back_url }}">{{ vehicle.display_name }}</a>{% endif %}</p>
+{% if scope_note %}<p>{{ scope_note }}</p>{% else %}<p>Saving writes a new draft revision{% if latest %} from revision {{ latest.revision }}{% endif %}. Nothing is in force until the draft is published.</p>{% endif %}
 
 <form method="get" class="admin-form" role="search" aria-label="Narrow the lists below">
   {% if not item_id %}<p><label for="item-search">Find an existing item by name</label><br>
@@ -69,7 +69,7 @@
   <input id="item-order" name="display_order" value="{{ form.display_order|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*" aria-describedby="item-order-help{% if field_errors.display_order %} order-error{% endif %}"{% if field_errors.display_order %} aria-invalid="true"{% endif %}><br>
   <span id="item-order-help">Lower numbers come first. Leave empty to put a new item last.</span>{% if field_errors.display_order %}<span id="order-error" class="field-error">Error: {{ field_errors.display_order }}</span>{% endif %}</p>
 
-  <p><button type="submit" class="button primary">Save draft</button> <a class="button" href="{% url 'checklist-template' template.pk %}">Cancel</a></p>
+  <p><button type="submit" class="button primary">Save draft</button> <a class="button" href="{% if back_url %}{{ back_url }}{% else %}{% url 'checklist-template' template.pk %}{% endif %}">Cancel</a></p>
 </form>
 </div>
 {% endblock %}

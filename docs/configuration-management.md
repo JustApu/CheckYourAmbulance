@@ -111,6 +111,16 @@ The screens are in `cya/operations/template_admin_views.py`, behind `draft_edit_
 
   The confirmation runs `publish_template_version`, which checks all of it again under its locks. The preview has no base token: a publication changes nothing that it shows, and every refusal is re-checked.
 
+## Vehicle overrides (part 6b)
+
+The screens are in `cya/operations/override_admin_views.py`, one page per template and vehicle, behind `draft_edit_template`; publishing needs `publish_template`.
+
+- **What an override overlays.** A draft is saved over the template's latest published version (by effective instant). The page shows the vehicle's resulting checklist, marking each row as from the template, added, changed or removed.
+- **One entry at a time.** Remove a template item, change one (6a's item form, prefilled with the template's definition), add one (an existing item or a new one by name), or undo an entry. Each saves a whole new draft through `save_override_draft`, from the vehicle's latest override of the template, with `base_revision`. Override revisions count per vehicle across templates, so a concurrent change to any of the vehicle's overrides refuses the save.
+- **Stale overrides.** An override over an older version stops the vehicle's checklist resolving once a newer version governs (`StaleOverrideError`; 6a's preview warns about it). The page offers to carry the entries over to the latest version. It first lists what cannot be carried: a REMOVE or REPLACE of an item the version no longer has, or an ADD of an item it now has. Confirmation saves a new draft with the rest.
+- **Publishing** is now or at a station-local date and time, never before the overlaid version's effective instant (the command refuses it). It shows a short preview first. By owner decision (2026-11-15), it is offered only for a vehicle bound to the template now or by a binding recorded for later; a draft may be prepared for any vehicle. Binding itself has no screen yet ([issue #177](https://github.com/JustApu/CheckYourAmbulance/issues/177)).
+- **The template page** lists vehicles for overrides, bound ones first, at most 500.
+
 ## Duplicating a checklist template (CFG-3)
 
 `duplicate_template` (`duplicate_configuration`, command `TEMPLATE_DUPLICATE`):
@@ -174,7 +184,7 @@ Each part is one PR, except part 5, which is three (owner decision 2026-11-15, t
      - duplicating one (CFG-5): pick a vehicle, and its add form opens with the same type.
 6. Checklist screens, as two PRs (owner decision 2026-11-15):
    - **6a, templates** (described above): create, duplicate, draft edit one item at a time, publish now or at a station-local date and time after the impact preview, and the versions in force, scheduled and drafted;
-   - **6b, overrides:** a vehicle's override in force, scheduled and draft, edited with 6a's item editor and published over the template version in force.
+   - **6b, overrides** (described above): a vehicle's override in force, scheduled and draft, edited one entry at a time with 6a's item editor, carried over when stale, and published only for a bound vehicle.
 7. Kit definition screens: list, edit, duplicate, publish and deactivate.
 
 The issue's acceptance criteria for responsive and accessible pages (UX issue #111), and its role, duplication, versioning, history and concurrency tests, apply to each part that adds the behaviour.
