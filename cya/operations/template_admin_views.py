@@ -35,11 +35,13 @@ from cya.checklists.models import (
     Compartment,
     Item,
     KitInstance,
+    Vehicle,
     VehicleSystem,
 )
 from cya.checklists.validation import ChecklistValidationError
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
+from cya.kits import positions as position_rules
 from cya.kits.keys import KeyRuleError
 from cya.kits.models import KitDefinition, PositionKey
 from cya.kits.placements import placements_of
@@ -172,6 +174,37 @@ def _versions(template, before=None):
     }
     rows = [{"version": v, "publication": publications.get(v.pk)} for v in page]
     return rows, (page[-1].revision if more else None)
+
+
+def _override_vehicles(org, template):
+    """(vehicles to open an override for, bound ones first; whether more exist) (part 6b).
+
+    Both reads are bounded (SPEC NFR-6): at most LIST_LIMIT vehicles, and bindings checked only
+    for at most LIST_LIMIT vehicles that have one.
+    """
+    from cya.obligations.models import RequirementBinding
+
+    limit = admin_pages.LIST_LIMIT
+    with_binding = list(
+        RequirementBinding.objects.filter(organization_id=org, template_id=template.pk)
+        .order_by("vehicle_id")
+        .values_list("vehicle_id", flat=True)
+        .distinct()[: limit + 1]
+    )
+    bound = {
+        str(v)
+        for v in position_rules.vehicles_bound_now_or_later(
+            org, str(template.pk), vehicle_ids=with_binding[:limit]
+        )
+    }
+    vehicles = list(
+        Vehicle.objects.filter(organization_id=org).order_by("-active", "display_name", "pk")[
+            : limit + 1
+        ]
+    )
+    rows = [{"vehicle": v, "bound": str(v.pk) in bound} for v in vehicles[:limit]]
+    rows.sort(key=lambda row: not row["bound"])
+    return rows, len(vehicles) > limit or len(with_binding) > limit
 
 
 def _latest(template):
@@ -433,6 +466,7 @@ def _template_page(
         "paged": request.GET.get("before") is not None,
         "can_publish": _can(user, roles, "publish_template"),
         "can_duplicate": _can(user, roles, "duplicate_configuration"),
+        "override_vehicles": _override_vehicles(str(user.organization_id), template),
         "impact": impact,
         "when": when,
         "at": at,
@@ -698,6 +732,30 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
     spec = next((s for s in specs if s["item_id"] == item_id), None)
     if item_id is not None and spec is None:
         raise Http404("that item is not in the latest version")
+    context = {
+        "title": f"{'Edit' if item_id else 'Add'} an item: {template.label}",
+        "template": template,
+        "latest": latest,
+        "base_revision": latest.revision if latest else 0,
+        **item_form_context(
+            request,
+            org,
+            spec=spec,
+            item_id=item_id,
+            exclude=[s["item_id"] for s in specs],
+            form=form,
+            errors=errors,
+        ),
+    }
+    return render(request, "operations/admin_template_item.html", context, status=status)
+
+
+def item_form_context(request, org, *, spec, item_id, exclude, form, errors):
+    """The item form's choices and values (shared with the override screens, part 6b).
+
+    spec is the definition being edited (None for a new item); exclude lists the items an
+    added item may not be; form is what was posted, when redisplaying after a refusal.
+    """
     place_query = request.GET.get("p", "").strip()[:MAX_QUERY]
     # The item's current place and kit stay on offer whatever the search shows.
     keep_place = keep_kit = None
@@ -722,16 +780,10 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
         form = _item_form(spec, choices)
     item_label = Item.objects.filter(pk=item_id).values_list("label", flat=True).first()
     query = request.GET.get("q", "").strip()[:MAX_QUERY]
-    items, more_items = (
-        _item_choices(org, [s["item_id"] for s in specs], query) if item_id is None else ([], False)
-    )
-    context = {
-        "title": f"{'Edit' if item_id else 'Add'} an item: {template.label}",
-        "template": template,
+    items, more_items = _item_choices(org, exclude, query) if item_id is None else ([], False)
+    return {
         "item_id": item_id,
         "item_label": item_label,
-        "latest": latest,
-        "base_revision": latest.revision if latest else 0,
         "form": form,
         "kinds": KIND_LABELS.items(),
         "optional_outcomes": OPTIONAL_OUTCOMES,
@@ -748,7 +800,6 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
         "errors": errors or [],
         "field_errors": field_errors(errors or [], ITEM_FIELDS),
     }
-    return render(request, "operations/admin_template_item.html", context, status=status)
 
 
 def _posted_form(post):

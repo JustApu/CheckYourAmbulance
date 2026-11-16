@@ -17,7 +17,7 @@ from cya.kits import views as kit_views
 from cya.notifications import api as notifications_api
 from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
-from cya.operations import template_admin_views, vehicle_admin_views
+from cya.operations import override_admin_views, template_admin_views, vehicle_admin_views
 from cya.operations import views as operations_views
 from cya.seals import api as seal_api
 from cya.seals import views as seal_views
@@ -161,6 +161,22 @@ urlpatterns = [
         "administration/checklists/<uuid:template_id>/duplicate/",
         template_admin_views.duplicate,
         name="checklist-template-duplicate",
+    ),
+    path(
+        "administration/checklists/<uuid:template_id>/vehicles/<uuid:vehicle_id>/",
+        override_admin_views.override,
+        name="checklist-override",
+    ),
+    path(
+        "administration/checklists/<uuid:template_id>/vehicles/<uuid:vehicle_id>/items/new/",
+        override_admin_views.override_item,
+        name="checklist-override-item-new",
+    ),
+    path(
+        "administration/checklists/<uuid:template_id>/vehicles/<uuid:vehicle_id>/items/"
+        "<uuid:item_id>/",
+        override_admin_views.override_item,
+        name="checklist-override-item",
     ),
     path(
         "administration/vehicle-files/",

@@ -464,7 +464,7 @@ def publish_template_version(*, version_id, effective_at=None, **context):
 # --- vehicle overrides ---------------------------------------------------------------------
 
 
-def _validated_entry(org, entry):
+def _validated_entry(org, entry, new_item_ids=frozenset()):
     if not isinstance(entry, dict) or set(entry) - {"item_id", "action", "definition"}:
         raise ChecklistValidationError("override entries take item_id, action and definition")
     action, definition = entry.get("action"), entry.get("definition")
@@ -472,20 +472,23 @@ def _validated_entry(org, entry):
         raise ChecklistValidationError(f"action must be one of {list(OVERRIDE_ACTIONS)}")
     if (action == "REMOVE") != (definition is None):
         raise ChecklistValidationError("only REMOVE omits the definition; ADD and REPLACE need one")
-    item_id = reference(entry, "item_id", Item, org)
+    if isinstance(entry.get("item_id"), str) and entry["item_id"] in new_item_ids:
+        item_id = entry["item_id"]  # created by this command (_override_new_items)
+    else:
+        item_id = reference(entry, "item_id", Item, org)
     if item_id is None:
         raise ChecklistValidationError("item_id is required")
-    fields = validate_definition(org, definition) if definition is not None else None
+    fields = validate_definition(org, definition, new_item_ids) if definition is not None else None
     if fields is not None and fields["item_id"] != item_id:
         raise ChecklistValidationError("a definition must name the entry's item")
     return item_id, action, fields
 
 
-def _validated_entries(org, entries, template_requirements):
+def _validated_entries(org, entries, template_requirements, new_item_ids=frozenset()):
     """Validate override entries and check that they overlay the template version cleanly."""
     if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_ITEMS:
         raise ChecklistValidationError(f"provide 1-{MAX_ITEMS} override entries")
-    validated = [_validated_entry(org, entry) for entry in entries]
+    validated = [_validated_entry(org, entry, new_item_ids) for entry in entries]
     # Dry-run the merge so a draft cannot be saved in a state that would never resolve.
     try:
         apply_overlay(
@@ -504,26 +507,91 @@ def _validated_entries(org, entries, template_requirements):
     return validated
 
 
-def save_override_draft(*, vehicle_id, template_version_id, entries, **context):
-    """Create the next draft override revision for a vehicle over a published template version."""
+def _override_new_items(org, entries):
+    """(entries with item ids, {new item id: label}) for ADD entries naming a new item by label.
+
+    An entry may give "new_item" (a label) in place of "item_id" for an ADD; its definition then
+    names no item. The command creates the item, under the same rules as save_template_draft.
+    """
+    if not isinstance(entries, list):
+        return entries, {}
+    marked = [e for e in entries if isinstance(e, dict) and "new_item" in e]
+    if not marked:
+        return entries, {}
+    for entry in marked:
+        definition = entry.get("definition")
+        if (
+            entry.get("action") != "ADD"
+            or "item_id" in entry
+            or not isinstance(definition, dict)
+            or "item_id" in definition
+        ):
+            raise ChecklistValidationError(
+                "a new item can only be added: give new_item, action ADD and a definition "
+                "without item_id"
+            )
+    specs, created = _with_new_items(
+        org, [{"new_item": e["new_item"], **e["definition"]} for e in marked]
+    )
+    ids = iter(spec["item_id"] for spec in specs)
+    resolved = []
+    for entry in entries:
+        if isinstance(entry, dict) and "new_item" in entry:
+            item_id = next(ids)
+            resolved.append(
+                {
+                    "item_id": item_id,
+                    "action": "ADD",
+                    "definition": {**entry["definition"], "item_id": item_id},
+                }
+            )
+        else:
+            resolved.append(entry)
+    return resolved, created
+
+
+def save_override_draft(*, vehicle_id, template_version_id, entries, base_revision=None, **context):
+    """Create the next draft override revision for a vehicle over a published template version.
+
+    An ADD entry may name a new item by label ("new_item"); the command creates it.
+    base_revision (optional) is the vehicle's latest override revision the edit started from
+    (0 for none; revisions count per vehicle across templates): a save is refused if another
+    override revision was saved since.
+    """
     canonical_id(vehicle_id)
     canonical_id(template_version_id)
     org = context["organization_id"]
+    if base_revision is not None and not is_count(base_revision):
+        raise ChecklistValidationError("base_revision must be a nonnegative integer")
+    creates_items = isinstance(entries, list) and any(
+        isinstance(e, dict) and "new_item" in e for e in entries
+    )
 
     def build(actor):
         vehicle = _locked(Vehicle, org, vehicle_id, "vehicle")
         template_version = _locked(ChecklistVersion, org, template_version_id, "template version")
         if not _is_published(checklist_version=template_version):
             raise ChecklistValidationError("an override must overlay a published template version")
+        latest = _next_revision(VehicleOverrideVersion.objects.filter(vehicle=vehicle)) - 1
+        if base_revision is not None and base_revision != latest:
+            raise ChecklistValidationError(
+                "the vehicle's override was changed since this edit started; reload it and try "
+                "again"
+            )
         template_requirements = [
             requirement_from_definition(d, "TEMPLATE")
             for d in ChecklistItemDef.objects.filter(checklist_version=template_version)
         ]
-        validated = _validated_entries(org, entries, template_requirements)
-        revision = _next_revision(VehicleOverrideVersion.objects.filter(vehicle=vehicle))
+        resolved, new_items = _override_new_items(org, entries)
+        validated = _validated_entries(org, resolved, template_requirements, frozenset(new_items))
+        revision = latest + 1
         override_id = new_id()
 
         def apply(receipt, current_actor):
+            Item.objects.bulk_create(
+                Item(id=item_id, organization_id=org, label=label, active=True)
+                for item_id, label in new_items.items()
+            )
             VehicleOverrideVersion.objects.create(
                 id=override_id,
                 organization_id=org,
@@ -551,9 +619,15 @@ def save_override_draft(*, vehicle_id, template_version_id, entries, **context):
                     definition_id=definition_id,
                 )
 
+        body = {"override_version_id": override_id, "revision": revision}
+        extra = {}
+        if new_items:
+            # Only when there are any, so an existing kind of save keeps its result and snapshot.
+            body["new_item_ids"] = sorted(new_items)
+            extra["new_items"] = [{"item_id": k, "label": v} for k, v in sorted(new_items.items())]
         return _plan(
             org,
-            {"override_version_id": override_id, "revision": revision},
+            body,
             apply,
             action="OVERRIDE_DRAFT_SAVED",
             vehicle_id=vehicle_id,
@@ -561,17 +635,23 @@ def save_override_draft(*, vehicle_id, template_version_id, entries, **context):
             override_version_id=override_id,
             revision=revision,
             entry_count=len(validated),
+            **extra,
         )
 
+    intent = {
+        "vehicle_id": vehicle_id,
+        "template_version_id": template_version_id,
+        "entries": entries,
+    }
+    if base_revision is not None:
+        # Only when given, so the digest of an existing kind of request is unchanged.
+        intent["base_revision"] = base_revision
     return _execute(
         action="draft_edit_template",
         command_type="OVERRIDE_DRAFT_SAVE",
-        intent={
-            "vehicle_id": vehicle_id,
-            "template_version_id": template_version_id,
-            "entries": entries,
-        },
+        intent=intent,
         build=build,
+        lock_organization=creates_items,
         **context,
     )
 

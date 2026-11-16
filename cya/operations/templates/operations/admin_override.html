@@ -1,0 +1,136 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'checklist-templates' %}">All templates</a> · <a href="{% url 'checklist-template' template.pk %}">{{ template.label }}</a> · {{ vehicle.display_name }}{% if not vehicle.active %} (inactive){% endif %}</p>
+<p>An override changes this template's checklist for {{ vehicle.display_name }} only: it adds, removes or changes items on top of a published version of the template.</p>
+
+{% if not target %}
+<p>This template has no published version yet. Publish one before overriding it for a vehicle.</p>
+{% else %}
+
+<h2 id="status-heading">Status</h2>
+<ul>
+  <li>Overrides are drafted over revision {{ target.revision }}, the template's latest published version.</li>
+  <li>{% if in_force %}In force: override revision {{ in_force.override_version.revision }}, since {{ in_force.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).{% else %}No override is in force: this vehicle uses the template as published.{% endif %}</li>
+  {% for p in scheduled %}<li>Scheduled: override revision {{ p.override_version.revision }} takes effect {{ p.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</li>{% endfor %}
+  {% if draft and not stale %}<li>Draft: override revision {{ draft.revision }}, not yet published.</li>{% endif %}
+  {% if not bound %}<li>This vehicle is not bound to this template, now or later. You can prepare a draft, but it can be published only once the vehicle is bound.</li>{% endif %}
+</ul>
+
+{% if stale %}
+<section aria-labelledby="stale-heading">
+<h2 id="stale-heading">This override is out of date</h2>
+<p>The vehicle's latest override (revision {{ latest.revision }}) overlays an older version of the template. Once a newer version is in force, this vehicle's checklist cannot be worked out until an override over the newer version is published.</p>
+{% if carry %}
+<p>Carrying it over keeps {{ carry.kept }} change{{ carry.kept|pluralize }}.{% if carry.dropped %} These cannot be carried:{% endif %}</p>
+{% if carry.dropped %}<ul id="carry-dropped">{% for d in carry.dropped %}<li>{{ d.label }} ({{ d.action|lower }}): {{ d.why }}</li>{% endfor %}</ul>{% endif %}
+{% if carry.kept %}
+<form method="post" action="{% url 'checklist-override' template.pk vehicle.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="carry">
+  <input type="hidden" name="base_revision" value="{{ base_revision }}">
+  <input type="hidden" name="operation_id" value="{{ carry_operation_id }}">
+  <p><button type="submit" class="button primary">Save the carried-over draft</button> <a class="button" href="{% url 'checklist-override' template.pk vehicle.pk %}">Cancel</a></p>
+</form>
+{% else %}<p>Nothing can be carried over. Make the changes again on the current version.</p>{% endif %}
+{% else %}
+<form method="post" action="{% url 'checklist-override' template.pk vehicle.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="carry-preview">
+  <input type="hidden" name="operation_id" value="{{ carry_operation_id }}">
+  <p><button type="submit" class="button">Carry it over to revision {{ target.revision }}</button></p>
+</form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if publish %}
+<section aria-labelledby="publish-check-heading">
+<h2 id="publish-check-heading">Before you publish override revision {{ draft.revision }}</h2>
+<p>It would take effect {% if publish.when == "at" %}{{ publish.effective_at|date:"Y-m-d H:i" }} ({{ zone }}){% else %}now{% endif %}. It cannot take effect before revision {{ target.revision }} of the template{% if publish.template_effective_at %}, which takes effect {{ publish.template_effective_at|date:"Y-m-d H:i" }} ({{ zone }}){% endif %}. The vehicle's checklist will be the one shown below.</p>
+<form method="post" action="{% url 'checklist-override' template.pk vehicle.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="publish">
+  <input type="hidden" name="override_version_id" value="{{ draft.pk }}">
+  <input type="hidden" name="when" value="{{ publish.when }}">
+  <input type="hidden" name="at" value="{{ publish.at }}">
+  <input type="hidden" name="operation_id" value="{{ publish_operation_id }}">
+  <p><button type="submit" class="button primary">Publish override revision {{ draft.revision }}</button> <a class="button" href="{% url 'checklist-override' template.pk vehicle.pk %}">Cancel</a></p>
+</form>
+</section>
+{% endif %}
+
+{% if not stale %}
+<h2 id="checklist-heading">{{ vehicle.display_name }}'s checklist{% if draft %} (draft){% endif %}</h2>
+<p><a class="button" href="{% url 'checklist-override-item-new' template.pk vehicle.pk %}">Add an item for this vehicle</a></p>
+<div class="table-scroll" role="region" aria-labelledby="checklist-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Where</th><th scope="col">Check</th><th scope="col">From</th><th scope="col">Change</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>{{ row.display_order }}</td>
+      <td>{{ row.label }}</td>
+      <td>{{ row.where }}</td>
+      <td>{{ row.kind }}{% if row.target %}: {{ row.target }}{% endif %}</td>
+      <td>{{ row.source }}</td>
+      <td>
+        <a href="{% url 'checklist-override-item' template.pk vehicle.pk row.item_id %}" aria-label="Change {{ row.label }} for this vehicle">Change</a>
+        <form method="post" action="{% url 'checklist-override' template.pk vehicle.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="item_id" value="{{ row.item_id }}">
+          <input type="hidden" name="base_revision" value="{{ base_revision }}">
+          <input type="hidden" name="operation_id" value="{{ row.operation_id }}">
+          {% if row.has_entry %}
+          <input type="hidden" name="stage" value="undo">
+          <button type="submit" class="button" aria-label="Undo the change to {{ row.label }}">Undo change</button>
+          {% else %}
+          <input type="hidden" name="stage" value="remove-item">
+          <button type="submit" class="button" aria-label="Remove {{ row.label }} for this vehicle">Remove</button>
+          {% endif %}
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if removed %}
+<h3 id="removed-heading">Removed for this vehicle</h3>
+<ul aria-labelledby="removed-heading">
+  {% for row in removed %}<li>{{ row.label }}
+    <form method="post" action="{% url 'checklist-override' template.pk vehicle.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="stage" value="undo">
+      <input type="hidden" name="item_id" value="{{ row.item_id }}">
+      <input type="hidden" name="base_revision" value="{{ base_revision }}">
+      <input type="hidden" name="operation_id" value="{{ row.operation_id }}">
+      <button type="submit" class="button" aria-label="Put {{ row.label }} back">Put back</button>
+    </form></li>{% endfor %}
+</ul>
+{% endif %}
+
+{% if draft and can_publish and bound and not publish %}
+<h2 id="publish-heading">Publish the override</h2>
+<form method="post" action="{% url 'checklist-override' template.pk vehicle.pk %}" class="admin-form" aria-labelledby="publish-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="publish-preview">
+  <input type="hidden" name="override_version_id" value="{{ draft.pk }}">
+  <input type="hidden" name="operation_id" value="{{ publish_operation_id }}">
+  <fieldset><legend>Takes effect</legend>
+    <label><input type="radio" name="when" value="now" checked> Now</label>
+    <label><input type="radio" name="when" value="at"> At</label>
+    <label for="publish-at">Date and time ({{ zone }})</label>
+    <input id="publish-at" type="datetime-local" name="at">
+  </fieldset>
+  <p><button type="submit" class="button">Preview publication</button></p>
+</form>
+{% endif %}
+{% endif %}
+{% endif %}
+</div>
+{% endblock %}
