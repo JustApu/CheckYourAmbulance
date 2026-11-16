@@ -101,6 +101,12 @@ ADMINISTRATION_LINKS = (
         "manage_kit_assignment",
     ),
     (
+        "checklist-templates",
+        "Checklist templates",
+        "create, edit, duplicate and publish checklist templates.",
+        "draft_edit_template",
+    ),
+    (
         "position-vehicles",
         "Compartments and systems",
         "add, rename, reorder and retire a vehicle's positions.",

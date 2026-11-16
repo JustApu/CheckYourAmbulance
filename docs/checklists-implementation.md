@@ -35,7 +35,7 @@ All commands run through `run_command`: one transaction, operation-id receipt (a
 
 | Command | Effect |
 |---|---|
-| `save_template_draft` | Next draft revision of a template with its complete item set |
+| `save_template_draft` | Next draft revision of a template with its complete item set. Optional inputs (issue #130 part 6a): an item spec may give `new_item` (a label) in place of `item_id`, and the command creates that item; `base_revision` refuses a save started from an older revision. Each enters the request digest only when given |
 | `publish_template_version` | Validates, assigns `effective_at`, writes the publication |
 | `save_override_draft` | Next draft override revision for a vehicle over a **published** template version |
 | `publish_override_version` | Same, for an override |

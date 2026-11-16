@@ -1,0 +1,133 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'checklist-templates' %}">All templates</a> · {{ template.label }} · Key {{ template.key|default:"not set" }}{% if not template.active %} · Inactive{% endif %}</p>
+{% if can_duplicate and latest %}<p><a href="{% url 'checklist-template-duplicate' template.pk %}">Duplicate this template</a></p>{% endif %}
+
+{% if impact %}
+<section aria-labelledby="impact-heading">
+<h2 id="impact-heading">Before you publish revision {{ impact.version.revision }}</h2>
+<p>It would take effect {% if when == "at" %}{{ impact.effective_at|date:"Y-m-d H:i" }} ({{ zone }}){% else %}now{% endif %}{% if impact.in_force %}, replacing revision {{ impact.in_force.revision }}{% else %}; no version of this template is in force then{% endif %}.</p>
+<h3>Items</h3>
+{% if impact.added or impact.removed or impact.changed %}
+<ul id="impact-items">
+  {% for label in impact.added %}<li>Added: {{ label }}</li>{% endfor %}
+  {% for label in impact.removed %}<li>Removed: {{ label }}</li>{% endfor %}
+  {% for label, changes in impact.changed %}<li>Changed: {{ label }} ({{ changes|join:", " }})</li>{% endfor %}
+</ul>
+{% else %}<p>No item differs from the version in force.</p>{% endif %}
+<h3>Vehicles</h3>
+{% if impact.vehicles %}
+<ul id="impact-vehicles">
+  {% for v in impact.vehicles %}<li>{{ v.vehicle.display_name }}{% if not v.vehicle.active %} (inactive){% endif %}{% if not v.blocking and not v.notes %}: no problem found{% endif %}
+    {% if v.blocking or v.notes %}<ul>{% for reason in v.blocking %}<li>Blocks publishing: {{ reason }}</li>{% endfor %}{% for note in v.notes %}<li>Needs follow-up: {{ note }}</li>{% endfor %}</ul>{% endif %}</li>{% endfor %}
+</ul>
+{% else %}<p>No vehicle is bound to this template, now or later.</p>{% endif %}
+{% if impact.more_vehicles %}<p>Only the first 500 vehicles are checked here. Publishing checks every vehicle and refuses if any would block it.</p>{% endif %}
+{% if impact.blocking %}<h3>Other problems</h3><ul id="impact-blocking">{% for reason in impact.blocking %}<li>Blocks publishing: {{ reason }}</li>{% endfor %}</ul>{% endif %}
+{% if impact.refused %}
+<p>Publishing would be refused. Fix what blocks it, then preview again.</p>
+<p><a class="button" href="{% url 'checklist-template' template.pk %}">Back</a></p>
+{% else %}
+<p>Publishing checks all of this again. A published version cannot be changed; a later change is a new version.</p>
+<form method="post" action="{% url 'checklist-template' template.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="publish">
+  <input type="hidden" name="version_id" value="{{ impact.version.pk }}">
+  <input type="hidden" name="when" value="{{ when }}">
+  <input type="hidden" name="at" value="{{ at }}">
+  <input type="hidden" name="operation_id" value="{{ publish_operation_id }}">
+  <p><button type="submit" class="button primary">Publish revision {{ impact.version.revision }}</button> <a class="button" href="{% url 'checklist-template' template.pk %}">Cancel</a></p>
+</form>
+{% endif %}
+</section>
+{% endif %}
+
+<h2 id="in-force-heading">In force</h2>
+{% if in_force %}
+<p>Revision {{ in_force.checklist_version.revision }}, in force since {{ in_force.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</p>
+{% include "operations/admin_template_items.html" with rows=in_force_rows heading_id="in-force-heading" %}
+{% else %}<p>No version of this template is in force.</p>{% endif %}
+{% if scheduled %}
+<h3>Scheduled</h3>
+<ul>{% for p in scheduled %}<li>Revision {{ p.checklist_version.revision }} takes effect {{ p.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</li>{% endfor %}</ul>
+{% endif %}
+
+<h2 id="edit-heading">{% if draft %}Draft revision {{ draft.revision }}{% else %}Edit{% endif %}</h2>
+{% if not latest %}
+<p>This template has no versions yet. Add its first item to start a draft.</p>
+{% elif not draft %}
+<p>Every version is published. A change starts a new draft from revision {{ latest.revision }}.</p>
+{% else %}
+<p>Each change saves a new draft revision; nothing is in force until it is published.</p>
+{% endif %}
+<p><a class="button" href="{% url 'checklist-template-item-new' template.pk %}">Add an item</a></p>
+{% if edit_rows %}
+<div class="table-scroll" role="region" aria-labelledby="edit-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Where</th><th scope="col">Check</th><th scope="col">Outcomes</th><th scope="col">Change</th></tr></thead>
+  <tbody>
+  {% for row in edit_rows %}
+    <tr>
+      <td>{{ row.display_order }}</td>
+      <td>{{ row.label }}</td>
+      <td>{{ row.where }}</td>
+      <td>{{ row.kind }}{% if row.target %}: {{ row.target }}{% endif %}</td>
+      <td>{{ row.outcomes }}</td>
+      <td>
+        <a href="{% url 'checklist-template-item' template.pk row.item_id %}" aria-label="Edit {{ row.label }}">Edit</a>
+        <form method="post" action="{% url 'checklist-template' template.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="stage" value="remove">
+          <input type="hidden" name="item_id" value="{{ row.item_id }}">
+          <input type="hidden" name="base_revision" value="{{ base_revision }}">
+          <input type="hidden" name="operation_id" value="{{ row.operation_id }}">
+          <button type="submit" class="button" aria-label="Remove {{ row.label }}">Remove</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if draft and can_publish and not impact %}
+<h2 id="publish-heading">Publish the draft</h2>
+<p>First see what publishing revision {{ draft.revision }} would change. Nothing is published until you confirm.</p>
+<form method="post" action="{% url 'checklist-template' template.pk %}" class="admin-form" aria-labelledby="publish-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="preview">
+  <input type="hidden" name="version_id" value="{{ draft.pk }}">
+  <input type="hidden" name="operation_id" value="{{ publish_operation_id }}">
+  <fieldset><legend>Takes effect</legend>
+    <label><input type="radio" name="when" value="now"{% if when != "at" %} checked{% endif %}> Now</label>
+    <label><input type="radio" name="when" value="at"{% if when == "at" %} checked{% endif %}> At</label>
+    <label for="publish-at">Date and time ({{ zone }})</label>
+    <input id="publish-at" type="datetime-local" name="at" value="{{ at }}">
+  </fieldset>
+  <p><button type="submit" class="button">Preview publication</button></p>
+</form>
+{% endif %}
+
+<h2 id="history-heading">Versions</h2>
+{% if versions %}
+<div class="table-scroll" role="region" aria-labelledby="history-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Revision</th><th scope="col">Saved</th><th scope="col">Published</th><th scope="col">Takes effect</th></tr></thead>
+  <tbody>
+  {% for v in versions %}
+    <tr><td>{{ v.version.revision }}</td><td>{{ v.version.created_at|date:"Y-m-d H:i" }}</td><td>{% if v.publication %}{{ v.publication.recorded_at|date:"Y-m-d H:i" }}{% else %}Draft{% endif %}</td><td>{% if v.publication %}{{ v.publication.effective_at|date:"Y-m-d H:i" }}{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p>Times are {{ zone }}.</p>
+{% if older or paged %}<p>{% if paged %}<a href="{% url 'checklist-template' template.pk %}">Newest versions</a>{% endif %}{% if older and paged %} · {% endif %}{% if older %}<a href="{% url 'checklist-template' template.pk %}?before={{ older }}">Older versions</a>{% endif %}</p>{% endif %}
+{% else %}<p>No versions yet.</p>{% endif %}
+</div>
+{% endblock %}

@@ -95,6 +95,22 @@ Part 5b opens the Administration section to Supervisors, and part 5c to Supply O
   - Vehicle files export positions by `display_order`, then label, and leave out retired positions. An import that names a retired position is refused with that reason.
   - The paper checklist and crew screens already follow placements, so they need no change.
 
+## Checklist templates (part 6a)
+
+The screens are in `cya/operations/template_admin_views.py`, behind `draft_edit_template`. Publishing needs `publish_template`, and duplicating needs `duplicate_configuration`. Each command checks its own action.
+
+- **Creating a template.** `create_template` (`cya/operations/templates.py`, command `TEMPLATE_CREATE`) writes an active template with the label and key its creator enters (SPEC 4.0.0 IMP-6), and no version. The template key is unique across the organization, so the command takes the organization lock first. The first version is a draft saved like every other.
+- **Editing one item at a time.** Each add, change or removal saves a whole new draft through `save_template_draft`, built from the template's latest version (a draft, or the latest published version), with that version's kit placements (KDEF-4) unchanged. A form holding every item would exceed Django's form field limit (`DATA_UPLOAD_MAX_NUMBER_FIELDS`) for a checklist of about 150 items. The editor offers one place per compartment or system slot, with its position key. Retired positions are left out. Resolution maps the chosen row to each vehicle's own row by stable slot.
+- **New items by name** (owner decision 2026-11-15). An item spec may name a new item by label instead of an `item_id`. `save_template_draft` creates it active in the same command, as a vehicle-file import creates an item by label (IMP-7). A label that an active item already has is refused, so that item is chosen instead. Active labels stay unique only when created this way, so a save that creates items takes the organization lock first.
+- **Stale edits.** The editor sends `base_revision`, the template's latest revision when the page was shown. The command refuses the save if another version was saved since, so a concurrent change is never silently replaced.
+- **Impact preview** (`publication_impact`, read only). Before the confirmation, the page shows:
+  - the items added, removed or changed against the version in force at the chosen instant;
+  - the vehicles the version applies to, bound now or by a later binding, active or not;
+  - for each such vehicle with an override in force, that the override overlays an earlier version. Resolution fails closed for that vehicle (`StaleOverrideError`) until an override over the new version is published (part 6b);
+  - whatever would make the command refuse: a retired position on a bound vehicle, a missing slot on any active vehicle, an instant in the past or not after the latest publication, an inactive or unpublished placed kit definition.
+
+  The confirmation runs `publish_template_version`, which checks all of it again under its locks. The preview has no base token: a publication changes nothing that it shows, and every refusal is re-checked.
+
 ## Duplicating a checklist template (CFG-3)
 
 `duplicate_template` (`duplicate_configuration`, command `TEMPLATE_DUPLICATE`):
@@ -156,7 +172,9 @@ Each part is one PR, except part 5, which is three (owner decision 2026-11-15, t
      - publishing now, or at a station-local date and time (a time skipped by a clock change is refused). Only these two choices are accepted;
      - adding a kit instance with its kit type;
      - duplicating one (CFG-5): pick a vehicle, and its add form opens with the same type.
-6. Checklist screens: templates (create, duplicate, draft edit, publish with an effective date, current, draft and future versions), overrides, and the impact preview of affected vehicles.
+6. Checklist screens, as two PRs (owner decision 2026-11-15):
+   - **6a, templates** (described above): create, duplicate, draft edit one item at a time, publish now or at a station-local date and time after the impact preview, and the versions in force, scheduled and drafted;
+   - **6b, overrides:** a vehicle's override in force, scheduled and draft, edited with 6a's item editor and published over the template version in force.
 7. Kit definition screens: list, edit, duplicate, publish and deactivate.
 
 The issue's acceptance criteria for responsive and accessible pages (UX issue #111), and its role, duplication, versioning, history and concurrency tests, apply to each part that adds the behaviour.

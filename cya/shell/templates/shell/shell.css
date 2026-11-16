@@ -68,7 +68,11 @@ h1 { font-size: 1.5rem; line-height: 1.25; margin: .5rem 0 1rem; }
 .table-scroll table { border-collapse: collapse; width: 100%; }
 .table-scroll th, .table-scroll td { padding: .5rem .75rem; border-bottom: 1px solid var(--line); text-align: left; }
 .role-administration input[type="search"], .role-administration select { max-width: 100%; min-height: 48px; padding: .4rem .65rem; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .375rem; }
-.admin-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), .admin-form select { box-sizing: border-box; width: min(100%, 24rem); min-height: 48px; padding: .4rem .65rem; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .375rem; }
+.admin-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), .admin-form select, .admin-form textarea { box-sizing: border-box; width: min(100%, 24rem); min-height: 48px; padding: .4rem .65rem; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid var(--line); border-radius: .375rem; }
+.admin-form textarea { width: min(100%, 36rem); }
+.admin-form input[type="checkbox"], .admin-form input[type="radio"] { width: 1.5rem; height: 1.5rem; margin: .25rem .5rem .25rem 0; vertical-align: middle; }
+.field-error { display: block; margin-top: .25rem; font-weight: 600; }
+.admin-form [aria-invalid="true"] { border-width: 3px; border-style: dashed; }
 @media (min-width: 48rem) {
   .site-header, .site-nav-list { padding-left: 2rem; padding-right: 2rem; }
   main { padding: 1.5rem 2rem; }

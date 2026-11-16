@@ -108,8 +108,27 @@ def _quantity_and_unit(spec):
     return quantity, unit
 
 
-def validate_definition(organization_id, spec):
-    """Return model keyword arguments for one definition, or raise."""
+def _existing_item(spec, organization_id):
+    item_id = reference(spec, "item_id", Item, organization_id)
+    if item_id is None:
+        raise ChecklistValidationError("item_id is required")
+    if not Item.objects.get(pk=item_id).active:
+        raise ChecklistValidationError(f"item {item_id} is inactive")
+    # Imported late: the kits app depends on checklists.
+    from cya.kits.models import KitDefinition
+
+    if KitDefinition.objects.filter(presence_item_id=item_id).exists():
+        # SPEC 2.0.0 KDEF-12: a presence item is used only for kit presence checks.
+        raise ChecklistValidationError(f"item {item_id} is a kit presence item")
+    return item_id
+
+
+def validate_definition(organization_id, spec, new_item_ids=frozenset()):
+    """Return model keyword arguments for one definition, or raise.
+
+    new_item_ids are items the same command creates (save_template_draft's new items). They
+    are not in the database yet; the command has already checked them.
+    """
     if not isinstance(spec, dict):
         raise ChecklistValidationError("a definition must be an object")
     unknown = set(spec) - FIELDS
@@ -129,15 +148,10 @@ def validate_definition(organization_id, spec):
     expiration_tracked = spec.get("expiration_tracked", False)
     if type(expiration_tracked) is not bool:
         raise ChecklistValidationError("expiration_tracked must be true or false")
-    item_id = reference(spec, "item_id", Item, organization_id)
-    if not Item.objects.get(pk=item_id).active:
-        raise ChecklistValidationError(f"item {item_id} is inactive")
-    # Imported late: the kits app depends on checklists.
-    from cya.kits.models import KitDefinition
-
-    if KitDefinition.objects.filter(presence_item_id=item_id).exists():
-        # SPEC 2.0.0 KDEF-12: a presence item is used only for kit presence checks.
-        raise ChecklistValidationError(f"item {item_id} is a kit presence item")
+    if isinstance(spec["item_id"], str) and spec["item_id"] in new_item_ids:
+        item_id = spec["item_id"]
+    else:
+        item_id = _existing_item(spec, organization_id)
     compartment = reference(spec, "compartment_id", Compartment, organization_id)
     system = reference(spec, "system_id", VehicleSystem, organization_id)
     kit = reference(spec, "kit_id", KitInstance, organization_id)
@@ -174,11 +188,11 @@ def validate_definition(organization_id, spec):
     }
 
 
-def validate_definitions(organization_id, specs):
+def validate_definitions(organization_id, specs, new_item_ids=frozenset()):
     """Validate a full item set: bounded, nonempty, one definition per item."""
     if not isinstance(specs, list) or not 1 <= len(specs) <= MAX_ITEMS:
         raise ChecklistValidationError(f"provide 1-{MAX_ITEMS} item definitions")
-    validated = [validate_definition(organization_id, spec) for spec in specs]
+    validated = [validate_definition(organization_id, spec, new_item_ids) for spec in specs]
     item_ids = [definition["item_id"] for definition in validated]
     if len(set(item_ids)) != len(item_ids):
         raise ChecklistValidationError("an item may appear only once in a version")

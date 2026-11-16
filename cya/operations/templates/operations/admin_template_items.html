@@ -1,0 +1,12 @@
+{% if rows %}
+<div class="table-scroll" role="region" aria-labelledby="{{ heading_id }}" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Where</th><th scope="col">Check</th><th scope="col">Outcomes</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr><td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.where }}</td><td>{{ row.kind }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
