@@ -102,7 +102,7 @@ def authorizer(organization_id, actor_id, action=ACTION, *, lock_organization=Fa
     return authorize
 
 
-def _run(context, command_type, request, build):
+def _run(context, command_type, request, build, *, lock_organization=False):
     canonical_id(context["actor_id"])
     return run_command(
         organization_id=context["organization_id"],
@@ -111,7 +111,11 @@ def _run(context, command_type, request, build):
         request_digest=digest(request),
         correlation_id=context["correlation_id"],
         request_attempt_id=context["request_attempt_id"],
-        authorize=authorizer(context["organization_id"], context["actor_id"]),
+        authorize=authorizer(
+            context["organization_id"],
+            context["actor_id"],
+            lock_organization=lock_organization,
+        ),
         prepare=build,
     )
 
@@ -224,8 +228,11 @@ def content_rules(entry, where):
     }
 
 
-def _content(org, index, entry):
-    """Model fields for one content entry, or raise naming its position."""
+def _content(org, index, entry, new_item_ids=frozenset()):
+    """Model fields for one content entry, or raise naming its position.
+
+    new_item_ids are items the same command creates (save_kit_definition_draft's new items).
+    """
     where = f"contents[{index}]"
     if not isinstance(entry, dict):
         raise KitDefinitionError(f"{where} must be an object")
@@ -237,6 +244,8 @@ def _content(org, index, entry):
     if not is_count(entry["display_order"]):
         raise KitDefinitionError(f"{where} display_order must be a nonnegative integer")
     fields = content_rules(entry, where)
+    if isinstance(entry["item_id"], str) and entry["item_id"] in new_item_ids:
+        return {"item_id": entry["item_id"], "display_order": entry["display_order"], **fields}
     try:
         item_id = canonical_id(entry["item_id"])
     except (TypeError, ValueError):
@@ -251,11 +260,11 @@ def _content(org, index, entry):
     return {"item_id": item_id, "display_order": entry["display_order"], **fields}
 
 
-def validate_contents(org, contents):
+def validate_contents(org, contents, new_item_ids=frozenset()):
     """A complete content set: bounded, nonempty, one entry per item (KDEF-1, KDEF-5)."""
     if not isinstance(contents, list) or not 1 <= len(contents) <= MAX_CONTENTS:
         raise KitDefinitionError(f"provide 1-{MAX_CONTENTS} content entries")
-    validated = [_content(org, index, entry) for index, entry in enumerate(contents)]
+    validated = [_content(org, index, entry, new_item_ids) for index, entry in enumerate(contents)]
     item_ids = [entry["item_id"] for entry in validated]
     if len(set(item_ids)) != len(item_ids):
         raise KitDefinitionError("an item may appear only once in a kit definition version")
@@ -311,22 +320,57 @@ def create_kit_definition(*, key, label, **context):
     return _run(context, CREATE_COMMAND, {"key": key, "label": label}, build)
 
 
-def save_kit_definition_draft(*, definition_id, contents, **context):
-    """Insert the next draft revision of a definition with its complete contents (KDEF-2)."""
+def _new_content_items(org, contents):
+    """(contents with item ids, {new item id: label}) for entries naming a new item by label.
+
+    The rules are those of save_template_draft (issue #130 part 7): a trimmed, nonblank label of
+    at most 200 characters, named once, that no active non-presence item already has.
+    """
+    from cya.checklists.commands import _with_new_items
+    from cya.checklists.validation import ChecklistValidationError
+
+    try:
+        return _with_new_items(org, contents)
+    except ChecklistValidationError as error:
+        raise KitDefinitionError(str(error)) from None
+
+
+def save_kit_definition_draft(*, definition_id, contents, base_revision=None, **context):
+    """Insert the next draft revision of a definition with its complete contents (KDEF-2).
+
+    A content entry may give "new_item" (a label) in place of "item_id"; the command creates the
+    item. base_revision (optional) is the definition's latest revision the edit started from (0
+    for none): a save is refused if another version was saved since.
+    """
     canonical_id(definition_id)
     org = context["organization_id"]
+    if base_revision is not None and not is_count(base_revision):
+        raise KitDefinitionError("base_revision must be a nonnegative integer")
+    creates_items = isinstance(contents, list) and any(
+        isinstance(entry, dict) and "new_item" in entry for entry in contents
+    )
 
     def build(actor):
         definition = _locked_definition(org, definition_id)
         if not definition.active:
             raise KitDefinitionError("kit definition is inactive")
-        validated = validate_contents(org, contents)
         top = KitDefinitionVersion.objects.filter(definition=definition).aggregate(
             m=Max("revision")
         )
-        revision, version_id = (top["m"] or 0) + 1, new_id()
+        latest = top["m"] or 0
+        if base_revision is not None and base_revision != latest:
+            raise KitDefinitionError(
+                "the kit definition was changed since this edit started; reload it and try again"
+            )
+        resolved, new_items = _new_content_items(org, contents)
+        validated = validate_contents(org, resolved, frozenset(new_items))
+        revision, version_id = latest + 1, new_id()
 
         def apply(receipt, _current):
+            Item.objects.bulk_create(
+                Item(id=item_id, organization_id=org, label=label, active=True)
+                for item_id, label in new_items.items()
+            )
             _insert_version(org, definition, revision, version_id, validated, receipt.recorded_at)
 
         body = {
@@ -335,10 +379,20 @@ def save_kit_definition_draft(*, definition_id, contents, **context):
             "revision": revision,
             "content_count": len(validated),
         }
-        return _plan(org, body, apply, definition_id=definition_id, **body)
+        extra = {}
+        if new_items:
+            # Only when there are any, so an existing kind of save keeps its result and snapshot.
+            body["new_item_ids"] = sorted(new_items)
+            extra["new_items"] = [{"item_id": k, "label": v} for k, v in sorted(new_items.items())]
+        return _plan(org, body, apply, definition_id=definition_id, **body, **extra)
 
     request = {"definition_id": definition_id, "contents": contents}
-    return _run(context, DRAFT_COMMAND, request, build)
+    if base_revision is not None:
+        # Only when given, so the digest of an existing kind of request is unchanged.
+        request["base_revision"] = base_revision
+    # New items: an active item label must stay unique across the organization, so take its
+    # lock first (docs/configuration-management.md, level 1).
+    return _run(context, DRAFT_COMMAND, request, build, lock_organization=creates_items)
 
 
 def publish_kit_definition_version(*, version_id, effective_at=None, **context):

@@ -1,0 +1,44 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p>A kit definition lists what a kind of kit contains. Edit a definition's draft one item at a time, then publish it. To import or export definitions as a file, use the <a href="{% url 'kit-library' %}">kit library</a>.</p>
+<h2 id="definitions-heading">Kit definitions</h2>
+{% if rows %}
+<div class="table-scroll" role="region" aria-labelledby="definitions-heading" tabindex="0">
+<table>
+  <thead><tr><th scope="col">Kit</th><th scope="col">Key</th><th scope="col">In force</th><th scope="col">Scheduled</th><th scope="col">Draft</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><a href="{% url 'kit-definition' row.definition.pk %}">{{ row.definition.label }}</a>{% if not row.definition.active %} (inactive){% endif %}</td>
+      <td>{{ row.definition.key }}</td>
+      <td>{% if row.in_force %}Revision {{ row.in_force }}{% else %}None{% endif %}</td>
+      <td>{% if row.scheduled %}{{ row.scheduled }}{% else %}None{% endif %}</td>
+      <td>{% if row.draft %}Revision {{ row.draft }}{% else %}None{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if rows|length == list_limit %}<p>Showing the first {{ list_limit }} kit definitions.</p>{% endif %}
+{% else %}<p>No kit definitions yet.</p>{% endif %}
+
+<h2 id="create-heading">Create a kit definition</h2>
+<p>The key identifies the definition in files and kit lists. It is set now and never changes.</p>
+<form method="post" action="{% url 'kit-definitions' %}" class="admin-form" aria-labelledby="create-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="create">
+  <input type="hidden" name="operation_id" value="{{ create_operation_id }}">
+  <p><label for="create-label">Name</label><br>
+  <input id="create-label" name="label" value="{{ form.label }}" maxlength="200" required{% if field_errors.label %} aria-invalid="true" aria-describedby="create-label-error"{% endif %}>{% if field_errors.label %}<span id="create-label-error" class="field-error">Error: {{ field_errors.label }}</span>{% endif %}</p>
+  <p><label for="create-key">Key</label><br>
+  <input id="create-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="create-key-help{% if field_errors.key %} create-key-error{% endif %}"{% if field_errors.key %} aria-invalid="true"{% endif %} autocapitalize="none" spellcheck="false"><br>
+  <span id="create-key-help">Lowercase letters, digits, and . _ - ; for example jump-kit.</span>{% if field_errors.key %}<span id="create-key-error" class="field-error">Error: {{ field_errors.key }}</span>{% endif %}</p>
+  <p><button type="submit" class="button">Create kit definition</button></p>
+</form>
+</div>
+{% endblock %}
