@@ -528,7 +528,7 @@ application, its virtual environment or the database is down.
    - copy the relay host copy, root-owned and mode 0600, to the path in its `monitor.json`;
    - re-copy it after any relay change;
    - enable `cya-probe.timer`.
-7. Set up the hosted uptime monitor as well (DEP-13, owner-held account and recipients).
+7. Set up the hosted uptime monitor as well. The owner holds the account and sets its recipients to the operator and deputy addresses. Set its re-notification interval to no less than 6 hours. It counts toward the DEP-12 delivery gate (owner decision 2026-11-16).
 
 **What alerts** (DEP-10 and DEP-13):
 - a certificate expiring within 14 days, or one that cannot be read;
@@ -557,7 +557,7 @@ recipients received the start and the clear. Suggested ways to induce each one:
 - a burst of requests to a route that returns 502;
 - a failing job;
 - deleting the host copy;
-- stopping the proxy, as seen from the probe host.
+- stopping the proxy, as seen from both the probe host and the hosted monitor; confirm both deliver the outage and the recovery to the operator and the deputy.
 
 ## Upgrade, failure and recovery
 
