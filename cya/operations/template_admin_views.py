@@ -34,15 +34,13 @@ from cya.checklists.models import (
     Compartment,
     Item,
     KitInstance,
-    Vehicle,
     VehicleSystem,
 )
 from cya.checklists.validation import ChecklistValidationError
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
-from cya.kits import positions as position_rules
 from cya.kits.keys import KeyRuleError
-from cya.kits.models import KitDefinition
+from cya.kits.models import KitDefinition, PositionKey
 from cya.kits.placements import placements_of
 from cya.kits.views import UNAVAILABLE, _can, _context_ids
 from cya.operations.duplication import _specs, duplicate_template
@@ -237,48 +235,83 @@ def _rows(version):
     return rows
 
 
-def _slot_choices(org):
-    """One choice per compartment or system slot in use now, with its position key.
+def _slot_choices(org, query="", keep=None):
+    """(places, whether more match than are shown): one per compartment or system slot.
 
     A template definition names one vehicle's row; resolution maps it by stable slot to each
-    vehicle's own row (cya.checklists.overlay.vehicle_slots). Retired positions are left out.
+    vehicle's own row (cya.checklists.overlay.vehicle_slots). Each choice is a current row of
+    the slot that is not retired. At most CHOICE_LIMIT slots are read (SPEC NFR-6); a name
+    query narrows them, so every slot stays reachable. `keep` is the (kind, row id) of the
+    item's current place, always offered when it is still in use.
     """
-    choices, seen = [], set()
-    vehicles = Vehicle.objects.filter(organization_id=org).order_by("-active", "display_name")
-    vehicle_ids = list(vehicles.values_list("pk", flat=True)[: admin_pages.LIST_LIMIT])
-    for kind, heading in (("COMPARTMENT", "Compartment"), ("SYSTEM", "System")):
-        for vehicle_id in vehicle_ids:
-            for row, key in position_rules.positions(org, str(vehicle_id), kind):
-                slot = (kind, str(row.stable_slot_id))
-                if row.retired or slot in seen:
-                    continue
-                seen.add(slot)
-                label = f"{row.label} ({key})" if key else row.label
-                choices.append(
-                    {
-                        "value": f"{kind}:{row.pk}",
-                        "slot": slot,
-                        "label": f"{heading}: {label}",
-                    }
-                )
-                if len(choices) >= CHOICE_LIMIT:
-                    return sorted(choices, key=lambda c: c["label"].lower())
-    return sorted(choices, key=lambda c: c["label"].lower())
+    now = timezone.now()
+    choices, more = [], False
+    for kind, heading, model in (
+        ("COMPARTMENT", "Compartment", Compartment),
+        ("SYSTEM", "System", VehicleSystem),
+    ):
+        rows = model.objects.filter(organization_id=org, effective_at__lte=now)
+        matching = rows.filter(label__icontains=query) if query else rows
+        slots = list(
+            matching.order_by("stable_slot_id")
+            .values_list("stable_slot_id", flat=True)
+            .distinct()[: CHOICE_LIMIT + 1]
+        )
+        more = more or len(slots) > CHOICE_LIMIT
+        slots = slots[:CHOICE_LIMIT]
+        if keep and keep[0] == kind:
+            kept = model.objects.filter(pk=keep[1]).values_list("stable_slot_id", flat=True)
+            slots += [slot for slot in kept if slot not in slots]
+        keys = dict(
+            PositionKey.objects.filter(
+                organization_id=org, kind=kind, stable_slot_id__in=slots
+            ).values_list("stable_slot_id", "key")
+        )
+        newest = {}
+        for row in rows.filter(stable_slot_id__in=slots).order_by(
+            "stable_slot_id", "vehicle_id", "-revision"
+        ):
+            newest.setdefault((row.stable_slot_id, row.vehicle_id), row)
+        offered = set()
+        for (slot, _vehicle), row in newest.items():
+            if row.retired or slot in offered:
+                continue
+            offered.add(slot)
+            key = keys.get(slot)
+            label = f"{row.label} ({key})" if key else row.label
+            choices.append(
+                {
+                    "value": f"{kind}:{row.pk}",
+                    "slot": (kind, str(slot)),
+                    "label": f"{heading}: {label}",
+                }
+            )
+    return sorted(choices, key=lambda c: c["label"].lower()), more
 
 
-def _kit_choices(org):
-    kits = (
-        KitInstance.objects.filter(organization_id=org, active=True, compartment__isnull=False)
-        .select_related("compartment", "vehicle")
-        .order_by("label", "id")[:CHOICE_LIMIT]
+def _kit_choices(org, query="", keep=None):
+    """(kits, whether more match than are shown), at most CHOICE_LIMIT; a query narrows them."""
+    kits = KitInstance.objects.filter(organization_id=org, active=True, compartment__isnull=False)
+    if query:
+        kits = kits.filter(label__icontains=query)
+    found = list(
+        kits.select_related("compartment", "vehicle").order_by("label", "id")[: CHOICE_LIMIT + 1]
     )
+    more = len(found) > CHOICE_LIMIT
+    found = found[:CHOICE_LIMIT]
+    if keep and all(str(k.pk) != keep for k in found):
+        found += list(
+            KitInstance.objects.filter(organization_id=org, pk=keep, active=True)
+            .exclude(compartment__isnull=True)
+            .select_related("compartment", "vehicle")
+        )
     return [
         {
             "value": str(k.pk),
             "label": f"{k.label} ({k.vehicle.display_name}, {k.compartment.label})",
         }
-        for k in kits
-    ]
+        for k in found
+    ], more
 
 
 def _item_choices(org, exclude, query=""):
@@ -653,7 +686,26 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
     spec = next((s for s in specs if s["item_id"] == item_id), None)
     if item_id is not None and spec is None:
         raise Http404("that item is not in the latest version")
-    choices = _slot_choices(org)
+    place_query = request.GET.get("p", "").strip()[:MAX_QUERY]
+    # The item's current place and kit stay on offer whatever the search shows.
+    keep_place = keep_kit = None
+    if form is not None:
+        kind, _, row = form.get("place", "").partition(":")
+        keep_place = (kind, row) if kind in ("COMPARTMENT", "SYSTEM") and row else None
+        keep_kit = form.get("kit_id") or None
+    elif spec is not None:
+        keep_place = (
+            ("COMPARTMENT", spec["compartment_id"])
+            if spec["compartment_id"]
+            else ("SYSTEM", spec["system_id"])
+        )
+        keep_kit = spec["kit_id"]
+    try:
+        choices, more_places = _slot_choices(org, place_query, keep_place)
+        kits, more_kits = _kit_choices(org, place_query, keep_kit)
+    except (ValueError, ValidationError):  # a malformed posted id
+        choices, more_places = _slot_choices(org, place_query)
+        kits, more_kits = _kit_choices(org, place_query)
     if form is None:
         form = _item_form(spec, choices)
     item_label = Item.objects.filter(pk=item_id).values_list("label", flat=True).first()
@@ -672,7 +724,10 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
         "kinds": KIND_LABELS.items(),
         "optional_outcomes": OPTIONAL_OUTCOMES,
         "places": choices,
-        "kits": _kit_choices(org),
+        "kits": kits,
+        "more_places": more_places or more_kits,
+        "place_query": place_query,
+        "choice_limit": CHOICE_LIMIT,
         "items": items,
         "more_items": more_items,
         "query": query,

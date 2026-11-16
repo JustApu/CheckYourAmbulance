@@ -6,14 +6,15 @@
 <p><a href="{% url 'checklist-templates' %}">All templates</a> · <a href="{% url 'checklist-template' template.pk %}">{{ template.label }}</a></p>
 <p>Saving writes a new draft revision{% if latest %} from revision {{ latest.revision }}{% endif %}. Nothing is in force until the draft is published.</p>
 
-{% if not item_id %}
-<form method="get" class="admin-form" role="search" aria-label="Find an existing item">
-  <p><label for="item-search">Find an existing item by name</label><br>
-  <input id="item-search" type="search" name="q" value="{{ query }}" maxlength="100">
-  <button type="submit" class="button">Find</button></p>
+<form method="get" class="admin-form" role="search" aria-label="Narrow the lists below">
+  {% if not item_id %}<p><label for="item-search">Find an existing item by name</label><br>
+  <input id="item-search" type="search" name="q" value="{{ query }}" maxlength="100"></p>{% endif %}
+  <p><label for="place-search">Find a place or kit by name</label><br>
+  <input id="place-search" type="search" name="p" value="{{ place_query }}" maxlength="100"></p>
+  <p><button type="submit" class="button">Find</button></p>
   {% if more_items %}<p>Showing the first {{ item_choices }} matching items. Search by name to find others.</p>{% endif %}
+  {% if more_places %}<p>Showing the first {{ choice_limit }} matching places or kits. Search by name to find others.</p>{% endif %}
 </form>
-{% endif %}
 
 <form method="post" class="admin-form" aria-label="{% if item_id %}Edit {{ item_label }}{% else %}Add an item{% endif %}">
   {% csrf_token %}

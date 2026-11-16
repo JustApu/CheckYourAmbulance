@@ -11,6 +11,7 @@ from cya.checklists.models import (
     ChecklistPublication,
     ChecklistTemplate,
     ChecklistVersion,
+    Compartment,
     Item,
 )
 from cya.core.models import AuditEvent
@@ -259,3 +260,17 @@ class TemplatePageTests(KitCase):
         self.assertContains(found, ">Synthetic splint</option>")
         self.assertNotContains(found, ">Synthetic masks</option>")
         self.assertNotContains(found, "Showing the first")
+
+    def test_places_and_kits_are_capped_and_found_by_name_keeping_the_current_one(self):
+        self.post(f"{self.url}items/new/", new_item="Synthetic splint", **self.item_fields())
+        splint = Item.objects.get(label="Synthetic splint")
+        url = f"{self.url}items/{splint.pk}/"
+        self.make_slot(Compartment, "drawer")  # two compartments, so a cap of 1 hides one
+        with mock.patch.object(template_admin_views, "CHOICE_LIMIT", 1):
+            page = self.client_.get(url).content.decode()
+            self.assertIn("Showing the first 1 matching places or kits", page)
+            # The cabinet the item is in stays on offer even when the search excludes it.
+            narrowed = self.client_.get(f"{url}?p=lights").content.decode()
+        self.assertIn("System: Synthetic lights", narrowed)
+        self.assertIn("Compartment: Synthetic cabinet", narrowed)
+        self.assertNotIn("Showing the first", self.client_.get(f"{url}?p=lights").content.decode())

@@ -1,6 +1,7 @@
 """Template creation, new items, the stale-edit check and the impact preview (issue #130 part 6a)."""
 
 from datetime import timedelta
+from unittest import mock
 
 from cya.checklists import commands
 from cya.checklists.models import (
@@ -212,3 +213,16 @@ class ImpactTests(KitCase):
     def test_a_published_version_has_no_preview(self):
         with self.assertRaisesMessage(TemplateError, "already published"):
             self.impact(self.published_version())
+
+    def test_the_preview_reads_a_bounded_set_of_vehicles(self):
+        from cya.operations import templates as template_rules
+
+        self.published_version()
+        self.bind()
+        self.bind(vehicle=self.vehicle_b)
+        draft = self.draft()
+        with mock.patch.object(template_rules, "VEHICLE_LIMIT", 1):
+            impact = self.impact(draft)
+        self.assertTrue(impact.more_vehicles)
+        self.assertLessEqual(len(impact.vehicles), 1)
+        self.assertFalse(self.impact(draft).more_vehicles)

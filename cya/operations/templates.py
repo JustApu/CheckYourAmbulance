@@ -307,21 +307,39 @@ def _retired(refs, vehicle_id):
 
 def _vehicle_impacts(impact, org, version, definitions, at):
     refs = _slot_refs(definitions)
-    bound = {str(v) for v in position_rules.vehicles_bound_now_or_later(org, version.template_id)}
-    active = {
+    # SPEC NFR-6: every read here is bounded. The candidates are at most VEHICLE_LIMIT vehicles
+    # with a binding of this template and VEHICLE_LIMIT active vehicles; the page says when
+    # there are more. The publication itself checks every vehicle under its locks.
+    from cya.obligations.models import RequirementBinding
+
+    with_binding = list(
+        RequirementBinding.objects.filter(organization_id=org, template_id=version.template_id)
+        .order_by("vehicle_id")
+        .values_list("vehicle_id", flat=True)
+        .distinct()[: VEHICLE_LIMIT + 1]
+    )
+    active_ids = list(
+        Vehicle.objects.filter(organization_id=org, active=True)
+        .order_by("pk")
+        .values_list("pk", flat=True)[: VEHICLE_LIMIT + 1]
+    )
+    bound = {
         str(v)
-        for v in Vehicle.objects.filter(organization_id=org, active=True).values_list(
-            "pk", flat=True
+        for v in position_rules.vehicles_bound_now_or_later(
+            org, version.template_id, vehicle_ids=with_binding[:VEHICLE_LIMIT]
         )
     }
-    # SPEC NFR-6: the preview checks at most VEHICLE_LIMIT vehicles and says when there are more;
-    # the publication itself checks every one under its locks.
+    active = {str(v) for v in active_ids[:VEHICLE_LIMIT]}
     vehicles = list(
         Vehicle.objects.filter(organization_id=org, pk__in=bound | active).order_by(
             "display_name", "pk"
         )[: VEHICLE_LIMIT + 1]
     )
-    impact.more_vehicles = len(vehicles) > VEHICLE_LIMIT
+    impact.more_vehicles = (
+        len(vehicles) > VEHICLE_LIMIT
+        or len(with_binding) > VEHICLE_LIMIT
+        or len(active_ids) > VEHICLE_LIMIT
+    )
     for vehicle in vehicles[:VEHICLE_LIMIT]:
         vehicle_id = str(vehicle.pk)
         entry = VehicleImpact(vehicle=vehicle)

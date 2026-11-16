@@ -474,14 +474,18 @@ def positions(organization_id, vehicle_id, kind, at=None):
     return [(row, keys.get(row.stable_slot_id)) for row in rows]
 
 
-def vehicles_bound_now_or_later(organization_id, template_id, now=None):
+def vehicles_bound_now_or_later(organization_id, template_id, now=None, vehicle_ids=None):
     """Vehicles bound to the template at `now` or by a binding scheduled to take effect later.
 
     Inactive vehicles are included: a binding survives deactivation, and reactivation would
-    make a retired position required again.
+    make a retired position required again. vehicle_ids, when given, limits the check to those
+    vehicles (a bounded read for previews, SPEC NFR-6).
     """
     now = now or timezone.now()
-    chains = _binding_chains(organization_id=organization_id, template_id=template_id)
+    filters = {"organization_id": organization_id, "template_id": template_id}
+    if vehicle_ids is not None:
+        filters["vehicle_id__in"] = list(vehicle_ids)
+    chains = _binding_chains(**filters)
     return sorted(
         {vehicle for (vehicle, _t, _s), rows in chains.items() if _bound_now_or_later(rows, now)}
     )
