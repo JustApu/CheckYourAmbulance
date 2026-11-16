@@ -226,3 +226,96 @@ class ImpactTests(KitCase):
         self.assertTrue(impact.more_vehicles)
         self.assertLessEqual(len(impact.vehicles), 1)
         self.assertFalse(self.impact(draft).more_vehicles)
+
+
+class BoundedHistoryTests(KitCase):
+    """Issue #130 part 6a review: reads stay the same size however long the history is."""
+
+    def setUp(self):
+        super().setUp()
+        self.publish_schedule("test-0600")
+        self.v1 = self.published_version()
+
+    def queries(self, call):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as captured:
+            result = call()
+        return result, len(captured.captured_queries)
+
+    def test_the_bound_vehicle_check_matches_the_full_rule_in_fixed_queries(self):
+        from cya.kits.positions import bound_vehicles_among, vehicles_bound_now_or_later
+
+        ids = [str(v.pk) for v in self.vehicles]
+        org, template = str(self.org.pk), str(self.template.pk)
+        self.bind()
+        first, before = self.queries(lambda: bound_vehicles_among(org, template, ids))
+        for action in ("UNBIND", "BIND", "UNBIND", "BIND", "UNBIND"):
+            self.bind(action=action)
+        self.bind(vehicle=self.vehicle_b)
+        self.bind(vehicle=self.vehicle_b, action="UNBIND")
+        self.bind(vehicle=self.vehicle_b, effective_at=self.clock.now + timedelta(days=1))
+        result, after = self.queries(lambda: bound_vehicles_among(org, template, ids))
+        self.assertEqual(first, [str(self.vehicle.pk)])
+        self.assertEqual(result, vehicles_bound_now_or_later(org, template))
+        self.assertEqual(result, [str(self.vehicle_b.pk)])  # A unbound now; B bound later
+        self.assertEqual(before, after)
+
+    def test_place_choices_read_a_fixed_number_of_rows_as_revisions_grow(self):
+        from cya.operations.template_admin_views import _slot_choices
+
+        org = str(self.org.pk)
+        (choices, _more), before = self.queries(lambda: _slot_choices(org))
+        for number in range(4):
+            revise_position(
+                vehicle_id=str(self.vehicle.pk),
+                kind="COMPARTMENT",
+                stable_slot_id=self.slot,
+                label=f"Synthetic cabinet renamed {number}",
+                **self.context(),
+            )
+        (after_choices, _more), after = self.queries(lambda: _slot_choices(org))
+        self.assertEqual(before, after)
+        self.assertEqual(len(choices), len(after_choices))
+        # Each slot is offered once, with a current, unretired row.
+        slots = [choice["slot"] for choice in after_choices]
+        self.assertEqual(len(slots), len(set(slots)))
+
+    def test_a_retired_slot_is_offered_only_while_another_vehicle_still_uses_it(self):
+        from cya.operations.template_admin_views import _slot_choices
+
+        org = str(self.org.pk)
+        for vehicle in self.vehicles:
+            revise_position(
+                vehicle_id=str(vehicle.pk),
+                kind="COMPARTMENT",
+                stable_slot_id=self.slot,
+                retired=True,
+                **self.context(),
+            )
+        choices, _more = _slot_choices(org)
+        self.assertNotIn(("COMPARTMENT", self.slot), [c["slot"] for c in choices])
+
+    def test_scheduled_overrides_are_capped_and_say_so(self):
+        from cya.operations import templates as template_rules
+
+        v1 = self.v1
+        self.bind()
+        for days in (1, 2):
+            override = commands.save_override_draft(
+                vehicle_id=str(self.vehicle.pk),
+                template_version_id=v1,
+                entries=[{"item_id": str(self.siren.pk), "action": "REMOVE"}],
+                **self.context(),
+            ).body["override_version_id"]
+            commands.publish_override_version(
+                override_version_id=override,
+                effective_at=self.clock.now + timedelta(days=days),
+                **self.context(),
+            )
+        with mock.patch.object(template_rules, "LATER_OVERRIDES", 1):
+            impact = publication_impact(str(self.org.pk), self.draft())
+        notes = {str(v.vehicle.pk): v.notes for v in impact.vehicles}[str(self.vehicle.pk)]
+        self.assertEqual(len([n for n in notes if "taking effect" in n]), 1)
+        self.assertIn("more overrides are scheduled after the first 1 listed", notes[-1])

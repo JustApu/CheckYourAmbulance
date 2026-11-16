@@ -36,6 +36,7 @@ from cya.operations.vehicles import MAX_NAME, VehicleError, _plan, _run
 
 ACTION = "draft_edit_template"
 VEHICLE_LIMIT = 500  # vehicles the impact preview checks (SPEC NFR-6)
+LATER_OVERRIDES = 5  # scheduled overrides listed per vehicle (SPEC NFR-6)
 CREATE_COMMAND = "TEMPLATE_CREATE"
 # The definition fields a reader compares between two versions of an item.
 COMPARED = (
@@ -223,8 +224,12 @@ def _overrides_from(org, vehicle_id, template_id, at):
         .order_by("-effective_at", "-override_version__revision")
         .first()
     )
-    later = list(publications.filter(effective_at__gt=at).order_by("effective_at"))
-    return ([current] if current else []) + later
+    # SPEC NFR-6: at most LATER_OVERRIDES scheduled ones are read; the caller says when more exist.
+    later = list(
+        publications.filter(effective_at__gt=at).order_by("effective_at")[: LATER_OVERRIDES + 1]
+    )
+    more = len(later) > LATER_OVERRIDES
+    return ([current] if current else []) + later[:LATER_OVERRIDES], more
 
 
 def publication_impact(organization_id, version_id, effective_at=None):
@@ -349,7 +354,8 @@ def _vehicle_impacts(impact, org, version, definitions, at):
         if vehicle_id in bound:
             if retired := _retired(refs, vehicle_id):
                 entry.blocking.append(f"these positions are retired on it: {', '.join(retired)}")
-            for override in _overrides_from(org, vehicle_id, version.template_id, at):
+            overrides, more_overrides = _overrides_from(org, vehicle_id, version.template_id, at)
+            for override in overrides:
                 scheduled = override.effective_at > at
                 entry.notes.append(
                     f"its override (revision {override.override_version.revision}"
@@ -357,6 +363,11 @@ def _vehicle_impacts(impact, org, version, definitions, at):
                     + ") overlays an earlier version; its checklist cannot be resolved from "
                     + ("then" if scheduled else "this publication")
                     + " until an override over this version is published"
+                )
+            if more_overrides:
+                entry.notes.append(
+                    f"more overrides are scheduled after the first {LATER_OVERRIDES} listed; "
+                    "each also overlays an earlier version"
                 )
         if vehicle_id in bound or entry.blocking:
             impact.vehicles.append(entry)

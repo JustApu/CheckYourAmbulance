@@ -479,16 +479,59 @@ def vehicles_bound_now_or_later(organization_id, template_id, now=None, vehicle_
 
     Inactive vehicles are included: a binding survives deactivation, and reactivation would
     make a retired position required again. vehicle_ids, when given, limits the check to those
-    vehicles (a bounded read for previews, SPEC NFR-6).
+    vehicles with a bounded read (bound_vehicles_among, SPEC NFR-6).
     """
     now = now or timezone.now()
-    filters = {"organization_id": organization_id, "template_id": template_id}
     if vehicle_ids is not None:
-        filters["vehicle_id__in"] = list(vehicle_ids)
-    chains = _binding_chains(**filters)
+        return bound_vehicles_among(organization_id, template_id, vehicle_ids, now)
+    chains = _binding_chains(organization_id=organization_id, template_id=template_id)
     return sorted(
         {vehicle for (vehicle, _t, _s), rows in chains.items() if _bound_now_or_later(rows, now)}
     )
+
+
+def bound_vehicles_among(organization_id, template_id, vehicle_ids, now=None):
+    """Which of vehicle_ids are bound to the template at `now` or by a later BIND (SPEC NFR-6).
+
+    The same rule as _bound_now_or_later: the revision in force on a (vehicle, template, slot)
+    chain is its highest revision effective by `now`, and a later BIND also counts. The database
+    does the per-chain work, so the rows read are at most the distinct vehicle ids given, however
+    long the binding history is.
+    """
+    from django.db.models import F, OuterRef, Subquery
+
+    from cya.obligations.models import RequirementBinding
+
+    now = now or timezone.now()
+    ids = [str(v) for v in vehicle_ids]
+    if not ids:
+        return []
+    chains = RequirementBinding.objects.filter(
+        organization_id=organization_id, template_id=template_id, vehicle_id__in=ids
+    )
+    newest = (
+        RequirementBinding.objects.filter(
+            vehicle_id=OuterRef("vehicle_id"),
+            template_id=OuterRef("template_id"),
+            slot=OuterRef("slot"),
+            effective_at__lte=now,
+        )
+        .order_by("-revision")
+        .values("revision")[:1]
+    )
+    in_force = (
+        chains.filter(effective_at__lte=now, action="BIND")
+        .annotate(newest=Subquery(newest))
+        .filter(revision=F("newest"))
+        .values_list("vehicle_id", flat=True)
+        .distinct()
+    )
+    later = (
+        chains.filter(effective_at__gt=now, action="BIND")
+        .values_list("vehicle_id", flat=True)
+        .distinct()
+    )
+    return sorted({str(v) for v in in_force} | {str(v) for v in later})
 
 
 def template_slot_rows(organization_id, template_id, now):

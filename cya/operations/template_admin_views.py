@@ -17,6 +17,7 @@ import logging
 from urllib.parse import urlencode
 
 from django.core.exceptions import ValidationError
+from django.db.models import F, Min, OuterRef, Subquery
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
@@ -267,16 +268,27 @@ def _slot_choices(org, query="", keep=None):
                 organization_id=org, kind=kind, stable_slot_id__in=slots
             ).values_list("stable_slot_id", "key")
         )
-        newest = {}
-        for row in rows.filter(stable_slot_id__in=slots).order_by(
-            "stable_slot_id", "vehicle_id", "-revision"
-        ):
-            newest.setdefault((row.stable_slot_id, row.vehicle_id), row)
-        offered = set()
-        for (slot, _vehicle), row in newest.items():
-            if row.retired or slot in offered:
-                continue
-            offered.add(slot)
+        # One row per slot, chosen in the database: a vehicle's newest revision of the slot that
+        # is not retired. The rows read are at most the slots, however long the history is.
+        newest = (
+            model.objects.filter(
+                stable_slot_id=OuterRef("stable_slot_id"),
+                vehicle_id=OuterRef("vehicle_id"),
+                effective_at__lte=now,
+            )
+            .order_by("-revision")
+            .values("revision")[:1]
+        )
+        picked = (
+            rows.filter(stable_slot_id__in=slots, retired=False)
+            .annotate(newest=Subquery(newest))
+            .filter(revision=F("newest"))
+            .values("stable_slot_id")
+            .annotate(row_id=Min("pk"))
+            .values_list("row_id", flat=True)
+        )
+        for row in model.objects.filter(pk__in=list(picked)).order_by("stable_slot_id"):
+            slot = row.stable_slot_id
             key = keys.get(slot)
             label = f"{row.label} ({key})" if key else row.label
             choices.append(
