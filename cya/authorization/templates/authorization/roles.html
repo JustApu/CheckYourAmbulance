@@ -50,7 +50,7 @@
     <h3>{{ target.display_name|default:target.email }}</h3>
     {% if target.display_name %}<p class="role-user-email">{{ target.email }}</p>{% endif %}
     {% if target.role_history_unavailable %}
-    <p class="banner banner-error" role="alert">Current roles could not be verified. Role changes for this user are unavailable. View role history or contact support.</p>
+    <p class="banner banner-error">Current roles could not be verified. Role changes for this user are unavailable. View role history or contact support.</p>
     {% else %}
     <p><strong>Current roles:</strong>
       {% if target.current_role_labels %}{% for label in target.current_role_labels %}<span class="pill">{{ label }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}No roles assigned{% endif %}

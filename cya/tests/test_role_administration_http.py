@@ -202,6 +202,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertIsNone(targets[str(crew.pk)].role_operation_id)
         self.assertFalse(targets[str(admin.pk)].role_history_unavailable)
         self.assertContains(response, "Current roles could not be verified.")
+        self.assertNotContains(response, 'role="alert">Current roles could not be verified.')
         self.assertContains(response, "Review grant")
 
     def test_unauthorized_user_is_refused_and_a_denial_is_recorded(self):
