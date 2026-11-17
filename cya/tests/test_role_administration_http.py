@@ -293,7 +293,11 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertContains(section, 'href="/administration/roles/"')
         page = client.get("/administration/roles/")
         self.assertEqual(page.status_code, 200)
-        self.assertContains(page, 'aria-current="page">Administration')
+        html = page.content.decode()
+        self.assertRegex(
+            html, r'<a href="/administration/" aria-current="page">.*?<span>Administration</span>'
+        )
+        self.assertRegex(html, r'<button id="app-nav-more"[^>]*aria-current="true"')
         self.assertContains(page, "Organization users")
 
     def test_role_matrix_shows_current_assignments_and_reviews_one_staged_change(self):
