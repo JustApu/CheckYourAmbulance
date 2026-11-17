@@ -1,0 +1,15 @@
+[Unit]
+Description=Check Your Ambulance: write the mail relay host copy (SPEC DEP-13, issue #8)
+After=mariadb.service
+
+[Service]
+Type=oneshot
+# Root, so the copy can be root-owned mode 0600; the database account is the runtime one.
+User=root
+WorkingDirectory=/srv/cya/current
+EnvironmentFile=/etc/check-your-ambulance/runtime.env
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+TimeoutStartSec=2min
+ExecStart=/srv/cya/current/local/venv/bin/python manage.py export_mail_relay --organization __ORG_ID__ --output /etc/check-your-ambulance/mail-relay.json

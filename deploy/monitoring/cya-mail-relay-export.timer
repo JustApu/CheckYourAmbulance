@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the mail relay host copy every 5 minutes (at least hourly and after each change, SPEC DEP-13)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

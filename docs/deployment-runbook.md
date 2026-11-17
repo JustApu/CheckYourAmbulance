@@ -370,8 +370,8 @@ Run recurring management commands with the protected runtime environment,
 Do not use the schema-owner account for recurring work. Configure the host
 service manager or cron only after testing the command manually on synthetic
 data; keep output and logs private. Verify that each schedule remains enabled
-and runs after a host reboot. [issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8) owns alert delivery; until it is in place,
-operators must inspect each job's result and arrange an approved alert path.
+and runs after a host reboot. Failed runs of these jobs alert through [operations alerts](#operations-alerts-spec-dep-13-issue-8)
+(issue #8); until that is installed, operators must inspect each job's result.
 
 - **Obligations:** invoke `manage.py generate_obligations --organization
   <org-uuid>` for each active organization at least hourly. It is restart-safe,
@@ -502,6 +502,62 @@ reports; verify at both proxy and app server, including errors. Do not publish
 raw logs. [issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8) must test alerts for unreachable site, certificate expiry
 within 14 days, disk space, stale backup/log shipping, refused DB connections
 and repeated 5xx errors, delivered to both operator and deputy.
+
+## Operations alerts (SPEC DEP-13, issue #8)
+
+Alerts go by email to the operator and deputy addresses set on **Administration → Outgoing mail**
+(see [notifications](notifications.md#outgoing-mail-relay-spec-420-dep-13-issue-8)). The host side
+is `deploy/monitoring/`. It uses the standard library only, so it keeps working while the
+application, its virtual environment or the database is down.
+
+| File | Install as | Purpose |
+|---|---|---|
+| `cya-alerts` | `/usr/local/sbin/cya-alerts`, root, mode 0755 | `check`, `probe URL` and `send-test` |
+| `cya-mail-relay-export.service` and `.timer` | `/etc/systemd/system/` (replace `__ORG_ID__`) | Root runs `manage.py export_mail_relay` every 5 minutes. It writes `/etc/check-your-ambulance/mail-relay.json` (root, 0600), the host copy |
+| `cya-monitor.service` and `.timer` | `/etc/systemd/system/` | Root runs `cya-alerts check` every 5 minutes. No dependency on MariaDB or the application |
+| `monitor.json.example` | `/etc/check-your-ambulance/monitor.json` (root, 0644; no secrets) | Certificate paths (replace `__HOSTNAME__`), disks, thresholds, the jobs to watch |
+| `cya-probe.service` and `.timer` | On **another** host the agency controls (replace `__SITE_URL__`) | `cya-alerts probe https://…` every 5 minutes. It alerts after 2 failures in a row |
+
+**Setup:**
+1. Set `CYA_MAIL_RELAY_KEY` in the runtime environment file, if the relay uses a password.
+2. Save the relay on the Outgoing mail page, and use **Send test email** there.
+3. Run `systemctl start cya-mail-relay-export.service` once.
+4. Run `/usr/local/sbin/cya-alerts send-test`. This checks the host path end to end.
+5. Enable both timers.
+6. On the probe host:
+   - copy the relay host copy, root-owned and mode 0600, to the path in its `monitor.json`;
+   - re-copy it after any relay change;
+   - enable `cya-probe.timer`.
+7. Set up the hosted uptime monitor as well. The owner holds the account and sets its recipients to the operator and deputy addresses. Set its re-notification interval to no less than 6 hours. It counts toward the DEP-12 delivery gate (owner decision 2026-11-16).
+
+**What alerts** (DEP-10 and DEP-13):
+- a certificate expiring within 14 days, or one that cannot be read;
+- free disk space under 10%;
+- a full backup not completed within 26 hours, or binary-log shipping not completed within 20 minutes;
+- `mariadb-admin ping` failing;
+- 20 or more 5xx responses in the last 10 minutes of the nginx access log. Only the last 4 MB is read;
+- a watched job whose last run failed: obligations, sessions, both backups, the relay export;
+- a missing host copy, or one more than 2 hours old;
+- from the probe host, the site unreachable.
+
+**Timing.** Each condition is emailed once when it starts, at most every 6 hours while it lasts,
+and once when it clears. A send that fails is retried on the next run. The state is kept in
+`/var/lib/cya-monitor/state.json` (0600).
+
+**What alerts contain.** The host name and the condition. They never include settings or secrets.
+Output goes only to the journal, as short lines without addresses. Keep the journal's retention
+short and separate from audit records.
+
+**Before the pilot (DEP-12):** induce each condition on a throwaway server, then record that both
+recipients received the start and the clear. Suggested ways to induce each one:
+- a short-lived certificate in `certificates`;
+- a disk-fill file;
+- stopping a backup timer;
+- stopping MariaDB;
+- a burst of requests to a route that returns 502;
+- a failing job;
+- deleting the host copy;
+- stopping the proxy, as seen from both the probe host and the hosted monitor; confirm both deliver the outage and the recovery to the operator and the deputy.
 
 ## Upgrade, failure and recovery
 
