@@ -20,6 +20,22 @@
   - `cyaShell.setSaveState(element, state)` changes it, and treats an unknown state as `failed`;
   - a connection-lost banner (`role="alert"`) appears when the browser goes offline, and says an item marked Unconfirmed may have been recorded, so use its Retry rather than a new tap.
 
+## Home (issue #194)
+
+`/` greets the signed-in user by first name (the first word of their display name) with the day and station time, then shows what to do next. `cya/shell/home.py` reads each part on its own; a part whose reader fails shows a short "unavailable" note and the rest still renders. A user with no role sees the earlier one-line page.
+
+- **Everyone with a role:**
+  - **In progress:** up to three of their open sessions, active within the last 6 hours, each with how many items are checked and how many by teammates, and **Continue inspection** (the first one is the primary button). With none, **Start an inspection** is the primary button.
+  - **Due:** per vehicle, chips for overdue (and missed), due now, due soon and done, from the fleet-readiness picture.
+  - **Problems:** up to five active problems, newest first, with the total, and **Report a problem**.
+  - **Last check by you**, in station time.
+- **Your vehicles:** there is no stored assignment of people to vehicles. Home uses the vehicles the user worked on in the last 24 hours: a session joined, a check recorded or a problem assigned to them. With none, Home shows every vehicle and says so.
+- **Supervisors and Administrators also get:**
+  - four tiles: vehicles ready (In Service), checks done of those owed, open problems, and items waiting for them;
+  - **Needs you:** status-change requests to review, fixes to verify, problems to assign;
+  - a **Vehicles** table: status, checks done, overdue, problems.
+- **Progress means task completion only.** There are no scores, rankings or comparisons between people.
+
 ## Roles and enforcement
 
 Navigation shows a section only if the user holds one of its roles, but the **server enforces every section** (SPEC §3.2): signed-out visitors are redirected to sign-in, and a user without a permitted role gets 403.
