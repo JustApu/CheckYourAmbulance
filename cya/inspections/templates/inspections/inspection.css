@@ -11,8 +11,18 @@
 .inspection-options .button { width: 100%; text-align: left; overflow-wrap: anywhere; }
 .separate-inspection summary { display: flex; align-items: center; min-height: 48px; font-weight: 700; cursor: pointer; }
 .session-row-status { flex: 1 1 18rem; min-width: 0; overflow-wrap: anywhere; }
+/* Vehicle cards (#194): one column on phones, two on tablets, three on wide screens; a chevron
+   shows the whole card opens the vehicle. */
 .vehicle-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
-.vehicle-link { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; min-height: 48px; padding: .75rem 1rem; border: 2px solid var(--line); border-radius: .5rem; color: var(--fg); text-decoration: none; }
+.vehicle-link { position: relative; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; min-height: 56px; height: 100%; padding: .875rem 2.5rem .875rem 1rem; background: var(--bg); border: 1px solid var(--line-soft); border-radius: var(--radius-card); color: var(--fg); text-decoration: none; }
+.vehicle-link::after { content: ""; position: absolute; right: 1.1rem; top: 50%; width: .55rem; height: .55rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-50%) rotate(-45deg); }
+.vehicle-link:hover { border-color: var(--accent); background: var(--info-bg); }
+@media (min-width: 48rem) { .vehicle-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 80rem) { .vehicle-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* Supervisor queue groups side by side on desktop (#194). */
+.queue-groups { display: grid; gap: 0 1rem; align-items: start; }
+@media (min-width: 64rem) { .queue-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (forced-colors: active) { .vehicle-link { border-color: CanvasText; } .vehicle-link::after { border-color: CanvasText; } }
 .vehicle-name { flex: 1 1 9rem; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
 .vehicle-badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; }
 .muted { color: var(--muted); }

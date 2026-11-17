@@ -1,4 +1,5 @@
 {% extends "shell/base.html" %}
+{% block main_class %} class="main-wide"{% endblock %}
 {% load station_time %}
 {% block head %}{% if home %}<style>{% include "inspections/inspection.css" %}</style>{% endif %}{% endblock %}
 {% block page_heading %}{% if home %}<h1>{{ home.greeting.text }}</h1>

@@ -20,6 +20,12 @@
   - `cyaShell.setSaveState(element, state)` changes it, and treats an unknown state as `failed`;
   - a connection-lost banner (`role="alert"`) appears when the browser goes offline, and says an item marked Unconfirmed may have been recorded, so use its Retry rather than a new tap.
 
+## Layouts by screen size (issue #194)
+
+- **Width:** pages keep a 60rem reading width. Dashboards and admin tables (Home, fleet readiness, the supervisor queue, and the vehicle, template, kit, position and role pages) set `{% block main_class %} class="main-wide"{% endblock %}` for up to 90rem.
+- **Vehicle cards:** the Inspect and Vehicles lists are cards with a chevron, one column on phones, two from 48rem and three from 80rem. The whole card is the link.
+- **Dashboards:** the supervisor queue shows its groups two across from 64rem; fleet readiness shows vehicles two across from 80rem, with notices and totals spanning the row.
+
 ## Home (issue #194)
 
 `/` greets the signed-in user by first name (the first word of their display name) with the day and station time, then shows what to do next. `cya/shell/home.py` reads each part on its own; a part whose reader fails shows a short "unavailable" note and the rest still renders. A user with no role sees the earlier one-line page.

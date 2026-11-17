@@ -1,4 +1,5 @@
 {% extends "shell/base.html" %}
+{% block main_class %} class="main-wide"{% endblock %}
 {% block content %}
 {% if saved %}{% include "shell/save_state.html" with state="saved" %}{% endif %}
 {% if error %}<p class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ error }}</p>{% endif %}
