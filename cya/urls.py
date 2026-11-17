@@ -33,10 +33,13 @@ from cya.operations import (
 from cya.operations import views as operations_views
 from cya.seals import api as seal_api
 from cya.seals import views as seal_views
+from cya.shell import brand_views
 from cya.shell import views as shell
 
 urlpatterns = [
     path("", shell.home, name="home"),
+    path("manifest.webmanifest", brand_views.manifest, name="web-manifest"),
+    path("icons/<str:name>", brand_views.icon, name="brand-icon"),
     path("fleet/", shell.fleet, name="fleet"),
     path("fleet/readiness/", readiness_views.screen, name="fleet-readiness"),
     path("fleet/readiness/panel/", readiness_views.panel, name="fleet-readiness-panel"),

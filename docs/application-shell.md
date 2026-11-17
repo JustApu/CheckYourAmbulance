@@ -61,6 +61,26 @@ For owner testing with VoiceOver or NVDA, use a synthetic account and vehicle. R
 
 **Manual Windows contrast-theme pass (2026-11-16):** The owner enabled the Windows Night Sky contrast theme on Windows 10 Pro 26H2 (build 26300.9974). In Chrome 157.0.8103.79, the current-source synthetic role-administration fixture using the production shell and inspection styles was visually inspected. Headings and body text, role pills, links, role select/options, review buttons, the disabled confirmation button, and the history table remained visible. The disabled action remained distinct with muted text and a dashed border. Keyboard focus on the role selector showed a clear system-color outline; the focused option remained legible. The history table retained its own horizontal scroll area. This verifies the shared styles in the synthetic fixture under the actual Windows contrast theme, not a Django-rendered production response or every workflow. No role was changed. The owner left Night Sky enabled after the check.
 
+## App icon and install (issue #194)
+
+Phones can add the app to the home screen. It then opens full screen with its own icon.
+
+- **Icon.** The approved concept G: a white check above "CYA" inside a navy shield with a red top band. The sources are in `cya/shell/brand/`:
+  - `icon.svg`: the app icon, a white shield on a navy tile;
+  - `maskable.svg`: Android's full-bleed version, with the mark inside the safe zone;
+  - `favicon.svg`: the shield and check, no letters, for browser tabs;
+  - `monochrome.svg`: the check cut out of the shield, for systems that use only the icon's shape.
+
+  `render.mjs` renders the PNGs (192, 512, the maskable 512, the 180 Apple touch icon and the 32 favicon) in Edge. Run it again and commit its output whenever an SVG changes. The PNGs fix the "CYA" letters, which in an SVG would depend on the device's fonts.
+- **Serving.** The app has no static-file pipeline, so `cya/shell/brand_views.py` serves the icons and the manifest:
+  - `/icons/<name>` serves only the files in its fixed `ICONS` table, cached for a year;
+  - `/manifest.webmanifest` gives the name "Check Your Ambulance", the short name "CYA", `display: standalone` and theme color navy `#14305C`, cached for a day.
+
+  Both answer without sign-in, because browsers fetch the manifest without credentials.
+- **Page head.** `base.html` links the SVG and PNG favicons, the Apple touch icon and the manifest. It sets the theme color (navy in light mode, `#0B1426` in dark mode) and the home-screen title "CYA".
+- **No service worker.** The app stays online-only (SPEC).
+- **Changing an icon.** Give the new file a new name: browsers keep the old one for a year.
+
 ## Stylesheet and script are inline
 
 CSS and JS are included in the page (`shell.css`, `shell.js`) so the shell needs no static-file serving, which is a deployment decision not yet made (SPEC §17). If a Content-Security-Policy is added later, these need a nonce or a move to served files.
