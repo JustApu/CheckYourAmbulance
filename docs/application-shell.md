@@ -29,7 +29,7 @@
   - **Due:** per vehicle, chips for overdue (and missed), due now, due soon and done, from the fleet-readiness picture.
   - **Problems:** up to five active problems, newest first, with the total, and **Report a problem**.
   - **Last check by you**, in station time.
-- **Your vehicles:** there is no stored assignment of people to vehicles. Home uses the vehicles the user worked on in the last 24 hours: a session joined, a check recorded or a problem assigned to them. With none, Home shows every vehicle and says so.
+- **Every vehicle:** Home always covers the whole active fleet (owner decision, 2026-11-17); there is no per-person vehicle list.
 - **Supervisors and Administrators also get:**
   - four tiles: vehicles ready (In Service), checks done of those owed, open problems, and items waiting for them;
   - **Needs you:** status-change requests to review, fixes to verify, problems to assign;

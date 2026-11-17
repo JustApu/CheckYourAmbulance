@@ -4,15 +4,12 @@ Everything here only reads. Each section is computed on its own, and a section w
 fails shows a short "unavailable" note instead of breaking the page; Home must always render,
 because other pages and tests rely on it.
 
-"Your vehicles" has no stored assignment yet. It is the vehicles the user worked on in the last
-24 hours (a session joined, a check recorded or a problem assigned); with none, Home uses the
-whole active fleet and says so.
+Home always covers every vehicle (owner decision, 2026-11-17); there is no per-person vehicle list.
 
 Progress is about task completion only: no scores, rankings or comparisons between people.
 """
 
 import logging
-from datetime import timedelta
 
 from django.db import DatabaseError
 from django.db.models import Count, Q
@@ -23,7 +20,6 @@ from cya.shell import navigation
 
 logger = logging.getLogger(__name__)
 
-RECENT = timedelta(hours=24)
 MAX_IN_PROGRESS = 3
 MAX_PROBLEMS = 5
 MAX_REQUESTS = 5
@@ -57,35 +53,6 @@ def greeting(user, now):
     part = "morning" if 5 <= hour < 12 else "afternoon" if 12 <= hour < 17 else "evening"
     name = first_name(user)
     return {"text": f"Good {part}, {name}" if name else f"Good {part}", "now": now}
-
-
-def _recent_vehicle_ids(user, now):
-    from cya.checks.models import CheckRecord
-    from cya.deficiencies.models import DeficiencyProjection
-    from cya.deficiencies.transitions import ACTIVE_STATUSES
-    from cya.inspections.models import SessionParticipant, SessionProjection
-
-    org = user.organization_id
-    since = now - RECENT
-    sessions = SessionParticipant.objects.filter(organization_id=org, user=user).values(
-        "session_id"
-    )
-    ids = set(
-        SessionProjection.objects.filter(
-            organization_id=org, session__in=sessions, last_activity_at__gte=since
-        ).values_list("session__vehicle_id", flat=True)
-    )
-    ids |= set(
-        CheckRecord.objects.filter(
-            organization_id=org, actor_user=user, recorded_at__gte=since
-        ).values_list("vehicle_id", flat=True)
-    )
-    ids |= set(
-        DeficiencyProjection.objects.filter(
-            organization_id=org, assignee=user, status__in=ACTIVE_STATUSES
-        ).values_list("deficiency__vehicle_id", flat=True)
-    )
-    return {str(i) for i in ids}
 
 
 def in_progress(user, now):
@@ -132,12 +99,10 @@ def _readiness(user, now):
     return fleet_readiness(str(user.organization_id), now=now)
 
 
-def due_today(picture, vehicle_ids):
+def due_today(picture):
     """Per vehicle: overdue, due now, due soon and done, from the readiness picture."""
     rows = []
     for vehicle in picture.vehicles:
-        if vehicle_ids and vehicle.vehicle_id not in vehicle_ids:
-            continue
         counts = vehicle.counts
         rows.append(
             {
@@ -152,7 +117,7 @@ def due_today(picture, vehicle_ids):
     return {"rows": rows, "truncated": picture.truncated}
 
 
-def problems(user, vehicle_ids):
+def problems(user):
     from cya.deficiencies.models import DeficiencyProjection
     from cya.deficiencies.transitions import ACTIVE_STATUSES
     from cya.inspections.workflow_views import STATUS_LABELS
@@ -160,8 +125,6 @@ def problems(user, vehicle_ids):
     found = DeficiencyProjection.objects.filter(
         organization_id=user.organization_id, status__in=ACTIVE_STATUSES
     )
-    if vehicle_ids:
-        found = found.filter(deficiency__vehicle_id__in=vehicle_ids)
     total = found.count()
     rows = [
         {
@@ -263,15 +226,12 @@ def build(user, now=None):
     if not roles:
         return None
     now = now or timezone.now()
-    recent = _guarded("recent vehicles", lambda: _recent_vehicle_ids(user, now))
-    vehicle_ids = set() if isinstance(recent, Unavailable) else recent
     picture = _guarded("readiness", lambda: _readiness(user, now))
     context = {
         "greeting": greeting(user, now),
-        "mine": bool(vehicle_ids),
         "in_progress": _guarded("in progress", lambda: in_progress(user, now)),
-        "due": picture if isinstance(picture, Unavailable) else due_today(picture, vehicle_ids),
-        "problems": _guarded("problems", lambda: problems(user, vehicle_ids)),
+        "due": picture if isinstance(picture, Unavailable) else due_today(picture),
+        "problems": _guarded("problems", lambda: problems(user)),
         "last_check": _guarded("last check", lambda: last_check(user)),
         "supervisor": None,
     }

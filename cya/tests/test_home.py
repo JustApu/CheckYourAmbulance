@@ -64,9 +64,10 @@ class HomeScreenTests(CrewUiCase):
         )
         self.assertIn("0 items checked", html)
         self.assertNotIn("Start an inspection", html)
-        # Working on a vehicle makes it "yours" for Home.
-        self.assertIn(">Due on your vehicles</h2>", html)
-        self.assertIn(">Problems on your vehicles</h2>", html)
+        # Home always covers every vehicle (owner, 2026-11-17).
+        self.assertIn(">Due today</h2>", html)
+        self.assertIn(">Open problems</h2>", html)
+        self.assertNotIn("your vehicles", html)
 
     def test_supervisor_home_adds_tiles_needs_you_and_vehicles(self):
         client, user = self.harness.sign_in("home-supervisor")
