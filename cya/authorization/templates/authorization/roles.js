@@ -8,7 +8,13 @@
     const update = () => {
       const changed = choices.filter((choice) => choice.checked !== choice.defaultChecked);
       choices.forEach((choice) => {
-        choice.closest(".role-option").classList.toggle("is-assigned", choice.checked);
+        const option = choice.closest(".role-option");
+        const pending = choice.checked !== choice.defaultChecked;
+        option.classList.toggle("is-assigned", choice.defaultChecked);
+        option.classList.toggle("is-pending", pending);
+        const pendingLabel = option.querySelector("[data-role-pending]");
+        pendingLabel.textContent = pending ? (choice.checked ? "Adding" : "Removing") : "";
+        pendingLabel.hidden = !pending;
       });
       review.hidden = changed.length === 0;
       review.disabled = changed.length > 1;
