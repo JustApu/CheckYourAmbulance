@@ -1,5 +1,6 @@
 (function () {
   "use strict";
+  document.documentElement.className += " js";
   try {
     var theme = window.localStorage.getItem("cya-theme");
     if (theme === "light" || theme === "dark") {

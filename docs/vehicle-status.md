@@ -104,7 +104,7 @@ query parameters, and a user with no current built-in role gets 403 (deny by def
 recorded and the other receives `ALREADY_DECIDED`. A replay of the same `operation_id` returns the original
 result and publishes nothing again.
 
-**Screens** (the Vehicle status section, every built-in role may read it):
+**Screens** (the Vehicle status section, shown as the **Vehicles** tab since issue #194; every built-in role may read it):
 
 - `/status/` lists active vehicles with their status and how many requests are waiting.
 - `/status/vehicles/{id}/` shows the current status with who set it and when, restrictions and the

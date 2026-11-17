@@ -22,7 +22,7 @@ from cya.inspections.views import MAX_VEHICLES, STATUS_LABELS, _authorized, _veh
 from cya.operations import service
 from cya.operations.commands import ACTION
 from cya.operations.status import status_at
-from cya.shell.navigation import roles_for
+from cya.shell.navigation import ADMINISTRATOR, SUPERVISOR, roles_for
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,14 @@ def vehicles(request, user):
         request,
         "operations/vehicles.html",
         {
-            "title": "Vehicle status",
+            # The Vehicles destination (issue #194): status for everyone, and a way to the
+            # fleet readiness picture for those who may read it.
+            "title": "Vehicles",
+            "readiness_url": (
+                reverse("fleet-readiness")
+                if roles_for(user) & {SUPERVISOR, ADMINISTRATOR}
+                else None
+            ),
             "vehicles": rows,
             "pending_total": len(pending["requests"]),
             "pending_truncated": pending["truncated"],
