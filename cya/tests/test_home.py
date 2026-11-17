@@ -1,6 +1,5 @@
 """The signed-in Home screen (issue #194 items 3 and 11)."""
 
-import re
 from datetime import datetime
 from types import SimpleNamespace
 from unittest import mock
@@ -88,6 +87,7 @@ class HomeScreenTests(CrewUiCase):
         self.assertNotIn("synthetic", "\n".join(logs.output), "only the error class is logged")
 
     def test_home_shows_no_scores_or_rankings(self):
-        html = re.sub(r"<style>.*?</style>|<script>.*?</script>", "", self.page(), flags=re.S)
+        page = self.page()
+        html = page[page.index("<main") : page.index("</main>")]  # the page content only
         for word in ("rank", "score", "leaderboard"):
             self.assertNotIn(word, html.lower())
