@@ -221,7 +221,18 @@ async function testInspectionOutcomeSemantics(viewport) {
     assert.match(await failed.innerText(), /Due/);
     assert.match(await failed.innerText(), /Latest recorded check: Fail by Synthetic EMT/);
     assert.match(await failed.innerText(), /Deficiency status: Open\. Severity: High/);
-    assert.equal(await failed.locator(".pill-attention").count(), 0, `${viewport.name}: an open deficiency is not repeated as a second attention badge`);
+    assert.equal(await failed.locator(".pill-needs-attention").count(), 0, `${viewport.name}: an open deficiency is not repeated as a second attention badge`);
+    // Issue 194: chip classes map to the approved status colors (amber for needs attention, red for failed/overdue).
+    const chipColors = await page.evaluate(() => {
+      const make = (cls, style) => { const s = document.createElement("span"); s.className = cls; if (style) s.style.cssText = style; document.body.appendChild(s); const c = getComputedStyle(s); const r = [c.backgroundColor, c.color]; s.remove(); return r; };
+      return {
+        needs: make("pill pill-needs-attention"), wait: make("", "background: var(--wait-bg); color: var(--wait-fg)"),
+        failed: make("pill pill-attention"), bad: make("", "background: var(--bad-bg); color: var(--bad-fg)"),
+      };
+    });
+    assert.deepEqual(chipColors.needs, chipColors.wait, `${viewport.name}: Needs attention uses the amber status pair`);
+    assert.deepEqual(chipColors.failed, chipColors.bad, `${viewport.name}: failed and overdue counts keep the red status pair`);
+    assert.notDeepEqual(chipColors.wait, chipColors.bad, `${viewport.name}: amber and red status pairs differ`);
     const passedWithOpenDeficiency = page.locator('#items > li[data-item-key="item-pass-open|"]');
     assert.match(await passedWithOpenDeficiency.innerText(), /Passed/);
     assert.match(await passedWithOpenDeficiency.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
@@ -868,19 +879,19 @@ try {
       await page.emulateMedia({ colorScheme: "dark" });
       const theme = page.getByLabel("Theme");
       const darkBackground = await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
-      assert.equal(darkBackground, "rgb(20, 24, 29)", `${viewport.name}: Auto did not follow dark system preference`);
+      assert.equal(darkBackground, "rgb(11, 20, 38)", `${viewport.name}: Auto did not follow dark system preference`);
       await theme.selectOption("light");
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 255, 255)", `${viewport.name}: Light override did not apply`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 247, 250)", `${viewport.name}: Light override did not apply`);
       await theme.selectOption("dark");
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(20, 24, 29)", `${viewport.name}: Dark override did not apply`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: Dark override did not apply`);
       await page.reload({ waitUntil: "load" });
       assert.equal(await page.getByLabel("Theme").inputValue(), "dark", `${viewport.name}: saved theme was not restored`);
       assert.equal(await page.evaluate(() => window.__themeBeforeStyles), "dark", `${viewport.name}: saved theme was not applied before the page stylesheet`);
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(20, 24, 29)", `${viewport.name}: restored Dark theme did not apply`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: restored Dark theme did not apply`);
       const restoredTheme = page.getByLabel("Theme");
       await restoredTheme.selectOption("auto");
       await page.emulateMedia({ colorScheme: "light" });
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 255, 255)", `${viewport.name}: Auto did not follow light system preference`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 247, 250)", `${viewport.name}: Auto did not follow light system preference`);
 
       await page.evaluate(() => {
         const state = document.getElementById("save-state");

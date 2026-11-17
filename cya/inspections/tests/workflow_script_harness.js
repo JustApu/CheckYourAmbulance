@@ -348,7 +348,12 @@ function generic(kind) {
     assert.equal(findClass(item(), "window-status").textContent, "Due");
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Fail by Synthetic EMT"));
     assert(findClass(item(), "known-deficiency").textContent.includes("Deficiency status: Open. Severity: High."));
-    assert.equal(findClass(item(), "pill-attention"), null, "the open deficiency supplies the attention cue without a duplicate badge");
+    assert.equal(findClass(item(), "pill-needs-attention"), null, "the open deficiency supplies the attention cue without a duplicate badge");
+    run.context.testUI.setRows([{...dueFail, deficiencies: []}]); run.context.testUI.render();
+    // Issue 194: "Needs attention" is the amber chip; red pill-attention is kept for failed and overdue counts.
+    assert.equal(findClass(item(), "pill-needs-attention").textContent, "⚠ Needs attention");
+    assert.equal(findClass(item(), "pill-attention"), null, "needs attention is not drawn with the red failed/overdue chip");
+    run.context.testUI.setRows([dueFail]); run.context.testUI.render();
     assert.deepEqual(marked(item()), [], "a Fail from a window that is due again marks no button");
 
     const passedWithOpenDeficiency = {...dueFail, obligation_state: "SATISFIED", obligation_outcome: "PASSED",
