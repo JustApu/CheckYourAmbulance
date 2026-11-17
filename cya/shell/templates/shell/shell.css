@@ -47,7 +47,6 @@ a { color: var(--accent); }
 .site-nav a[aria-current="page"] { font-weight: 700; border-bottom-color: var(--accent); }
 .site-nav a:hover { text-decoration: underline; }
 main { max-width: 60rem; margin: 0 auto; padding: 1rem; }
-main:focus { outline: none; }
 h1 { font-size: 1.5rem; line-height: 1.25; margin: .5rem 0 1rem; }
 .banner { display: flex; gap: .5rem; align-items: flex-start; padding: .75rem 1rem; border-bottom: 2px solid currentColor; }
 .banner[hidden] { display: none; }

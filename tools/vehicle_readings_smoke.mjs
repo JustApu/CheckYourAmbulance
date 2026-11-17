@@ -51,6 +51,10 @@ try {
       assert.equal(await page.getByLabel("Engine hours (optional)").getAttribute("inputmode"), "decimal");
       assert.equal(await page.locator("#odo-unit").inputValue(), "km");
       assert.equal(await page.locator("select").count(), 0, `${viewport.name}: established unit still requires selection`);
+      const noteFontSize = await page.locator(".readings-save-note").evaluate(
+        (element) => parseFloat(getComputedStyle(element).fontSize),
+      );
+      assert.ok(noteFontSize >= 16, `${viewport.name}: vehicle-reading save instruction is smaller than body text (${noteFontSize}px)`);
       const metrics = await page.evaluate(() => ({
         documentWidth: document.documentElement.scrollWidth,
         cardHeight: document.querySelector(".vehicle-readings").getBoundingClientRect().height,

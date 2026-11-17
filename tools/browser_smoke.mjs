@@ -707,6 +707,47 @@ try {
       const skipBox = await skipLink.boundingBox();
       assert.ok(skipBox && skipBox.y >= 0, `${viewport.name}: focused skip link is not visible`);
       assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: skip link focus indicator is missing`);
+      await page.keyboard.press("Enter");
+      const main = page.locator("#main");
+      assert.equal(await main.evaluate((element) => element === document.activeElement), true, `${viewport.name}: skip link did not move focus to main`);
+      const mainOutline = await main.evaluate((element) => ({
+        width: getComputedStyle(element).outlineWidth,
+        style: getComputedStyle(element).outlineStyle,
+      }));
+      assert.equal(mainOutline.width, "3px", `${viewport.name}: skip-link destination has no visible focus indicator`);
+      assert.equal(mainOutline.style, "solid", `${viewport.name}: skip-link destination focus indicator is not solid`);
+      await page.emulateMedia({ forcedColors: "active" });
+      const forcedInspection = await page.evaluate(() => {
+        const probe = document.createElement("span");
+        document.body.append(probe);
+        const systemColor = (value) => {
+          probe.style.color = value;
+          return getComputedStyle(probe).color;
+        };
+        const status = document.querySelector('.status-pill[data-status="OUT_OF_SERVICE"]');
+        const action = document.querySelector(".item-controls .button.primary");
+        const result = {
+          active: matchMedia("(forced-colors: active)").matches,
+          focus: getComputedStyle(document.activeElement).outlineColor,
+          highlight: systemColor("Highlight"),
+          statusText: getComputedStyle(status).color,
+          canvasText: systemColor("CanvasText"),
+          statusBackground: getComputedStyle(status).backgroundColor,
+          canvas: systemColor("Canvas"),
+          actionText: getComputedStyle(action).color,
+          buttonText: systemColor("ButtonText"),
+          statusLabel: status.textContent.trim(),
+        };
+        probe.remove();
+        return result;
+      });
+      assert.equal(forcedInspection.active, true, `${viewport.name}: forced-colors mode did not activate`);
+      assert.equal(forcedInspection.focus, forcedInspection.highlight, `${viewport.name}: main focus is not visible with the system highlight color`);
+      assert.equal(forcedInspection.statusText, forcedInspection.canvasText, `${viewport.name}: inspection status text does not use a system color`);
+      assert.equal(forcedInspection.statusBackground, forcedInspection.canvas, `${viewport.name}: inspection status background does not use Canvas`);
+      assert.equal(forcedInspection.actionText, forcedInspection.buttonText, `${viewport.name}: inspection action does not use ButtonText`);
+      assert.equal(forcedInspection.statusLabel, "Out of service", `${viewport.name}: status wording disappeared in forced-colors mode`);
+      await page.emulateMedia({ forcedColors: "none" });
       const navToggle = page.locator("#site-nav-toggle");
       const navList = page.locator("#site-nav-list");
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-header") !== null), true, `${viewport.name}: menu is outside the compact header`);
