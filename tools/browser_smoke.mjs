@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 20819)
+Total output lines: 888
+
 #!/usr/bin/env node
 // Deterministic browser smoke against real shell/inspection CSS and synthetic markup.
 
@@ -371,92 +374,7 @@ async function testReadinessSummary(viewport) {
   const readiness = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1"><title>Fleet readiness</title>
     <style>${css}</style></head><body><main id="main"><h1>Fleet readiness</h1>
-    <div class="readiness-filter"><input class="readiness-filter-input" id="readiness-attention-only" type="checkbox" aria-describedby="readiness-filter-help"><div class="readiness-filter-copy"><label for="readiness-attention-only">Show vehicles needing attention</label><p id="readiness-filter-help" class="readiness-filter-help">Includes non-In-Service status, failed, overdue or missed checks, active deficiencies among the top two active configured severity ranks (or any active deficiency if no level is active), suspensions, or a truncated deficiency list. These independent signals do not combine into a compliance or operational status.</p></div>
-    <div id="readiness-panel"><p>Each state is counted on its own; nothing here is a single &quot;compliant&quot; flag.</p>
-      <section class="panel readiness-vehicle" data-vehicle-id="vehicle-a" data-attention="true" aria-labelledby="vehicle-a-heading">
-        <div class="readiness-overview"><div class="readiness-identity"><h2 id="vehicle-a-heading">Medic 6</h2><span class="pill status-pill" data-status="IN_SERVICE">In Service</span></div>
-        <div class="readiness-measure"><h3>Inspection progress</h3><p>8 of 10 owed checks recorded</p></div>
-        <ul class="readiness-signals" aria-label="Independent attention counts"><li class="pill pill-attention">Failed: 1</li><li class="pill pill-attention">Overdue: 2</li><li class="pill">Missed: 0</li><li class="pill pill-attention">Critical / High shown: 1</li><li class="pill">Suspensions: 0</li></ul>
-        <nav class="readiness-actions" aria-label="Medic 6 workflows"><a href="/inspection/vehicles/vehicle-a/">Open vehicle inspection</a><a href="/status/vehicles/vehicle-a/">Current status workflow</a><a href="/deficiencies/def-a/">Open oldest active deficiency</a></nav></div>
-        <details class="readiness-details" data-vehicle-id="vehicle-a"><summary>Obligations, deficiencies and suspensions for Medic 6</summary><div class="readiness-detail-content"><h3>Obligations by state</h3><ul><li>Failed: 1</li><li>Overdue: 2</li></ul></div></details>
-      </section>
-      <section class="panel readiness-vehicle" data-vehicle-id="vehicle-b" data-attention="false"><div class="readiness-overview"><div class="readiness-identity"><h2>Medic 7</h2><span class="pill status-pill" data-status="IN_SERVICE">In Service</span></div><div class="readiness-measure"><h3>Inspection progress</h3><p>10 of 10 owed checks recorded</p></div><ul class="readiness-signals" aria-label="Independent attention counts"><li class="pill">Failed: 0</li><li class="pill">Overdue: 0</li><li class="pill">Missed: 0</li><li class="pill">Critical / High shown: 0</li><li class="pill">Suspensions: 0</li></ul></div></section>
-      <section class="panel readiness-vehicle" data-vehicle-id="vehicle-c" data-attention="true"><div class="readiness-overview"><div class="readiness-identity"><h2>Medic 8</h2><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of Service</span></div><div class="readiness-measure"><h3>Inspection progress</h3><p>10 of 10 owed checks recorded</p></div><ul class="readiness-signals" aria-label="Independent attention counts"><li class="pill">Failed: 0</li><li class="pill">Overdue: 0</li><li class="pill">Missed: 0</li><li class="pill">Critical / High shown: 0</li><li class="pill">Suspensions: 0</li></ul></div></section>
-    </div></div></main></body></html>`;
-  try {
-    await page.route("http://readiness.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: readiness }));
-    await page.goto("http://readiness.test/", { waitUntil: "load" });
-    assert.equal(await page.getByRole("heading", { name: "Fleet readiness" }).count(), 1);
-    assert.match(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-a"]').innerText(), /In Service[\s\S]*Failed: 1[\s\S]*Overdue: 2[\s\S]*Missed: 0[\s\S]*Critical \/ High shown: 1[\s\S]*Suspensions: 0/);
-    assert.equal(await page.getByRole("link", { name: "Open vehicle inspection" }).getAttribute("href"), "/inspection/vehicles/vehicle-a/");
-    assert.equal(await page.getByRole("link", { name: "Current status workflow" }).getAttribute("href"), "/status/vehicles/vehicle-a/");
-    assert.equal(await page.getByRole("link", { name: "Open oldest active deficiency" }).getAttribute("href"), "/deficiencies/def-a/");
-    const filter = page.getByRole("checkbox", { name: "Show vehicles needing attention" });
-    await filter.focus();
-    assert.equal(await filter.evaluate((element) => element === document.activeElement), true, `${viewport.name}: attention filter is not keyboard-focusable`);
-    await page.keyboard.press("Space");
-    assert.equal(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-a"]').isVisible(), true, `${viewport.name}: attention vehicle was hidden by the filter`);
-    assert.equal(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-c"]').isVisible(), true, `${viewport.name}: non-In-Service status was not filtered as an independent signal`);
-    assert.equal(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-b"]').isVisible(), false, `${viewport.name}: vehicle without attention signals remained in the filtered view`);
-    const summary = page.getByText("Obligations, deficiencies and suspensions for Medic 6");
-    const targetHeight = await summary.evaluate((element) => element.getBoundingClientRect().height);
-    assert.ok(targetHeight >= 48, `${viewport.name}: details target is shorter than 48 CSS pixels`);
-    await summary.focus();
-    await page.keyboard.press("Enter");
-    assert.equal(await summary.evaluate((element) => element.parentElement.open), true, `${viewport.name}: details disclosure did not open from the keyboard`);
-    const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-    assert.ok(metrics.document <= viewport.width, `${viewport.name}: readiness page overflows horizontally ${JSON.stringify(metrics)}`);
-    assert.ok(metrics.body <= viewport.width, `${viewport.name}: readiness body overflows horizontally ${JSON.stringify(metrics)}`);
-    await page.setViewportSize({ width: Math.max(320, Math.floor(viewport.width / 2)), height: viewport.height });
-    const zoom = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-    assert.ok(zoom.document <= zoom.viewport, `${viewport.name} at 200%: readiness page overflows ${JSON.stringify(zoom)}`);
-    assert.ok(zoom.body <= zoom.viewport, `${viewport.name} at 200%: readiness body overflows ${JSON.stringify(zoom)}`);
-    console.log(`${viewport.name}: readiness summaries, filter, links, disclosure and responsive layout passed`);
-  } finally {
-    await page.close();
-  }
-}
-
-async function testDeficiencyFilters(viewport) {
-  const page = await browser.newPage({ viewport });
-  const listing = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Deficiencies</title>
-    <style>${css}</style></head><body><main id="main"><h1>Deficiencies</h1>
-    <form class="panel deficiency-filter-form" method="get" action="/deficiencies/">
-      <div class="deficiency-filter-grid">
-        <label for="deficiency-search">Search deficiency text<input id="deficiency-search" type="search" name="q" value="brake" maxlength="100"></label>
-        <label for="deficiency-vehicle">Vehicle name or number<input id="deficiency-vehicle" type="search" name="vehicle" value="Medic 6" maxlength="100"></label>
-        <label for="deficiency-severity">Severity<select id="deficiency-severity" name="severity"><option value="">Any severity</option><option value="URGENT" selected>Urgent (URGENT)</option><option value="RETIRED">Legacy (RETIRED, retired)</option></select></label>
-        <label for="deficiency-assignee">Assigned to<input id="deficiency-assignee" type="search" name="assignee" value="Sam Example" maxlength="100"></label>
-        <label for="deficiency-status">Lifecycle status<select id="deficiency-status" name="status"><option value="active">Outstanding only</option><option value="all">All statuses, including closed and Reported in Error</option><option value="OPEN">Open</option><option value="REPORTED_IN_ERROR">Reported in Error</option></select></label>
-        <label class="check" for="deficiency-overdue"><input id="deficiency-overdue" type="checkbox" name="overdue" value="1"> Overdue only</label>
-      </div><div class="deficiency-filter-actions"><button class="button primary" type="submit">Apply filters</button><a class="button" href="/deficiencies/">Clear filters</a></div>
-    </form><p class="deficiency-applied-filters"><strong>Applied filters:</strong> Text: brake · Vehicle: Medic 6</p>
-    <p class="deficiency-results-count">42 matching deficiencies; showing 25 on this page.</p>
-    <ul class="plain"><li class="panel"><a href="/deficiencies/one/">Synthetic brake warning</a> — Medic 6 (North County Regional Ambulance)</li></ul>
-    <nav class="deficiency-pagination" aria-label="Deficiency result pages"><a class="button" href="/deficiencies/?q=brake&amp;results_page=1">Newer results</a><a class="button" href="/deficiencies/?q=brake&amp;results_page=2">Older results</a></nav>
-    </main></body></html>`;
-  try {
-    await page.route("http://deficiencies.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: listing }));
-    await page.goto("http://deficiencies.test/", { waitUntil: "load" });
-    assert.equal(await page.getByRole("heading", { name: "Deficiencies" }).count(), 1);
-    assert.equal(await page.getByRole("searchbox", { name: "Search deficiency text" }).inputValue(), "brake");
-    assert.equal(await page.getByLabel("Lifecycle status").locator('option[value="REPORTED_IN_ERROR"]').textContent(), "Reported in Error");
-    assert.equal(await page.getByLabel("Severity").inputValue(), "URGENT");
-    assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/deficiencies/?q=brake&results_page=2");
-    assert.match(await page.getByText("42 matching deficiencies").innerText(), /showing 25/);
-    for (const label of ["Search deficiency text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
-      const control = page.getByLabel(label);
-      const box = await control.boundingBox();
-      assert.ok(box && box.height >= 48, `${viewport.name}: ${label} target is shorter than 48 CSS pixels`);
-    }
-    const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-    assert.ok(metrics.document <= viewport.width, `${viewport.name}: deficiency list overflows horizontally ${JSON.stringify(metrics)}`);
-    assert.ok(metrics.body <= viewport.width, `${viewport.name}: deficiency body overflows horizontally ${JSON.stringify(metrics)}`);
-    await page.setViewportSize({ width: Math.max(320, Math.floor(viewport.width / 2)), height: viewport.height });
-    const zoom = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-    assert.ok(zoom.document <= zoom.viewport, `${viewport.name} at 200%: deficiency list overflows ${JSON.stringify(zoom)}`);
-    assert.ok(zoom.body <= zoom.viewport, `${viewport.name} at 200%: deficiency body overflows ${JSON.stringify(zoom)}`);
+    <div class="readiness-filter"><input class="readiness-filter-input" id="readiness-attention-only" type="checkbox" aria-d…2819 tokens truncated…ert.ok(zoom.body <= zoom.viewport, `${viewport.name} at 200%: deficiency body overflows ${JSON.stringify(zoom)}`);
     console.log(`${viewport.name}: deficiency filters, result count, pagination and responsive layout passed`);
   } finally {
     await page.close();
@@ -707,6 +625,47 @@ try {
       const skipBox = await skipLink.boundingBox();
       assert.ok(skipBox && skipBox.y >= 0, `${viewport.name}: focused skip link is not visible`);
       assert.equal(await skipLink.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", `${viewport.name}: skip link focus indicator is missing`);
+      await page.keyboard.press("Enter");
+      const main = page.locator("#main");
+      assert.equal(await main.evaluate((element) => element === document.activeElement), true, `${viewport.name}: skip link did not move focus to main`);
+      const mainOutline = await main.evaluate((element) => ({
+        width: getComputedStyle(element).outlineWidth,
+        style: getComputedStyle(element).outlineStyle,
+      }));
+      assert.equal(mainOutline.width, "3px", `${viewport.name}: skip-link destination has no visible focus indicator`);
+      assert.equal(mainOutline.style, "solid", `${viewport.name}: skip-link destination focus indicator is not solid`);
+      await page.emulateMedia({ forcedColors: "active" });
+      const forcedInspection = await page.evaluate(() => {
+        const probe = document.createElement("span");
+        document.body.append(probe);
+        const systemColor = (value) => {
+          probe.style.color = value;
+          return getComputedStyle(probe).color;
+        };
+        const status = document.querySelector('.status-pill[data-status="OUT_OF_SERVICE"]');
+        const action = document.querySelector(".item-controls .button.primary");
+        const result = {
+          active: matchMedia("(forced-colors: active)").matches,
+          focus: getComputedStyle(document.activeElement).outlineColor,
+          highlight: systemColor("Highlight"),
+          statusText: getComputedStyle(status).color,
+          canvasText: systemColor("CanvasText"),
+          statusBackground: getComputedStyle(status).backgroundColor,
+          canvas: systemColor("Canvas"),
+          actionText: getComputedStyle(action).color,
+          buttonText: systemColor("ButtonText"),
+          statusLabel: status.textContent.trim(),
+        };
+        probe.remove();
+        return result;
+      });
+      assert.equal(forcedInspection.active, true, `${viewport.name}: forced-colors mode did not activate`);
+      assert.equal(forcedInspection.focus, forcedInspection.highlight, `${viewport.name}: main focus is not visible with the system highlight color`);
+      assert.equal(forcedInspection.statusText, forcedInspection.canvasText, `${viewport.name}: inspection status text does not use a system color`);
+      assert.equal(forcedInspection.statusBackground, forcedInspection.canvas, `${viewport.name}: inspection status background does not use Canvas`);
+      assert.equal(forcedInspection.actionText, forcedInspection.buttonText, `${viewport.name}: inspection action does not use ButtonText`);
+      assert.equal(forcedInspection.statusLabel, "Out of service", `${viewport.name}: status wording disappeared in forced-colors mode`);
+      await page.emulateMedia({ forcedColors: "none" });
       const navToggle = page.locator("#site-nav-toggle");
       const navList = page.locator("#site-nav-list");
       assert.equal(await navToggle.evaluate((element) => element.closest(".site-header") !== null), true, `${viewport.name}: menu is outside the compact header`);
