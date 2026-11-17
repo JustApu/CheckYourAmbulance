@@ -105,6 +105,19 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(decision["django-labels"], ("cya.tests.test_shell",))
         self.assertTrue(decision["run-browser-smoke"])
 
+    def test_role_matrix_script_uses_authorization_tests_and_browser_smoke(self):
+        decision = ci_lanes.classify(["cya/authorization/templates/authorization/roles.js"])
+        self.assertEqual(
+            decision["django-labels"],
+            (
+                "cya.authorization",
+                "cya.tests.test_role_administration_http",
+                "cya.tests.test_role_transition_integration",
+            ),
+        )
+        self.assertTrue(decision["run-browser-smoke"])
+        self.assertFalse(decision["run-client-scripts"])
+
     def test_browser_test_source_change_runs_full_server_and_browser_checks(self):
         for path in ci_lanes.BROWSER_TEST_PATHS:
             with self.subTest(path=path):
@@ -322,6 +335,15 @@ class CoverageMapTests(unittest.TestCase):
                 self.assertTrue(source.is_file())
                 self.assertTrue(harness.is_file())
                 self.assertIn(source.name, harness.read_text(encoding="utf-8"))
+
+    def test_each_browser_script_exists_and_is_read_by_a_browser_smoke(self):
+        sources = [
+            (ROOT / smoke).read_text(encoding="utf-8") for smoke in ci_lanes.BROWSER_TEST_PATHS
+        ]
+        for script_path in ci_lanes.BROWSER_SCRIPTS:
+            with self.subTest(script_path=script_path):
+                self.assertTrue((ROOT / script_path).is_file())
+                self.assertTrue(any(script_path in source for source in sources))
 
     def test_each_browser_css_path_exists_and_is_read_by_the_browser_smoke(self):
         # Any registered browser smoke may read a CSS file; at least one must.

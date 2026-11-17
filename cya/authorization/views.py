@@ -58,6 +58,8 @@ ROLE_LABELS = {
 # Sanitized messages keyed by outcome; no exception text reaches the page.
 MESSAGES = {
     "INVALID": "The request was not valid. Check the user, role and action and try again.",
+    "ONE_ROLE": "Review one role change at a time. Select one role to add or remove.",
+    "HISTORY_UNAVAILABLE": "Current roles could not be verified. Reload the page before trying again.",
     "NOT_FOUND": "That user is not available.",
     "LAST_ADMINISTRATOR": "The last active administrator must keep the Administrator role.",
     "OPERATION_CONFLICT": (
@@ -141,7 +143,7 @@ def _current_roles_by_user(organization_id, targets):
             result[target_id] = None
             continue
         codes = {"CREW" if role.value in ("CREW", "EMT") else role.value for role in state.grants}
-        result[target_id] = tuple(ROLE_LABELS[code] for code in sorted(codes))
+        result[target_id] = tuple(sorted(codes))
     return result
 
 
@@ -179,8 +181,13 @@ def _render_roles(
             status = 503
         else:
             for target in targets:
-                target.current_role_labels = roles_by_user[str(target.pk)]
-                target.role_history_unavailable = target.current_role_labels is None
+                target.current_role_codes = roles_by_user[str(target.pk)]
+                target.role_history_unavailable = target.current_role_codes is None
+                target.current_role_labels = (
+                    tuple(ROLE_LABELS[code] for code in target.current_role_codes)
+                    if target.current_role_codes is not None
+                    else ()
+                )
                 target.role_operation_id = (
                     None if target.role_history_unavailable else str(uuid.uuid4())
                 )
@@ -236,8 +243,24 @@ def _preview(request, user):
         return deny_section(request, user, navigation.roles_for(user), "VIEW_ADMINISTRATION")
     query, search_error = _search_query(request.POST)
     values = _form_values(request.POST)
+    matrix_selection = request.POST.getlist("role_selection_present") == ["1"]
+    selected_roles = None
     try:
-        target_id, role, action, operation_id = _parse(request.POST)
+        if matrix_selection:
+            target_id = canonical_id(request.POST.get("target", ""))
+            operation_id = canonical_id(request.POST.get("operation_id", ""))
+            if uuid.UUID(operation_id).version != 4:
+                raise ValueError("operation id must be a UUID4")
+            selected_values = request.POST.getlist("roles")
+            selected_roles = set(selected_values)
+            if len(selected_values) != len(selected_roles) or not selected_roles.issubset(
+                SELECTABLE_ROLES
+            ):
+                raise ValueError("role selection is invalid")
+        else:
+            # Keep the existing single-role form contract for trusted internal clients while
+            # the administration page uses the staged role matrix.
+            target_id, role, action, operation_id = _parse(request.POST)
     except ValueError:
         return _failure(
             request,
@@ -268,6 +291,41 @@ def _preview(request, user):
             search_query=query,
             form_values=values,
         )
+    if matrix_selection:
+        try:
+            current_by_user = _current_roles_by_user(user.organization_id, [target])
+        except DatabaseError:
+            logger.error("role list unavailable during preview")
+            return _failure(
+                request,
+                user,
+                "HISTORY_UNAVAILABLE",
+                503,
+                search_query=query,
+                form_values=values,
+            )
+        current_roles_for_user = current_by_user[str(target.pk)]
+        if current_roles_for_user is None:
+            return _failure(
+                request,
+                user,
+                "HISTORY_UNAVAILABLE",
+                503,
+                search_query=query,
+                form_values=values,
+            )
+        changed_roles = set(current_roles_for_user).symmetric_difference(selected_roles)
+        if len(changed_roles) != 1:
+            return _failure(
+                request,
+                user,
+                "ONE_ROLE",
+                400,
+                search_query=query,
+                form_values=values,
+            )
+        role = changed_roles.pop()
+        action = "GRANT" if role in selected_roles else "REVOKE"
     preview = {
         "target": target,
         "role": role,

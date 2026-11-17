@@ -7,7 +7,7 @@
 <div class="role-administration">
 {% if preview %}
 <h2>Review role change</h2>
-<p id="role-change-summary">{% if preview.action == "GRANT" %}Grant {{ preview.role_label }} role to{% else %}Remove {{ preview.role_label }} role from{% endif %} {{ preview.target.display_name|default:preview.target.email }} ({{ preview.target.email }}).</p>
+<p id="role-change-summary">{% if preview.action == "GRANT" %}Add the {{ preview.role_label }} role for{% else %}Remove the {{ preview.role_label }} role from{% endif %} {{ preview.target.display_name|default:preview.target.email }} ({{ preview.target.email }}).</p>
 <form method="post" action="{% url 'administration-roles' %}">
   {% csrf_token %}
   <input type="hidden" name="stage" value="confirm">
@@ -44,34 +44,37 @@
   <p>Showing the first {{ target_limit }} active users. Search to find someone else.</p>
 {% endif %}
 {% if targets %}
-<ul class="role-user-list">
+<ul class="role-user-list" aria-label="Organization users and roles">
   {% for target in targets %}
-  <li class="role-user-card">
-    <h3>{{ target.display_name|default:target.email }}</h3>
-    {% if target.display_name %}<p class="role-user-email">{{ target.email }}</p>{% endif %}
+  <li class="role-user-row">
+    <div class="role-user-details">
+      <h3>{{ target.display_name|default:target.email }}</h3>
+      {% if target.display_name %}<p class="role-user-email">{{ target.email }}</p>{% endif %}
+      <a href="{% url 'administration-role-history' target.pk %}" aria-label="View role history for {{ target.email }}">View role history</a>
+    </div>
     {% if target.role_history_unavailable %}
     <p class="banner banner-error">Current roles could not be verified. Role changes for this user are unavailable. View role history or contact support.</p>
     {% else %}
-    <p><strong>Current roles:</strong>
-      {% if target.current_role_labels %}{% for label in target.current_role_labels %}<span class="pill">{{ label }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}No roles assigned{% endif %}
-    </p>
-    {% endif %}
-    <p><a href="{% url 'administration-role-history' target.pk %}" aria-label="View role history for {{ target.email }}">View role history</a></p>
-    {% if not target.role_history_unavailable %}
-    <form method="post" action="{% url 'administration-roles' %}" class="admin-form">
+    <form method="post" action="{% url 'administration-roles' %}" class="role-change-form admin-form" data-role-change-form>
       {% csrf_token %}
       <input type="hidden" name="stage" value="preview">
+      <input type="hidden" name="role_selection_present" value="1">
       <input type="hidden" name="operation_id" value="{{ target.role_operation_id }}">
       <input type="hidden" name="target" value="{{ target.pk }}">
       {% if target_search_query %}<input type="hidden" name="q" value="{{ target_search_query }}">{% endif %}
-      <label for="role-code-{{ forloop.counter }}">Role to change</label>
-      <select id="role-code-{{ forloop.counter }}" name="role" aria-label="Role to change for {{ target.display_name|default:target.email }}" required>
-        <option value="">Choose a role</option>
-        {% for option in role_options %}<option value="{{ option.0 }}"{% if form_values.target == target.pk|stringformat:"s" and form_values.role == option.0 %} selected{% endif %}>{{ option.1 }}</option>{% endfor %}
-      </select>
-      <div class="role-user-actions">
-        <button type="submit" name="action" value="GRANT" class="button">Review grant</button>
-        <button type="submit" name="action" value="REVOKE" class="button">Review removal</button>
+      <fieldset class="role-options">
+        <legend>Roles</legend>
+        {% for option in role_options %}
+        <label class="role-option{% if option.0 in target.current_role_codes %} is-assigned{% endif %}">
+          <input type="checkbox" name="roles" value="{{ option.0 }}" data-role-choice data-role-label="{{ option.1 }}" aria-label="{{ option.1 }} role for {{ target.email }}"{% if option.0 in target.current_role_codes %} checked{% endif %}>
+          <span>{{ option.1 }}</span><span class="role-option-pending" data-role-pending hidden></span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      <div class="role-change-actions">
+        <p class="role-change-status" role="status" aria-live="polite" data-role-change-status hidden></p>
+        <button type="submit" class="button" data-role-review-button>Review changes</button>
+        <button type="reset" class="button" data-role-reset-button>Reset</button>
       </div>
     </form>
     {% endif %}
@@ -84,4 +87,7 @@
 {% endif %}
 </div>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>{% include "authorization/roles.js" %}</script>
 {% endblock %}
