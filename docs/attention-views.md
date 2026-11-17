@@ -78,7 +78,7 @@ reported instant). The result also has the vehicle's operational status at the i
   PR.
 - **Suspended checks** ([issue #13](https://github.com/JustApu/CheckYourAmbulance/issues/13), SPEC §8.9, VW-2, AC-18). A row whose routine check a
   supervisor suspended for a known deficiency ([deficiencies](deficiencies.md#supervisor-check-suspension))
-  shows obligation state `SUSPENDED`, which the crew screen labels "Known Deficiency — Check
+  shows obligation state `SUSPENDED`, which the crew screen labels "Known Problem — Check
   Suspended". It is never actionable and is left out of Needs Attention Only even though its
   unresolved deficiency keeps it red; it stays in the full checklist, in either view, with the
   deficiency listed beside it. A row still shows Overdue, Due or Current, and stays in the filter,

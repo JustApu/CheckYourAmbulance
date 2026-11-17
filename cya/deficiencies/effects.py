@@ -105,12 +105,10 @@ NO_KIT_KEY = "00000000-0000-0000-0000-000000000000"  # the scope instance key of
 ERROR, NOTICE, NONE = "ERROR", "NOTICE", "NONE"
 ERROR_TEXT = "Reported in error: the author corrected the Failed check to Passed."
 NOTICE_TEXT = (
-    "The author corrected a Failed check to Passed, but this deficiency stays open: "
+    "The author corrected a Failed check to Passed, but this problem stays open: "
     "other evidence, recorded repair work or its status needs a supervisor to resolve it."
 )
-REOPEN_TEXT = (
-    "Reopened: the correction chain that reported this deficiency in error was invalidated."
-)
+REOPEN_TEXT = "Reopened: the correction chain that reported this problem in error was invalidated."
 VERIFICATION_REOPEN_TEXT = {
     "INVALIDATION": "Reopened: a verification check its closure relied on was invalidated.",
     "CORRECTION": "Reopened: a verification check its closure relied on was corrected to a non-Pass.",

@@ -69,23 +69,21 @@ urlpatterns = [
         inspection_views.session,
         name="inspection-session",
     ),
-    path("deficiencies/", workflow_views.deficiencies, name="deficiencies"),
-    path("deficiencies/queue/", workflow_views.queue, name="deficiency-queue"),
+    path("problems/", workflow_views.deficiencies, name="deficiencies"),
+    path("problems/queue/", workflow_views.queue, name="deficiency-queue"),
     path(
-        "deficiencies/<str:deficiency_id>/verification/",
+        "problems/<str:deficiency_id>/verification/",
         workflow_views.verification,
         name="deficiency-verification",
     ),
     path(
-        "deficiencies/<str:deficiency_id>/verification-items/",
+        "problems/<str:deficiency_id>/verification-items/",
         workflow_views.verification_items,
         name="deficiency-verification-items",
     ),
+    path("problems/<str:deficiency_id>/", workflow_views.deficiency, name="deficiencies-detail"),
     path(
-        "deficiencies/<str:deficiency_id>/", workflow_views.deficiency, name="deficiencies-detail"
-    ),
-    path(
-        "inspection/vehicles/<str:vehicle_id>/deficiencies/new/",
+        "inspection/vehicles/<str:vehicle_id>/problems/new/",
         workflow_views.report,
         name="inspection-deficiency-report",
     ),

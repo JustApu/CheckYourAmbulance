@@ -96,7 +96,7 @@ class WorkflowUiTests(CrewUiCase):
         self.assertEqual(len(few_queries), len(more_queries))
 
     def report_page(self):
-        return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/deficiencies/new/")
+        return self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/problems/new/")
 
     def correction(self, check_id, **extra):
         return self.post(
@@ -111,10 +111,10 @@ class WorkflowUiTests(CrewUiCase):
 
     def test_new_pages_require_sign_in_and_current_roles(self):
         urls = (
-            "/deficiencies/",
-            f"/deficiencies/{uuid4()}/",
+            "/problems/",
+            f"/problems/{uuid4()}/",
             f"/inspection/vehicles/{self.vehicle.pk}/check-history/",
-            f"/inspection/vehicles/{self.vehicle.pk}/deficiencies/new/",
+            f"/inspection/vehicles/{self.vehicle.pk}/problems/new/",
         )
         for url in urls:
             response = Client().get(url)
@@ -132,10 +132,10 @@ class WorkflowUiTests(CrewUiCase):
                 self.client.get(f"/inspection/vehicles/{value}/check-history/").status_code, 404
             )
             self.assertEqual(
-                self.client.get(f"/inspection/vehicles/{value}/deficiencies/new/").status_code, 404
+                self.client.get(f"/inspection/vehicles/{value}/problems/new/").status_code, 404
             )
         for value in (str(uuid4()), "not-a-uuid"):
-            self.assertEqual(self.client.get(f"/deficiencies/{value}/").status_code, 404)
+            self.assertEqual(self.client.get(f"/problems/{value}/").status_code, 404)
 
     def test_report_page_shows_scope_choices_severity_criteria_and_no_automatic_link(self):
         response = self.report_page()
@@ -165,7 +165,7 @@ class WorkflowUiTests(CrewUiCase):
         self.assertEqual(replay.json()["result"], first.json()["result"])
         self.assertEqual(Deficiency.objects.count(), 1)
         pk = first.json()["result"]["deficiency_id"]
-        detail = self.client.get(f"/deficiencies/{pk}/")
+        detail = self.client.get(f"/problems/{pk}/")
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, 'aria-current="page"')
         self.assertEqual(
@@ -174,7 +174,7 @@ class WorkflowUiTests(CrewUiCase):
         )
         self.assertIn("Open", detail.content.decode())
         self.assertIn(self.user.display_name, detail.content.decode())
-        self.assertIn(f"/deficiencies/{pk}/", self.client.get("/deficiencies/").content.decode())
+        self.assertIn(f"/problems/{pk}/", self.client.get("/problems/").content.decode())
 
     def test_own_correction_is_distinct_from_repair_and_other_users_get_fresh_check_path(self):
         own = self.failed(actor=self.user).body["check_id"]
@@ -200,7 +200,7 @@ class WorkflowUiTests(CrewUiCase):
         rows = self.history(check=check_id).context["checks"]
         self.assertEqual({r["state"] for r in rows}, {"Effective", "Superseded"})
         self.assertEqual(CheckRecord.objects.get(pk=check_id).outcome, "FAILED")
-        detail = self.client.get(f"/deficiencies/{deficiency_id}/").content.decode()
+        detail = self.client.get(f"/problems/{deficiency_id}/").content.decode()
         self.assertIn("Reported in Error", detail)
         self.assertIn("Reported", detail)  # the original creation event remains visible
         self.assertNotIn("REPORTED", detail)
@@ -217,7 +217,7 @@ class WorkflowUiTests(CrewUiCase):
             explanation="Synthetic invalidation.",
             **self.context(self.admin),
         )
-        response = self.client.get(f"/deficiencies/{pk}/")
+        response = self.client.get(f"/problems/{pk}/")
         self.assertEqual(response.status_code, 200)
         labels = [event.type_label for event in response.context["events"]]
         self.assertEqual(
@@ -257,7 +257,7 @@ class WorkflowUiTests(CrewUiCase):
             **self.context(self.admin),
         )
         start_work(deficiency_id=pk, expected_event_id=newest(), **self.context(self.admin))
-        response = self.client.get(f"/deficiencies/{pk}/")
+        response = self.client.get(f"/problems/{pk}/")
         self.assertEqual(
             [(e.type_label, e.status_label) for e in response.context["events"]],
             [
@@ -279,7 +279,7 @@ class WorkflowUiTests(CrewUiCase):
         )
         self.assertEqual(correction.status_code, 201, correction.content)
         self.assertEqual(correction.json()["result"]["status"], "PENDING_VERIFICATION")
-        updated = self.client.get(f"/deficiencies/{pk}/")
+        updated = self.client.get(f"/problems/{pk}/")
         self.assertContains(updated, "Repair recorded")
         self.assertNotContains(updated, "Record repair")
 
@@ -301,7 +301,7 @@ class WorkflowUiTests(CrewUiCase):
         call(revise_dependency, explanation="Synthetic: vendor changed the date.")
         call(add_progress_note, note="Synthetic: the part was ordered.")
         call(end_dependency)
-        response = self.client.get(f"/deficiencies/{pk}/")
+        response = self.client.get(f"/problems/{pk}/")
         self.assertEqual(
             [(e.type_label, e.status_label) for e in response.context["events"]][1:],
             [
@@ -341,7 +341,7 @@ class WorkflowUiTests(CrewUiCase):
             explanation="Synthetic: not needed.",
             **context(),
         )
-        response = self.client.get(f"/deficiencies/{pk}/")
+        response = self.client.get(f"/problems/{pk}/")
         self.assertEqual(
             [e.type_label for e in response.context["events"]][-2:],
             ["Extension requested", "Extension decided"],
@@ -437,21 +437,21 @@ class WorkflowUiTests(CrewUiCase):
         url = f"/api/v1/deficiencies/{first}/links"
         linked = self.post(url, {"operation_id": str(uuid4()), "related_deficiency_id": second})
         self.assertEqual(linked.status_code, 201, linked.content)
-        detail = self.client.get(f"/deficiencies/{first}/")
+        detail = self.client.get(f"/problems/{first}/")
         self.assertEqual([str(r.pk) for r in detail.context["related"]], [second])
         removed = self.post(
             f"/api/v1/deficiencies/{first}/link-removals",
             {"operation_id": str(uuid4()), "related_deficiency_id": second},
         )
         self.assertEqual(removed.status_code, 201, removed.content)
-        self.assertEqual(self.client.get(f"/deficiencies/{first}/").context["related"], [])
+        self.assertEqual(self.client.get(f"/problems/{first}/").context["related"], [])
         self.assertEqual(
             set(DeficiencyProjection.objects.values_list("status", flat=True)), {"OPEN"}
         )
 
     def test_a_re_grade_shows_in_the_list_and_detail_and_is_labelled_in_the_history(self):
         pk = self.failed(actor=self.user).body["deficiency_ids"][0]  # reported as High
-        before = self.client.get(f"/deficiencies/{pk}/").content.decode()
+        before = self.client.get(f"/problems/{pk}/").content.decode()
         self.assertIn("High", before)
         regrade_severity(
             deficiency_id=pk,
@@ -462,8 +462,8 @@ class WorkflowUiTests(CrewUiCase):
             .pk,
             **self.context(self.supervisor),
         )
-        detail = self.client.get(f"/deficiencies/{pk}/").content.decode()
-        listing_response = self.client.get("/deficiencies/")
+        detail = self.client.get(f"/problems/{pk}/").content.decode()
+        listing_response = self.client.get("/problems/")
         listing = listing_response.content.decode()
         self.assertIn("Low", detail)
         self.assertNotIn("SEVERITY_CHANGED", detail)
@@ -492,7 +492,7 @@ class WorkflowUiTests(CrewUiCase):
         html = self.history().content.decode()
         self.assertIn("Reference", html)
         pk = Deficiency.objects.get().pk
-        detail = self.client.get(f"/deficiencies/{pk}/").content.decode()
+        detail = self.client.get(f"/problems/{pk}/").content.decode()
         self.assertIn("&lt;script&gt;Synthetic&lt;/script&gt;", detail)
         self.assertNotIn("<script>Synthetic</script>", detail)
 
@@ -576,7 +576,7 @@ class DeficiencyListTests(CrewUiCase):
 
     def test_default_is_active_and_history_includes_reported_in_error(self):
         deficiency_id, check_id = self.create_deficiency(summary="Synthetic corrected pump")
-        self.assertContains(self.client.get("/deficiencies/"), "Synthetic corrected pump")
+        self.assertContains(self.client.get("/problems/"), "Synthetic corrected pump")
         corrected = self.post(
             f"/api/v1/checks/{check_id}/corrections",
             {
@@ -586,14 +586,14 @@ class DeficiencyListTests(CrewUiCase):
             },
         )
         self.assertEqual(corrected.status_code, 201, corrected.content)
-        active = self.client.get("/deficiencies/")
+        active = self.client.get("/problems/")
         self.assertNotContains(active, "Synthetic corrected pump")
         self.assertContains(active, "Outstanding only")
-        history = self.client.get("/deficiencies/", {"status": "all"})
+        history = self.client.get("/problems/", {"status": "all"})
         self.assertContains(history, "Synthetic corrected pump")
         self.assertContains(history, "Reported in Error")
         self.assertEqual(history.context["page"]["total"], 1)
-        selected = self.client.get("/deficiencies/", {"status": "REPORTED_IN_ERROR"})
+        selected = self.client.get("/problems/", {"status": "REPORTED_IN_ERROR"})
         self.assertEqual(selected.context["page"]["total"], 1)
         self.assertEqual(str(selected.context["page"]["rows"][0].deficiency_id), str(deficiency_id))
 
@@ -612,7 +612,7 @@ class DeficiencyListTests(CrewUiCase):
             **self.context(self.admin),
         )
         filtered = self.client.get(
-            "/deficiencies/",
+            "/problems/",
             {
                 "q": "%_",
                 "vehicle": "R-204",
@@ -628,13 +628,13 @@ class DeficiencyListTests(CrewUiCase):
             filtered, '<option value="HIGH" selected>High (HIGH)</option>', html=True
         )
         self.assertContains(filtered, "Applied filters:")
-        self.assertContains(filtered, "1 matching deficiencies; showing 1")
+        self.assertContains(filtered, "1 matching problems; showing 1")
         self.assertNotContains(filtered, "Synthetic pump other")
 
-        no_match = self.client.get("/deficiencies/", {"severity": "UNCONFIGURED"})
+        no_match = self.client.get("/problems/", {"severity": "UNCONFIGURED"})
         self.assertEqual(no_match.context["page"]["total"], 0)
         self.assertContains(no_match, "Choose a configured severity.")
-        self.assertContains(no_match, "No deficiencies match these filters.")
+        self.assertContains(no_match, "No problems match these filters.")
 
         set_deadline(
             deficiency_id=other,
@@ -643,7 +643,7 @@ class DeficiencyListTests(CrewUiCase):
             **self.context(self.admin),
         )
         self.clock.set(self.now + timedelta(hours=2))
-        late = self.client.get("/deficiencies/", {"overdue": "1"})
+        late = self.client.get("/problems/", {"overdue": "1"})
         self.assertEqual(late.context["page"]["total"], 1)
         self.assertEqual(str(late.context["page"]["rows"][0].deficiency_id), str(other))
 
@@ -674,13 +674,13 @@ class DeficiencyListTests(CrewUiCase):
             **self.context(self.admin),
         )
         self.clock.set(self.now + timedelta(days=2))
-        filtered = self.client.get("/deficiencies/", {"overdue": "1"})
+        filtered = self.client.get("/problems/", {"overdue": "1"})
         self.assertEqual(filtered.context["page"]["total"], 1)
         self.assertEqual(str(filtered.context["page"]["rows"][0].deficiency_id), str(overdue_id))
 
         supervisor, user = self.harness.sign_in("extension-queue-supervisor")
         self.grant(user, "SUPERVISOR")
-        queue_response = supervisor.get("/deficiencies/queue/", {"overdue": "1"})
+        queue_response = supervisor.get("/problems/queue/", {"overdue": "1"})
         overdue_group = next(
             group for group in queue_response.context["lists"] if group["heading"] == "Overdue"
         )
@@ -689,21 +689,21 @@ class DeficiencyListTests(CrewUiCase):
 
     def test_invalid_filters_fail_closed_with_a_visible_message(self):
         self.create_deficiency()
-        invalid = self.client.get("/deficiencies/", {"status": "UNKNOWN"})
+        invalid = self.client.get("/problems/", {"status": "UNKNOWN"})
         self.assertEqual(invalid.status_code, 200)
         self.assertEqual(invalid.context["page"]["total"], 0)
         self.assertContains(invalid, "Choose a valid lifecycle status.")
-        overlong = self.client.get("/deficiencies/", {"q": "x" * 101})
+        overlong = self.client.get("/problems/", {"q": "x" * 101})
         self.assertEqual(overlong.context["page"]["total"], 0)
         self.assertContains(overlong, "Filter text is limited to 100 characters.")
-        bad_overdue = self.client.get("/deficiencies/", {"overdue": "true-ish"})
+        bad_overdue = self.client.get("/problems/", {"overdue": "true-ish"})
         self.assertEqual(bad_overdue.context["page"]["total"], 0)
         self.assertContains(bad_overdue, "Choose a valid overdue filter value.")
-        malformed_page = self.client.get("/deficiencies/", {"results_page": "not-a-page"})
+        malformed_page = self.client.get("/problems/", {"results_page": "not-a-page"})
         self.assertEqual(malformed_page.status_code, 200)
         self.assertEqual(malformed_page.context["page"]["total"], 1)
         self.assertContains(malformed_page, "results-page link was invalid")
-        out_of_range = self.client.get("/deficiencies/", {"results_page": "99"})
+        out_of_range = self.client.get("/problems/", {"results_page": "99"})
         self.assertContains(out_of_range, "results-page link was out of range")
 
     def test_pagination_preserves_filters_and_uses_a_deterministic_order(self):
@@ -712,7 +712,7 @@ class DeficiencyListTests(CrewUiCase):
             for index in range(3)
         }
         with mock.patch("cya.inspections.workflow_views.DEFICIENCY_PAGE_SIZE", 2):
-            first = self.client.get("/deficiencies/", {"q": "pagination marker"})
+            first = self.client.get("/problems/", {"q": "pagination marker"})
             first_ids = {str(row.deficiency_id) for row in first.context["page"]["rows"]}
             self.assertEqual(len(first_ids), 2)
             self.assertIn("q=pagination+marker", first.context["page"]["next_url"])
@@ -738,11 +738,11 @@ class DeficiencyListTests(CrewUiCase):
                 self.assertEqual(response.status_code, 200)
             return len(queries)
 
-        list_one = captured("/deficiencies/")
+        list_one = captured("/problems/")
         supervisor, _user = self.harness.sign_in("list-supervisor")
         self.grant(_user, "SUPERVISOR")
-        queue_five = captured("/deficiencies/queue/", supervisor)
+        queue_five = captured("/problems/queue/", supervisor)
         for index in range(5, 30):
             self.create_deficiency(summary=f"Synthetic query-count case {index}")
-        self.assertEqual(captured("/deficiencies/"), list_one)
-        self.assertEqual(captured("/deficiencies/queue/", supervisor), queue_five)
+        self.assertEqual(captured("/problems/"), list_one)
+        self.assertEqual(captured("/problems/queue/", supervisor), queue_five)

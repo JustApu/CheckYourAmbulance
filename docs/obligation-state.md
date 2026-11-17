@@ -57,7 +57,7 @@ Distinct exemption/waiver/suspension reasons take display precedence over checks
   Reinstatement or invalidation does not revive an older waiver. Ambiguous branches
   raise `ValueError`. This reader never re-evaluates rosters or writes determinations.
 - `SUSPENDED` is distinct from Pass (SPEC §8.9, AC-18); an active suspension prevents a
-  check from claiming satisfaction, and `display_text` is "Known Deficiency — Check Suspended".
+  check from claiming satisfaction, and `display_text` is "Known Problem — Check Suspended".
   Only a routine obligation is suspended (SUS-1); an explicit ad hoc order never is. A suspension
   is judged at `min(T, G)`, as exemption is judged at `min(D, T)`: an obligation whose window
   closed while it was suspended stays `SUSPENDED` after the suspension ends (never Overdue, never

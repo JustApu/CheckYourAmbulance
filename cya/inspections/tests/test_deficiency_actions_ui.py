@@ -40,7 +40,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         )
 
     def detail(self, pk):
-        return self.client.get(f"/deficiencies/{pk}/")
+        return self.client.get(f"/problems/{pk}/")
 
     def pending(self, item=None, **fields):
         pk = report_deficiency(
@@ -227,7 +227,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
             page.context["verification_progress"],
             {"total": 1, "verified": 0, "outstanding": 1},
         )
-        screen = self.client.get(f"/deficiencies/{pk}/verification/")
+        screen = self.client.get(f"/problems/{pk}/verification/")
         self.assertEqual(screen.status_code, 200)
         self.assertNotContains(screen, 'id="odometer-form"')
         config = self.config(screen)
@@ -271,7 +271,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertContains(page, "Routine checks suspended")
         self.assertContains(page, "Check suspensions — 1 in force")
         self.assertNotContains(page, "Check suspensions ended")
-        row = self.client.get(f"/deficiencies/{verified}/verification-items/").json()["items"][0]
+        row = self.client.get(f"/problems/{verified}/verification-items/").json()["items"][0]
         saved = self.post(
             "/api/v1/checks",
             {
@@ -306,14 +306,14 @@ class DeficiencyActionsUiTests(CrewUiCase):
         pk = self.pending(self.kit_item, summary="Synthetic kit deficiency")
         # A routine Pass can satisfy its ordinary obligation, but not this scope.
         self.record(self.kit_item, actor=self.user, kit_id=self.reference)
-        items = self.client.get(f"/deficiencies/{pk}/verification-items/").json()
+        items = self.client.get(f"/problems/{pk}/verification-items/").json()
         self.assertEqual({r["kit_id"] for r in items["items"]}, {self.reference, self.kit_b})
         self.assertEqual(items["remaining_scope_rows"], 2)
         self.assertContains(self.detail(pk), "Outstanding", count=2)
 
     def test_verification_failure_preserves_history_and_returns_to_work(self):
         pk = self.pending()
-        row = self.client.get(f"/deficiencies/{pk}/verification-items/").json()["items"][0]
+        row = self.client.get(f"/problems/{pk}/verification-items/").json()["items"][0]
         failed = self.post(
             "/api/v1/checks",
             {
@@ -336,27 +336,25 @@ class DeficiencyActionsUiTests(CrewUiCase):
         pk = self.pending()
         for route in ("verification", "verification-items"):
             for identity in (str(uuid4()), "malformed"):
-                self.assertEqual(
-                    self.client.get(f"/deficiencies/{identity}/{route}/").status_code, 404
-                )
+                self.assertEqual(self.client.get(f"/problems/{identity}/{route}/").status_code, 404)
             with mock.patch(
                 "cya.inspections.workflow_views.verification_scope",
                 side_effect=ValueError("Synthetic missing evidence"),
             ):
-                response = self.client.get(f"/deficiencies/{pk}/{route}/")
+                response = self.client.get(f"/problems/{pk}/{route}/")
                 self.assertEqual(response.status_code, 503)
                 self.assertNotContains(response, "Synthetic missing evidence", status_code=503)
 
     def test_verification_page_for_a_settled_deficiency_says_it_is_not_pending(self):
         # Issue 20: not a 503 "temporarily unavailable" page for a permanent state.
         pk = self.report()
-        response = self.client.get(f"/deficiencies/{pk}/verification/")
+        response = self.client.get(f"/problems/{pk}/verification/")
         self.assertContains(response, "not awaiting verification", status_code=409)
         self.assertContains(response, "Its status is Open", status_code=409)
-        self.assertContains(response, f'href="/deficiencies/{pk}/"', status_code=409)
+        self.assertContains(response, f'href="/problems/{pk}/"', status_code=409)
         self.assertNotContains(response, "temporarily unavailable", status_code=409)
         self.assertEqual(
-            self.client.get(f"/deficiencies/{self.pending()}/verification/").status_code, 200
+            self.client.get(f"/problems/{self.pending()}/verification/").status_code, 200
         )
 
     def test_a_passed_follow_up_is_not_prefilled_and_revision_succeeds(self):
@@ -420,7 +418,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
                 vehicle_status={"status": "IN_SERVICE", "restrictions": None},
             ),
         ):
-            response = self.client.get(f"/deficiencies/{pk}/verification-items/")
+            response = self.client.get(f"/problems/{pk}/verification-items/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["items"], [])
         self.assertEqual(response.json()["remaining_scope_rows"], 1)
@@ -429,7 +427,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
     def test_verification_routes_require_sign_in_and_roles_and_scope_the_organization(self):
         pk = self.pending()
         for route in ("verification", "verification-items"):
-            url = f"/deficiencies/{pk}/{route}/"
+            url = f"/problems/{pk}/{route}/"
             # The script re-reads verification-items: signed out is 401, not a redirect (issue 37).
             expected = 401 if route == "verification-items" else 302
             self.assertEqual(Client().get(url).status_code, expected, route)

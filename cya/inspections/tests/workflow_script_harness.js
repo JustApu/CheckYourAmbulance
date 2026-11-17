@@ -120,7 +120,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
   const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
-    urls: {checks: "/checks", checklist: "/checklist", suggestions: "/suggestions", deficiency_detail: "/deficiencies/DEFICIENCY/", socket: "/live", odometer: "/odometer"}};
+    urls: {checks: "/checks", checklist: "/checklist", suggestions: "/suggestions", deficiency_detail: "/problems/DEFICIENCY/", socket: "/live", odometer: "/odometer"}};
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
@@ -347,7 +347,7 @@ function generic(kind) {
     run.context.testUI.setRows([dueFail]); run.context.testUI.render();
     assert.equal(findClass(item(), "window-status").textContent, "Due");
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Fail by Synthetic EMT"));
-    assert(findClass(item(), "known-deficiency").textContent.includes("Deficiency status: Open. Severity: High."));
+    assert(findClass(item(), "known-deficiency").textContent.includes("Problem status: Open. Severity: High."));
     assert.equal(findClass(item(), "pill-needs-attention"), null, "the open deficiency supplies the attention cue without a duplicate badge");
     run.context.testUI.setRows([{...dueFail, deficiencies: []}]); run.context.testUI.render();
     // Issue 194: "Needs attention" is the amber chip; red pill-attention is kept for failed and overdue counts.
@@ -361,7 +361,7 @@ function generic(kind) {
     run.context.testUI.setRows([passedWithOpenDeficiency]); run.context.testUI.render();
     assert.equal(findClass(item(), "window-status").textContent, "Passed");
     assert(findClass(item(), "last-check").textContent.includes("Latest recorded check: Pass"));
-    assert(findClass(item(), "known-deficiency").textContent.includes("Deficiency status: Open"), "a passing check does not hide an open deficiency");
+    assert(findClass(item(), "known-deficiency").textContent.includes("Problem status: Open"), "a passing check does not hide an open deficiency");
     assert.deepEqual(marked(item()), ["pass"], "a Pass that satisfied the window is marked, alongside the open deficiency");
 
     const newWindow = {...row, obligation_state: "DUE", obligation_outcome: null,
@@ -547,7 +547,7 @@ function generic(kind) {
   }
   for (const [code, expected] of [
     ["SCOPE_AVAILABLE", "Current verification items exist; record the repair instead."],
-    ["DEFICIENCY_CHANGED", "This deficiency changed. Refresh history"],
+    ["DEFICIENCY_CHANGED", "This problem changed. Refresh history"],
     ["INVALID_TRANSITION", "no longer Open, In Progress or Awaiting External Dependency"],
   ]) {
     const run = generic("empty-scope-close"); run.form.dataset.expectedEvent = "event-seen";
@@ -692,7 +692,7 @@ function generic(kind) {
     const body = run.posts()[0].body;
     assert.deepEqual(body.items, [{item_id: "item-1"}, {item_id: "item-2", kit_instance_id: "kit-9"}]); assert(!("explanation" in body));
     response(run.posts()[0], 409, {status: "REJECTED", code: "ITEM_NOT_IN_SCOPE"}); await tick();
-    assert(run.form.querySelector(".workflow-result").textContent.includes("outside this deficiency's affected scope"));
+    assert(run.form.querySelector(".workflow-result").textContent.includes("outside this problem's affected scope"));
   }
   {
     // SUS-5: one suspension per form; the explanation is optional and sent only when given.

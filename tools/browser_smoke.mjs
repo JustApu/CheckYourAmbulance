@@ -46,9 +46,9 @@ const html = `<!doctype html>
 <nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">${navIcon}<span class="app-nav-label">Home</span></a></li><li><a class="app-nav-link" href="#main" aria-current="page">${navIcon}<span class="app-nav-label">Inspect</span></a></li><li><a class="app-nav-link" href="#deficiency">${navIcon}<span class="app-nav-label">Problems</span></a></li><li><a class="app-nav-link" href="#status">${navIcon}<span class="app-nav-label">Vehicles</span></a></li><li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false" hidden>${navIcon}<span class="app-nav-label">More</span></button></li></ul><div id="app-nav-more-panel" class="app-nav-more-panel"><ul class="app-nav-more-list"><li><a href="#kits">${navIcon}<span>Kits</span></a></li><li><a href="#administration">${navIcon}<span>Administration</span></a></li></ul><div class="app-nav-settings"><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><form><button class="button" type="button">Sign out</button></form></div></div></nav>
 <div id="connection-banner" class="banner banner-error" role="alert" hidden><span class="indicator-icon" aria-hidden="true">&#9888;</span><strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded.</div>
 <main id="main" tabindex="-1"><h1>Unit 12 inspection</h1>
-<section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open deficiency</span></section>
+<section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open problem</span></section>
 <ul class="vehicle-list"><li><a class="vehicle-link" href="#status"><span class="vehicle-name">Unit 12 — Synthetic Regional Response Ambulance</span><span class="vehicle-badges"><span class="pill pending-pill" data-count="2">2 pending requests</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span></span></a></li></ul>
-<section id="deficiency" class="item item-attention" aria-labelledby="item-title"><div class="item-head"><h2 id="item-title">Synthetic oxygen cylinder</h2><span class="pill pill-attention">Known deficiency</span></div><p>Pressure below the approved range.</p><div class="item-controls" aria-label="Inspection actions"><button class="button primary" type="button" aria-label="Record passed">Passed</button><button class="button" type="button" aria-label="Record unable to inspect">Unable to inspect</button></div><label class="panel">Inspection note<input aria-label="Inspection note" type="text" value="Synthetic check"></label><p id="save-state" class="save-state" role="status"><span class="indicator-icon" aria-hidden="true">?</span><span class="save-state-text">Unconfirmed</span></p></section>
+<section id="deficiency" class="item item-attention" aria-labelledby="item-title"><div class="item-head"><h2 id="item-title">Synthetic oxygen cylinder</h2><span class="pill pill-attention">Known problem</span></div><p>Pressure below the approved range.</p><div class="item-controls" aria-label="Inspection actions"><button class="button primary" type="button" aria-label="Record passed">Passed</button><button class="button" type="button" aria-label="Record unable to inspect">Unable to inspect</button></div><label class="panel">Inspection note<input aria-label="Inspection note" type="text" value="Synthetic check"></label><p id="save-state" class="save-state" role="status"><span class="indicator-icon" aria-hidden="true">?</span><span class="save-state-text">Unconfirmed</span></p></section>
 <section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title"><h2 id="deficiency-overview-title">Synthetic oxygen cylinder pressure issue</h2><p class="deficiency-state"><strong>In Progress</strong> · High severity</p><p>Synthetic Ambulance 12</p><dl class="deficiency-facts"><dt>Affected scope</dt><dd>Synthetic oxygen cylinder</dd><dt>Assignee</dt><dd>Sam Example</dd><dt>Governing deadline</dt><dd>2026-11-15 12:00 UTC · Overdue</dd></dl></section>
 <section class="panel deficiency-next-action" aria-labelledby="next-action-title"><h2 id="next-action-title">Next action</h2><form class="workflow-write"><p>Record that the repair is complete and request verification.</p><button class="button primary" type="button">Record repair</button></form></section>
 <details class="panel deficiency-details" id="deficiency-work-updates"><summary>Work updates and dependencies</summary><form class="panel workflow-write"><h2>Add progress note</h2><label>Progress note<textarea aria-label="Progress note"></textarea></label><button class="button" type="button">Add note</button></form></details>
@@ -82,7 +82,7 @@ function inspectionMarkup(userId, sessionId, timeZone = "America/New_York") {
   <section aria-labelledby="odo-heading" class="panel vehicle-readings"><h2 id="odo-heading">Vehicle readings</h2><form id="odometer-form" novalidate><div class="vehicle-readings-fields"><label class="vehicle-reading-field" for="odo-value"><span>Mileage <span class="muted">(miles)</span></span><input id="odo-value" class="number-input" type="text" inputmode="decimal" autocomplete="off" required></label><input id="odo-unit" type="hidden" value="mi"><label class="vehicle-reading-field" for="odo-hours"><span>Engine hours (optional)</span><input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off"></label><button type="submit" class="button primary" aria-describedby="readings-save-help">Record readings</button></div></form><p id="readings-save-help" class="muted readings-save-note">Audited history: select Record after entering complete values.</p><div id="odo-confirm" hidden><label for="odo-why">Why is this reading correct? (optional)</label><textarea id="odo-why" rows="2" maxlength="1000"></textarea><button id="odo-confirm-button" class="button" type="button">The reading is correct. Save it.</button></div><p id="odometer-state" class="save-state" role="status" hidden><span class="indicator-icon"></span><span class="save-state-text"></span></p></section>
   <section><h2 id="checklist-heading" tabindex="-1">Checklist</h2><div class="view-controls"><button id="view-normal" class="button" type="button">Normal</button><button id="view-priority" class="button" type="button">Priority</button><label><input id="only-attention" type="checkbox"> Needs Attention Only</label></div><p id="pref-state" role="status"></p>
   <div id="layout-controls" class="view-controls" role="group" aria-label="Inspection layout"><button id="layout-compartments" class="button" type="button">Compartments</button><button id="layout-flat" class="button" type="button">All items</button></div>
-  <section id="area-overview"><h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3><p class="muted">Progress counts checks for the current inspection window. Known deficiencies remain open until resolved.</p><div id="area-cards" class="area-cards"></div></section>
+  <section id="area-overview"><h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3><p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p><div id="area-cards" class="area-cards"></div></section>
   <section id="area-detail" hidden><button id="area-overview-button" class="button" type="button">All areas and compartments</button><h3 id="area-heading" tabindex="-1"></h3></section><p id="screen-notice" hidden></p><ol id="items" class="items" aria-live="polite"></ol></section>
   <dialog id="conflict-dialog"><p id="conflict-text"></p><button id="conflict-cancel" type="button">Cancel</button><button id="conflict-proceed" type="button">Proceed</button></dialog>
   <dialog id="outcome-dialog"><h2 id="outcome-title"></h2><form id="outcome-form"><textarea name="outcome_explanation"></textarea><select id="outcome-existing"></select><p id="outcome-matches"></p><p id="outcome-error"></p><fieldset id="outcome-create-fields"></fieldset><button id="outcome-cancel" type="button">Cancel</button></form></dialog>
@@ -150,7 +150,7 @@ async function testInspectionNavigation(viewport) {
     assert.equal(await page.locator("#items").isVisible(), false, `${viewport.name}: overview also rendered the flat item list`);
     const cab = page.getByRole("button", { name: /^Cab / });
     assert.match(await cab.innerText(), /1 of 4 items checked in this window/);
-    assert.match(await cab.innerText(), /1 due · 0 due soon · 1 overdue · 0 not due · 0 without an obligation · 1 exceptions · 1 open deficiencies/);
+    assert.match(await cab.innerText(), /1 due · 0 due soon · 1 overdue · 0 not due · 0 without an obligation · 1 exceptions · 1 open problems/);
     const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth, cardTarget: document.querySelector(".area-card").getBoundingClientRect().height }));
     assert.ok(metrics.document <= viewport.width, `${viewport.name}: inspection overview overflows horizontally ${JSON.stringify(metrics)}`);
     assert.ok(metrics.body <= viewport.width, `${viewport.name}: inspection body overflows horizontally ${JSON.stringify(metrics)}`);
@@ -221,7 +221,7 @@ async function testInspectionOutcomeSemantics(viewport) {
     const failed = page.locator('#items > li[data-item-key="item-fail|"]');
     assert.match(await failed.innerText(), /Due/);
     assert.match(await failed.innerText(), /Latest recorded check: Fail by Synthetic EMT/);
-    assert.match(await failed.innerText(), /Deficiency status: Open\. Severity: High/);
+    assert.match(await failed.innerText(), /Problem status: Open\. Severity: High/);
     assert.equal(await failed.locator(".pill-needs-attention").count(), 0, `${viewport.name}: an open deficiency is not repeated as a second attention badge`);
     // Issue 194: chip classes map to the approved status colors (amber for needs attention, red for failed/overdue).
     const chipColors = await page.evaluate(() => {
@@ -237,13 +237,13 @@ async function testInspectionOutcomeSemantics(viewport) {
     const passedWithOpenDeficiency = page.locator('#items > li[data-item-key="item-pass-open|"]');
     assert.match(await passedWithOpenDeficiency.innerText(), /Passed/);
     assert.match(await passedWithOpenDeficiency.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
-    assert.match(await passedWithOpenDeficiency.innerText(), /Deficiency status: Open\. Severity: Medium/);
+    assert.match(await passedWithOpenDeficiency.innerText(), /Problem status: Open\. Severity: Medium/);
     const priorPass = page.locator('#items > li[data-item-key="item-prior-pass|"]');
     assert.match(await priorPass.innerText(), /Due/);
     assert.match(await priorPass.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
     const unable = page.locator('#items > li[data-item-key="item-unable|"]');
     assert.match(await unable.innerText(), /Latest recorded check: Unable to inspect by Synthetic EMT/);
-    assert.match(await unable.innerText(), /Deficiency status: Pending verification/);
+    assert.match(await unable.innerText(), /Problem status: Pending verification/);
     const readings = page.getByRole("region", { name: "Vehicle readings" });
     assert.equal(await readings.getByRole("button", { name: "Record readings" }).count(), 1, `${viewport.name}: checklist evidence does not show the current audited readings action`);
     assert.equal(await readings.getByText("Audited history: select Record after entering complete values.").count(), 1, `${viewport.name}: checklist evidence does not explain explicit readings history`);
@@ -388,14 +388,14 @@ async function testReadinessSummary(viewport) {
   const readiness = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1"><title>Fleet readiness</title>
     <style>${css}</style></head><body><main id="main"><h1>Fleet readiness</h1>
-    <div class="readiness-filter"><input class="readiness-filter-input" id="readiness-attention-only" type="checkbox" aria-describedby="readiness-filter-help"><div class="readiness-filter-copy"><label for="readiness-attention-only">Show vehicles needing attention</label><p id="readiness-filter-help" class="readiness-filter-help">Includes non-In-Service status, failed, overdue or missed checks, active deficiencies among the top two active configured severity ranks (or any active deficiency if no level is active), suspensions, or a truncated deficiency list. These independent signals do not combine into a compliance or operational status.</p></div>
+    <div class="readiness-filter"><input class="readiness-filter-input" id="readiness-attention-only" type="checkbox" aria-describedby="readiness-filter-help"><div class="readiness-filter-copy"><label for="readiness-attention-only">Show vehicles needing attention</label><p id="readiness-filter-help" class="readiness-filter-help">Includes non-In-Service status, failed, overdue or missed checks, active problems among the top two active configured severity ranks (or any active problem if no level is active), suspensions, or a truncated problem list. These independent signals do not combine into a compliance or operational status.</p></div>
     <div id="readiness-panel"><p>Each state is counted on its own; nothing here is a single &quot;compliant&quot; flag.</p>
       <section class="panel readiness-vehicle" data-vehicle-id="vehicle-a" data-attention="true" aria-labelledby="vehicle-a-heading">
         <div class="readiness-overview"><div class="readiness-identity"><h2 id="vehicle-a-heading">Medic 6</h2><span class="pill status-pill" data-status="IN_SERVICE">In Service</span></div>
         <div class="readiness-measure"><h3>Inspection progress</h3><p>8 of 10 owed checks recorded</p></div>
         <ul class="readiness-signals" aria-label="Independent attention counts"><li class="pill pill-attention">Failed: 1</li><li class="pill pill-attention">Overdue: 2</li><li class="pill">Missed: 0</li><li class="pill pill-attention">Critical / High shown: 1</li><li class="pill">Suspensions: 0</li></ul>
-        <nav class="readiness-actions" aria-label="Medic 6 workflows"><a href="/inspection/vehicles/vehicle-a/">Open vehicle inspection</a><a href="/status/vehicles/vehicle-a/">Current status workflow</a><a href="/deficiencies/def-a/">Open oldest active deficiency</a></nav></div>
-        <details class="readiness-details" data-vehicle-id="vehicle-a"><summary>Obligations, deficiencies and suspensions for Medic 6</summary><div class="readiness-detail-content"><h3>Obligations by state</h3><ul><li>Failed: 1</li><li>Overdue: 2</li></ul></div></details>
+        <nav class="readiness-actions" aria-label="Medic 6 workflows"><a href="/inspection/vehicles/vehicle-a/">Open vehicle inspection</a><a href="/status/vehicles/vehicle-a/">Current status workflow</a><a href="/problems/def-a/">Open oldest active problem</a></nav></div>
+        <details class="readiness-details" data-vehicle-id="vehicle-a"><summary>Obligations, problems and suspensions for Medic 6</summary><div class="readiness-detail-content"><h3>Obligations by state</h3><ul><li>Failed: 1</li><li>Overdue: 2</li></ul></div></details>
       </section>
       <section class="panel readiness-vehicle" data-vehicle-id="vehicle-b" data-attention="false"><div class="readiness-overview"><div class="readiness-identity"><h2>Medic 7</h2><span class="pill status-pill" data-status="IN_SERVICE">In Service</span></div><div class="readiness-measure"><h3>Inspection progress</h3><p>10 of 10 owed checks recorded</p></div><ul class="readiness-signals" aria-label="Independent attention counts"><li class="pill">Failed: 0</li><li class="pill">Overdue: 0</li><li class="pill">Missed: 0</li><li class="pill">Critical / High shown: 0</li><li class="pill">Suspensions: 0</li></ul></div></section>
       <section class="panel readiness-vehicle" data-vehicle-id="vehicle-c" data-attention="true"><div class="readiness-overview"><div class="readiness-identity"><h2>Medic 8</h2><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of Service</span></div><div class="readiness-measure"><h3>Inspection progress</h3><p>10 of 10 owed checks recorded</p></div><ul class="readiness-signals" aria-label="Independent attention counts"><li class="pill">Failed: 0</li><li class="pill">Overdue: 0</li><li class="pill">Missed: 0</li><li class="pill">Critical / High shown: 0</li><li class="pill">Suspensions: 0</li></ul></div></section>
@@ -407,7 +407,7 @@ async function testReadinessSummary(viewport) {
     assert.match(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-a"]').innerText(), /In Service[\s\S]*Failed: 1[\s\S]*Overdue: 2[\s\S]*Missed: 0[\s\S]*Critical \/ High shown: 1[\s\S]*Suspensions: 0/);
     assert.equal(await page.getByRole("link", { name: "Open vehicle inspection" }).getAttribute("href"), "/inspection/vehicles/vehicle-a/");
     assert.equal(await page.getByRole("link", { name: "Current status workflow" }).getAttribute("href"), "/status/vehicles/vehicle-a/");
-    assert.equal(await page.getByRole("link", { name: "Open oldest active deficiency" }).getAttribute("href"), "/deficiencies/def-a/");
+    assert.equal(await page.getByRole("link", { name: "Open oldest active problem" }).getAttribute("href"), "/problems/def-a/");
     const filter = page.getByRole("checkbox", { name: "Show vehicles needing attention" });
     await filter.focus();
     assert.equal(await filter.evaluate((element) => element === document.activeElement), true, `${viewport.name}: attention filter is not keyboard-focusable`);
@@ -415,7 +415,7 @@ async function testReadinessSummary(viewport) {
     assert.equal(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-a"]').isVisible(), true, `${viewport.name}: attention vehicle was hidden by the filter`);
     assert.equal(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-c"]').isVisible(), true, `${viewport.name}: non-In-Service status was not filtered as an independent signal`);
     assert.equal(await page.locator('.readiness-vehicle[data-vehicle-id="vehicle-b"]').isVisible(), false, `${viewport.name}: vehicle without attention signals remained in the filtered view`);
-    const summary = page.getByText("Obligations, deficiencies and suspensions for Medic 6");
+    const summary = page.getByText("Obligations, problems and suspensions for Medic 6");
     const targetHeight = await summary.evaluate((element) => element.getBoundingClientRect().height);
     assert.ok(targetHeight >= 48, `${viewport.name}: details target is shorter than 48 CSS pixels`);
     await summary.focus();
@@ -437,32 +437,32 @@ async function testReadinessSummary(viewport) {
 async function testDeficiencyFilters(viewport) {
   const page = await browser.newPage({ viewport });
   const listing = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Deficiencies</title>
-    <style>${css}</style></head><body><main id="main"><h1>Deficiencies</h1>
-    <form class="panel deficiency-filter-form" method="get" action="/deficiencies/">
+    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Problems</title>
+    <style>${css}</style></head><body><main id="main"><h1>Problems</h1>
+    <form class="panel deficiency-filter-form" method="get" action="/problems/">
       <div class="deficiency-filter-grid">
-        <label for="deficiency-search">Search deficiency text<input id="deficiency-search" type="search" name="q" value="brake" maxlength="100"></label>
+        <label for="deficiency-search">Search problem text<input id="deficiency-search" type="search" name="q" value="brake" maxlength="100"></label>
         <label for="deficiency-vehicle">Vehicle name or number<input id="deficiency-vehicle" type="search" name="vehicle" value="Medic 6" maxlength="100"></label>
         <label for="deficiency-severity">Severity<select id="deficiency-severity" name="severity"><option value="">Any severity</option><option value="URGENT" selected>Urgent (URGENT)</option><option value="RETIRED">Legacy (RETIRED, retired)</option></select></label>
         <label for="deficiency-assignee">Assigned to<input id="deficiency-assignee" type="search" name="assignee" value="Sam Example" maxlength="100"></label>
         <label for="deficiency-status">Lifecycle status<select id="deficiency-status" name="status"><option value="active">Outstanding only</option><option value="all">All statuses, including closed and Reported in Error</option><option value="OPEN">Open</option><option value="REPORTED_IN_ERROR">Reported in Error</option></select></label>
         <label class="check" for="deficiency-overdue"><input id="deficiency-overdue" type="checkbox" name="overdue" value="1"> Overdue only</label>
-      </div><div class="deficiency-filter-actions"><button class="button primary" type="submit">Apply filters</button><a class="button" href="/deficiencies/">Clear filters</a></div>
+      </div><div class="deficiency-filter-actions"><button class="button primary" type="submit">Apply filters</button><a class="button" href="/problems/">Clear filters</a></div>
     </form><p class="deficiency-applied-filters"><strong>Applied filters:</strong> Text: brake · Vehicle: Medic 6</p>
-    <p class="deficiency-results-count">42 matching deficiencies; showing 25 on this page.</p>
-    <ul class="plain"><li class="panel"><a href="/deficiencies/one/">Synthetic brake warning</a> — Medic 6 (North County Regional Ambulance)</li></ul>
-    <nav class="deficiency-pagination" aria-label="Deficiency result pages"><a class="button" href="/deficiencies/?q=brake&amp;results_page=1">Newer results</a><a class="button" href="/deficiencies/?q=brake&amp;results_page=2">Older results</a></nav>
+    <p class="deficiency-results-count">42 matching problems; showing 25 on this page.</p>
+    <ul class="plain"><li class="panel"><a href="/problems/one/">Synthetic brake warning</a> — Medic 6 (North County Regional Ambulance)</li></ul>
+    <nav class="deficiency-pagination" aria-label="Problem result pages"><a class="button" href="/problems/?q=brake&amp;results_page=1">Newer results</a><a class="button" href="/problems/?q=brake&amp;results_page=2">Older results</a></nav>
     </main></body></html>`;
   try {
     await page.route("http://deficiencies.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: listing }));
     await page.goto("http://deficiencies.test/", { waitUntil: "load" });
-    assert.equal(await page.getByRole("heading", { name: "Deficiencies" }).count(), 1);
-    assert.equal(await page.getByRole("searchbox", { name: "Search deficiency text" }).inputValue(), "brake");
+    assert.equal(await page.getByRole("heading", { name: "Problems" }).count(), 1);
+    assert.equal(await page.getByRole("searchbox", { name: "Search problem text" }).inputValue(), "brake");
     assert.equal(await page.getByLabel("Lifecycle status").locator('option[value="REPORTED_IN_ERROR"]').textContent(), "Reported in Error");
     assert.equal(await page.getByLabel("Severity").inputValue(), "URGENT");
-    assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/deficiencies/?q=brake&results_page=2");
-    assert.match(await page.getByText("42 matching deficiencies").innerText(), /showing 25/);
-    for (const label of ["Search deficiency text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
+    assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/problems/?q=brake&results_page=2");
+    assert.match(await page.getByText("42 matching problems").innerText(), /showing 25/);
+    for (const label of ["Search problem text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
       const control = page.getByLabel(label);
       const box = await control.boundingBox();
       assert.ok(box && box.height >= 48, `${viewport.name}: ${label} target is shorter than 48 CSS pixels`);

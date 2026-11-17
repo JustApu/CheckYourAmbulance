@@ -19,7 +19,7 @@
 <p>Reactivation takes effect when you confirm. Routine inspections are owed again from then on. Nothing is owed for the time it was inactive.</p>
 {% else %}
 <h2 id="active-heading">Deactivate {{ vehicle.display_name }}</h2>
-<p>Deactivation takes effect when you confirm. From then on the vehicle owes no routine inspection, and inspections due later are shown as exempt. Its earlier inspections, checks, deficiencies and other history are kept. It can be reactivated later.</p>
+<p>Deactivation takes effect when you confirm. From then on the vehicle owes no routine inspection, and inspections due later are shown as exempt. Its earlier inspections, checks, problems and other history are kept. It can be reactivated later.</p>
 {% endif %}
 <form method="post" action="{% url 'vehicle-admin' vehicle.pk %}">
   {% csrf_token %}

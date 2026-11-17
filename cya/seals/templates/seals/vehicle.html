@@ -3,7 +3,7 @@
 {% block content %}
 <p class="breadcrumb"><a href="{% url 'inspection-vehicle' vehicle.pk %}">&larr; {{ vehicle.display_name }}</a></p>
 <h1>Sealed kits and cabinets</h1>
-<p>Check the seal itself or break it to inspect its contents. A seal never closes an open deficiency.</p>
+<p>Check the seal itself or break it to inspect its contents. A seal never closes an open problem.</p>
 <form id="seal-csrf">{% csrf_token %}</form>
 <p id="seal-message" class="notice" role="status" aria-live="polite"></p>
 <section aria-labelledby="seals-heading">

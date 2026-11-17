@@ -19,11 +19,11 @@
 </div>
 <p id="session-message" class="notice" role="status"></p>
 <form id="csrf-holder">{% csrf_token %}</form>
-<p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent deficiency report</a></p>
+<p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent problem report</a></p>
 {% if not verification %}<p><a class="button" href="{% url 'inspection-vehicle-seals' vehicle.pk %}">Sealed kits and cabinets</a></p>{% endif %}
 
 {% if verification %}
-<section class="notice"><p>Verification for <a href="{% url 'deficiencies-detail' verification.pk %}">{{ verification.summary }}</a>. Each outstanding row needs a Pass; a Fail returns the deficiency to In Progress. Unable to Inspect does not verify.</p></section>
+<section class="notice"><p>Verification for <a href="{% url 'deficiencies-detail' verification.pk %}">{{ verification.summary }}</a>. Each outstanding row needs a Pass; a Fail returns the problem to In Progress. Unable to Inspect does not verify.</p></section>
 {% elif state != "OPEN" %}
 <section class="notice" aria-label="Session ended">
   <p>This session is {{ state_label|lower }}. Reopen it to record more checks; completed checks keep their original times.</p>
@@ -78,7 +78,7 @@
   </div>
   <section id="area-overview" aria-labelledby="area-overview-heading">
     <h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3>
-    <p class="muted">Progress counts checks for the current inspection window. Known deficiencies remain open until resolved.</p>
+    <p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p>
     <div id="area-cards" class="area-cards"></div>
   </section>
   <section id="area-detail" aria-labelledby="area-heading" hidden>
@@ -103,13 +103,13 @@
   <h2 id="outcome-title">Record a failed or unable check</h2>
   <form id="outcome-form" class="panel" novalidate>
     <label id="outcome-reason-label">Reason <textarea name="outcome_explanation" maxlength="4000"></textarea></label>
-    <label>Choose an existing deficiency, or report a new one
-      <select id="outcome-existing"><option value="">Report a new deficiency</option></select>
+    <label>Choose an existing problem, or report a new one
+      <select id="outcome-existing"><option value="">Report a new problem</option></select>
     </label>
     <p id="outcome-matches" role="status"></p>
-    <fieldset id="outcome-create-fields"><legend>New deficiency</legend>{% include "inspections/report_fields.html" with options=report_options %}</fieldset>
+    <fieldset id="outcome-create-fields"><legend>New problem</legend>{% include "inspections/report_fields.html" with options=report_options %}</fieldset>
     <p id="outcome-error" role="status"></p>
-    <button type="submit" class="button primary">Record check and deficiency</button>
+    <button type="submit" class="button primary">Record check and problem</button>
     <button type="button" id="outcome-cancel" class="button">Cancel</button>
   </form>
 </dialog>

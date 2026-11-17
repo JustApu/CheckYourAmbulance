@@ -12,12 +12,12 @@ All mutations use the existing audited [check](check-records.md) and
 
 | Route | Purpose |
 |---|---|
-| `/deficiencies/` | The 100 most recent reports, including cancelled history; active vehicle links to independent reporting. |
-| `/deficiencies/queue/` | Supervisor queue (Supervisors and Administrators): unassigned, overdue and waiting extension requests. |
-| `/deficiencies/{id}/` | Report details, deadlines and age, lifecycle history, crew and supervisor action forms, check suspensions, verification scope and informational links. |
-| `/deficiencies/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. A deficiency that is not Pending Verification answers 409 with its current status and a link back to it, not the 503 outage page (issue #20). |
-| `/deficiencies/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. Without a session it answers 401 (the verification screen then stops re-reading; issue #37). |
-| `/inspection/vehicles/{id}/deficiencies/new/` | Independent item, compartment or selected vehicle-systems report. |
+| `/problems/` | The 100 most recent reports, including cancelled history; active vehicle links to independent reporting. |
+| `/problems/queue/` | Supervisor queue (Supervisors and Administrators): unassigned, overdue and waiting extension requests. |
+| `/problems/{id}/` | Report details, deadlines and age, lifecycle history, crew and supervisor action forms, check suspensions, verification scope and informational links. |
+| `/problems/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. A deficiency that is not Pending Verification answers 409 with its current status and a link back to it, not the 503 outage page (issue #20). |
+| `/problems/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count. Without a session it answers 401 (the verification screen then stops re-reading; issue #37). |
+| `/inspection/vehicles/{id}/problems/new/` | Independent item, compartment or selected vehicle-systems report. |
 | `/inspection/vehicles/{id}/check-history/` | Searchable, paginated summaries of recent check chains, with a per-chain detail view for complete history; own corrections, administrator invalidation and supervisor Unable completion. |
 
 Pages require an active signed-in user with an organization role, like the shell. Missing,
@@ -168,7 +168,7 @@ rechecked by the existing command on every check; stale screens cannot force acc
 
 ## Supervisor and administrator actions (issue #16)
 
-The deficiency page adds a **Supervisor actions** group for the M4 commands that need a supervisor
+The problem page adds a **Supervisor actions** group for the M4 commands that need a supervisor
 or administrator. Each form posts to the existing audited endpoint with the event seen at page load,
 so a concurrent change answers `DEFICIENCY_CHANGED` and asks for a refresh. The page decides only
 what to offer; the command rechecks the permission, the status and every choice.
@@ -191,13 +191,13 @@ Roles combine, so a Crew member who is also a Supervisor sees both groups. A for
 role the page hid is refused by the command (403); the tests post a forged crew extension
 decision and a forged supervisor reopening.
 
-**Check suspensions.** The page lists every suspension of the deficiency as "Known Deficiency —
+**Check suspensions.** The page lists every suspension of the deficiency as "Known Problem —
 Check Suspended" with its start, explanation and, once ended, when and by which event (SUS-1,
 SUS-4). There is no "end suspension" control: SPEC §8.9 ends suspensions only automatically, when
 the deficiency is verified closed, closed by an administrator or Reported in Error (SUS-3, SUS-4),
 and the server has no other way to end one. Closing the deficiency is how a supervisor ends them.
 
-**Supervisor queue** (`/deficiencies/queue/`, linked from the index for those who may decide
+**Supervisor queue** (`/problems/queue/`, linked from the index for those who may decide
 extensions). Three lists of deficiencies still being worked, 200 each at most (the heading shows
 `+` when cut short): unassigned, oldest report first; overdue by the deadline in force (the same
 governing-deadline reader the overdue notice job uses, so an approved extension that has not

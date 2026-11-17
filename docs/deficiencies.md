@@ -33,7 +33,7 @@ adds [Awaiting External Dependency and progress notes](#awaiting-external-depend
 
 ## Deficiency list and supervisor queue
 
-`GET /deficiencies/` is the read-only organization-wide list available to each built-in role.
+`GET /problems/` is the read-only organization-wide list available to each built-in role.
 It defaults to active deficiencies and offers GET filters for summary/description text, vehicle
 name or number, configured severity code, assignee name, lifecycle status, and the
 governing deadline being overdue. Choose **All statuses, including closed and Reported in Error**
@@ -45,7 +45,7 @@ are first, with deterministic 25-row pages and filtered totals. Malformed or dup
 numbers return a notice and show the first page; page numbers beyond the result range show a notice
 and clamp to the last page.
 
-`GET /deficiencies/queue/` remains Supervisor/Administrator-only. Its bounded, searchable active
+`GET /problems/queue/` remains Supervisor/Administrator-only. Its bounded, searchable active
 case groups put extension requests waiting for a decision first, then overdue deficiencies, cases
 at the threshold of the organization's two highest active severity ranks, and unassigned cases.
 Retired grades above that threshold remain included, matching fleet readiness. Severity labels
@@ -413,7 +413,7 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   assignee, deadline, scope or vehicle status (SUS-2, OPS-2). Another deficiency may suspend the
   same item; the item is suspended while any suspension of it is in force.
 - **What it does to obligations.** The item's routine obligations (for a kit item, only those of the
-  named physical instance) show `SUSPENDED`, displayed "Known Deficiency — Check Suspended". They are
+  named physical instance) show `SUSPENDED`, displayed "Known Problem — Check Suspended". They are
   never Satisfied, a check recorded anyway does not satisfy them, and they leave Needs Attention Only
   but stay in the full checklist with the deficiency beside them (AC-18). Every other check stays
   required. An obligation already satisfied by a check recorded before the suspension started stays
@@ -479,7 +479,7 @@ suspensions at once (`422 TOO_MANY_SUSPENSIONS`). A stale `expected_event_id` is
   and type. `?as_of=<instant>` answers for that moment (AC-26, AC-27): an instant before the
   deficiency was reported is `404`, a malformed or naive one `400`. Any signed-in member may read it.
   The answer is bounded (`503` rather than truncated).
-- **Deficiency page.** The history lists a start as "Routine checks suspended" and an early end
+- **Problem page.** The history lists a start as "Routine checks suspended" and an early end
   as "Check suspension ended early", and an event that ended suspensions shows how many ("Check
   suspensions ended: 1"). The suspension form and the list of suspensions with when and how each
   ended are on the same page; each suspension in force has an "End suspension" form, with an
@@ -511,7 +511,7 @@ reopen either explicit-closure status, using the existing administrator-reopenin
 event is neutral for correction effects: closure does not imply repair and does not turn a later
 check correction into repair evidence.
 
-On the deficiency page ([issue #21](https://github.com/JustApu/CheckYourAmbulance/issues/21)), Supervisors and Administrators see a
+On the problem page ([issue #21](https://github.com/JustApu/CheckYourAmbulance/issues/21)), Supervisors and Administrators see a
 "Close: no current verification items" form directly under Record repair while the deficiency is
 Open, In Progress or Awaiting External Dependency. It requires an explanation, states that the
 deficiency closes as Closed — No current verification items and that only an Administrator can

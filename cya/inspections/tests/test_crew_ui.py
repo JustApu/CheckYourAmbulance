@@ -239,7 +239,7 @@ class PageTests(CrewUiCase):
         self.assertIn("Start Night Shift Vehicle Safety Checklist inspection", html)
         self.assertNotIn("Choose a configured inspection", html)
         self.assertIn("Inspection history", html)
-        self.assertIn("Report a deficiency", html)
+        self.assertIn("Report a problem", html)
         self.assertIn('aria-current="page"', html)
         self.assertIn("X-CSRFToken", html)
         self.assertNotIn("Checks, corrections and supervisor completion", html)

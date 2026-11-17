@@ -22,12 +22,12 @@ class BackgroundRefreshTests(CrewUiCase):
         self.re_reads = (
             "/fleet/readiness/panel/",
             f"/status/vehicles/{self.vehicle.pk}/panel/",
-            f"/deficiencies/{self.deficiency}/verification-items/",
+            f"/problems/{self.deficiency}/verification-items/",
         )
         self.pages = (
             "/fleet/readiness/",
             f"/status/vehicles/{self.vehicle.pk}/",
-            f"/deficiencies/{self.deficiency}/verification/",
+            f"/problems/{self.deficiency}/verification/",
         )
 
     def assert_signed_out(self, response, url):

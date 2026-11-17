@@ -738,7 +738,7 @@ class ObligationTests(SuspensionMixin, AttentionCase, VerificationBase):
         day0 = self.states(self.suction)[self.at(hours=6)]
         self.assertEqual((day0.state, day0.evidence_id), (State.SUSPENDED, suspension_id))
         self.assertIsNone(day0.outcome)
-        self.assertEqual(day0.display_text, "Known Deficiency — Check Suspended")
+        self.assertEqual(day0.display_text, "Known Problem — Check Suspended")
         # Excluded from Needs Attention Only although red; unaffected checks stay required.
         only = self.item_ids(needs_attention_only=True)
         self.assertNotIn((str(self.suction.pk), None), only)

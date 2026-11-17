@@ -75,11 +75,11 @@
   }
 
   var MESSAGES = {
-    DEFICIENCY_REQUIRED: "Choose or report a deficiency for this result.",
+    DEFICIENCY_REQUIRED: "Choose or report a problem for this result.",
     UNKNOWN_CATEGORY: "Report choices changed. Refresh and choose a current category.",
     INVALID_SEVERITY: "Report choices changed. Refresh and choose a current severity.",
     DEFICIENCY_NOT_ACTIVE: "That report is closed or Reported in Error. Choose another report.",
-    VERIFICATION_NOT_PENDING: "This deficiency is no longer Pending Verification. Refresh its history.",
+    VERIFICATION_NOT_PENDING: "This problem is no longer Pending Verification. Refresh its history.",
     NOT_IN_VERIFICATION_SCOPE: "This item and kit are no longer in the verification scope. Refresh history.",
     INVALID_OBSERVATION: "That value is not accepted for this item.",
     INVALID_OUTCOME: "That result is not allowed for this item.",
@@ -284,7 +284,7 @@
     outcomeForm.querySelector('[name="outcome_explanation"]').required = outcome === "UNABLE_TO_INSPECT";
     $("outcome-error").textContent = ""; $("outcome-create-fields").hidden = false;
     outcomeChoice.textContent = "";
-    var create = el("option", "", "Report a new deficiency"); create.value = ""; outcomeChoice.appendChild(create);
+    var create = el("option", "", "Report a new problem"); create.value = ""; outcomeChoice.appendChild(create);
     var generation = ++outcomeGeneration;
     $("outcome-matches").textContent = "Loading possible matches… None will be selected for you.";
     fetch(config.urls.suggestions + "?vehicle_id=" + encodeURIComponent(config.vehicle_id) + "&item_id=" + encodeURIComponent(row.item_id),
@@ -297,7 +297,7 @@
         var option = el("option", "", match.summary + " (" + match.status + ")");
         option.value = match.deficiency_id; outcomeChoice.appendChild(option);
       });
-      $("outcome-matches").textContent = body.suggestions.length ? "Choose a matching existing report yourself, or describe a new one." : "No possible matches found. Describe a new deficiency.";
+      $("outcome-matches").textContent = body.suggestions.length ? "Choose a matching existing report yourself, or describe a new one." : "No possible matches found. Describe a new problem.";
     }).catch(function () { if (generation === outcomeGeneration) { $("outcome-matches").textContent = "Possible matches could not be loaded. Refresh to choose an existing report, or explicitly report a new one."; } });
     if (typeof outcomeDialog.showModal === "function") { outcomeDialog.showModal(); } else { outcomeDialog.setAttribute("open", ""); }
   }
@@ -320,7 +320,7 @@
       var severity = outcomeForm.querySelector('[name="severity"]:checked');
       var fields = {category_id: outcomeValue("category_id"), severity: severity ? severity.value : "",
         summary: outcomeValue("summary"), description: outcomeValue("description")};
-      if (!fields.category_id || !fields.severity || !fields.summary || !fields.description) { $("outcome-error").textContent = "Choose a category and severity, and describe the new deficiency."; return; }
+      if (!fields.category_id || !fields.severity || !fields.summary || !fields.description) { $("outcome-error").textContent = "Choose a category and severity, and describe the new problem."; return; }
       deficiency = {create: fields};
     }
     closeOutcome(true); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
@@ -500,7 +500,7 @@
   function progressText(group) {
     return group.checked + " of " + group.total + " items checked in this window · " + group.due + " due · " +
       group.due_soon + " due soon · " + group.overdue + " overdue · " + group.not_due + " not due · " +
-      group.no_obligation + " without an obligation · " + group.exceptions + " exceptions · " + group.open_deficiencies + " open deficiencies";
+      group.no_obligation + " without an obligation · " + group.exceptions + " exceptions · " + group.open_deficiencies + " open problems";
   }
   function renderAreaCards() {
     var cards = $("area-cards");
@@ -617,7 +617,7 @@
     row.deficiencies.forEach(function (d) {
       var box = el("div", "known-deficiency");
       var status = d.status.replace(/_/g, " ").toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); });
-      box.appendChild(el("strong", "", "Deficiency status: " + status + ". Severity: " + d.severity_label + ". "));
+      box.appendChild(el("strong", "", "Problem status: " + status + ". Severity: " + d.severity_label + ". "));
       box.appendChild(document.createTextNode(d.summary));
       var historyLink = el("a", "", " View report and history");
       historyLink.href = config.urls.deficiency_detail.replace("DEFICIENCY", encodeURIComponent(d.id));

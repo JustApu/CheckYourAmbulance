@@ -2,7 +2,7 @@
 {% load station_time %}
 {% block content %}
 <p>
-<a href="{% url 'deficiencies' %}">All deficiencies</a> · <a href="{% url 'inspection-check-history' deficiency.vehicle_id %}">Check history</a>
+<a href="{% url 'deficiencies' %}">All problems</a> · <a href="{% url 'inspection-check-history' deficiency.vehicle_id %}">Check history</a>
 </p>
 <section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title">
 <h2 id="deficiency-overview-title">{{ deficiency.summary }}</h2>
@@ -40,7 +40,7 @@
 </form>
 {% elif supervisor.can_start_work %}
 <form class="workflow-write deficiency-primary-form" data-kind="start-work" data-url="{% url 'api-deficiency-work-starts' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
-{% csrf_token %}<p>Move this deficiency from Open to In Progress.</p>
+{% csrf_token %}<p>Move this problem from Open to In Progress.</p>
 <button type="submit" class="button primary">Start work</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
@@ -57,9 +57,9 @@
 <summary>Closure exception — no current verification items</summary>
 <form class="panel workflow-write" data-kind="empty-scope-close" data-url="{% url 'api-deficiency-empty-scope-closures' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Close: no current verification items</h2>
-<p>Use only when the checklist no longer has anything to verify for this deficiency. It closes as &ldquo;Closed &mdash; No current verification items&rdquo;; only an Administrator can reopen it.</p>
+<p>Use only when the checklist no longer has anything to verify for this problem. It closes as &ldquo;Closed &mdash; No current verification items&rdquo;; only an Administrator can reopen it.</p>
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
-<button type="submit" class="button primary">Close deficiency</button>
+<button type="submit" class="button primary">Close problem</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 </details>
@@ -116,8 +116,8 @@
 {% if suspensions %}
 <details class="panel deficiency-details">
 <summary>Check suspensions — {{ active_suspension_count }} in force</summary>
-<p>A suspended check is never a Pass. Suspensions end automatically when the deficiency is closed or Reported in Error. A supervisor or administrator may also end one early while the deficiency is open; the check is then required again on its normal schedule.</p>
-<ul>{% for row in suspensions %}<li>{{ row.label }}: Known Deficiency — Check Suspended from {{ row.started_at|station_time }}{% if row.ended_at %}; ended {{ row.ended_at|station_time }} ({{ row.end_label }}){% else %}; in force{% endif %}{% if row.explanation %}<p>{{ row.explanation }}</p>{% endif %}{% if not row.ended_at and supervisor.can_end_suspensions %}
+<p>A suspended check is never a Pass. Suspensions end automatically when the problem is closed or Reported in Error. A supervisor or administrator may also end one early while the problem is open; the check is then required again on its normal schedule.</p>
+<ul>{% for row in suspensions %}<li>{{ row.label }}: Known Problem — Check Suspended from {{ row.started_at|station_time }}{% if row.ended_at %}; ended {{ row.ended_at|station_time }} ({{ row.end_label }}){% else %}; in force{% endif %}{% if row.explanation %}<p>{{ row.explanation }}</p>{% endif %}{% if not row.ended_at and supervisor.can_end_suspensions %}
 <form class="workflow-write" data-kind="end-suspension" data-url="{% url 'api-deficiency-check-suspension-ends' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}" data-suspension="{{ row.suspension_id }}">
 {% csrf_token %}<label>Why end it now (optional) <textarea name="explanation" maxlength="4000"></textarea></label>
 <button type="submit" class="button">End suspension</button>
@@ -194,7 +194,7 @@
 {% if supervisor.verification_items is not None %}
 <form class="panel workflow-write" {% if not supervisor.expanding %}data-time-zone="{{ cya_user.organization.station_zone }}" {% endif %}data-kind="{% if supervisor.expanding %}expand{% else %}add-verification{% endif %}" data-url="{% if supervisor.expanding %}{% url 'api-deficiency-scope-expansions' deficiency.pk %}{% else %}{% url 'api-deficiency-added-verifications' deficiency.pk %}{% endif %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>{% if supervisor.expanding %}Expand verification scope{% else %}Add verification after closure{% endif %}</h2>
-<p>{% if supervisor.expanding %}Each item and physical kit you add needs its own verification Pass.{% else %}This reopens the deficiency; each item and physical kit you add needs a verification Pass by the deadline.{% endif %}</p>
+<p>{% if supervisor.expanding %}Each item and physical kit you add needs its own verification Pass.{% else %}This reopens the problem; each item and physical kit you add needs a verification Pass by the deadline.{% endif %}</p>
 <fieldset><legend>Items</legend>{% for value, label in supervisor.verification_items %}<label><input type="checkbox" name="items" value="{{ value }}"> {{ label }}</label>{% empty %}<p>No current checklist items.</p>{% endfor %}</fieldset>
 {% if not supervisor.expanding %}<label>Verification deadline (agency local time, {{ cya_user.organization.station_zone }}) <input name="deadline" type="datetime-local" required></label>{% endif %}
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
@@ -205,8 +205,8 @@
 {% if supervisor.suspension_items is not None %}
 <form class="panel workflow-write" data-kind="suspend" data-url="{% url 'api-deficiency-check-suspensions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Suspend routine checks</h2>
-<p>Choose exactly which checks stop being required while this deficiency is worked. A suspension is not a Pass, other checks stay required, and operational status does not change.</p>
-<fieldset><legend>Items in this deficiency's scope</legend>{% for value, label in supervisor.suspension_items %}<label><input type="checkbox" name="items" value="{{ value }}"> {{ label }}</label>{% empty %}<p>No current checklist items are in this deficiency's scope.</p>{% endfor %}</fieldset>
+<p>Choose exactly which checks stop being required while this problem is worked. A suspension is not a Pass, other checks stay required, and operational status does not change.</p>
+<fieldset><legend>Items in this problem's scope</legend>{% for value, label in supervisor.suspension_items %}<label><input type="checkbox" name="items" value="{{ value }}"> {{ label }}</label>{% empty %}<p>No current checklist items are in this problem's scope.</p>{% endfor %}</fieldset>
 <label>Explanation (optional) <textarea name="explanation" maxlength="4000"></textarea></label>
 <button type="submit" class="button primary">Suspend checks</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
@@ -215,18 +215,18 @@
 {% if supervisor.can_close %}
 <form class="panel workflow-write" data-kind="admin-close" data-url="{% url 'api-deficiency-administrator-closures' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Close without verification</h2>
-<p>Administrator only. The deficiency closes as "Closed — Administrator" and any check suspensions end.</p>
+<p>Administrator only. The problem closes as "Closed — Administrator" and any check suspensions end.</p>
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
-<button type="submit" class="button">Close deficiency</button>
+<button type="submit" class="button">Close problem</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% endif %}
 {% if supervisor.can_reopen %}
 <form class="panel workflow-write" data-kind="admin-reopen" data-url="{% url 'api-deficiency-administrator-reopenings' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Reopen</h2>
-<p>Administrator only. Reopens this explicitly closed deficiency.</p>
+<p>Administrator only. Reopens this explicitly closed problem.</p>
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
-<button type="submit" class="button primary">Reopen deficiency</button>
+<button type="submit" class="button primary">Reopen problem</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% endif %}

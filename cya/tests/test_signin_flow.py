@@ -151,7 +151,7 @@ class SignInFlowTests(TestCase):
         response = self.sign_in(next_path="/fleet/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.landing(response), ("/fleet/", "/fleet/"))
-        page = "/deficiencies/?status=OPEN&vehicle=a%20b"
+        page = "/problems/?status=OPEN&vehicle=a%20b"
         self.assertEqual(self.landing(self.sign_in(next_path=page)), (page, page))
 
     def test_unsafe_return_paths_fall_back_to_the_status_page(self):
@@ -193,15 +193,13 @@ class SignInFlowTests(TestCase):
         # One transaction at a time: a second tab's sign-in replaces the first, whose callback
         # is then refused instead of landing on the second tab's page.
         _, first = self.start(next_path="/fleet/")
-        _, second = self.start(next_path="/deficiencies/")
+        _, second = self.start(next_path="/problems/")
         stale = self.google.issue_code(self.google.id_token(sub="1001", nonce=first["nonce"]))
         refused = self.client.get("/auth/callback/", {"state": first["state"], "code": stale})
         self.assertEqual(refused.status_code, 403)
-        self.assertNotIn("/deficiencies/", refused.content.decode())
+        self.assertNotIn("/problems/", refused.content.decode())
         self.client.cookies.pop(SIGNIN_COOKIE, None)
-        self.assertEqual(
-            self.landing(self.sign_in(next_path="/deficiencies/")), ("/deficiencies/",) * 2
-        )
+        self.assertEqual(self.landing(self.sign_in(next_path="/problems/")), ("/problems/",) * 2)
 
     def test_only_a_get_page_is_returned_to(self):
         factory = RequestFactory()
@@ -216,7 +214,7 @@ class SignInFlowTests(TestCase):
         self.assertEqual(returns.sign_in_location("/api/v1/x"), "/auth/login/")
 
     def test_the_return_path_is_not_audited(self):
-        self.sign_in(next_path="/deficiencies/?vehicle=marker-52")
+        self.sign_in(next_path="/problems/?vehicle=marker-52")
         self.assertNotIn("marker-52", repr(AUDIT.events))
 
     def test_code_exchange_uses_configured_redirect_and_pkce_verifier(self):
