@@ -111,7 +111,7 @@
     formArea.appendChild(button("Request audit", function () { send("audit", subjectFields(subject)); }));
   }
   function deficiencyFields(parent) {
-    var details = element("details"), summary = element("summary", "Report a deficiency if this item failed");
+    var details = element("details"), summary = element("summary", "Report a problem if this item failed");
     details.appendChild(summary); parent.appendChild(details);
     var categories = [{value: "", label: "Choose a category"}].concat(config.report_options.categories.map(function (c) {
       return {value: c.id, label: c.label};
@@ -151,7 +151,7 @@
         if (!line.checklist_version_id) { payload.inspection_start_operation_id = startId; }
         if (quantity !== line.required_count) {
           if (!deficiency.category.value || !deficiency.severity.value || !deficiency.summary.value.trim() ||
-              !deficiency.description.value.trim()) { show("Complete the deficiency details for the kit count."); return; }
+              !deficiency.description.value.trim()) { show("Complete the problem details for the kit count."); return; }
           payload.deficiency = {create: {category_id: deficiency.category.value, severity: deficiency.severity.value,
             summary: deficiency.summary.value, description: deficiency.description.value}};
         }
@@ -248,7 +248,7 @@
         }
         return value;
       });
-      if (invalid) { show("Complete the deficiency details for each failed item."); return; }
+      if (invalid) { show("Complete the problem details for each failed item."); return; }
       if (data.kit_lines.some(function (line) { return !counts[line.line_id]; })) {
         show("Record a fresh count for every kit line before resealing."); return;
       }

@@ -57,7 +57,7 @@ SLOT_MODELS = (("COMPARTMENT", Compartment), ("SYSTEM", VehicleSystem))
 NEVER_COPIED = (
     "the VIN",
     "kit instances and equipment",
-    "checks, obligations and deficiencies",
+    "checks, obligations and problems",
     "seals",
     "operational status",
     "odometer and engine hours",

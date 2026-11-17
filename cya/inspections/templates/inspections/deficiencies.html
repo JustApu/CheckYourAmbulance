@@ -3,7 +3,7 @@
 {% block content %}
 {% if can_view_queue %}<p><a class="button primary" href="{% url 'deficiency-queue' %}">Supervisor queue</a> <a class="button" href="{% url 'fleet-readiness' %}">Fleet readiness</a></p>{% endif %}
 <section class="panel">
-<h2>Report a deficiency independently</h2>
+<h2>Report a problem independently</h2>
 <p>A report does not record a check, repair or change to vehicle status.</p>
 <ul>
 {% for vehicle in vehicles %}
@@ -15,7 +15,7 @@
 {% endfor %}
 </ul>
 </section>
-<h2>Deficiencies</h2>
+<h2>Problems</h2>
 <p>Outstanding cases are shown by default. Choose all statuses to include closed and Reported in Error history.</p>
 {% include "inspections/deficiency_filters.html" %}
 <ul class="plain">
@@ -25,7 +25,7 @@
 <p>Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}</p>
 </li>
 {% empty %}
-<li class="panel">{% if applied_filters or filter_errors %}No deficiencies match these filters. Clear filters or adjust the search.{% else %}No outstanding deficiencies.{% endif %}</li>
+<li class="panel">{% if applied_filters or filter_errors %}No problems match these filters. Clear filters or adjust the search.{% else %}No outstanding problems.{% endif %}</li>
 {% endfor %}
 </ul>
 {% include "inspections/deficiency_pagination.html" %}

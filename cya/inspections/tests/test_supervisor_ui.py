@@ -48,7 +48,7 @@ class SupervisorUiCase(CrewUiCase):
         )
 
     def page(self, who, pk):
-        return who[0].get(f"/deficiencies/{pk}/")
+        return who[0].get(f"/problems/{pk}/")
 
     def assert_every_form_can_submit(self, page):
         # The script reads each form's submit button at load; one without would stop every form.
@@ -206,14 +206,14 @@ class SupervisorActionTests(SupervisorUiCase):
             self.assertContains(page, "More people can be assigned than this list shows")
             self.assert_every_form_can_submit(page.content.decode())
             name = self.user.display_name
-            found = self.sup[0].get(f"/deficiencies/{pk}/", {"assignee_search": name})
+            found = self.sup[0].get(f"/problems/{pk}/", {"assignee_search": name})
             self.assertIn((str(self.user.pk), name), found.context["supervisor"]["assignees"])
             self.assertTrue(
                 all(
                     name.lower() in n.lower() for _id, n in found.context["supervisor"]["assignees"]
                 )
             )
-            nobody = self.sup[0].get(f"/deficiencies/{pk}/", {"assignee_search": "zz-nobody"})
+            nobody = self.sup[0].get(f"/problems/{pk}/", {"assignee_search": "zz-nobody"})
             self.assertContains(nobody, "No one matching that name can be assigned.")
 
     def test_acknowledgement_regrade_and_suspension_round_trip(self):
@@ -266,7 +266,7 @@ class SupervisorActionTests(SupervisorUiCase):
         )
         self.assertEqual(suspended.status_code, 201, suspended.content)
         page = self.page(self.sup, pk)
-        self.assertContains(page, "Known Deficiency — Check Suspended")
+        self.assertContains(page, "Known Problem — Check Suspended")
         self.assertContains(page, "in force")
         repeat = self.act(
             self.sup, pk, "check-suspensions", items=[{"item_id": str(self.suction.pk)}]
@@ -288,7 +288,7 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertIn('data-kind="end-suspension"', page)
         self.assert_every_form_can_submit(page)
         crew_page = self.page(self.crew, pk).content.decode()
-        self.assertIn("Known Deficiency — Check Suspended", crew_page)
+        self.assertIn("Known Problem — Check Suspended", crew_page)
         self.assertNotIn('data-kind="end-suspension"', crew_page)
         denied = self.act(self.crew, pk, "check-suspension-ends", suspension_id=suspension_id)
         self.assertEqual(denied.status_code, 403, denied.content)
@@ -337,7 +337,7 @@ class SupervisorActionTests(SupervisorUiCase):
         self.assertContains(page, "Closed by administrator")
         self.assertContains(page, "Synthetic &lt;i&gt;close&lt;/i&gt;.")
         self.assertNotContains(page, "Synthetic <i>close</i>.")
-        self.assertContains(page, "Known Deficiency — Check Suspended")
+        self.assertContains(page, "Known Problem — Check Suspended")
         self.assertContains(page, "(Closed by administrator)")  # the suspension's end label
         self.assertContains(page, "Check suspensions — 0 in force")
         self.assertNotContains(page, "; in force")
@@ -406,7 +406,7 @@ class SupervisorActionTests(SupervisorUiCase):
 
 
 class QueueTests(SupervisorUiCase):
-    URL = "/deficiencies/queue/"
+    URL = "/problems/queue/"
 
     def lists(self, response):
         return {
@@ -418,10 +418,10 @@ class QueueTests(SupervisorUiCase):
         before = AuditEvent.objects.count()
         self.assertEqual(self.client.get(self.URL).status_code, 403)
         self.assertGreater(AuditEvent.objects.count(), before)  # the refusal is audited
-        self.assertNotContains(self.client.get("/deficiencies/"), self.URL)
+        self.assertNotContains(self.client.get("/problems/"), self.URL)
         sup = self.signed_in("sup-ui", "SUPERVISOR")
         self.assertEqual(sup[0].get(self.URL).status_code, 200)
-        self.assertContains(sup[0].get("/deficiencies/"), self.URL)
+        self.assertContains(sup[0].get("/problems/"), self.URL)
 
     def test_unassigned_overdue_and_waiting_extensions(self):
         unassigned = self.report(summary="Synthetic unassigned")
@@ -458,7 +458,7 @@ class QueueTests(SupervisorUiCase):
         sup = self.signed_in("sup-ui", "SUPERVISOR")
         response = sup[0].get(self.URL)
         found = self.lists(response)
-        self.assertNotContains(response, "matching active deficiencies; showing")
+        self.assertNotContains(response, "matching active problems; showing")
         self.assertEqual(found["Unassigned"], [unassigned, unassigned_later])
         self.assertEqual(found["Overdue"], [late, late_later])
         self.assertEqual(
@@ -515,7 +515,7 @@ class QueueTests(SupervisorUiCase):
         self.assertIn("Critical / High", heading)
         self.assertEqual(groups[heading]["total"], 1)
         self.assertContains(response, "Next action: Review the active high-severity issue.")
-        self.assertContains(response, 'href="/deficiencies/' + urgent + '/"')
+        self.assertContains(response, 'href="/problems/' + urgent + '/"')
 
     def test_queue_severity_priority_tracks_custom_active_levels(self):
         DeficiencySeverity.objects.create(
@@ -695,7 +695,7 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
         client, _user, token = self.sup
 
         def from_page():
-            page = client.get(f"/deficiencies/{pk}/").content.decode()
+            page = client.get(f"/problems/{pk}/").content.decode()
             form = re.search(rf"<form [^>]*{self.FORM}[^>]*>", page).group(0)
             url = re.search(r'data-url="([^"]+)"', form).group(1)
             expected = re.search(r'data-expected-event="([^"]+)"', form).group(1)

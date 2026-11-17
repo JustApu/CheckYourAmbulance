@@ -28,8 +28,8 @@
     NOT_CURRENT_DETERMINATION: "The determination changed. Refresh history.",
     OPERATION_REUSED: "This operation has different content. Refresh before making another decision.",
     ALREADY_LINKED: "These reports are already linked.", NOT_LINKED: "These reports are not linked.",
-    DEFICIENCY_NOT_ACTIVE: "That deficiency is closed or Reported in Error. Choose another report.",
-    DEFICIENCY_CHANGED: "This deficiency changed. Refresh history before making a new decision.",
+    DEFICIENCY_NOT_ACTIVE: "That problem is closed or Reported in Error. Choose another report.",
+    DEFICIENCY_CHANGED: "This problem changed. Refresh history before making a new decision.",
     INVALID_EXTENSION_DATE: "Choose a future date later than the governing deadline.",
     NO_DEADLINE: "A supervisor must set a deadline before an extension can be requested.",
     INVALID_FOLLOW_UP: "Choose a future follow-up date.",
@@ -37,7 +37,7 @@
     NO_ACTIVE_DEPENDENCY: "This dependency has ended. Refresh history.",
     DEPENDENCY_ALREADY_RECORDED: "A dependency is already recorded. Refresh to update it.",
     MALFORMED_REQUEST: "Check the form values and try again.",
-    INVALID_TRANSITION: "This deficiency is not in a status that allows this action.",
+    INVALID_TRANSITION: "This problem is not in a status that allows this action.",
     NOT_YET_SUPPORTED: "This action is not available yet. Record a fresh independent check when appropriate.",
     INVALID_ASSIGNEE: "That person cannot be assigned. Choose an active Crew, Supervisor or Supply Officer.",
     ASSIGNEE_UNCHANGED: "That person is already the assignee.",
@@ -50,9 +50,9 @@
     ACKNOWLEDGEMENT_PERIOD_OUT_OF_RANGE: "Choose a period no longer than the administrator's maximum.",
     SEVERITY_UNCHANGED: "Choose a different severity.",
     ALREADY_IN_SCOPE: "An item you chose is already in the verification scope.",
-    ALREADY_SUSPENDED: "An item you chose is already suspended for this deficiency.",
+    ALREADY_SUSPENDED: "An item you chose is already suspended for this problem.",
     ITEM_NOT_IN_CHECKLIST: "An item you chose is no longer on the vehicle's checklist. Refresh.",
-    ITEM_NOT_IN_SCOPE: "An item you chose is outside this deficiency's affected scope.",
+    ITEM_NOT_IN_SCOPE: "An item you chose is outside this problem's affected scope.",
     KIT_REQUIRED: "Choose the physical kit for that item. Refresh.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
     TOO_MANY_SUSPENSIONS: "Too many suspensions at once. Choose fewer items.",
     SUSPENSION_ALREADY_ENDED: "This suspension has already ended. Refresh history.",
@@ -63,12 +63,12 @@
   // Codes whose meaning depends on the form (issue 20): a repair with an empty scope has nothing
   // left to verify, which the report form's wording does not fit.
   var kindErrors = {
-    repair: {EMPTY_SCOPE: "There are no current checklist items left to verify for this deficiency, so a repair cannot be recorded. Ask a supervisor or administrator to close it."},
+    repair: {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Ask a supervisor or administrator to close it."},
     // The repair form carries data-can-close-empty when this page offers the empty-scope close (issue 21).
-    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this deficiency, so a repair cannot be recorded. Use \u201cClose: no current verification items\u201d below."},
+    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Use \u201cClose: no current verification items\u201d below."},
     "empty-scope-close": {
       SCOPE_AVAILABLE: "Current verification items exist; record the repair instead.",
-      INVALID_TRANSITION: "This deficiency is no longer Open, In Progress or Awaiting External Dependency. Refresh history."
+      INVALID_TRANSITION: "This problem is no longer Open, In Progress or Awaiting External Dependency. Refresh history."
     }
   };
   function errorText(form, code) {

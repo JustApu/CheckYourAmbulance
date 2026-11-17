@@ -67,7 +67,7 @@ class AssignmentAndClosureTests(NoticeCase):
                 "deficiency.assigned",
                 "deficiency.assigned",
                 "deficiency_event",
-                f"/deficiencies/{self.deficiency_id}/",
+                f"/problems/{self.deficiency_id}/",
             ),
         )
         self.assertEqual(row.command_id, event.command_id)  # the same transaction

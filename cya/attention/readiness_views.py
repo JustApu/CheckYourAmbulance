@@ -160,7 +160,7 @@ def _screen(request, template, background=False):
     top_levels = top_active_levels(severity_in_force)
     severity_threshold = min((level.rank for level in top_levels), default=None)
     attention_severity_labels = list(dict.fromkeys(level.label for level in top_levels))
-    attention_severity_label = " / ".join(attention_severity_labels) or "Active deficiencies"
+    attention_severity_label = " / ".join(attention_severity_labels) or "Active problems"
     for vehicle in picture.vehicles:
         vehicle.status_label = VEHICLE_STATUS_LABELS.get(vehicle.status, vehicle.status)
         vehicle.states = [

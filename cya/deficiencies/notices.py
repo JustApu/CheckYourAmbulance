@@ -32,7 +32,7 @@ SOURCE = "deficiency_event"
 
 
 def deficiency_link(deficiency_id):
-    return f"/deficiencies/{deficiency_id}/"
+    return f"/problems/{deficiency_id}/"
 
 
 def people(organization_id, deficiency_id):

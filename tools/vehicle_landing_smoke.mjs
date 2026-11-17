@@ -58,7 +58,7 @@ function markup({ active = false, participant = false, incomplete = false } = {}
     <title>Medic 6 — North Crew - Check Your Ambulance</title><style>${css}</style></head><body>
     <main id="main"><div class="vehicle-page-heading"><h1>Medic 6 — North Crew</h1>
       <p class="status-line"><span class="visually-hidden">Vehicle operational status: </span><span class="pill status-pill" data-status="IN_SERVICE">In Service</span></p></div>
-    <nav class="vehicle-actions" aria-label="Vehicle tasks"><a href="/history">Inspection history</a><a href="/report">Report a deficiency</a></nav>
+    <nav class="vehicle-actions" aria-label="Vehicle tasks"><a href="/history">Inspection history</a><a href="/report">Report a problem</a></nav>
     <p id="vehicle-message" class="notice" role="status" hidden></p><form id="csrf-holder"><input name="csrfmiddlewaretoken" value="synthetic"></form>
     <script id="cya-config" type="application/json">{"vehicle_id":"vehicle-synthetic","sessions_url":"/api/v1/inspection-sessions"}</script>
       <section class="panel inspection-start" aria-labelledby="start-heading"><h2 id="start-heading">Inspection</h2>
@@ -99,7 +99,7 @@ async function checkLayout(page, viewport) {
   assert.equal(await page.getByRole("heading", { level: 1, name: "Medic 6 — North Crew" }).count(), 1);
   assert.equal(await page.locator(".status-line .visually-hidden").textContent(), "Vehicle operational status: ");
   assert.equal(await page.getByRole("link", { name: "Inspection history" }).count(), 1);
-  assert.equal(await page.getByRole("link", { name: "Report a deficiency" }).count(), 1);
+  assert.equal(await page.getByRole("link", { name: "Report a problem" }).count(), 1);
   const metrics = await page.evaluate(() => {
     const heading = document.querySelector(".vehicle-page-heading");
     const title = heading.querySelector("h1").getBoundingClientRect();

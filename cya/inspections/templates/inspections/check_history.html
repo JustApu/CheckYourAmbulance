@@ -2,7 +2,7 @@
 {% load station_time %}
 {% block content %}
 <p>
-<a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Deficiencies</a>
+<a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Problems</a>
 </p>
 <p>Complete chains for the 200 most recent entries recorded in the last 14 days. Original entries remain in history.</p>
 {% if detail %}
@@ -79,7 +79,7 @@
 {% if check.can_invalidate %}
 <details>
 <summary>Administrator: invalidate this check chain</summary>
-<p>The entire chain is excluded. No earlier outcome revives, and invalidation does not close a deficiency.</p>
+<p>The entire chain is excluded. No earlier outcome revives, and invalidation does not close a problem.</p>
 <form class="workflow-write" data-kind="explanation" data-url="{{ check.invalidation_url }}">
 {% csrf_token %}
 <label>Mandatory explanation <textarea name="explanation" required maxlength="4000">
@@ -107,7 +107,7 @@
 </ol>
 {% endif %}
 {% if obligation.completed %}
-<p>Completed by supervisor — unable to inspect{% if obligation.self_completed %} (self-completed){% endif %}. This is not Passed and does not close the deficiency.</p>
+<p>Completed by supervisor — unable to inspect{% if obligation.self_completed %} (self-completed){% endif %}. This is not Passed and does not close the problem.</p>
 {% endif %}
 {% if obligation.can_complete %}
 <form class="workflow-write" data-kind="completion" data-check="{{ check.record.pk }}" data-url="{{ obligation.complete_url }}">

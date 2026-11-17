@@ -240,7 +240,7 @@ class ObligationState:
         if self.outcome == "SUPERVISOR_COMPLETED":
             return "Completed by supervisor — unable to inspect"
         if self.state == State.SUSPENDED:
-            return "Known Deficiency — Check Suspended"  # SPEC SUS-1, AC-18
+            return "Known Problem — Check Suspended"  # SPEC SUS-1, AC-18
         return self.outcome or self.state.value
 
 

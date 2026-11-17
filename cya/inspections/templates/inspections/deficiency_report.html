@@ -1,7 +1,7 @@
 {% extends "inspections/workflow_base.html" %}
 {% block content %}
 <p>
-<a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Deficiency history</a>
+<a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Problem history</a>
 </p>
 <form class="panel workflow-write" data-kind="report" data-url="{% url 'api-deficiencies' %}" novalidate>
 {% csrf_token %}
@@ -45,9 +45,9 @@
 </label>
 <p id="match-note" role="status">Loading possible matches…</p>
 <p>Related links are informational: they do not merge or close reports.</p>
-<button type="submit" class="button primary">Report deficiency</button>
+<button type="submit" class="button primary">Report problem</button>
 <p class="workflow-result" role="status">
 </p>
-<a class="workflow-refresh" href="{% url 'deficiencies' %}" hidden>View deficiency history</a>
+<a class="workflow-refresh" href="{% url 'deficiencies' %}" hidden>View problem history</a>
 </form>
 {% endblock %}

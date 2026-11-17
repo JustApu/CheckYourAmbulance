@@ -277,7 +277,7 @@ class StateTests(SimpleTestCase):
         during = self.evaluate(7, suspensions=[suspension], checks=[self.check()])
         self.assertEqual((during.state, during.evidence_id), (State.SUSPENDED, "suspension"))
         self.assertIsNone(during.outcome)
-        self.assertEqual(during.display_text, "Known Deficiency — Check Suspended")
+        self.assertEqual(during.display_text, "Known Problem — Check Suspended")
         self.assertEqual((during.suspension_in_force, during.suspension_ended_at), (True, None))
         # The window closed while suspended: still Suspended after the end, never Overdue.
         after = self.evaluate(9, suspensions=[suspension])

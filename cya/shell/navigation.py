@@ -51,7 +51,7 @@ SECTIONS = (
     Section("fleet", "Fleet", "fleet", ALL_ROLES),
     Section("inspection", "Inspection", "inspection", ALL_ROLES),
     Section("status", "Vehicle status", "status", ALL_ROLES),
-    Section("deficiencies", "Deficiencies", "deficiencies", ALL_ROLES),
+    Section("deficiencies", "Problems", "deficiencies", ALL_ROLES),
     Section(
         "administration",
         "Administration",
@@ -74,7 +74,7 @@ class Tab:
 TABS = (
     Tab("home", "Home", "home", "home", ("/",), ALL_ROLES),
     Tab("inspect", "Inspect", "inspect", "inspection", ("/inspection/",), ALL_ROLES),
-    Tab("problems", "Problems", "problems", "deficiencies", ("/deficiencies/",), ALL_ROLES),
+    Tab("problems", "Problems", "problems", "deficiencies", ("/problems/",), ALL_ROLES),
     Tab("vehicles", "Vehicles", "vehicles", "status", ("/status/", "/fleet/"), ALL_ROLES),
 )
 

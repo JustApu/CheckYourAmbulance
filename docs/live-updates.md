@@ -65,7 +65,7 @@ by event ID if useful, treat each event as a request to refresh, and always
 re-read authoritative state after reconnect because an event may be missed.
 
 **Signed out during a re-read** ([issue #37](https://github.com/JustApu/CheckYourAmbulance/issues/37)). The page routes that scripts re-read
-(`/fleet/readiness/panel/`, `/status/vehicles/{id}/panel/`, `/deficiencies/{id}/verification-items/`)
+(`/fleet/readiness/panel/`, `/status/vehicles/{id}/panel/`, `/problems/{id}/verification-items/`)
 answer a request without a valid session with 401 `AUTHENTICATION_REQUIRED` instead of
 redirecting, as the `/api/v1/...` endpoints already do. Full-page navigations still redirect to
 `/auth/login/`, and a signed-in user without the role still gets 403. On a 401 each script stops

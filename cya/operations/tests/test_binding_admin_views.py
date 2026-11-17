@@ -151,7 +151,7 @@ class BindingPagesTests(AttentionCase):
         self.assertIn("2026-06-02 06:00", superseded)
         self.assertIn("2026-06-01 06:00", continuing[: continuing.index("</table>")])
         self.assertIn("does not complete any inspection", html)
-        self.assertIn("Checks, deficiencies and audit history are kept", html)
+        self.assertIn("Checks, problems and audit history are kept", html)
         self.assertEqual(self.actions(), ["BIND"], "a preview changes nothing")
         done = self.confirm(preview)
         self.assertEqual(done.status_code, 302)

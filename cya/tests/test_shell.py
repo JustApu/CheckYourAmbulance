@@ -149,7 +149,7 @@ class NavigationTests(ShellTestCase):
         cases = {
             "/": "Home",
             "/inspection/": "Inspect",
-            "/deficiencies/": "Problems",
+            "/problems/": "Problems",
             "/status/": "Vehicles",
             "/fleet/": "Vehicles",
         }
@@ -237,7 +237,7 @@ class NavigationTests(ShellTestCase):
 
     def test_signed_out_visitors_go_to_sign_in_and_see_no_navigation(self):
         client = Client()
-        for path in ("/", "/fleet/", "/inspection/", "/deficiencies/", "/administration/"):
+        for path in ("/", "/fleet/", "/inspection/", "/problems/", "/administration/"):
             with self.subTest(path=path):
                 response = client.get(path)
                 self.assertEqual(response.status_code, 302)
