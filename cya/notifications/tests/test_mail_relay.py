@@ -309,6 +309,11 @@ class RelayPageTests(NotificationCase):
         StubTransport.fail = "CONNECT_FAILED"
         failed = self.post(stage="test")
         self.assertContains(failed, "The relay could not be reached.")
+        # Issue #184 goals review: the glyph is decorative; screen readers hear only the words.
+        self.assertContains(
+            failed, '<span class="indicator-icon" aria-hidden="true">&#9888;</span>'
+        )
+        self.assertContains(sent, '<span class="indicator-icon" aria-hidden="true">&#10003;</span>')
         self.assertEqual(
             AuditEvent.objects.filter(action="MAIL_RELAY_TEST", outcome="SUCCEEDED").count(), 2
         )
