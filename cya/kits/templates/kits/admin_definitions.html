@@ -10,7 +10,7 @@
 <h2 id="definitions-heading">Kit definitions</h2>
 {% if rows %}
 <div class="table-scroll" role="region" aria-labelledby="definitions-heading" tabindex="0">
-<table>
+<table data-sortable data-filter-label="Filter kits">
   <thead><tr><th scope="col">Kit</th><th scope="col">Key</th><th scope="col">In force</th><th scope="col">Scheduled</th><th scope="col">Draft</th></tr></thead>
   <tbody>
   {% for row in rows %}

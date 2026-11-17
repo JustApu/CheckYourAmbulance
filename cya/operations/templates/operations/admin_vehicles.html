@@ -12,7 +12,7 @@
 
 {% if vehicles %}
 <div class="table-scroll" role="region" aria-label="Vehicles" tabindex="0">
-<table>
+<table data-sortable data-filter-label="Filter this list">
   <thead><tr><th scope="col">Vehicle</th><th scope="col">Number</th><th scope="col">VIN</th><th scope="col">Active</th><th scope="col">Operational status</th></tr></thead>
   <tbody>
   {% for v in vehicles %}

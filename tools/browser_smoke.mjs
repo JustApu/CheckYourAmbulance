@@ -383,6 +383,57 @@ async function openMore(page) {
   if (await more.isVisible() && (await more.getAttribute("aria-expanded")) !== "true") { await more.click(); }
 }
 
+async function testSortableTables(viewport) {
+  // Issue #194: admin tables sort by column (aria-sort) and filter, as a script enhancement.
+  const page = await browser.newPage({ viewport });
+  const markup = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Vehicles</title>
+    <style>${css}</style></head><body><main id="main"><h1>Vehicles</h1>
+    <div class="table-scroll" role="region" aria-label="Vehicles" tabindex="0">
+    <table data-sortable data-filter-label="Filter this list">
+      <thead><tr><th scope="col">Vehicle</th><th scope="col">Number</th><th scope="col" data-nosort>Action</th></tr></thead>
+      <tbody>
+        <tr><td><a href="#m10">Medic 10</a></td><td>10</td><td><button type="button">Duplicate</button></td></tr>
+        <tr><td><a href="#e1">Engine 1</a></td><td>1</td><td><button type="button">Duplicate</button></td></tr>
+        <tr><td><a href="#m2">Medic 2</a></td><td>2</td><td><button type="button">Duplicate</button></td></tr>
+      </tbody>
+    </table></div></main><script>${shellScript}</script></body></html>`;
+  try {
+    await page.route("http://tables.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: markup }));
+    await page.goto("http://tables.test/", { waitUntil: "load" });
+    const names = () => page.locator("tbody tr:not([hidden]) td:first-child").allInnerTexts();
+    const vehicle = page.getByRole("button", { name: "Vehicle", exact: true });
+    const header = page.locator("th").first();
+    assert.equal(await header.getAttribute("aria-sort"), "none", `${viewport.name}: sortable header starts unsorted`);
+    assert.equal(await page.locator('th[data-nosort] button').count(), 0, `${viewport.name}: a no-sort column got a sort button`);
+    const box = await vehicle.boundingBox();
+    assert.ok(box.height >= 48, `${viewport.name}: sort button is shorter than 48 CSS pixels`);
+    await vehicle.click();
+    assert.equal(await header.getAttribute("aria-sort"), "ascending");
+    assert.deepEqual(await names(), ["Engine 1", "Medic 2", "Medic 10"], `${viewport.name}: ascending sort is not in natural order`);
+    await vehicle.press("Enter");
+    assert.equal(await header.getAttribute("aria-sort"), "descending", `${viewport.name}: keyboard did not reverse the sort`);
+    assert.deepEqual(await names(), ["Medic 10", "Medic 2", "Engine 1"]);
+    await page.getByRole("button", { name: "Number", exact: true }).click();
+    assert.equal(await header.getAttribute("aria-sort"), "none", `${viewport.name}: the previous column kept its sort state`);
+    assert.equal(await page.locator("th").nth(1).getAttribute("aria-sort"), "ascending");
+    assert.deepEqual(await names(), ["Engine 1", "Medic 2", "Medic 10"], `${viewport.name}: numbers are not sorted numerically`);
+    const filter = page.getByLabel("Filter this list");
+    const filterBox = await filter.boundingBox();
+    assert.ok(filterBox.height >= 48, `${viewport.name}: filter box is shorter than 48 CSS pixels`);
+    await filter.fill("medic");
+    assert.deepEqual(await names(), ["Medic 2", "Medic 10"], `${viewport.name}: filter did not hide non-matching rows`);
+    assert.equal(await page.locator(".table-status").textContent(), "Showing 2 of 3.");
+    await filter.fill("");
+    assert.equal((await names()).length, 3, `${viewport.name}: clearing the filter did not restore every row`);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `${viewport.name}: sortable table page overflows horizontally`);
+    console.log(`${viewport.name}: sortable and filterable table passed`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function testReadinessSummary(viewport) {
   const page = await browser.newPage({ viewport });
   const readiness = `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -737,6 +788,7 @@ try {
     const page = await browser.newPage({ viewport });
     try {
       await testReadinessSummary(viewport);
+      await testSortableTables(viewport);
       await testDeficiencyFilters(viewport);
       await testAdministratorRoleChange(viewport);
       await testSupervisorStatusDecisions(viewport);

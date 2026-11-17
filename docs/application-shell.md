@@ -26,6 +26,16 @@
 - **Vehicle cards:** the Inspect and Vehicles lists are cards with a chevron, one column on phones, two from 48rem and three from 80rem. The whole card is the link.
 - **Dashboards:** the supervisor queue shows its groups two across from 64rem; fleet readiness shows vehicles two across from 80rem, with notices and totals spanning the row.
 
+## Sortable, filterable tables (issue #194)
+
+`shell.js` enhances any `<table data-sortable>`:
+- **Sorting:** each column header except those marked `data-nosort` (action columns) becomes a button. It sorts the rows in natural order ("Medic 2" before "Medic 10"), reports the order with `aria-sort`, and announces "Sorted by …" through a polite status line.
+- **Filtering:** `data-filter-label="…"` adds a labelled filter box above the table that hides non-matching rows and announces "Showing N of M".
+
+Without the script the table is unchanged. Only rows already on the page are reordered or hidden; the server still decides what is listed.
+
+These tables are marked: vehicle administration, checklist templates, kit definitions and kit instances. Compartment and system positions are left in their configured order on purpose.
+
 ## Home (issue #194)
 
 `/` greets the signed-in user by first name (the first word of their display name) with the day and station time, then shows what to do next. `cya/shell/home.py` reads each part on its own; a part whose reader fails shows a short "unavailable" note and the rest still renders. A user with no role sees the earlier one-line page.
