@@ -67,7 +67,7 @@
         {% for option in role_options %}
         <label class="role-option{% if option.0 in target.current_role_codes %} is-assigned{% endif %}">
           <input type="checkbox" name="roles" value="{{ option.0 }}" data-role-choice data-role-label="{{ option.1 }}" aria-label="{{ option.1 }} role for {{ target.email }}"{% if option.0 in target.current_role_codes %} checked{% endif %}>
-          <span>{{ option.1 }}</span>
+          <span>{{ option.1 }}</span><span class="role-option-pending" data-role-pending hidden></span>
         </label>
         {% endfor %}
       </fieldset>
