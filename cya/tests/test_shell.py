@@ -167,11 +167,16 @@ class NavigationTests(ShellTestCase):
         client = self.client_for(self.make_user(roles=["ADMINISTRATOR"]))
         nav = self.nav(client.get("/administration/"))
         self.assertIn("app-nav-more is-current", nav)
+        # The visible More button tells assistive technology the current page is in its group.
+        more = re.search(r'<button id="app-nav-more".*?>', nav).group(0)
+        self.assertIn('aria-current="true"', more)
         self.assertRegex(nav, r'<a href="/administration/" aria-current="page">')
         nav = self.nav(client.get("/administration/kits/"))
         self.assertRegex(nav, r'<a href="/administration/kits/" aria-current="page">')
         self.assertNotRegex(nav, r'<a href="/administration/" aria-current')
-        self.assertNotIn("is-current", self.nav(client.get("/inspection/")))
+        nav = self.nav(client.get("/inspection/"))
+        self.assertNotIn("is-current", nav)
+        self.assertNotIn('aria-current="true"', nav)
 
     def test_hidden_sections_are_still_denied_by_the_server(self):
         client = self.client_for(self.make_user(roles=["CREW"]))
@@ -247,8 +252,11 @@ class ShellMarkupTests(ShellTestCase):
         # More: a hamburger icon with a visible name, a real button that reports its state.
         more = re.search(r'<button id="app-nav-more".*?</button>', html, re.S).group(0)
         self.assertIn(
-            'type="button" aria-controls="app-nav-more-panel" aria-expanded="false"', more
+            'type="button" aria-label="More menu" aria-controls="app-nav-more-panel" '
+            'aria-expanded="false"',
+            more,
         )
+        # #194 keeps "Menu" in the name; it starts with the visible label (WCAG 2.5.3).
         self.assertIn('<span class="app-nav-label">More</span>', more)
         self.assertIn('aria-hidden="true"', more)
         self.assertIn('id="app-nav-more-panel" class="app-nav-more-panel"', html)
