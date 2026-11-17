@@ -30,9 +30,11 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from email.message import EmailMessage
 
+# Python 3.9 compatible (Rocky Linux 9's default python3): no datetime.UTC.
+UTC = timezone.utc
 REPEAT_SECONDS = 6 * 3600
 DEFAULT_CONFIG = "/etc/check-your-ambulance/monitor.json"
 DEFAULTS = {
@@ -61,7 +63,12 @@ DEFAULTS = {
     "probe_failures_to_alert": 2,
     "probe_timeout": 15,
 }
-LOG_TIME = re.compile(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]")
+# nginx's default `[17/Nov/2026:02:43:20 +0000]`, or an ISO 8601 `[2026-11-17T02:43:20+00:00]`
+# from a `$time_iso8601` log format (the Ubuntu rehearsal host uses one).
+LOG_TIME = re.compile(
+    r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}"
+    r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))\]"
+)
 LOG_STATUS = re.compile(r'" (\d{3}) ')
 
 
@@ -179,6 +186,13 @@ def database_conditions(config, at, run=subprocess.run):
     return {"database": "The database is refusing connections"} if refused else {}
 
 
+def log_time(text):
+    """Seconds since the epoch for either access-log timestamp form."""
+    if "T" in text:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    return datetime.strptime(text, "%d/%b/%Y:%H:%M:%S %z").timestamp()
+
+
 def errors_in_window(lines, at, window):
     """How many responses in the last `window` seconds had a 5xx status."""
     count = 0
@@ -188,7 +202,7 @@ def errors_in_window(lines, at, window):
         if not stamp or not status or not status.group(1).startswith("5"):
             continue
         try:
-            when = datetime.strptime(stamp.group(1), "%d/%b/%Y:%H:%M:%S %z").timestamp()
+            when = log_time(stamp.group(1))
         except ValueError:
             continue
         if at - window <= when <= at + 60:
