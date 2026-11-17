@@ -11,53 +11,51 @@
   window.addEventListener("online", showConnection);
   window.addEventListener("offline", function () { if (banner) { banner.hidden = false; } });
   if (navigator.onLine === false && banner) { banner.hidden = false; }
-  var nav = document.querySelector(".site-nav");
-  var navToggle = document.getElementById("site-nav-toggle");
-  var navList = document.getElementById("site-nav-list");
-  var narrowNav = window.matchMedia("(max-width: 47.999rem)");
+  // Navigation (issue #194): a bottom tab bar on phones, a rail on tablets and a sidebar on
+  // laptops and desktops. Below 64rem, More (hamburger icon) opens a panel with its places,
+  // the theme and Sign out; at 64rem and wider that panel is always shown.
+  var more = document.getElementById("app-nav-more");
+  var morePanel = document.getElementById("app-nav-more-panel");
+  var wideNav = window.matchMedia("(min-width: 64rem)");
+  function setMore(open) {
+    more.setAttribute("aria-expanded", String(open));
+    syncNav();
+  }
   function syncNav() {
-    if (!navToggle || !navList) { return; }
-    var toggleHadFocus = document.activeElement === navToggle;
-    navToggle.hidden = !narrowNav.matches;
-    if (narrowNav.matches) {
-      navList.hidden = navToggle.getAttribute("aria-expanded") !== "true";
-      if (navList.hidden && navList.contains(document.activeElement)) { navToggle.focus(); }
-    } else {
-      navToggle.setAttribute("aria-expanded", "false");
-      navList.hidden = false;
-      if (toggleHadFocus) {
-        var currentLink = navList.querySelector('[aria-current="page"]') || navList.querySelector("a");
-        if (currentLink) { currentLink.focus(); }
+    if (!more || !morePanel) { return; }
+    var buttonHadFocus = document.activeElement === more;
+    more.hidden = wideNav.matches;
+    if (wideNav.matches) {
+      more.setAttribute("aria-expanded", "false");
+      morePanel.hidden = false;
+      if (buttonHadFocus) {
+        var first = morePanel.querySelector('[aria-current="page"]') || morePanel.querySelector("a, select, button");
+        if (first) { first.focus(); }
       }
+    } else {
+      morePanel.hidden = more.getAttribute("aria-expanded") !== "true";
+      if (morePanel.hidden && morePanel.contains(document.activeElement)) { more.focus(); }
     }
   }
-  if (navToggle && navList) {
-    navToggle.addEventListener("click", function () {
-      var expanded = navToggle.getAttribute("aria-expanded") === "true";
-      navToggle.setAttribute("aria-expanded", String(!expanded));
-      syncNav();
+  if (more && morePanel) {
+    more.addEventListener("click", function () {
+      setMore(more.getAttribute("aria-expanded") !== "true");
     });
-    nav.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && navToggle.getAttribute("aria-expanded") === "true") {
-        navToggle.setAttribute("aria-expanded", "false");
-        syncNav();
-        navToggle.focus();
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && more.getAttribute("aria-expanded") === "true") {
+        setMore(false);
+        more.focus();
       }
     });
-    navList.addEventListener("click", function (event) {
-      if (event.target.closest("a") && narrowNav.matches) {
-        navToggle.setAttribute("aria-expanded", "false");
-        syncNav();
+    document.addEventListener("click", function (event) {
+      if (more.getAttribute("aria-expanded") === "true" && !more.contains(event.target) && !morePanel.contains(event.target)) {
+        setMore(false);
       }
     });
-    navToggle.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && navToggle.getAttribute("aria-expanded") === "true") {
-        navToggle.setAttribute("aria-expanded", "false");
-        syncNav();
-        navToggle.focus();
-      }
+    morePanel.addEventListener("click", function (event) {
+      if (event.target.closest("a") && !wideNav.matches) { setMore(false); }
     });
-    narrowNav.addEventListener("change", syncNav);
+    wideNav.addEventListener("change", syncNav);
     syncNav();
   }
   var themeSelect = document.getElementById("theme-select");

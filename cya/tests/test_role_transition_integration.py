@@ -81,9 +81,9 @@ class RoleTransitionIntegrationTests(TransactionTestCase):
         client = self.client_for(user)
         fleet_response = client.get("/fleet/")
         self.assertEqual(fleet_response.status_code, 200)
-        self.assertContains(fleet_response, "Fleet")
-        self.assertContains(fleet_response, "Inspection")
-        self.assertContains(fleet_response, "Deficiencies")
+        self.assertContains(fleet_response, "Inspect")
+        self.assertContains(fleet_response, "Problems")
+        self.assertContains(fleet_response, "Vehicles")
         self.assertNotContains(fleet_response, "Administration")
 
         # 4. Accessing administration section is denied (403) and audits with roles_at_time=["CREW"]

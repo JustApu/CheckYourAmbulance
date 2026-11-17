@@ -4,11 +4,17 @@
 
 ## What it provides
 
-- **Layout:** `cya/shell/templates/shell/base.html` is the one page frame (skip link, header with the signed-in user and a CSRF-protected sign-out, main navigation, connection banner, `<main>`). The sign-in, callback, status and sign-out pages use it. Feature pages extend it.
-- **Compact navigation:** below 48rem, the Menu toggle stays in the header and expands the navigation list below it; wider layouts show the list directly.
+- **Layout:** `cya/shell/templates/shell/base.html` is the one page frame (skip link, header with the brand and the signed-in user, main navigation, connection banner, `<main>`). The sign-in, callback, status and sign-out pages use it. Feature pages extend it.
+- **Navigation by device (issue #194):**
+  - every role sees the same tabs: **Home · Inspect · Problems · Vehicles · More**;
+  - phones (under 48rem) get a bottom tab bar, fixed only when scripting runs, with page padding so nothing hides under it;
+  - tablets (48 to 64rem) get a left rail of icons with labels;
+  - laptops and desktops (64rem and wider) get a left sidebar.
+
+  **More** shows a hamburger icon with the visible label "More". Its accessible name is "More menu": it keeps "Menu", as #194 asks for the hamburger control, and starts with the visible label (WCAG 2.5.3). Below 64rem it is a button (`aria-expanded`) that opens a panel; Escape, a click outside or choosing a link closes it. The panel holds Kits and Administration (each only for roles that may open them), the theme control and the CSRF-protected Sign out. At 64rem and wider the sidebar lists the panel in full and the button is hidden. Icons are decorative (`aria-hidden`); every place has a visible label.
 - **Responsive and touch-friendly:** one stylesheet, mobile first, with a wider layout from 48rem. Every control is at least 48 px tall. It follows the light/dark preference and reduced motion.
-- **Status never by color alone:** the current section is bold, underlined and marked `aria-current="page"`. Every save state has an icon and words.
-- **Navigation:** Fleet, Inspection, Vehicle status and Deficiencies (every built-in role) and Administration (Administrator only), per SPEC §3.3. Fleet, Deficiencies and Administration are placeholder pages; Inspection is built in [issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85) (see [crew inspection screens](crew-inspection-ui.md)) and Vehicle status in [issue #148](https://github.com/JustApu/CheckYourAmbulance-archive/issues/148) (see [vehicle status](vehicle-status.md#http-endpoints-and-screens)). Feature pages add `{% block head %}` and `{% block scripts %}` content to the frame.
+- **Status never by color alone:** the current place is bold, has an accent bar and is marked `aria-current="page"`; More is marked the same way, with `aria-current="true"`, when one of its places is current, so the visible button announces it while the panel is closed. Every save state has an icon and words.
+- **Places:** `TABS` in `cya/shell/navigation.py` (issue #194). **Problems** is the on-screen word for deficiencies: the SPEC, code, data and audit records keep "deficiency". **Vehicles** opens the vehicle status list; Supervisors and Administrators also get a link to fleet readiness there, and readiness pages mark Vehicles as current. `/fleet/` stays a placeholder that is no longer in the navigation. **Kits** links to the first kit page the user's roles permit. `SECTIONS` stays the access table that section pages check (SPEC §3.3); Inspection is built in [issue #85](https://github.com/JustApu/CheckYourAmbulance-archive/issues/85) (see [crew inspection screens](crew-inspection-ui.md)) and Vehicle status in [issue #148](https://github.com/JustApu/CheckYourAmbulance-archive/issues/148) (see [vehicle status](vehicle-status.md#http-endpoints-and-screens)). Feature pages add `{% block head %}` and `{% block scripts %}` content to the frame.
 - **Save and connection indicators (PRN-7, §16.4):**
   - `shell/save_state.html` renders `pending`, `saved` or `failed`; `cyaShell.setSaveState` also knows `unconfirmed` (a request with no definite answer, which may or may not have committed);
   - `cyaShell.setSaveState(element, state)` changes it, and treats an unknown state as `failed`;
@@ -20,7 +26,7 @@ Navigation shows a section only if the user holds one of its roles, but the **se
 
 Roles come from `settings.CYA_ROLE_LOOKUP`, a dotted path to `lookup(user) -> iterable of role names`. It defaults to `cya.authorization.persistence.current_role_codes`, which reads current database roles on every call. Missing configuration yields no roles and no sections. A lookup that raises is treated the same way, and only the exception class is logged. Denied section requests are durably audited through the authorization backend; audit failure returns 503. Feature handlers must use the [request/command guards](authorization-implementation.md#policy-and-request-guards) and server-owned resource facts when real features arrive.
 
-The Administration page lists its tools; today that is a link to [role administration](authorization-implementation.md#role-administration-over-http-issue-25). A section's sub-pages (route names `<section>-<page>`) keep the section highlighted in the navigation.
+The Administration page lists its tools; today that is a link to [role administration](authorization-implementation.md#role-administration-over-http-issue-25). A tab owns URL path prefixes (`Tab.paths`), so a place's sub-pages keep it highlighted.
 
 ## Shared responsive and semantic UI conventions
 

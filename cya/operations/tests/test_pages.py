@@ -45,8 +45,22 @@ class StatusPageTests(StatusHttpCase):
 
     def test_navigation_links_the_status_section_for_every_role(self):
         html = self.client.get("/status/").content.decode()
-        self.assertRegex(html, r'href="/status/"[^>]*>\s*Vehicle status')
-        self.assertIn('aria-current="page"', html)
+        self.assertRegex(
+            html,
+            r'href="/status/" aria-current="page">.*?<span class="app-nav-label">Vehicles<',
+        )
+        self.assertIn("<h1>Vehicles</h1>", html)
+
+    def test_vehicles_links_fleet_readiness_only_for_its_readers(self):
+        # Issue #194: Vehicles brings status and fleet readiness together.
+        link = 'href="/fleet/readiness/">Fleet readiness</a>'
+        self.assertNotIn(link, self.client.get("/status/").content.decode())
+        for index, role in enumerate(("SUPERVISOR", "ADMINISTRATOR")):
+            with self.subTest(role=role):
+                client, _ = self.as_role(role, f"status-reader-{index}")
+                self.assertIn(link, client.get("/status/").content.decode())
+        client, _ = self.as_role("SUPPLY_OFFICER", "status-supply")
+        self.assertNotIn(link, client.get("/status/").content.decode())
 
     def test_crew_sees_the_request_form_and_no_set_or_decision_forms(self):
         self.request("OUT_OF_SERVICE", actor=self.crew)

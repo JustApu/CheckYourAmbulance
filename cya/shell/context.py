@@ -15,4 +15,8 @@ def shell(request):
         ),
         None,
     )
-    return {"cya_user": user, "cya_menu": navigation.menu(user, current)}
+    return {
+        "cya_user": user,
+        "cya_menu": navigation.menu(user, current),
+        "cya_nav": navigation.app_navigation(user, request.path) if user is not None else None,
+    }

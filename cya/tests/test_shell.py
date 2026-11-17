@@ -99,53 +99,84 @@ class ShellTestCase(TestCase):
 
 @override_settings(CYA_ROLE_LOOKUP=LOOKUP)
 class NavigationTests(ShellTestCase):
-    def labels(self, response):
+    def nav(self, response):
         html = response.content.decode()
-        nav = re.search(r'<nav class="site-nav".*?</nav>', html, re.S)
-        return re.findall(r">([^<]+)</a>", nav.group(0)) if nav else []
+        found = re.search(r'<nav class="app-nav" aria-label="Main">.*?</nav>', html, re.S)
+        return found.group(0) if found else ""
 
-    def test_each_role_sees_its_sections(self):
+    def labels(self, response):
+        """(tab labels including More, More's place links) as shown in the navigation."""
+        nav = self.nav(response)
+        return (
+            re.findall(r'<span class="app-nav-label">([^<]+)</span>', nav),
+            re.findall(r"</svg><span>([^<]+)</span></a>", nav),
+        )
+
+    def test_each_role_sees_the_same_tabs_and_its_more_items(self):
+        tabs = ["Home", "Inspect", "Problems", "Vehicles", "More"]
         cases = {
-            "CREW": ["Fleet", "Inspection", "Vehicle status", "Deficiencies"],
-            "SUPERVISOR": [
-                "Fleet",
-                "Inspection",
-                "Vehicle status",
-                "Deficiencies",
-                "Administration",
-            ],
-            "SUPPLY_OFFICER": [
-                "Fleet",
-                "Inspection",
-                "Vehicle status",
-                "Deficiencies",
-                "Administration",
-            ],
-            "ADMINISTRATOR": [
-                "Fleet",
-                "Inspection",
-                "Vehicle status",
-                "Deficiencies",
-                "Administration",
-            ],
+            "CREW": [],
+            "SUPERVISOR": ["Kits", "Administration"],
+            "SUPPLY_OFFICER": ["Kits", "Administration"],
+            "ADMINISTRATOR": ["Kits", "Administration"],
         }
-        for index, (role, expected) in enumerate(cases.items()):
+        for index, (role, more) in enumerate(cases.items()):
             with self.subTest(role=role):
                 client = self.client_for(self.make_user(str(index), [role]))
-                self.assertEqual(self.labels(client.get("/fleet/")), expected)
+                self.assertEqual(self.labels(client.get("/")), (tabs, more))
+
+    def test_kits_links_the_first_kit_page_the_role_may_open(self):
+        cases = {
+            "SUPERVISOR": "/administration/kits/",
+            "SUPPLY_OFFICER": "/administration/kit-instances/",
+        }
+        for index, (role, url) in enumerate(cases.items()):
+            with self.subTest(role=role):
+                client = self.client_for(self.make_user(str(index), [role]))
+                self.assertRegex(
+                    self.nav(client.get("/")), rf'<a href="{url}">.*?<span>Kits</span>'
+                )
 
     def test_legacy_emt_constant_aliases_crew(self):
         self.assertEqual(navigation.EMT, navigation.CREW)
 
     def test_roles_are_a_union(self):
         client = self.client_for(self.make_user(roles=["CREW", "ADMINISTRATOR"]))
-        self.assertIn("Administration", self.labels(client.get("/")))
+        self.assertIn("Administration", self.labels(client.get("/"))[1])
 
-    def test_current_section_is_marked_not_by_color_alone(self):
+    def test_current_place_is_marked_not_by_color_alone(self):
         client = self.client_for(self.make_user(roles=["CREW"]))
-        html = client.get("/inspection/").content.decode()
-        self.assertEqual(html.count('aria-current="page">'), 1)
-        self.assertRegex(html, r'<a href="/inspection/" aria-current="page">Inspection</a>')
+        cases = {
+            "/": "Home",
+            "/inspection/": "Inspect",
+            "/deficiencies/": "Problems",
+            "/status/": "Vehicles",
+            "/fleet/": "Vehicles",
+        }
+        for path, label in cases.items():
+            with self.subTest(path=path):
+                nav = self.nav(client.get(path))
+                self.assertEqual(nav.count('aria-current="page"'), 1)
+                self.assertRegex(
+                    nav,
+                    r'aria-current="page"><svg [^>]*aria-hidden="true".*?</svg>'
+                    rf'<span class="app-nav-label">{label}</span>',
+                )
+
+    def test_more_is_marked_when_one_of_its_places_is_current(self):
+        client = self.client_for(self.make_user(roles=["ADMINISTRATOR"]))
+        nav = self.nav(client.get("/administration/"))
+        self.assertIn("app-nav-more is-current", nav)
+        # The visible More button tells assistive technology the current page is in its group.
+        more = re.search(r'<button id="app-nav-more".*?>', nav).group(0)
+        self.assertIn('aria-current="true"', more)
+        self.assertRegex(nav, r'<a href="/administration/" aria-current="page">')
+        nav = self.nav(client.get("/administration/kits/"))
+        self.assertRegex(nav, r'<a href="/administration/kits/" aria-current="page">')
+        self.assertNotRegex(nav, r'<a href="/administration/" aria-current')
+        nav = self.nav(client.get("/inspection/"))
+        self.assertNotIn("is-current", nav)
+        self.assertNotIn('aria-current="true"', nav)
 
     def test_hidden_sections_are_still_denied_by_the_server(self):
         client = self.client_for(self.make_user(roles=["CREW"]))
@@ -183,7 +214,9 @@ class RoleLookupFailClosedTests(ShellTestCase):
             for path in ("/fleet/", "/administration/"):
                 self.assertEqual(client.get(path).status_code, 403)
             home = client.get("/")
-            self.assertNotContains(home, 'class="site-nav"')
+            self.assertNotContains(home, 'class="app-nav"')
+            self.assertContains(home, 'action="/auth/logout/"')
+            self.assertContains(home, 'id="theme-select"')
             self.assertContains(home, "No sections are available")
 
     def test_failing_lookup_means_no_sections_and_logs_only_the_class(self):
@@ -212,12 +245,23 @@ class ShellMarkupTests(ShellTestCase):
         self.assertIn('<html lang="en">', html)
         self.assertIn('name="viewport" content="width=device-width, initial-scale=1"', html)
         self.assertIn('<a class="skip-link" href="#main">', html)
-        self.assertIn('<nav class="site-nav" aria-label="Main">', html)
-        self.assertIn('id="site-nav-toggle"', html)
-        self.assertLess(html.index('class="site-header"'), html.index('id="site-nav-toggle"'))
-        self.assertLess(html.index('id="site-nav-toggle"'), html.index('<nav class="site-nav"'))
-        self.assertIn('aria-controls="site-nav-list" aria-expanded="false"', html)
-        self.assertIn('id="site-nav-list" class="site-nav-list"', html)
+        self.assertIn('<body class="has-app-nav">', html)
+        self.assertIn('<nav class="app-nav" aria-label="Main">', html)
+        self.assertLess(html.index('class="site-header"'), html.index('<nav class="app-nav"'))
+        self.assertLess(html.index('<nav class="app-nav"'), html.index('<main id="main"'))
+        # More: a hamburger icon with a visible name, a real button that reports its state.
+        more = re.search(r'<button id="app-nav-more".*?</button>', html, re.S).group(0)
+        self.assertIn(
+            'type="button" aria-label="More menu" aria-controls="app-nav-more-panel" '
+            'aria-expanded="false"',
+            more,
+        )
+        # #194 keeps "Menu" in the name; it starts with the visible label (WCAG 2.5.3).
+        self.assertIn('<span class="app-nav-label">More</span>', more)
+        self.assertIn('aria-hidden="true"', more)
+        self.assertIn('id="app-nav-more-panel" class="app-nav-more-panel"', html)
+        # Every icon is decorative; each place has a visible text label.
+        self.assertEqual(html.count("<svg "), html.count('aria-hidden="true" focusable="false"'))
         self.assertEqual(html.count("<h1>"), 1)
         self.assertIn('<main id="main"', html)
 
@@ -246,12 +290,17 @@ class ShellMarkupTests(ShellTestCase):
         css = render_to_string("shell/shell.css")
         self.assertGreaterEqual(css.count("min-height: 48px"), 4)
         self.assertIn("@media (min-width: 48rem)", css)
+        self.assertIn("@media (min-width: 64rem)", css)
+        self.assertIn("env(safe-area-inset-bottom)", css)
         self.assertIn("prefers-color-scheme: dark", css)
         self.assertIn(":focus-visible", css)
 
     def test_signed_in_header_has_csrf_protected_sign_out(self):
         html = self.page()
-        self.assertRegex(html, r'<form method="post" action="/auth/logout/">')
+        self.assertEqual(html.count('action="/auth/logout/"'), 1, "Sign out is in More, once")
+        panel = html[html.index('id="app-nav-more-panel"') :]
+        self.assertRegex(panel, r'<form method="post" action="/auth/logout/">')
+        self.assertIn('id="theme-select"', panel)
         self.assertIn("csrfmiddlewaretoken", html)
 
     def test_user_text_is_escaped(self):

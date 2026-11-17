@@ -315,7 +315,7 @@ def deficiencies(request, user):
         request,
         "inspections/deficiencies.html",
         {
-            "title": "Deficiencies",
+            "title": "Problems",  # the on-screen word for deficiencies (issue #194)
             "can_view_queue": permitted("decide_extension", str(user.pk), roles_for(user)),
             "page": page_data,
             "filter_action": reverse("deficiencies"),

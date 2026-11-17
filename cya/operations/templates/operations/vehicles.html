@@ -1,6 +1,7 @@
 {% extends "shell/base.html" %}
 {% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
 {% block content %}
+{% if readiness_url %}<p><a class="button" href="{{ readiness_url }}">Fleet readiness</a> <span class="muted">Live checks, problems and suspensions for every vehicle.</span></p>{% endif %}
 {% if pending_total %}<p class="notice" role="status">{{ pending_total }} status-change request{{ pending_total|pluralize }} waiting for a supervisor{% if pending_truncated %} (showing the oldest){% endif %}.</p>{% endif %}
 {% if vehicles %}
 <ul class="vehicle-list">
