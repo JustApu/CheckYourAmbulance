@@ -4,6 +4,11 @@
 .readiness-filter-input { grid-column: 1; grid-row: 1; z-index: 1; align-self: start; justify-self: center; width: 1.5rem; height: 1.5rem; min-height: auto; margin: .95rem 0 0; }
 .readiness-filter-help { margin: 0 0 .35rem; padding-left: 2rem; }
 .readiness-filter #readiness-panel { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+/* Wide screens show vehicles two by two; notices and totals span the row (#194). */
+@media (min-width: 80rem) {
+  #readiness-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; align-items: start; }
+  #readiness-panel > :not(.readiness-vehicle) { grid-column: 1 / -1; }
+}
 #readiness-attention-only:checked ~ #readiness-panel .readiness-vehicle[data-attention="false"] { display: none; }
 .readiness-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); align-items: start; gap: .75rem 1rem; }
 .readiness-identity h2 { margin: 0 0 .35rem; overflow-wrap: anywhere; }

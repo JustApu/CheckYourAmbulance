@@ -107,6 +107,24 @@ class HomeScreenTests(CrewUiCase):
         self.assertIn('href="/inspection/">See every vehicle in Inspect</a>', html)
         self.assertIn(f"counting the first 1 of {fleet}", html)
 
+    def test_layout_pages_use_their_width_and_styles(self):
+        # Issue #194 layouts: dashboards are wide, and the Inspect list loads its card styles.
+        self.assertIn('<main id="main" tabindex="-1" class="main-wide">', self.page())
+        inspect = self.client.get("/inspection/").content.decode()
+        self.assertIn(
+            '<main id="main" tabindex="-1">', inspect, "a plain list keeps the reading width"
+        )
+        self.assertIn(".vehicle-list {", inspect, "the vehicle cards are styled")
+        css = render_to_string("shell/shell.css")
+        self.assertIn("main.main-wide { max-width: 90rem; }", css)
+
+    def test_fleet_readiness_markup_is_balanced(self):
+        client, user = self.harness.sign_in("home-readiness")
+        self.grant(user, "SUPERVISOR")
+        html = client.get("/fleet/readiness/").content.decode()
+        main = html[html.index("<main") : html.index("</main>")]
+        self.assertEqual(main.count("<div"), main.count("</div>"))
+
     def test_home_shows_no_scores_or_rankings(self):
         page = self.page()
         html = page[page.index("<main") : page.index("</main>")]  # the page content only

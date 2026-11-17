@@ -59,7 +59,7 @@
   <span class="indicator-icon" aria-hidden="true">&#9888;</span>
   <strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded: use its Retry button, not a new tap.
 </div>
-<main id="main" tabindex="-1">
+<main id="main" tabindex="-1"{% block main_class %}{% endblock %}>
   {% block page_heading %}<h1>{{ title }}</h1>{% endblock %}
   {% block content %}{{ body }}{% endblock %}
 </main>

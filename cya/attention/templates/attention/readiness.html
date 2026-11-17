@@ -1,4 +1,5 @@
 {% extends "shell/base.html" %}
+{% block main_class %} class="main-wide"{% endblock %}
 {% load station_time %}
 {% block head %}
 <style>
@@ -16,7 +17,6 @@
 <div class="readiness-filter-copy"><label for="readiness-attention-only">Show vehicles needing attention</label>
 <p id="readiness-filter-help" class="readiness-filter-help">Includes non-In-Service status, failed, overdue or missed checks, active problems among the top two active configured severity ranks (or any active problem if no level is active), suspensions, or a truncated problem list. These independent signals do not combine into a compliance or operational status.</p></div>
 <div id="readiness-panel">{% include "attention/readiness_panel.html" %}</div>
-</div>
 </div>
 {% if live %}
 <p id="readiness-live-state" role="status">Connecting to live updates…</p>
