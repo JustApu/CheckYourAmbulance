@@ -404,7 +404,7 @@ async function testSortableTables(viewport) {
     const names = () => page.locator("tbody tr:not([hidden]) td:first-child").allInnerTexts();
     const vehicle = page.getByRole("button", { name: "Vehicle", exact: true });
     const header = page.locator("th").first();
-    assert.equal(await header.getAttribute("aria-sort"), "none", `${viewport.name}: sortable header starts unsorted`);
+    assert.equal(await page.locator("th[aria-sort]").count(), 0, `${viewport.name}: no header carries aria-sort before a sort`);
     assert.equal(await page.locator('th[data-nosort] button').count(), 0, `${viewport.name}: a no-sort column got a sort button`);
     const box = await vehicle.boundingBox();
     assert.ok(box.height >= 48, `${viewport.name}: sort button is shorter than 48 CSS pixels`);
@@ -415,7 +415,8 @@ async function testSortableTables(viewport) {
     assert.equal(await header.getAttribute("aria-sort"), "descending", `${viewport.name}: keyboard did not reverse the sort`);
     assert.deepEqual(await names(), ["Medic 10", "Medic 2", "Engine 1"]);
     await page.getByRole("button", { name: "Number", exact: true }).click();
-    assert.equal(await header.getAttribute("aria-sort"), "none", `${viewport.name}: the previous column kept its sort state`);
+    assert.equal(await header.getAttribute("aria-sort"), null, `${viewport.name}: the previous column kept its sort state`);
+    assert.equal(await page.locator("th[aria-sort]").count(), 1, `${viewport.name}: more than one header carries aria-sort`);
     assert.equal(await page.locator("th").nth(1).getAttribute("aria-sort"), "ascending");
     assert.deepEqual(await names(), ["Engine 1", "Medic 2", "Medic 10"], `${viewport.name}: numbers are not sorted numerically`);
     const filter = page.getByLabel("Filter this list");

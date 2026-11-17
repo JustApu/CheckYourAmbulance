@@ -59,8 +59,8 @@
     syncNav();
   }
   // Sortable, filterable tables (issue #194). A table marked data-sortable gets a button in each
-  // header (except data-nosort) that sorts its rows, reported with aria-sort; data-filter-label
-  // adds a filter box above it. Without this script the table is unchanged. The server still
+  // header (except data-nosort) that sorts its rows. Only the sorted header carries aria-sort
+  // (WAI-ARIA: one at a time). data-filter-label adds a filter box above it. Without this script the table is unchanged. The server still
   // owns the data; this only reorders and hides rows already on the page.
   var collator = window.Intl ? new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }) : null;
   function cellText(row, index) {
@@ -85,10 +85,9 @@
       button.textContent = name;
       th.textContent = "";
       th.appendChild(button);
-      th.setAttribute("aria-sort", "none");
       button.addEventListener("click", function () {
         var direction = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
-        headers.forEach(function (other) { if (other.hasAttribute("aria-sort")) { other.setAttribute("aria-sort", "none"); } });
+        headers.forEach(function (other) { other.removeAttribute("aria-sort"); });  // one sorted header at a time (WAI-ARIA)
         th.setAttribute("aria-sort", direction);
         var sign = direction === "ascending" ? 1 : -1;
         var rows = Array.prototype.slice.call(body.rows);

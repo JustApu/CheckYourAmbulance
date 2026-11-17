@@ -29,7 +29,7 @@
 ## Sortable, filterable tables (issue #194)
 
 `shell.js` enhances any `<table data-sortable>`:
-- **Sorting:** each column header except those marked `data-nosort` (action columns) becomes a button. It sorts the rows in natural order ("Medic 2" before "Medic 10"), reports the order with `aria-sort`, and announces "Sorted by …" through a polite status line.
+- **Sorting:** each column header except those marked `data-nosort` (action columns) becomes a button. It sorts the rows in natural order ("Medic 2" before "Medic 10"), reports the order with `aria-sort` on that header only (WAI-ARIA), and announces "Sorted by …" through a polite status line.
 - **Filtering:** `data-filter-label="…"` adds a labelled filter box above the table that hides non-matching rows and announces "Showing N of M".
 
 Without the script the table is unchanged. Only rows already on the page are reordered or hidden; the server still decides what is listed.

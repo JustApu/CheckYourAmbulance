@@ -386,6 +386,7 @@ class SortableTableTemplateTests(TestCase):
         js = render_to_string("shell/shell.js")
         for marker in (
             'setAttribute("aria-sort", direction)',
+            'other.removeAttribute("aria-sort")',
             "Showing ",
             'th.hasAttribute("data-nosort")',
         ):
