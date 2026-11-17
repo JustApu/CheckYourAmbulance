@@ -157,12 +157,15 @@ def last_check(user):
 
 def supervisor(user, picture):
     """Tiles, the vehicles table and the Needs-you list for Supervisors and Administrators."""
+    from cya.checklists.models import Vehicle
     from cya.deficiencies.models import DeficiencyProjection
     from cya.deficiencies.transitions import ACTIVE_STATUSES, PENDING_VERIFICATION
     from cya.inspections.views import STATUS_LABELS as VEHICLE_STATUS
     from cya.operations.service import pending_requests
 
     org = user.organization_id
+    # The readiness picture lists at most VEHICLE_LIMIT vehicles; the fleet total is counted.
+    fleet = Vehicle.objects.filter(organization_id=org, active=True).count()
     active = DeficiencyProjection.objects.filter(organization_id=org, status__in=ACTIVE_STATUSES)
     counts = active.aggregate(
         open=Count("pk"),
@@ -205,7 +208,9 @@ def supervisor(user, picture):
     return {
         "tiles": {
             "ready": ready,
-            "vehicles": len(picture.vehicles),
+            "listed": len(picture.vehicles),
+            "fleet": fleet,
+            "partial": picture.truncated,
             "checked": checked,
             "owed": owed,
             "open_problems": counts["open"],

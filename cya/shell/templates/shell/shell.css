@@ -178,7 +178,7 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
 .home-list { list-style: none; margin: 0; padding: 0; }
 .home-list > li { padding: .625rem 0; border-bottom: 1px solid var(--line-soft); }
 .home-list > li:last-child { border-bottom: 0; }
-.home-list a { display: inline-flex; align-items: center; min-height: 44px; }
+.home-list a { display: inline-flex; align-items: center; min-height: 48px; }
 .home-progress p { margin: 0 0 .25rem; }
 .home-due-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
 .home-chips { display: flex; flex-wrap: wrap; gap: .375rem; }

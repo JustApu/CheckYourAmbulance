@@ -1,14 +1,17 @@
 """The signed-in Home screen (issue #194 items 3 and 11)."""
 
+import re
 from datetime import datetime
 from types import SimpleNamespace
 from unittest import mock
 from zoneinfo import ZoneInfo
 
 from django.db import DatabaseError
+from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 from django.utils import timezone
 
+from cya.checklists.models import Vehicle
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 from cya.shell import home
 
@@ -86,6 +89,23 @@ class HomeScreenTests(CrewUiCase):
         self.assertIn("Problems are unavailable right now.", html)
         self.assertIn(">Due today</h2>", html, "other sections still render")
         self.assertNotIn("synthetic", "\n".join(logs.output), "only the error class is logged")
+
+    def test_home_targets_are_at_least_48_px(self):
+        # Codex review of PR #201: Home's links and buttons keep the 48 px target rule.
+        css = render_to_string("shell/shell.css")
+        rule = re.search(r"\.home-list a \{[^}]*\}", css).group(0)
+        self.assertIn("min-height: 48px", rule)
+
+    def test_a_bounded_fleet_is_disclosed_not_presented_as_the_total(self):
+        client, user = self.harness.sign_in("home-truncated")
+        self.grant(user, "SUPERVISOR")
+        with mock.patch("cya.attention.readiness.VEHICLE_LIMIT", 1):
+            html = self.page(client)
+        fleet = Vehicle.objects.filter(organization=self.org, active=True).count()
+        self.assertGreater(fleet, 1, "the fixture has more vehicles than the patched limit")
+        self.assertIn("Only the first 1 vehicles are shown here.", html)
+        self.assertIn('href="/inspection/">See every vehicle in Inspect</a>', html)
+        self.assertIn(f"counting the first 1 of {fleet}", html)
 
     def test_home_shows_no_scores_or_rankings(self):
         page = self.page()
