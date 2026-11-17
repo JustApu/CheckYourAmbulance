@@ -282,3 +282,121 @@ def mark_read(*, outbox_id, **context):
     return _execute(
         command_type="NOTIFICATION_MARK_READ", request={"outbox": outbox_id}, build=build, **context
     )
+
+
+def configure_mail_relay(
+    *,
+    host,
+    port,
+    tls_mode,
+    auth_mode,
+    username,
+    password,
+    sender,
+    operator_addresses,
+    deputy_addresses,
+    base_revision=None,
+    **context,
+):
+    """Administrator sets the organization's outgoing-mail relay (SPEC DEP-13, issue #8).
+
+    password=None keeps the stored password; a string replaces it. With IP authentication any
+    stored password is dropped. The audit snapshots record that a password is set, never it.
+    base_revision refuses a save over a change made since the page was shown.
+    """
+    from cya.notifications import relay as rules_relay
+    from cya.notifications.models import MailRelay
+
+    values = rules_relay.validate(
+        host=host,
+        port=port,
+        tls_mode=tls_mode,
+        auth_mode=auth_mode,
+        username=username,
+        sender=sender,
+        operator=operator_addresses,
+        deputy=deputy_addresses,
+    )
+    if password is not None and not isinstance(password, str):
+        raise rules_relay.RelayError("the password is not valid")
+    if password is not None and len(password) > 1024:
+        raise rules_relay.RelayError("the password is too long")
+    # Encrypt before the command runs, so the request digest never holds the plaintext.
+    ciphertext = None
+    if values["auth_mode"] == "PASSWORD" and password:
+        ciphertext = rules_relay.encrypt_password(password)
+    org = context["organization_id"]
+
+    def build(actor):
+        row = MailRelay.objects.select_for_update().filter(organization_id=org).first()
+        if base_revision is not None and (row.revision if row else 0) != base_revision:
+            raise rules_relay.RelayError(
+                "the relay settings were changed since this page was shown; review them again"
+            )
+        if values["auth_mode"] == "IP":
+            stored = ""
+        elif ciphertext is not None:
+            stored = ciphertext
+        else:
+            stored = row.password_ciphertext if row else ""
+        if values["auth_mode"] == "PASSWORD" and not stored:
+            raise rules_relay.RelayError("enter the relay password")
+        prior = rules_relay.snapshot(row)
+        revision = (row.revision + 1) if row else 1
+
+        def apply(receipt, current):
+            MailRelay.objects.update_or_create(
+                organization_id=org,
+                defaults={**values, "password_ciphertext": stored, "revision": revision},
+            )
+
+        after = MailRelay(**values, password_ciphertext=stored, revision=revision)
+        return Plan(
+            response_body={"code": "SAVED", "revision": revision},
+            apply=apply,
+            target_type="ORGANIZATION",
+            target_id=org,
+            prior_snapshot=prior,
+            new_snapshot=rules_relay.snapshot(after),
+        )
+
+    return _execute(
+        command_type="MAIL_RELAY_SET",
+        # The digest covers whether a new password was given, never the password or ciphertext.
+        request={**values, "password_replaced": ciphertext is not None, "base": base_revision},
+        build=build,
+        permission=POLICY_ACTION,
+        **context,
+    )
+
+
+def request_mail_relay_test(**context):
+    """Administrator asks for a test email (DEP-13). Audited; the caller sends after it commits.
+
+    Returns the command result; its body names the relay revision to send through. Sending is
+    left to the caller so that no database transaction is held open during SMTP.
+    """
+    from cya.notifications.models import MailRelay
+    from cya.notifications.relay import RelayError
+
+    org = context["organization_id"]
+
+    def build(actor):
+        row = MailRelay.objects.filter(organization_id=org).first()
+        if row is None:
+            raise RelayError("save the relay settings before sending a test email")
+        return Plan(
+            response_body={"code": "TEST_REQUESTED", "revision": row.revision},
+            apply=lambda receipt, current: None,
+            target_type="ORGANIZATION",
+            target_id=org,
+            new_snapshot={"schema_version": 1, "values": {"revision": row.revision}},
+        )
+
+    return _execute(
+        command_type="MAIL_RELAY_TEST",
+        request={"test": True},
+        build=build,
+        permission=POLICY_ACTION,
+        **context,
+    )

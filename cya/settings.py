@@ -150,6 +150,12 @@ CYA_NOTIFICATION_SENDER = env("NOTIFICATION_SENDER", "")
 CYA_NOTIFICATION_MAX_ATTEMPTS = env_int("NOTIFICATION_MAX_ATTEMPTS", 5, 1, 20)
 CYA_NOTIFICATION_RETRY_SECONDS = env_int("NOTIFICATION_RETRY_SECONDS", 60, 1, 86400)
 
+# Outgoing-mail relay (SPEC 4.2.0 DEP-13, issue #8). KEY is a Fernet key from the root-owned
+# secrets file; without it a relay password can be neither saved nor used (DEP-10 exception).
+# TRANSPORT is a dotted path to a zero-argument factory; tests inject a stub (no network).
+CYA_MAIL_RELAY_KEY = env("MAIL_RELAY_KEY", "")
+CYA_MAIL_RELAY_TRANSPORT = env("MAIL_RELAY_TRANSPORT", "cya.notifications.relay.SmtpTransport")
+
 ROOT_URLCONF = "cya.urls"
 ASGI_APPLICATION = "cya.asgi.application"
 

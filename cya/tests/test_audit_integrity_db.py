@@ -222,6 +222,7 @@ class AuditIntegrityTests(TestCase):
         "M": {
             "notification_policy",
             "notification_recipient_rule",
+            "mail_relay",  # issue #8: the organization's outgoing-mail relay (SPEC DEP-13)
             "obligation_projection",
             "kit_definition",  # issue #129: kit types, key immutable
         },

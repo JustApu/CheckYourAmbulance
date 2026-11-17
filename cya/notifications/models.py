@@ -244,3 +244,54 @@ class NotificationRecipientRule(models.Model):
 
     def __str__(self):
         return f"NotificationRecipientRule {self.pk}"
+
+
+TLS_MODES = ("STARTTLS", "TLS")  # a plaintext relay is refused (SPEC DEP-13)
+AUTH_MODES = ("PASSWORD", "IP")
+
+
+class MailRelay(models.Model):
+    """The organization's outgoing-mail relay and operations-alert recipients (DEP-13, issue #8).
+
+    One row per organization, set by an Administrator through an audited command. The password,
+    when the relay uses one, is stored only as Fernet ciphertext under the key from the root-owned
+    secrets file (DEP-10 exception); it is never shown back. With IP authentication nothing is
+    stored for it. Recipient addresses are configuration, never repository content (DEP-3).
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = models.OneToOneField(
+        "cya_accounts.Organization", on_delete=models.PROTECT, related_name="+"
+    )
+    host = models.CharField(max_length=253)
+    port = models.PositiveIntegerField()
+    tls_mode = models.CharField(max_length=8)
+    auth_mode = models.CharField(max_length=8)
+    username = models.CharField(max_length=254, blank=True, default="")
+    password_ciphertext = models.TextField(blank=True, default="")
+    sender = models.CharField(max_length=254)
+    operator_addresses = models.JSONField(default=list)
+    deputy_addresses = models.JSONField(default=list)
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "mail_relay"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(tls_mode__in=TLS_MODES), name="mail_relay_tls"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(auth_mode__in=AUTH_MODES), name="mail_relay_auth"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(port__gte=1, port__lte=65535), name="mail_relay_port"
+            ),
+            # IP authentication stores no credential at all.
+            models.CheckConstraint(
+                condition=~models.Q(auth_mode="IP") | models.Q(username="", password_ciphertext=""),
+                name="mail_relay_ip_no_secret",
+            ),
+        ]
+
+    def __str__(self):
+        return f"MailRelay {self.organization_id}"

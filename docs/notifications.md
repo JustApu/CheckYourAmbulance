@@ -151,6 +151,37 @@ tested with the injected sender. A real transport's own idempotency guarantee, i
 that adapter and is described and tested there. `SmtpSender` has none; it passes the outbox id in
 an `X-CYA-Reference` header so a recipient or relay can recognize a repeat.
 
+## Outgoing-mail relay (SPEC 4.2.0 DEP-13, issue #8)
+
+An Administrator (`configure_schedules_thresholds_notifications`) sets the organization's relay on
+**Administration → Outgoing mail** (`/administration/mail-relay/`, `cya/notifications/relay_views.py`):
+- host and port;
+- encryption: STARTTLS or TLS from the start. A plaintext relay is refused;
+- authentication: a username and password, or this server's IP address alone (the relay operator
+  allows it, as Google Workspace's SMTP relay can). IP authentication stores no credential;
+- the sender address;
+- the operator and deputy recipient addresses for operations alerts, 1 to 10 each.
+
+The settings live in `mail_relay`, one row per organization:
+- **The password** is stored only as Fernet ciphertext under `CYA_MAIL_RELAY_KEY`, from the
+  root-owned secrets file (the DEP-10 exception). It is never rendered back; a blank field keeps it.
+- **Saving** runs the audited `configure_mail_relay` (`MAIL_RELAY_SET`). Its snapshots and request
+  digest record only whether a password is set or replaced. `base_revision` refuses a save over a
+  change made since the page was shown.
+- **Send test email** records an audited `MAIL_RELAY_TEST` request, then sends one message through
+  the saved relay to every operator and deputy address. The page shows a fixed safe result (`SENT`,
+  `CONNECT_FAILED`, `TLS_FAILED`, `AUTH_FAILED`, `REJECTED`, `TIMEOUT`, `KEY_MISSING`,
+  `UNKNOWN`). No provider reply or exception text is stored or shown.
+- **The host copy.** `manage.py export_mail_relay --organization <id> --output <file>` writes the
+  settings the host alerts need, including the decrypted password, as JSON. It writes mode 0600
+  through a temporary file and an atomic rename. On any failure, such as a missing or wrong key, it
+  exits nonzero and leaves the previous copy untouched. It runs as root from a timer (see the
+  [deployment runbook](deployment-runbook.md)), so host alerts still send while the app or database
+  is down.
+
+Not yet built: email notification delivery through this relay (today it still uses
+`CYA_NOTIFICATION_SENDER`), and the host alert checks themselves (`deploy/monitoring/`).
+
 ## Settings
 
 | Variable | Default | Meaning |
@@ -159,6 +190,8 @@ an `X-CYA-Reference` header so a recipient or relay can recognize a repeat.
 | `CYA_PUBLIC_BASE_URL` | unset | Prefix for email deep links, e.g. `https://cya.example`. Unset sends the bare path. |
 | `CYA_NOTIFICATION_MAX_ATTEMPTS` | 5 | Attempts before `GAVE_UP` (1 to 20). |
 | `CYA_NOTIFICATION_RETRY_SECONDS` | 60 | Base retry delay, doubled per attempt (1 to 86400). |
+| `CYA_MAIL_RELAY_KEY` | unset | Fernet key for the relay password (root-owned secrets file). Unset: a password cannot be saved or used; IP authentication still works. |
+| `CYA_MAIL_RELAY_TRANSPORT` | `cya.notifications.relay.SmtpTransport` | Dotted path to the test-email transport factory; tests inject a stub. |
 
 The email provider, sender identity and credentials are deployment configuration. They need the
 owner's input before production, not before this mechanism merges.

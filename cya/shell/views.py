@@ -83,6 +83,12 @@ ADMINISTRATION_LINKS = (
         "export_configuration",
     ),
     (
+        "mail-relay",
+        "Outgoing mail",
+        "set the relay for operations alerts and email, and send a test message.",
+        "configure_schedules_thresholds_notifications",
+    ),
+    (
         "vehicle-files",
         "Vehicle files",
         "export and import one vehicle's VIN, compartments, items and kit list.",
