@@ -221,7 +221,18 @@ async function testInspectionOutcomeSemantics(viewport) {
     assert.match(await failed.innerText(), /Due/);
     assert.match(await failed.innerText(), /Latest recorded check: Fail by Synthetic EMT/);
     assert.match(await failed.innerText(), /Deficiency status: Open\. Severity: High/);
-    assert.equal(await failed.locator(".pill-attention").count(), 0, `${viewport.name}: an open deficiency is not repeated as a second attention badge`);
+    assert.equal(await failed.locator(".pill-needs-attention").count(), 0, `${viewport.name}: an open deficiency is not repeated as a second attention badge`);
+    // Issue 194: chip classes map to the approved status colors (amber for needs attention, red for failed/overdue).
+    const chipColors = await page.evaluate(() => {
+      const make = (cls, style) => { const s = document.createElement("span"); s.className = cls; if (style) s.style.cssText = style; document.body.appendChild(s); const c = getComputedStyle(s); const r = [c.backgroundColor, c.color]; s.remove(); return r; };
+      return {
+        needs: make("pill pill-needs-attention"), wait: make("", "background: var(--wait-bg); color: var(--wait-fg)"),
+        failed: make("pill pill-attention"), bad: make("", "background: var(--bad-bg); color: var(--bad-fg)"),
+      };
+    });
+    assert.deepEqual(chipColors.needs, chipColors.wait, `${viewport.name}: Needs attention uses the amber status pair`);
+    assert.deepEqual(chipColors.failed, chipColors.bad, `${viewport.name}: failed and overdue counts keep the red status pair`);
+    assert.notDeepEqual(chipColors.wait, chipColors.bad, `${viewport.name}: amber and red status pairs differ`);
     const passedWithOpenDeficiency = page.locator('#items > li[data-item-key="item-pass-open|"]');
     assert.match(await passedWithOpenDeficiency.innerText(), /Passed/);
     assert.match(await passedWithOpenDeficiency.innerText(), /Latest recorded check: Pass by Synthetic EMT/);
