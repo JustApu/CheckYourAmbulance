@@ -472,7 +472,7 @@ async function testAdministratorRoleChange(viewport) {
   );
   const roleHistoryPage = () => '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Role history</title><style>' + css + '</style></head><body><main><h1>Role history</h1><h2>Changes to roles for Sam Example (sam@example.test)</h2><p><a href="/administration/roles/">Back to organization users</a></p>' + history + '</main></body></html>';
   const roleChoice = (code, label, checked) =>
-    '<label class="role-option' + (checked ? ' is-assigned' : '') + '"><input type="checkbox" name="roles" value="' + code + '" data-role-choice data-role-label="' + label + '" aria-label="' + label + ' role for sam@example.test"' + (checked ? ' checked' : '') + '><span>' + label + '</span></label>';
+    '<label class="role-option' + (checked ? ' is-assigned' : '') + '"><input type="checkbox" name="roles" value="' + code + '" data-role-choice data-role-label="' + label + '" aria-label="' + label + ' role for sam@example.test"' + (checked ? ' checked' : '') + '><span>' + label + '</span><span class="role-option-pending" data-role-pending hidden></span></label>';
   const rolePage = (stage, query = "") => {
     const content = stage === "preview"
       ? '<h2>Review role change</h2><p id="role-change-summary">Add the Supervisor role for Sam Example (sam@example.test).</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="confirm"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Confirm grant of Supervisor role</button></form><form method="post" action="/administration/roles/"><input type="hidden" name="stage" value="edit"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Change selection</button></form>'
@@ -526,11 +526,25 @@ async function testAdministratorRoleChange(viewport) {
     await page.keyboard.press("Tab"); // Crew role
     const crewRole = page.getByRole("checkbox", { name: "Crew role for sam@example.test" });
     assert.equal(await crewRole.evaluate((element) => element === document.activeElement), true, viewport.name + ": Crew role checkbox is not keyboard reachable");
+    assert.equal(await crewRole.locator("xpath=..").evaluate((element) => element.classList.contains("is-assigned")), true, viewport.name + ": committed Crew role is not marked assigned");
     await page.keyboard.press("Tab"); // Supervisor role
     const supervisorRole = page.getByRole("checkbox", { name: "Supervisor role for sam@example.test" });
     assert.equal(await supervisorRole.evaluate((element) => element === document.activeElement), true, viewport.name + ": Supervisor role checkbox is not keyboard reachable");
     await page.keyboard.press("Space");
     assert.equal(await page.getByRole("status").innerText(), "Add the Supervisor role. Review the change before confirming it.", viewport.name + ": staged change is not announced");
+    const supervisorOption = supervisorRole.locator("xpath=..");
+    assert.equal(await supervisorOption.evaluate((element) => element.classList.contains("is-assigned")), false, viewport.name + ": pending role is styled as already assigned");
+    assert.equal(await supervisorOption.evaluate((element) => element.classList.contains("is-pending")), true, viewport.name + ": pending role lacks its separate state");
+    assert.equal(await supervisorOption.getByText("Adding", { exact: true }).isVisible(), true, viewport.name + ": pending grant is not labeled Adding");
+    await crewRole.uncheck();
+    const crewOption = crewRole.locator("xpath=..");
+    assert.equal(await crewOption.evaluate((element) => element.classList.contains("is-assigned")), true, viewport.name + ": pending removal no longer shows the committed role");
+    assert.equal(await crewOption.getByText("Removing", { exact: true }).isVisible(), true, viewport.name + ": pending removal is not labeled Removing");
+    await page.getByRole("button", { name: "Reset" }).click();
+    await page.waitForFunction(() => !document.querySelector(".role-option.is-pending"));
+    assert.equal(await crewRole.isChecked(), true, viewport.name + ": reset did not restore the committed role");
+    assert.equal(await crewOption.evaluate((element) => element.classList.contains("is-pending")), false, viewport.name + ": reset retained the pending state");
+    await supervisorRole.check();
     const reviewChanges = page.getByRole("button", { name: "Review changes" });
     assert.equal(await reviewChanges.isVisible(), true, viewport.name + ": review action did not appear after a change");
     for (const label of ["Find an active user by name or email"]) {
