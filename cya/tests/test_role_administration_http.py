@@ -58,16 +58,22 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual((self.counts()[0] - before[0], self.counts()[1] - before[1]), (1, 1))
         users_page = admin_client.get(URL + "?saved=1")
         self.assertContains(users_page, "Saved")
-        self.assertContains(users_page, "Current roles:")
         self.assertContains(users_page, "Crew")
         self.assertContains(users_page, "Supervisor")
-        self.assertContains(users_page, "Review grant")
-        self.assertContains(users_page, "Review removal")
+        self.assertContains(users_page, "Review changes")
+        self.assertContains(users_page, "<legend>Roles</legend>", html=True)
+        self.assertContains(users_page, 'name="roles" value="CREW"')
         self.assertContains(
             users_page,
-            f'aria-label="Role to change for {crew.display_name}"',
+            f'name="roles" value="CREW" data-role-choice data-role-label="Crew" aria-label="Crew role for {crew.email}" checked',
         )
-        self.assertContains(users_page, 'Crew</span>, <span class="pill">Supervisor</span>')
+        self.assertContains(users_page, 'name="roles" value="SUPERVISOR"')
+        self.assertContains(
+            users_page,
+            f'name="roles" value="SUPERVISOR" data-role-choice data-role-label="Supervisor" aria-label="Supervisor role for {crew.email}" checked',
+        )
+        self.assertNotContains(users_page, "Review grant")
+        self.assertNotContains(users_page, 'class="role-user-card"')
         self.assertContains(
             users_page,
             f'href="{URL}{crew.pk}/history/" aria-label="View role history for {crew.email}"',
@@ -182,12 +188,10 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(roles, {str(crew.pk): None})
 
     def test_role_list_keeps_other_users_available_when_one_history_is_unavailable(self):
-        from cya.authorization.views import ROLE_LABELS
-
         admin_client, admin = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
         roles = {
-            str(admin.pk): (ROLE_LABELS["ADMINISTRATOR"], "Crew"),
+            str(admin.pk): ("ADMINISTRATOR", "CREW"),
             str(crew.pk): None,
         }
         with mock.patch(
@@ -203,7 +207,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertFalse(targets[str(admin.pk)].role_history_unavailable)
         self.assertContains(response, "Current roles could not be verified.")
         self.assertNotContains(response, 'role="alert">Current roles could not be verified.')
-        self.assertContains(response, "Review grant")
+        self.assertContains(response, "Review changes")
 
     def test_unauthorized_user_is_refused_and_a_denial_is_recorded(self):
         _, admin = self.make_administrator("admin-1")
@@ -292,6 +296,69 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertContains(page, 'aria-current="page">Administration')
         self.assertContains(page, "Organization users")
 
+    def test_role_matrix_shows_current_assignments_and_reviews_one_staged_change(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+
+        page = admin_client.get(URL)
+
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, 'class="role-user-row"')
+        self.assertContains(page, 'name="roles" value="CREW"')
+        self.assertContains(page, "Supervisor")
+        self.assertContains(page, "Supply Officer")
+        self.assertContains(page, "Administrator")
+        self.assertContains(page, "View role history")
+        self.assertContains(page, "Review changes")
+        self.assertNotContains(page, "Role to change")
+
+        before = self.counts()
+        staged = self.data(
+            admin_client,
+            crew,
+            q=crew.email,
+            stage="preview",
+            role_selection_present="1",
+            roles=["CREW", "SUPERVISOR"],
+        )
+        preview = admin_client.post(URL, staged)
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, f"Add the Supervisor role for {crew.display_name}")
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
+        confirmation = admin_client.post(
+            URL,
+            {
+                **staged,
+                "stage": "confirm",
+                "role": "SUPERVISOR",
+                "action": "GRANT",
+            },
+        )
+        self.assertEqual(confirmation.status_code, 302)
+        self.assertEqual(current_role_codes(crew), ("CREW", "SUPERVISOR"))
+
+    def test_role_matrix_rejects_more_than_one_staged_change(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        before = self.counts()
+        staged = self.data(
+            admin_client,
+            crew,
+            stage="preview",
+            role_selection_present="1",
+            roles=["SUPERVISOR", "ADMINISTRATOR"],
+        )
+
+        response = admin_client.post(URL, staged)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "Review one role change at a time", status_code=400)
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+
     def test_preview_is_clear_and_does_not_change_roles_until_confirmation(self):
         admin_client, _ = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
@@ -301,7 +368,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         preview = admin_client.post(URL, data)
 
         self.assertEqual(preview.status_code, 200)
-        self.assertContains(preview, f"Grant Supervisor role to {crew.display_name}")
+        self.assertContains(preview, f"Add the Supervisor role for {crew.display_name}")
         self.assertContains(preview, crew.email)
         self.assertContains(preview, 'name="stage" value="confirm"')
         self.assertEqual(self.counts(), before)

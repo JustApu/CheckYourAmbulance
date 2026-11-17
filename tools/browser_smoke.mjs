@@ -466,12 +466,18 @@ async function testDeficiencyFilters(viewport) {
 async function testAdministratorRoleChange(viewport) {
   const page = await browser.newPage({ viewport });
   const history = '<div class="role-history-scroll" role="region" aria-label="Role history for sam@example.test" tabindex="0"><table class="role-history-table"><thead><tr><th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead><tbody><tr><td>2026-11-15 12:34 UTC</td><td>Sam Example (sam@example.test)</td><td>GRANT</td><td>SUPERVISOR</td><td>Alex Example (alex@example.test)</td></tr></tbody></table></div>';
+  const rolesScript = readFileSync(
+    path.join(root, "cya/authorization/templates/authorization/roles.js"),
+    "utf8",
+  );
   const roleHistoryPage = () => '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Role history</title><style>' + css + '</style></head><body><main><h1>Role history</h1><h2>Changes to roles for Sam Example (sam@example.test)</h2><p><a href="/administration/roles/">Back to organization users</a></p>' + history + '</main></body></html>';
+  const roleChoice = (code, label, checked) =>
+    '<label class="role-option' + (checked ? ' is-assigned' : '') + '"><input type="checkbox" name="roles" value="' + code + '" data-role-choice data-role-label="' + label + '" aria-label="' + label + ' role for sam@example.test"' + (checked ? ' checked' : '') + '><span>' + label + '</span></label>';
   const rolePage = (stage, query = "") => {
     const content = stage === "preview"
-      ? '<h2>Review role change</h2><p id="role-change-summary">Grant Supervisor role to Sam Example (sam@example.test).</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="confirm"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Confirm grant of Supervisor role</button></form><form method="post" action="/administration/roles/"><input type="hidden" name="stage" value="edit"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Change selection</button></form>'
-      : '<section class="role-administration"><h2>Organization users</h2><form method="get" action="/administration/roles/" role="search"><label for="role-user-search">Find an active user by name or email</label><input id="role-user-search" name="q" type="search" value="' + query + '" maxlength="100"><button type="submit" class="button">Search users</button></form><p>1 matching active user.</p><ul class="role-user-list"><li class="role-user-card"><h3>Sam Example</h3><p class="role-user-email">sam@example.test</p><p><strong>Current roles:</strong> <span class="pill">Crew</span>' + (stage === "saved" ? ' <span class="pill">Supervisor</span>' : "") + '</p><p><a href="/administration/roles/user-1/history/" aria-label="View role history for sam@example.test">View role history</a></p><form method="post" action="/administration/roles/" class="admin-form"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="preview"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><label for="role-code-1">Role to change</label><select id="role-code-1" name="role" aria-label="Role to change for Sam Example" required><option value="">Choose a role</option><option value="CREW">Crew</option><option value="SUPERVISOR">Supervisor</option></select><div class="role-user-actions"><button type="submit" name="action" value="GRANT" class="button">Review grant</button><button type="submit" name="action" value="REVOKE" class="button">Review removal</button></div></form></li></ul></section>';
-    return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Administration - Roles</title><style>' + css + '</style></head><body><main><h1>Role administration</h1>' + (stage === "saved" ? '<p class="save-state save-state-saved" role="status">Saved</p>' : "") + content + '</main></body></html>';
+      ? '<h2>Review role change</h2><p id="role-change-summary">Add the Supervisor role for Sam Example (sam@example.test).</p><form method="post" action="/administration/roles/"><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="confirm"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Confirm grant of Supervisor role</button></form><form method="post" action="/administration/roles/"><input type="hidden" name="stage" value="edit"><input type="hidden" name="target" value="user-1"><input type="hidden" name="role" value="SUPERVISOR"><input type="hidden" name="action" value="GRANT"><button class="button" type="submit">Change selection</button></form>'
+      : '<section class="role-administration"><h2>Organization users</h2><form method="get" action="/administration/roles/" role="search"><label for="role-user-search">Find an active user by name or email</label><input id="role-user-search" name="q" type="search" value="' + query + '" maxlength="100"><button type="submit" class="button">Search users</button></form><p>1 matching active user.</p><ul class="role-user-list" aria-label="Organization users and roles"><li class="role-user-row"><div class="role-user-details"><h3>Sam Example</h3><p class="role-user-email">sam@example.test</p><a href="/administration/roles/user-1/history/" aria-label="View role history for sam@example.test">View role history</a></div><form method="post" action="/administration/roles/" class="role-change-form admin-form" data-role-change-form><input type="hidden" name="csrfmiddlewaretoken" value="synthetic-csrf"><input type="hidden" name="stage" value="preview"><input type="hidden" name="role_selection_present" value="1"><input type="hidden" name="operation_id" value="synthetic-operation"><input type="hidden" name="target" value="user-1"><fieldset class="role-options"><legend>Roles</legend>' + roleChoice("CREW", "Crew", true) + roleChoice("SUPERVISOR", "Supervisor", stage === "saved") + roleChoice("SUPPLY_OFFICER", "Supply Officer", false) + roleChoice("ADMINISTRATOR", "Administrator", false) + '</fieldset><div class="role-change-actions"><p class="role-change-status" role="status" aria-live="polite" data-role-change-status hidden></p><button type="submit" class="button" data-role-review-button>Review changes</button><button type="reset" class="button" data-role-reset-button>Reset</button></div></form></li></ul></section>';
+    return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Administration - Roles</title><style>' + css + '</style></head><body><main><h1>Role administration</h1>' + (stage === "saved" ? '<p class="save-state save-state-saved" role="status">Saved</p>' : "") + content + '<script>' + rolesScript + '</script></main></body></html>';
   };
   let confirmed = false;
   await page.route("http://roles.test/administration/roles/**", async (route) => {
@@ -487,8 +493,8 @@ async function testAdministratorRoleChange(viewport) {
     const form = new URLSearchParams(route.request().postData() || "");
     if (form.get("stage") === "preview") {
       assert.equal(form.get("target"), "user-1");
-      assert.equal(form.get("role"), "SUPERVISOR");
-      assert.equal(form.get("action"), "GRANT");
+      assert.equal(form.get("role_selection_present"), "1");
+      assert.deepEqual(form.getAll("roles"), ["CREW", "SUPERVISOR"]);
       await route.fulfill({ status: 200, contentType: "text/html", body: rolePage("preview") });
       return;
     }
@@ -512,31 +518,39 @@ async function testAdministratorRoleChange(viewport) {
     await page.keyboard.type("sam");
     await Promise.all([page.waitForNavigation(), page.keyboard.press("Enter")]);
     assert.equal(await search.inputValue(), "sam", viewport.name + ": role search did not retain its query");
-    await page.keyboard.press("Tab");
-    assert.equal(await search.evaluate((element) => element === document.activeElement), true, viewport.name + ": search is not first after navigation");
+    await search.focus();
     await page.keyboard.press("Tab"); // Search users
     await page.keyboard.press("Tab"); // Role history link
     const historyLink = page.getByRole("link", { name: "View role history for sam@example.test" });
     assert.equal(await historyLink.evaluate((element) => element === document.activeElement), true, viewport.name + ": role-history link is not keyboard reachable");
-    await page.keyboard.press("Tab"); // Role selector
-    const role = page.getByLabel("Role to change for Sam Example");
-    assert.equal(await role.evaluate((element) => element === document.activeElement), true, viewport.name + ": role selector is not keyboard reachable");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
-    assert.equal(await role.inputValue(), "SUPERVISOR", viewport.name + ": keyboard could not select Supervisor");
-    for (const label of ["Find an active user by name or email", "Role to change for Sam Example"]) {
+    await page.keyboard.press("Tab"); // Crew role
+    const crewRole = page.getByRole("checkbox", { name: "Crew role for sam@example.test" });
+    assert.equal(await crewRole.evaluate((element) => element === document.activeElement), true, viewport.name + ": Crew role checkbox is not keyboard reachable");
+    await page.keyboard.press("Tab"); // Supervisor role
+    const supervisorRole = page.getByRole("checkbox", { name: "Supervisor role for sam@example.test" });
+    assert.equal(await supervisorRole.evaluate((element) => element === document.activeElement), true, viewport.name + ": Supervisor role checkbox is not keyboard reachable");
+    await page.keyboard.press("Space");
+    assert.equal(await page.getByRole("status").innerText(), "Add the Supervisor role. Review the change before confirming it.", viewport.name + ": staged change is not announced");
+    const reviewChanges = page.getByRole("button", { name: "Review changes" });
+    assert.equal(await reviewChanges.isVisible(), true, viewport.name + ": review action did not appear after a change");
+    for (const label of ["Find an active user by name or email"]) {
       const box = await page.getByLabel(label, { exact: true }).boundingBox();
       assert.ok(box && box.height >= 48, viewport.name + ": " + label + " is shorter than 48 CSS pixels");
     }
-    await page.keyboard.press("Tab"); // Review grant
-    const reviewGrant = page.getByRole("button", { name: "Review grant" });
-    assert.equal(await reviewGrant.evaluate((element) => element === document.activeElement), true, viewport.name + ": keyboard skips the role-change review action");
-    await page.keyboard.press("Enter");
-    assert.match(await page.locator("#role-change-summary").innerText(), /Grant Supervisor role to Sam Example/);
+    for (const label of ["Crew", "Supervisor", "Supply Officer", "Administrator"]) {
+      const box = await page.getByRole("checkbox", { name: label + " role for sam@example.test" }).locator("xpath=..").boundingBox();
+      assert.ok(box && box.height >= 44, viewport.name + ": " + label + " role target is shorter than 44 CSS pixels");
+    }
+    await page.keyboard.press("Tab"); // Supply Officer
+    await page.keyboard.press("Tab"); // Administrator
+    await page.keyboard.press("Tab"); // Review changes
+    assert.equal(await reviewChanges.evaluate((element) => element === document.activeElement), true, viewport.name + ": keyboard skips the role-change review action");
+    await Promise.all([page.waitForNavigation(), page.keyboard.press("Enter")]);
+    assert.match(await page.locator("#role-change-summary").innerText(), /Add the Supervisor role for Sam Example/);
     const confirm = page.getByRole("button", { name: "Confirm grant of Supervisor role" });
     await page.keyboard.press("Tab");
     assert.equal(await confirm.evaluate((element) => element === document.activeElement), true, viewport.name + ": confirmation is not keyboard reachable");
-    await page.keyboard.press("Enter");
+    await Promise.all([page.waitForNavigation(), page.keyboard.press("Enter")]);
     await page.getByRole("status").getByText("Saved").waitFor();
     assert.equal(confirmed, true, viewport.name + ": confirmation request was not submitted");
     assert.equal(await page.getByRole("region", { name: "Role history for sam@example.test" }).count(), 0, viewport.name + ": history belongs on its separate detail page");
@@ -549,11 +563,12 @@ async function testAdministratorRoleChange(viewport) {
 
     await page.emulateMedia({ forcedColors: "active" });
     const forcedColors = await page.evaluate(() => {
-      const card = document.querySelector(".role-user-card");
-      const pill = card.querySelector(".pill");
+      const row = document.querySelector(".role-user-row");
+      const option = document.querySelector(".role-option.is-assigned");
+      const checkbox = option.querySelector("input[type=checkbox]");
       const searchInput = document.querySelector("#role-user-search");
-      const button = card.querySelector(".button");
-      const link = card.querySelector("a");
+      const button = row.querySelector(".button");
+      const link = row.querySelector("a");
       const probe = document.createElement("span");
       document.body.append(probe);
       const systemColor = (value) => {
@@ -562,11 +577,12 @@ async function testAdministratorRoleChange(viewport) {
       };
       const result = {
         active: matchMedia("(forced-colors: active)").matches,
-        cardBorder: getComputedStyle(card).borderTopColor,
+        rowBorder: getComputedStyle(row).borderBottomColor,
         canvasText: systemColor("CanvasText"),
-        cardBackground: getComputedStyle(card).backgroundColor,
+        optionBorder: getComputedStyle(option).borderTopColor,
+        optionBackground: getComputedStyle(option).backgroundColor,
         canvas: systemColor("Canvas"),
-        pillBorder: getComputedStyle(pill).borderTopColor,
+        checkboxAccent: getComputedStyle(checkbox).accentColor,
         searchBackground: getComputedStyle(searchInput).backgroundColor,
         field: systemColor("Field"),
         buttonColor: getComputedStyle(button).color,
@@ -578,9 +594,10 @@ async function testAdministratorRoleChange(viewport) {
       return result;
     });
     assert.equal(forcedColors.active, true, viewport.name + ": forced-colors mode did not activate");
-    assert.equal(forcedColors.cardBorder, forcedColors.canvasText, viewport.name + ": role card boundary does not use a system color");
-    assert.equal(forcedColors.cardBackground, forcedColors.canvas, viewport.name + ": role card background does not use Canvas");
-    assert.equal(forcedColors.pillBorder, forcedColors.canvasText, viewport.name + ": role badge boundary does not use a system color");
+    assert.equal(forcedColors.rowBorder, forcedColors.canvasText, viewport.name + ": role row boundary does not use a system color");
+    assert.equal(forcedColors.optionBorder, forcedColors.canvasText, viewport.name + ": role option boundary does not use a system color");
+    assert.equal(forcedColors.optionBackground, forcedColors.canvas, viewport.name + ": assigned role option does not use Canvas");
+    assert.equal(forcedColors.checkboxAccent, "auto", viewport.name + ": role checkbox did not retain native system-color treatment");
     assert.equal(forcedColors.searchBackground, forcedColors.field, viewport.name + ": search field does not use Field");
     assert.equal(forcedColors.buttonColor, forcedColors.buttonText, viewport.name + ": role action does not use ButtonText");
     assert.equal(forcedColors.linkColor, forcedColors.linkText, viewport.name + ": role history link does not use LinkText");
@@ -593,7 +610,7 @@ async function testAdministratorRoleChange(viewport) {
     assert.equal(await historyRegion.evaluate((element) => element === document.activeElement), true, viewport.name + ": role history is not keyboard focusable");
     assert.equal(await historyRegion.evaluate((element) => getComputedStyle(element).outlineWidth), "3px", viewport.name + ": role history focus is not visible");
     assert.match(await historyRegion.innerText(), /Sam Example \(sam@example\.test\)[\s\S]*GRANT[\s\S]*SUPERVISOR/);
-    console.log(viewport.name + ": administrator user list, role review/confirmation and separate history passed");
+    console.log(viewport.name + ": compact role matrix, staged review/confirmation and separate history passed");
   } finally {
     await page.close();
   }

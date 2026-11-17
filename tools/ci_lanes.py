@@ -95,8 +95,13 @@ SCRIPT_HARNESSES = {
     "cya/seals/templates/seals/vehicle.js": "cya/seals/tests/vehicle_script_harness.js",
 }
 
-# Shared shell behavior is executed in Chromium rather than a mock-DOM harness.
-BROWSER_SCRIPTS = frozenset({"cya/shell/templates/shell/shell.js"})
+# These scripts are read and executed in Chromium rather than a mock-DOM harness.
+BROWSER_SCRIPTS = frozenset(
+    {
+        "cya/authorization/templates/authorization/roles.js",
+        "cya/shell/templates/shell/shell.js",
+    }
+)
 BROWSER_TEST_PATHS = frozenset(
     {
         "tools/browser_smoke.mjs",
