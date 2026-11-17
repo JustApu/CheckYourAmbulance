@@ -131,7 +131,7 @@ def disk_conditions(config, at):
 
 def unit_property(unit, names):
     output = subprocess.run(
-        ["systemctl", "show", unit, "--property=" + ",".join(names)],
+        ["systemctl", "show", unit, "--timestamp=unix", "--property=" + ",".join(names)],
         capture_output=True,
         text=True,
         timeout=20,
@@ -140,12 +140,17 @@ def unit_property(unit, names):
 
 
 def systemd_time(value):
-    """Seconds since the epoch for a systemd timestamp in microseconds, or None."""
-    try:
-        micro = int(value)
-    except (TypeError, ValueError):
+    """Seconds since the epoch for a `--timestamp=unix` value such as `@1794883609`, or None.
+
+    An empty value means the unit has not exited since it was loaded.
+    """
+    if not isinstance(value, str) or not value.startswith("@"):
         return None
-    return micro / 1_000_000 if micro > 0 else None
+    try:
+        seconds = float(value[1:])
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
 
 
 def job_conditions(config, at, show=unit_property):
@@ -157,11 +162,11 @@ def job_conditions(config, at, show=unit_property):
         if props.get("Result", "success") != "success":
             found[f"job:{unit}"] = f"The recurring job {unit} failed on its last run"
     for unit, limit in config["stale_after"].items():
-        props = show(unit, ["LoadState", "Result", "ExecMainExitTimestampUSec"])
+        props = show(unit, ["LoadState", "Result", "ExecMainExitTimestamp"])
         if props.get("LoadState") != "loaded":
             found[f"stale:{unit}"] = f"{unit} is not installed, so its runs cannot be checked"
             continue
-        ended = systemd_time(props.get("ExecMainExitTimestampUSec"))
+        ended = systemd_time(props.get("ExecMainExitTimestamp"))
         if ended is None or at - ended > limit:
             found[f"stale:{unit}"] = f"{unit} has not completed a run in the expected time"
     return found

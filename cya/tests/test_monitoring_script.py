@@ -189,12 +189,12 @@ class ConditionTests(AlertsCase):
                 "cya-backup-full.service": {
                     "LoadState": "loaded",
                     "Result": "success",
-                    "ExecMainExitTimestampUSec": str(int((at - 30 * HOUR) * 1_000_000)),
+                    "ExecMainExitTimestamp": f"@{int(at - 30 * HOUR)}",
                 },
                 "cya-backup-binlog.service": {
                     "LoadState": "loaded",
                     "Result": "success",
-                    "ExecMainExitTimestampUSec": str(int((at - 60) * 1_000_000)),
+                    "ExecMainExitTimestamp": f"@{int(at - 60)}",
                 },
             }.get(unit, {"LoadState": "not-found"})
 
@@ -202,6 +202,18 @@ class ConditionTests(AlertsCase):
         self.assertEqual(
             set(found), {"job:cya-obligations.service", "stale:cya-backup-full.service"}
         )
+
+    def test_systemd_times_are_read_as_unix_timestamps(self):
+        # Found in the issue #8 rehearsal: there is no ExecMainExitTimestampUSec property, so
+        # the check reads ExecMainExitTimestamp with --timestamp=unix ("@<seconds>").
+        self.assertEqual(alerts.systemd_time("@1794883609"), 1794883609.0)
+        for value in ("", None, "0", "Mon 2026-11-17 02:46:49 UTC", "@0", "@x"):
+            self.assertIsNone(alerts.systemd_time(value), value)
+        with mock.patch.object(alerts.subprocess, "run") as run:
+            run.return_value = mock.Mock(stdout="LoadState=loaded\nExecMainExitTimestamp=@5\n")
+            props = alerts.unit_property("x.service", ["LoadState", "ExecMainExitTimestamp"])
+        self.assertIn("--timestamp=unix", run.call_args.args[0])
+        self.assertEqual(props["ExecMainExitTimestamp"], "@5")
 
     def test_database_refusing_connections(self):
         ok = mock.Mock(return_value=mock.Mock(returncode=0))
