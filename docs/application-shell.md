@@ -26,7 +26,7 @@ Navigation shows a section only if the user holds one of its roles, but the **se
 
 Roles come from `settings.CYA_ROLE_LOOKUP`, a dotted path to `lookup(user) -> iterable of role names`. It defaults to `cya.authorization.persistence.current_role_codes`, which reads current database roles on every call. Missing configuration yields no roles and no sections. A lookup that raises is treated the same way, and only the exception class is logged. Denied section requests are durably audited through the authorization backend; audit failure returns 503. Feature handlers must use the [request/command guards](authorization-implementation.md#policy-and-request-guards) and server-owned resource facts when real features arrive.
 
-The Administration page lists its tools; today that is a link to [role administration](authorization-implementation.md#role-administration-over-http-issue-25). A tab owns URL path prefixes (`Tab.paths`), so a place's sub-pages keep it highlighted.
+The Administration page lists its tools in four headed groups of cards (issue #194): **People** (role administration), **Vehicles** (vehicles, compartments and systems, checklist templates, vehicle files), **Kits** (kit definitions, kit lists, kit instances, kit library) and **System** (outgoing mail). `ADMINISTRATION_GROUPS` in `cya/shell/views.py` sets the order; each page appears only if the user may open it, and a group with no such page is hidden. See [role administration](authorization-implementation.md#role-administration-over-http-issue-25). A tab owns URL path prefixes (`Tab.paths`), so a place's sub-pages keep it highlighted.
 
 ## Shared responsive and semantic UI conventions
 

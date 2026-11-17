@@ -178,6 +178,51 @@ class NavigationTests(ShellTestCase):
         self.assertNotIn("is-current", nav)
         self.assertNotIn('aria-current="true"', nav)
 
+    def test_administration_groups_its_pages_in_task_order(self):
+        # Issue #194: People, Vehicles, Kits, System, each a heading over its own cards.
+        html = (
+            self.client_for(self.make_user(roles=["ADMINISTRATOR"]))
+            .get("/administration/")
+            .content.decode()
+        )
+        groups = re.findall(
+            r'<section class="admin-group" aria-labelledby="admin-group-(\w+)">'
+            r'\s*<h2 id="admin-group-\1">([^<]+)</h2>(.*?)</section>',
+            html,
+            re.S,
+        )
+        self.assertEqual(
+            [(key, label) for key, label, _ in groups],
+            [
+                ("people", "People"),
+                ("vehicles", "Vehicles"),
+                ("kits", "Kits"),
+                ("system", "System"),
+            ],
+        )
+        titles = {
+            key: re.findall(r'<span class="admin-card-title">([^<]+)</span>', body)
+            for key, _, body in groups
+        }
+        self.assertEqual(titles["people"], ["Role administration"])
+        self.assertEqual(
+            titles["vehicles"],
+            ["Vehicles", "Compartments and systems", "Checklist templates", "Vehicle files"],
+        )
+        self.assertEqual(
+            titles["kits"], ["Kit definitions", "Kit lists", "Kit instances", "Kit library"]
+        )
+        self.assertEqual(titles["system"], ["Outgoing mail"])
+
+    def test_administration_hides_groups_with_no_page_for_the_role(self):
+        html = (
+            self.client_for(self.make_user(roles=["SUPPLY_OFFICER"]))
+            .get("/administration/")
+            .content.decode()
+        )
+        self.assertEqual(re.findall(r'<h2 id="admin-group-\w+">([^<]+)</h2>', html), ["Kits"])
+        self.assertIn('href="/administration/kit-instances/"', html)
+
     def test_hidden_sections_are_still_denied_by_the_server(self):
         client = self.client_for(self.make_user(roles=["CREW"]))
         response = client.get("/administration/")
@@ -360,6 +405,15 @@ class SignInPagesUseTheShellTests(ShellTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "/auth/logout/")
         self.assertNotContains(response, "Pat Example")
+
+
+class AdministrationGroupTableTests(TestCase):
+    def test_every_administration_page_is_in_exactly_one_group(self):
+        from cya.shell.views import ADMINISTRATION_GROUPS, ADMINISTRATION_LINKS
+
+        grouped = [name for _, _, _, names in ADMINISTRATION_GROUPS for name in names]
+        self.assertEqual(len(grouped), len(set(grouped)))
+        self.assertEqual(set(grouped), {name for name, *_ in ADMINISTRATION_LINKS})
 
 
 class SectionTableTests(TestCase):

@@ -152,10 +152,21 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
   .pill { border-color: CanvasText; }
   .site-header { border-top-color: CanvasText; }
   .app-nav, .app-nav-more-panel { border-color: CanvasText; }
+  .admin-card { border-color: CanvasText; }
+  .admin-card-title { color: LinkText; }
   .app-nav-link { color: LinkText; border-color: Canvas; }
   .app-nav-more { color: ButtonText; }
   .app-nav-link[aria-current="page"], .app-nav-more.is-current, .app-nav-more-list a[aria-current="page"] { color: Highlight; border-color: Highlight; }
 }
+/* Admin landing (issue #194): headed groups of cards; the whole card is the link. */
+.admin-group { margin: 0 0 1.5rem; }
+.admin-group h2 { margin: 0 0 .25rem; }
+.admin-group > .muted { margin: 0 0 .75rem; color: var(--muted); }
+.admin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: .75rem; list-style: none; margin: 0; padding: 0; }
+.admin-card { display: flex; flex-direction: column; gap: .25rem; height: 100%; min-height: 48px; padding: .875rem 1rem; color: var(--fg); background: var(--bg); border: 1px solid var(--line-soft); border-radius: var(--radius-card); text-decoration: none; }
+.admin-card:hover { border-color: var(--accent); background: var(--info-bg); }
+.admin-card-title { color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: .15em; }
+.admin-card-text { color: var(--muted); }
 .field-error { display: block; margin-top: .25rem; font-weight: 600; }
 .admin-form [aria-invalid="true"] { border-width: 3px; border-style: dashed; }
 @media (min-width: 48rem) {
