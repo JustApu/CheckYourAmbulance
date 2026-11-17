@@ -6,8 +6,9 @@ the icons named in the page head and the manifest. Both answer anonymously, beca
 fetch the manifest without credentials, and both send long cache lifetimes; a changed icon
 gets a new file name.
 
-Only the files in ICONS are served: the name is looked up in a fixed table, never joined to
-a path, so no request can reach any other file. There is no service worker and no offline mode;
+Only the files in ICONS are served. Their paths are built once, at import, from that fixed
+table; a request's name is only a key to look one up and is never joined to a path, so no
+request can reach any other file. There is no service worker and no offline mode;
 the app stays online-only (SPEC).
 """
 
@@ -61,18 +62,24 @@ MANIFEST = {
 }
 
 
+# name -> (file path, media type), fixed at import. A request selects an entry; it never
+# contributes to a path (CodeQL py/path-injection).
+ICON_FILES = {name: (BRAND_DIR / name, content_type) for name, content_type in ICONS.items()}
+
+
 @cache
-def _icon_bytes(name):
-    return (BRAND_DIR / name).read_bytes()
+def _read(path):
+    return path.read_bytes()
 
 
 @require_GET
 @cache_control(public=True, max_age=ONE_YEAR, immutable=True)
 def icon(request, name):
-    content_type = ICONS.get(name)
-    if content_type is None:
+    entry = ICON_FILES.get(name)
+    if entry is None:
         raise Http404("no such icon")
-    response = HttpResponse(_icon_bytes(name), content_type=content_type)
+    path, content_type = entry
+    response = HttpResponse(_read(path), content_type=content_type)
     response["X-Content-Type-Options"] = "nosniff"
     return response
 
