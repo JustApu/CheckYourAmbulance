@@ -868,19 +868,19 @@ try {
       await page.emulateMedia({ colorScheme: "dark" });
       const theme = page.getByLabel("Theme");
       const darkBackground = await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
-      assert.equal(darkBackground, "rgb(20, 24, 29)", `${viewport.name}: Auto did not follow dark system preference`);
+      assert.equal(darkBackground, "rgb(11, 20, 38)", `${viewport.name}: Auto did not follow dark system preference`);
       await theme.selectOption("light");
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 255, 255)", `${viewport.name}: Light override did not apply`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 247, 250)", `${viewport.name}: Light override did not apply`);
       await theme.selectOption("dark");
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(20, 24, 29)", `${viewport.name}: Dark override did not apply`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: Dark override did not apply`);
       await page.reload({ waitUntil: "load" });
       assert.equal(await page.getByLabel("Theme").inputValue(), "dark", `${viewport.name}: saved theme was not restored`);
       assert.equal(await page.evaluate(() => window.__themeBeforeStyles), "dark", `${viewport.name}: saved theme was not applied before the page stylesheet`);
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(20, 24, 29)", `${viewport.name}: restored Dark theme did not apply`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: restored Dark theme did not apply`);
       const restoredTheme = page.getByLabel("Theme");
       await restoredTheme.selectOption("auto");
       await page.emulateMedia({ colorScheme: "light" });
-      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 255, 255)", `${viewport.name}: Auto did not follow light system preference`);
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 247, 250)", `${viewport.name}: Auto did not follow light system preference`);
 
       await page.evaluate(() => {
         const state = document.getElementById("save-state");

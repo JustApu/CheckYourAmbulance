@@ -63,6 +63,29 @@ For owner testing with VoiceOver or NVDA, use a synthetic account and vehicle. R
 
 **Manual Windows contrast-theme pass (2026-11-16):** The owner enabled the Windows Night Sky contrast theme on Windows 10 Pro 26H2 (build 26300.9974). In Chrome 157.0.8103.79, the current-source synthetic role-administration fixture using the production shell and inspection styles was visually inspected. Headings and body text, role pills, links, role select/options, review buttons, the disabled confirmation button, and the history table remained visible. The disabled action remained distinct with muted text and a dashed border. Keyboard focus on the role selector showed a clear system-color outline; the focused option remained legible. The history table retained its own horizontal scroll area. This verifies the shared styles in the synthetic fixture under the actual Windows contrast theme, not a Django-rendered production response or every workflow. No role was changed. The owner left Night Sky enabled after the check.
 
+## Design tokens (issue #194)
+
+`shell.css` starts with the owner-approved tokens. Use them, not new hex values:
+
+- **Surfaces.** `--page` is the page background and `--bg` the white card and control surface (deep navy in dark mode). `--fg` is text and `--muted` secondary text.
+- **Lines.** `--line` is for form-control borders, at 3:1 or more as WCAG 1.4.11 requires. `--line-soft` is for decorative dividers, cards and table rows.
+- **Brand.** `--accent` is navy (`#14305C`), used for links, focus, primary buttons and the brand name. `--brand-red` is used only for the header's top stripe. `--danger` marks destructive actions.
+- **Status, always with a word.**
+  - `--ok-*`: green, for done or passed;
+  - `--wait-*`: amber, for due soon or needs attention;
+  - `--bad-*`: red, for overdue, failed or out of service;
+  - `--info-*`: blue, for open;
+  - `--neutral-*`: gray, for not started.
+- **Scale.** `--space-1` to `--space-6`, `--radius-control`, `--radius-card` and `--radius-pill`. `--font-sans` is the system font stack, and `.tabular` gives even-width digits for counts and times.
+- **Buttons.**
+  - `.button` is navy-outlined, the secondary style;
+  - `.button.primary` is filled navy, one per screen;
+  - `.button.danger` is red-outlined;
+  - a disabled button gets a dashed border.
+- **Chips.** `.pill`, plus `.pill-ok`, `.pill-wait`, `.pill-needs-attention`, `.pill-bad`, `.pill-info` or `.pill-neutral`. In forced-colors mode every chip gets a system-color border.
+
+Every text pair measures at least 4.5:1 and every control border at least 3:1, in both themes. The pairs are recorded on issue #194 and its token PR.
+
 ## Stylesheet and script are inline
 
 CSS and JS are included in the page (`shell.css`, `shell.js`) so the shell needs no static-file serving, which is a deployment decision not yet made (SPEC §17). If a Content-Security-Policy is added later, these need a nonce or a move to served files.
