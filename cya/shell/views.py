@@ -127,6 +127,26 @@ ADMINISTRATION_LINKS = (
 )
 
 
+# The landing page's groups, in order, and each group's pages in task order (issue #194):
+# people, then a vehicle's setup, then kits, then settings for the whole system.
+ADMINISTRATION_GROUPS = (
+    ("people", "People", "Who can do what.", ("administration-roles",)),
+    (
+        "vehicles",
+        "Vehicles",
+        "Vehicles, their compartments and systems, and their checklists.",
+        ("vehicle-admin-list", "position-vehicles", "checklist-templates", "vehicle-files"),
+    ),
+    (
+        "kits",
+        "Kits",
+        "What each kit holds, which kits each vehicle carries, and the shared library.",
+        ("kit-definitions", "kit-list-vehicles", "kit-instance-vehicles", "kit-library"),
+    ),
+    ("system", "System", "Settings for the whole system.", ("mail-relay",)),
+)
+
+
 @never_cache
 @require_GET
 def administration(request):
@@ -137,16 +157,26 @@ def administration(request):
     roles = navigation.roles_for(user)
     if not section.roles & roles:
         return deny_section(request, user, roles, "VIEW_ADMINISTRATION")
-    links = [
-        {"url_name": name, "label": label, "description": description}
+    links = {
+        name: {"url_name": name, "label": label, "description": description}
         for name, label, description, action in ADMINISTRATION_LINKS
         if (
             navigation.ADMINISTRATOR in roles
             if action is None
             else permitted(action, str(user.pk), roles)
         )
+    }
+    groups = [
+        {
+            "key": key,
+            "label": label,
+            "summary": summary,
+            "links": [links[name] for name in names if name in links],
+        }
+        for key, label, summary, names in ADMINISTRATION_GROUPS
     ]
-    return render(request, "shell/administration.html", {"title": section.label, "links": links})
+    groups = [group for group in groups if group["links"]]
+    return render(request, "shell/administration.html", {"title": section.label, "groups": groups})
 
 
 @never_cache

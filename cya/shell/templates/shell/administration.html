@@ -1,10 +1,16 @@
 {% extends "shell/base.html" %}
 {% block content %}
-<ul>
-{% for link in links %}
-  <li><a href="{% url link.url_name %}">{{ link.label }}</a>: {{ link.description }}</li>
+{% for group in groups %}
+<section class="admin-group" aria-labelledby="admin-group-{{ group.key }}">
+  <h2 id="admin-group-{{ group.key }}">{{ group.label }}</h2>
+  <p class="muted">{{ group.summary }}</p>
+  <ul class="admin-cards">
+  {% for link in group.links %}
+    <li><a href="{% url link.url_name %}" class="admin-card"><span class="admin-card-title">{{ link.label }}</span> <span class="admin-card-text">{{ link.description|capfirst }}</span></a></li>
+  {% endfor %}
+  </ul>
+</section>
 {% empty %}
-  <li>No administration pages are available to you.</li>
+<p>No administration pages are available to you.</p>
 {% endfor %}
-</ul>
 {% endblock %}
