@@ -30,9 +30,11 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from email.message import EmailMessage
 
+# Python 3.9 compatible (Rocky Linux 9's default python3): no datetime.UTC.
+UTC = timezone.utc
 REPEAT_SECONDS = 6 * 3600
 DEFAULT_CONFIG = "/etc/check-your-ambulance/monitor.json"
 DEFAULTS = {
@@ -61,7 +63,12 @@ DEFAULTS = {
     "probe_failures_to_alert": 2,
     "probe_timeout": 15,
 }
-LOG_TIME = re.compile(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]")
+# nginx's default `[17/Nov/2026:02:43:20 +0000]`, or an ISO 8601 `[2026-11-17T02:43:20+00:00]`
+# from a `$time_iso8601` log format (the Ubuntu rehearsal host uses one).
+LOG_TIME = re.compile(
+    r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}"
+    r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))\]"
+)
 LOG_STATUS = re.compile(r'" (\d{3}) ')
 
 
@@ -124,7 +131,7 @@ def disk_conditions(config, at):
 
 def unit_property(unit, names):
     output = subprocess.run(
-        ["systemctl", "show", unit, "--property=" + ",".join(names)],
+        ["systemctl", "show", unit, "--timestamp=unix", "--property=" + ",".join(names)],
         capture_output=True,
         text=True,
         timeout=20,
@@ -133,12 +140,17 @@ def unit_property(unit, names):
 
 
 def systemd_time(value):
-    """Seconds since the epoch for a systemd timestamp in microseconds, or None."""
-    try:
-        micro = int(value)
-    except (TypeError, ValueError):
+    """Seconds since the epoch for a `--timestamp=unix` value such as `@1794883609`, or None.
+
+    An empty value means the unit has not exited since it was loaded.
+    """
+    if not isinstance(value, str) or not value.startswith("@"):
         return None
-    return micro / 1_000_000 if micro > 0 else None
+    try:
+        seconds = float(value[1:])
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
 
 
 def job_conditions(config, at, show=unit_property):
@@ -150,11 +162,11 @@ def job_conditions(config, at, show=unit_property):
         if props.get("Result", "success") != "success":
             found[f"job:{unit}"] = f"The recurring job {unit} failed on its last run"
     for unit, limit in config["stale_after"].items():
-        props = show(unit, ["LoadState", "Result", "ExecMainExitTimestampUSec"])
+        props = show(unit, ["LoadState", "Result", "ExecMainExitTimestamp"])
         if props.get("LoadState") != "loaded":
             found[f"stale:{unit}"] = f"{unit} is not installed, so its runs cannot be checked"
             continue
-        ended = systemd_time(props.get("ExecMainExitTimestampUSec"))
+        ended = systemd_time(props.get("ExecMainExitTimestamp"))
         if ended is None or at - ended > limit:
             found[f"stale:{unit}"] = f"{unit} has not completed a run in the expected time"
     return found
@@ -179,6 +191,13 @@ def database_conditions(config, at, run=subprocess.run):
     return {"database": "The database is refusing connections"} if refused else {}
 
 
+def log_time(text):
+    """Seconds since the epoch for either access-log timestamp form."""
+    if "T" in text:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    return datetime.strptime(text, "%d/%b/%Y:%H:%M:%S %z").timestamp()
+
+
 def errors_in_window(lines, at, window):
     """How many responses in the last `window` seconds had a 5xx status."""
     count = 0
@@ -188,7 +207,7 @@ def errors_in_window(lines, at, window):
         if not stamp or not status or not status.group(1).startswith("5"):
             continue
         try:
-            when = datetime.strptime(stamp.group(1), "%d/%b/%Y:%H:%M:%S %z").timestamp()
+            when = log_time(stamp.group(1))
         except ValueError:
             continue
         if at - window <= when <= at + 60:

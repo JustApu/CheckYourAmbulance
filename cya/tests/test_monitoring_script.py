@@ -160,6 +160,14 @@ class ConditionTests(AlertsCase):
         lines += [line.format(m=40, s=500), line.format(m=58, s=200), "garbage"]
         self.assertEqual(alerts.errors_in_window(lines, at, 600), 5)
 
+    def test_iso_8601_access_log_times_are_counted(self):
+        # Found in the issue #8 rehearsal: the Ubuntu host's nginx logs $time_iso8601.
+        at = datetime.datetime(2026, 11, 17, 3, 0, tzinfo=datetime.UTC).timestamp()
+        line = '198.51.100.7 [2026-11-17T02:{m:02d}:00+00:00] "GET / HTTP/2.0" {s} 0 0.1 "host"'
+        lines = [line.format(m=m, s=502) for m in range(52, 58)] + [line.format(m=40, s=502)]
+        lines.append('198.51.100.7 [2026-11-17T02:58:00Z] "GET / HTTP/2.0" 503 0 0.1 "host"')
+        self.assertEqual(alerts.errors_in_window(lines, at, 600), 7)
+
     def test_error_condition_reads_only_the_log_tail(self):
         log = os.path.join(self.dir.name, "access.log")
         now = datetime.datetime.now(datetime.UTC)
@@ -181,12 +189,12 @@ class ConditionTests(AlertsCase):
                 "cya-backup-full.service": {
                     "LoadState": "loaded",
                     "Result": "success",
-                    "ExecMainExitTimestampUSec": str(int((at - 30 * HOUR) * 1_000_000)),
+                    "ExecMainExitTimestamp": f"@{int(at - 30 * HOUR)}",
                 },
                 "cya-backup-binlog.service": {
                     "LoadState": "loaded",
                     "Result": "success",
-                    "ExecMainExitTimestampUSec": str(int((at - 60) * 1_000_000)),
+                    "ExecMainExitTimestamp": f"@{int(at - 60)}",
                 },
             }.get(unit, {"LoadState": "not-found"})
 
@@ -194,6 +202,18 @@ class ConditionTests(AlertsCase):
         self.assertEqual(
             set(found), {"job:cya-obligations.service", "stale:cya-backup-full.service"}
         )
+
+    def test_systemd_times_are_read_as_unix_timestamps(self):
+        # Found in the issue #8 rehearsal: there is no ExecMainExitTimestampUSec property, so
+        # the check reads ExecMainExitTimestamp with --timestamp=unix ("@<seconds>").
+        self.assertEqual(alerts.systemd_time("@1794883609"), 1794883609.0)
+        for value in ("", None, "0", "Mon 2026-11-17 02:46:49 UTC", "@0", "@x"):
+            self.assertIsNone(alerts.systemd_time(value), value)
+        with mock.patch.object(alerts.subprocess, "run") as run:
+            run.return_value = mock.Mock(stdout="LoadState=loaded\nExecMainExitTimestamp=@5\n")
+            props = alerts.unit_property("x.service", ["LoadState", "ExecMainExitTimestamp"])
+        self.assertIn("--timestamp=unix", run.call_args.args[0])
+        self.assertEqual(props["ExecMainExitTimestamp"], "@5")
 
     def test_database_refusing_connections(self):
         ok = mock.Mock(return_value=mock.Mock(returncode=0))
@@ -294,6 +314,14 @@ class SendTests(AlertsCase):
             json.dump({**self.relay, "tls_mode": "NONE"}, handle)
         with self.assertRaises(alerts.SendError):
             alerts.load_relay(self.relay_file)
+
+    def test_the_script_parses_as_python_3_9(self):
+        # Found in the issue #8 rehearsal: the probe host's python3 is 3.9 (Rocky Linux 9).
+        import ast
+
+        source = SCRIPT.read_text()
+        ast.parse(source, feature_version=(3, 9))
+        self.assertNotRegex(source, r"from datetime import[^\n]*\bUTC\b")
 
     def test_the_script_is_executable_and_stdlib_only(self):
         self.assertTrue(os.access(SCRIPT, os.X_OK))
