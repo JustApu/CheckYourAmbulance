@@ -1,8 +1,116 @@
 {% extends "shell/base.html" %}
+{% load station_time %}
+{% block head %}{% if home %}<style>{% include "inspections/inspection.css" %}</style>{% endif %}{% endblock %}
+{% block page_heading %}{% if home %}<h1>{{ home.greeting.text }}</h1>
+<p class="home-when">{{ home.greeting.now|date:"l j F" }} · {{ home.greeting.now|time:"H:i" }} station time</p>{% else %}<h1>{{ title }}</h1>{% endif %}{% endblock %}
 {% block content %}
+{% if not home %}
 {% if cya_menu %}
 <p>Choose Inspect, Problems or Vehicles to get started.</p>
 {% else %}
 <p>No sections are available to your account yet. Ask an administrator if you need access.</p>
+{% endif %}
+{% else %}
+<div class="home">
+{% if home.supervisor %}
+{% with sup=home.supervisor %}
+{% if sup.unavailable %}<p class="notice" role="status">The fleet summary is unavailable right now. Try again in a moment.</p>{% else %}
+<section class="home-section home-wide" aria-labelledby="home-glance">
+  <h2 id="home-glance" class="visually-hidden">At a glance</h2>
+  <ul class="home-tiles">
+    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.ready }} of {{ sup.tiles.listed }}</span> <span class="home-tile-label">vehicles ready{% if sup.tiles.partial %}, counting the first {{ sup.tiles.listed }} of {{ sup.tiles.fleet }}{% endif %}</span></li>
+    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.checked }} of {{ sup.tiles.owed }}</span> <span class="home-tile-label">checks done{% if sup.tiles.partial %} on those vehicles{% endif %}</span></li>
+    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.open_problems }}</span> <span class="home-tile-label">open problem{{ sup.tiles.open_problems|pluralize }}</span></li>
+    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.for_you }}</span> <span class="home-tile-label">waiting for you</span></li>
+  </ul>
+</section>
+{% endif %}{% endwith %}{% endif %}
+
+{% if home.in_progress.unavailable %}<p class="notice" role="status">Your inspections in progress are unavailable right now.</p>
+{% elif home.in_progress %}
+<section class="home-section panel home-wide" aria-labelledby="home-in-progress">
+  <h2 id="home-in-progress">In progress</h2>
+  <ul class="home-list home-progress">
+  {% for row in home.in_progress %}
+    <li>
+      <p class="home-progress-title"><strong>{{ row.vehicle }}</strong> · {{ row.check }}</p>
+      <p class="muted tabular">{{ row.checked }} item{{ row.checked|pluralize }} checked{% if row.by_others %} · {{ row.by_others }} by teammates{% endif %} · last activity {{ row.last_activity_at|time:"H:i" }}</p>
+      <a class="button{% if forloop.first %} primary{% endif %}" href="{{ row.url }}">Continue inspection</a>
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% else %}
+<p class="home-start"><a class="button primary" href="{% url 'inspection' %}">Start an inspection</a></p>
+{% endif %}
+
+{% if home.supervisor and not home.supervisor.unavailable %}{% with sup=home.supervisor %}
+<section class="home-section panel home-wide" aria-labelledby="home-needs-you">
+  <h2 id="home-needs-you">Needs you</h2>
+  {% if sup.requests or sup.verifying or sup.unassigned %}
+  <ul class="home-list">
+    {% for row in sup.requests %}<li><a href="{{ row.url }}">Review the request to set {{ row.vehicle }} {{ row.requested }}</a></li>{% endfor %}
+    {% if sup.requests_total > sup.requests|length %}<li><a href="{% url 'status' %}">{{ sup.requests_total }} status requests in all</a></li>{% endif %}
+    {% if sup.verifying %}<li><a href="{% url 'deficiency-queue' %}">Verify {{ sup.verifying }} fix{{ sup.verifying|pluralize:"es" }}</a></li>{% endif %}
+    {% if sup.unassigned %}<li><a href="{% url 'deficiency-queue' %}">Assign {{ sup.unassigned }} problem{{ sup.unassigned|pluralize }}</a></li>{% endif %}
+  </ul>
+  {% else %}<p>Nothing is waiting for you.</p>{% endif %}
+</section>
+<section class="home-section panel home-wide" aria-labelledby="home-vehicles">
+  <h2 id="home-vehicles">Vehicles</h2>
+  {% if sup.vehicles %}
+  <div class="table-scroll" tabindex="0" role="region" aria-labelledby="home-vehicles">
+  <table>
+    <thead><tr><th scope="col">Vehicle</th><th scope="col">Status</th><th scope="col">Checks done</th><th scope="col">Overdue</th><th scope="col">Problems</th></tr></thead>
+    <tbody>
+    {% for row in sup.vehicles %}
+      <tr><th scope="row"><a href="{{ row.url }}">{{ row.vehicle }}</a></th><td><span class="pill status-pill" data-status="{{ row.status }}">{{ row.status_label }}</span></td><td class="tabular">{{ row.checked }} of {{ row.owed }}</td><td class="tabular">{{ row.overdue }}</td><td class="tabular">{{ row.problems }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if sup.truncated %}<p class="muted">Only the first {{ sup.vehicles|length }} vehicles are shown. <a href="{% url 'fleet-readiness' %}">Open fleet readiness</a></p>{% endif %}
+  {% else %}<p>No active vehicles are set up yet.</p>{% endif %}
+</section>
+{% endwith %}{% endif %}
+
+<section class="home-section panel" aria-labelledby="home-due">
+  <h2 id="home-due">Due today</h2>
+  {% if home.due.unavailable %}<p role="status">What is due is unavailable right now. Try again in a moment.</p>
+  {% elif home.due.rows %}
+  <ul class="home-list">
+  {% for row in home.due.rows %}
+    <li class="home-due-row"><a href="{{ row.url }}">{{ row.vehicle }}</a>
+      <span class="home-chips">
+        {% if row.overdue %}<span class="pill pill-bad tabular">{{ row.overdue }} overdue</span>{% endif %}
+        {% if row.due %}<span class="pill pill-wait tabular">{{ row.due }} due now</span>{% endif %}
+        {% if row.soon %}<span class="pill pill-info tabular">{{ row.soon }} due soon</span>{% endif %}
+        {% if row.done %}<span class="pill pill-ok tabular">{{ row.done }} done</span>{% elif not row.overdue and not row.due and not row.soon %}<span class="pill pill-neutral">Nothing due</span>{% endif %}
+      </span>
+    </li>
+  {% endfor %}
+  </ul>
+  {% if home.due.truncated %}<p class="notice" role="status">Only the first {{ home.due.rows|length }} vehicles are shown here. <a href="{% url 'inspection' %}">See every vehicle in Inspect</a></p>{% endif %}
+  {% else %}<p>No active vehicles are set up yet.</p>{% endif %}
+</section>
+
+<section class="home-section panel" aria-labelledby="home-problems">
+  <h2 id="home-problems">Open problems</h2>
+  {% if home.problems.unavailable %}<p role="status">Problems are unavailable right now. Try again in a moment.</p>
+  {% elif home.problems.rows %}
+  <ul class="home-list">
+  {% for row in home.problems.rows %}
+    <li><a href="{{ row.url }}">{{ row.summary }}</a> <span class="muted">{{ row.vehicle }} · {{ row.severity }} · {{ row.status }}</span></li>
+  {% endfor %}
+  </ul>
+  {% if home.problems.total > home.problems.rows|length %}<p><a href="{% url 'deficiencies' %}">All {{ home.problems.total }} open problems</a></p>{% endif %}
+  {% else %}<p>No open problems.</p>{% endif %}
+  <p><a class="button" href="{% url 'deficiencies' %}">Report a problem</a></p>
+</section>
+
+{% if home.last_check and not home.last_check.unavailable %}
+<p class="home-last muted">Last check by you: {{ home.last_check.at|station_time }} on {{ home.last_check.vehicle }}.</p>
+{% endif %}
+</div>
 {% endif %}
 {% endblock %}

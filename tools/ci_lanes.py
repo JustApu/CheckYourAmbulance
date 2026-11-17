@@ -51,11 +51,13 @@ UI_TESTS = {
         "cya.attention",
         "cya.operations",
         "cya.seals",
+        "cya.shell",  # Home includes inspection.css (issue #194)
         "cya.tests.test_background_refresh",
+        "cya.tests.test_home",
     ),
     "operations": ("cya.operations", "cya.tests.test_background_refresh"),
     "seals": ("cya.seals", "cya.inspections", "cya.attention", "cya.tests.test_background_refresh"),
-    "shell": ("cya.tests.test_shell",),
+    "shell": ("cya.tests.test_shell", "cya.tests.test_home"),
 }
 
 # Shared shell templates that affect every extending/included page keep full coverage. Only the

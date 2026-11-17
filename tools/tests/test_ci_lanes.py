@@ -64,7 +64,9 @@ class RoutingTests(unittest.TestCase):
                     "cya.attention",
                     "cya.operations",
                     "cya.seals",
+                    "cya.shell",
                     "cya.tests.test_background_refresh",
+                    "cya.tests.test_home",
                 ),
                 False,
             ),
@@ -76,7 +78,9 @@ class RoutingTests(unittest.TestCase):
             with self.subTest(path=path):
                 decision = ci_lanes.classify([path])
                 self.assertEqual(decision["django-mode"], "focused")
-                self.assertEqual(decision["django-labels"], ("cya.tests.test_shell",))
+                self.assertEqual(
+                    decision["django-labels"], ("cya.tests.test_shell", "cya.tests.test_home")
+                )
                 self.assertTrue(decision["run-browser-smoke"])
 
     def test_shared_shell_templates_keep_the_full_suite(self):
@@ -102,7 +106,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_shared_shell_script_uses_shell_tests_and_browser(self):
         decision = ci_lanes.classify(["cya/shell/templates/shell/shell.js"])
-        self.assertEqual(decision["django-labels"], ("cya.tests.test_shell",))
+        self.assertEqual(decision["django-labels"], ("cya.tests.test_shell", "cya.tests.test_home"))
         self.assertTrue(decision["run-browser-smoke"])
 
     def test_role_matrix_script_uses_authorization_tests_and_browser_smoke(self):

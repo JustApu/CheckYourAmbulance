@@ -184,4 +184,10 @@ def administration(request):
 def home(request):
     if request.cya_user is None:
         return sign_in_redirect(request)
-    return render(request, "shell/home.html", {"title": "Check Your Ambulance"})
+    from cya.shell import home as home_screen
+
+    return render(
+        request,
+        "shell/home.html",
+        {"title": "Check Your Ambulance", "home": home_screen.build(request.cya_user)},
+    )
