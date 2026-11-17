@@ -1,5 +1,6 @@
 """Application shell: navigation by role, server-side enforcement, accessibility markers."""
 
+import pathlib
 import re
 import time
 from datetime import UTC, datetime
@@ -353,6 +354,43 @@ class ShellMarkupTests(ShellTestCase):
         html = self.client_for(user).get("/fleet/").content.decode()
         self.assertNotIn("<script>alert(1)</script>", html)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+
+
+class SortableTableTemplateTests(TestCase):
+    """Issue #194: these admin lists are marked for the shell's sort and filter enhancement."""
+
+    TABLES = {
+        "operations/admin_vehicles.html": "Filter this list",
+        "operations/admin_templates.html": "Filter templates",
+        "kits/admin_definitions.html": "Filter kits",
+        "kits/kit_instances.html": "Filter kits on this vehicle",
+    }
+
+    def test_admin_lists_are_sortable_and_filterable(self):
+        from django.template.loader import get_template
+
+        for name, label in self.TABLES.items():
+            with self.subTest(template=name):
+                source = pathlib.Path(get_template(name).origin.name).read_text(encoding="utf-8")
+                self.assertIn(f'<table data-sortable data-filter-label="{label}">', source)
+
+    def test_action_columns_are_not_sortable(self):
+        from django.template.loader import get_template
+
+        source = pathlib.Path(get_template("kits/kit_instances.html").origin.name).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('<th scope="col" data-nosort>Duplicate</th>', source)
+
+    def test_script_reports_sort_state_and_filter_counts(self):
+        js = render_to_string("shell/shell.js")
+        for marker in (
+            'setAttribute("aria-sort", direction)',
+            'other.removeAttribute("aria-sort")',
+            "Showing ",
+            'th.hasAttribute("data-nosort")',
+        ):
+            self.assertIn(marker, js)
 
 
 class SaveStateIndicatorTests(TestCase):

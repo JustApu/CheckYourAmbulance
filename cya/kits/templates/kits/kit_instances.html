@@ -11,8 +11,8 @@
 <h2 id="kits-heading">Kits on this vehicle</h2>
 {% if kits %}
 <div class="table-scroll" role="region" aria-labelledby="kits-heading" tabindex="0">
-<table>
-  <thead><tr><th scope="col">Kit</th><th scope="col">Type</th><th scope="col">Compartment</th><th scope="col">Duplicate</th></tr></thead>
+<table data-sortable data-filter-label="Filter kits on this vehicle">
+  <thead><tr><th scope="col">Kit</th><th scope="col">Type</th><th scope="col">Compartment</th><th scope="col" data-nosort>Duplicate</th></tr></thead>
   <tbody>
   {% for kit in kits %}
     <tr>

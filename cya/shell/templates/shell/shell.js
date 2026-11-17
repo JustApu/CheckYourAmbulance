@@ -58,6 +58,75 @@
     wideNav.addEventListener("change", syncNav);
     syncNav();
   }
+  // Sortable, filterable tables (issue #194). A table marked data-sortable gets a button in each
+  // header (except data-nosort) that sorts its rows. Only the sorted header carries aria-sort
+  // (WAI-ARIA: one at a time). data-filter-label adds a filter box above it. Without this script the table is unchanged. The server still
+  // owns the data; this only reorders and hides rows already on the page.
+  var collator = window.Intl ? new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }) : null;
+  function cellText(row, index) {
+    var cell = row.cells[index];
+    return cell ? cell.textContent.replace(/\s+/g, " ").trim() : "";
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("table[data-sortable]"), function (table, tableIndex) {
+    var body = table.tBodies[0];
+    if (!body || !table.tHead || !table.tHead.rows.length) { return; }
+    var status = document.createElement("p");
+    status.className = "visually-hidden table-status";
+    status.setAttribute("role", "status");
+    var holder = table.closest(".table-scroll") || table;
+    holder.parentNode.insertBefore(status, holder.nextSibling);
+    var headers = Array.prototype.slice.call(table.tHead.rows[0].cells);
+    headers.forEach(function (th, index) {
+      if (th.hasAttribute("data-nosort")) { return; }
+      var name = th.textContent.trim();
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "sort-button";
+      button.textContent = name;
+      th.textContent = "";
+      th.appendChild(button);
+      button.addEventListener("click", function () {
+        var direction = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+        headers.forEach(function (other) { other.removeAttribute("aria-sort"); });  // one sorted header at a time (WAI-ARIA)
+        th.setAttribute("aria-sort", direction);
+        var sign = direction === "ascending" ? 1 : -1;
+        var rows = Array.prototype.slice.call(body.rows);
+        rows.sort(function (a, b) {
+          var x = cellText(a, index);
+          var y = cellText(b, index);
+          return sign * (collator ? collator.compare(x, y) : (x < y ? -1 : x > y ? 1 : 0));
+        });
+        rows.forEach(function (row) { body.appendChild(row); });
+        status.textContent = "Sorted by " + name + ", " + direction + ".";
+      });
+    });
+    var label = table.getAttribute("data-filter-label");
+    if (!label) { return; }
+    var id = "table-filter-" + (tableIndex + 1);
+    var box = document.createElement("div");
+    box.className = "table-filter";
+    var labelNode = document.createElement("label");
+    labelNode.setAttribute("for", id);
+    labelNode.textContent = label;
+    var input = document.createElement("input");
+    input.type = "search";
+    input.id = id;
+    input.autocomplete = "off";
+    labelNode.appendChild(input);
+    box.appendChild(labelNode);
+    holder.parentNode.insertBefore(box, holder);
+    input.addEventListener("input", function () {
+      var query = input.value.replace(/\s+/g, " ").trim().toLowerCase();
+      var rows = Array.prototype.slice.call(body.rows);
+      var shown = 0;
+      rows.forEach(function (row) {
+        var match = !query || row.textContent.replace(/\s+/g, " ").toLowerCase().indexOf(query) !== -1;
+        row.hidden = !match;
+        if (match) { shown += 1; }
+      });
+      status.textContent = query ? "Showing " + shown + " of " + rows.length + "." : "Showing all " + rows.length + ".";
+    });
+  });
   var themeSelect = document.getElementById("theme-select");
   var themeKey = "cya-theme";
   function applyTheme(theme, persist) {
