@@ -1,18 +1,21 @@
-"""Role administration over HTTP: the walking skeleton's end-to-end action (issue 25 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/25)).
+"""Organization-scoped role management and audited role-history detail.
 
-GET shows the organization's append-only role history to an Administrator. POST
-changes one role through commands.change_role, which owns authorization,
-receipt, effect and audit in a single transaction. The handler only parses and
-validates input and maps outcomes to responses; the role, target and operation
-id come from the form, never the actor, organization or roles (SPEC 3.2).
+Administrators see active users and current roles; changes still pass through
+an explicit review and confirmation. The separate history page reads immutable
+role events. POST changes one role through commands.change_role, which owns
+authorization, receipt, effect and audit in a single transaction. The handler
+only parses and validates input; the actor and organization always come from
+the authenticated request, never the form (SPEC 3.2).
 """
 
 import logging
 import uuid
 from urllib.parse import urlencode
 
+from django.core.paginator import Paginator
 from django.db import DatabaseError
-from django.db.models import Q
+from django.db.models import F, Q, Window
+from django.db.models.functions import RowNumber
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
@@ -23,7 +26,12 @@ from cya.accounts.models import User
 from cya.accounts.returns import sign_in_redirect
 from cya.authorization.backend import AuthorizationUnavailable, canonical_id
 from cya.authorization.commands import change_role
-from cya.authorization.lifecycle import InvalidRoleHistory, LastAdministrator
+from cya.authorization.lifecycle import (
+    InvalidRoleHistory,
+    LastAdministrator,
+    RoleEvent,
+    current_roles,
+)
 from cya.authorization.models import RoleGrant
 from cya.authorization.policy import Role
 from cya.core.audit_commands import CommandDenied, OperationConflict, OutcomeUnknown, RetryLater
@@ -35,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 HISTORY_LIMIT = 50
 TARGET_LIMIT = 50
+ROLE_EVENT_LIMIT = 500
 SEARCH_LIMIT = 100
 ACTIONS = ("GRANT", "REVOKE")
 SELECTABLE_ROLES = tuple(role.value for role in Role if role != Role.EMT)  # EMT is a legacy alias
@@ -44,6 +53,7 @@ ROLE_LABELS = {
     "SUPPLY_OFFICER": "Supply Officer",
     "ADMINISTRATOR": "Administrator",
 }
+
 
 # Sanitized messages keyed by outcome; no exception text reaches the page.
 MESSAGES = {
@@ -74,7 +84,68 @@ def _is_administrator(user):
     return navigation.ADMINISTRATOR in navigation.roles_for(user)
 
 
-def _render_history(
+def _current_roles_by_user(organization_id, targets):
+    target_ids = [str(target.pk) for target in targets]
+    events = {target_id: [] for target_id in target_ids}
+    unavailable = set()
+    rows = (
+        RoleGrant.objects.filter(organization_id=organization_id, user_id__in=target_ids)
+        .annotate(
+            event_number=Window(
+                expression=RowNumber(),
+                partition_by=[F("user_id")],
+                order_by=F("sequence").asc(),
+            )
+        )
+        .filter(event_number__lte=ROLE_EVENT_LIMIT + 1)
+        .order_by("user_id", "sequence")
+        .values(
+            "id",
+            "organization_id",
+            "user_id",
+            "sequence",
+            "role",
+            "action",
+            "prior_grant_id",
+            "event_number",
+        )
+    )
+    for row in rows:
+        target_id = str(row["user_id"])
+        if row["event_number"] > ROLE_EVENT_LIMIT:
+            unavailable.add(target_id)
+            continue
+        events[target_id].append(
+            RoleEvent(
+                id=str(row["id"]),
+                organization_id=str(row["organization_id"]),
+                user_id=target_id,
+                sequence=row["sequence"],
+                role=row["role"],
+                action=row["action"],
+                prior_grant_id=str(row["prior_grant_id"]) if row["prior_grant_id"] else None,
+            )
+        )
+    result = {}
+    for target_id, target_events in events.items():
+        if target_id in unavailable:
+            result[target_id] = None
+            continue
+        try:
+            state = current_roles(
+                target_events,
+                organization_id=str(organization_id),
+                user_id=target_id,
+            )
+        except InvalidRoleHistory:
+            result[target_id] = None
+            continue
+        codes = {"CREW" if role.value in ("CREW", "EMT") else role.value for role in state.grants}
+        result[target_id] = tuple(ROLE_LABELS[code] for code in sorted(codes))
+    return result
+
+
+def _render_roles(
     request,
     user,
     *,
@@ -86,16 +157,9 @@ def _render_history(
     form_values=None,
     preview=None,
 ):
-    # Only an Administrator is shown history, users or the form; any other
-    # caller who reaches an error page sees the message alone.
+    # Only an Administrator is shown users and the form; any other caller
+    # who reaches an error page sees the message alone.
     show = _is_administrator(user)
-    history = (
-        RoleGrant.objects.filter(organization_id=user.organization_id)
-        .select_related("user", "actor_user")
-        .order_by("-recorded_at", "-sequence", "-pk")[:HISTORY_LIMIT]
-        if show
-        else []
-    )
     target_query = User.objects.filter(organization_id=user.organization_id, active=True)
     if search_query:
         target_query = target_query.filter(
@@ -103,22 +167,33 @@ def _render_history(
         )
     target_query = target_query.order_by("email", "id") if show and not search_error else []
     target_total = target_query.count() if show and not search_error else 0
-    targets = target_query[:TARGET_LIMIT] if show and not search_error else []
+    targets = list(target_query[:TARGET_LIMIT]) if show and not search_error and not preview else []
+    role_list_error = None
+    if targets:
+        try:
+            roles_by_user = _current_roles_by_user(user.organization_id, targets)
+        except DatabaseError:
+            logger.error("role list unavailable")
+            targets = []
+            role_list_error = "The user list could not be loaded. Reload the page to try again."
+            status = 503
+        else:
+            for target in targets:
+                target.current_role_labels = roles_by_user[str(target.pk)]
+                target.role_history_unavailable = target.current_role_labels is None
+                target.role_operation_id = (
+                    None if target.role_history_unavailable else str(uuid.uuid4())
+                )
     context = {
         "title": "Role administration",
         "show": show,
-        "history": history,
         "targets": targets,
         "target_total": target_total,
         "target_limit": TARGET_LIMIT,
         "target_search_query": search_query,
         "target_search_error": search_error,
-        "roles": SELECTABLE_ROLES,
-        "role_labels": ROLE_LABELS,
+        "role_list_error": role_list_error,
         "role_options": tuple((role, ROLE_LABELS.get(role, role)) for role in SELECTABLE_ROLES),
-        "actions": ACTIONS,
-        # A fresh id per rendered form: a double submit replays instead of repeating.
-        "operation_id": str(uuid.uuid4()),
         "error": error,
         "saved": saved,
         "form_values": form_values or {},
@@ -128,7 +203,7 @@ def _render_history(
 
 
 def _failure(request, user, outcome, status, *, search_query="", form_values=None):
-    return _render_history(
+    return _render_roles(
         request,
         user,
         status=status,
@@ -173,7 +248,7 @@ def _preview(request, user):
             form_values=values,
         )
     if search_error:
-        return _render_history(
+        return _render_roles(
             request,
             user,
             status=400,
@@ -201,7 +276,7 @@ def _preview(request, user):
         "action_label": action.title(),
         "operation_id": operation_id,
     }
-    return _render_history(
+    return _render_roles(
         request,
         user,
         search_query=query,
@@ -287,7 +362,7 @@ def roles(request):
             query, search_error = _search_query(request.POST)
             values = _form_values(request.POST)
             if search_error:
-                return _render_history(
+                return _render_roles(
                     request,
                     user,
                     status=400,
@@ -295,7 +370,7 @@ def roles(request):
                     search_error=search_error,
                     form_values=values,
                 )
-            return _render_history(request, user, search_query=query, form_values=values)
+            return _render_roles(request, user, search_query=query, form_values=values)
         if not _is_administrator(user):
             return deny_section(request, user, navigation.roles_for(user), "VIEW_ADMINISTRATION")
         return _failure(request, user, "INVALID", 400)
@@ -303,10 +378,69 @@ def roles(request):
     if navigation.ADMINISTRATOR not in current:
         return deny_section(request, user, current, "VIEW_ADMINISTRATION")
     query, search_error = _search_query(request.GET)
-    return _render_history(
+    return _render_roles(
         request,
         user,
         saved=request.GET.get("saved") == "1",
         search_query=query,
         search_error=search_error,
+    )
+
+
+@never_cache
+@require_http_methods(["GET"])
+def role_history(request, target_id):
+    user = request.cya_user
+    if user is None:
+        return sign_in_redirect(request)
+    current = navigation.roles_for(user)
+    if navigation.ADMINISTRATOR not in current:
+        return deny_section(request, user, current, "VIEW_ADMINISTRATION")
+
+    target = User.objects.filter(organization_id=user.organization_id, pk=target_id).first()
+    if target is None:
+        return render(
+            request,
+            "authorization/role_history.html",
+            {"title": "Role history", "target": None, "history": []},
+            status=404,
+        )
+    try:
+        history_query = (
+            RoleGrant.objects.filter(organization_id=user.organization_id, user_id=target.pk)
+            .select_related("actor_user")
+            .order_by("-recorded_at", "-sequence", "-pk")
+        )
+        history_page = Paginator(history_query, HISTORY_LIMIT).get_page(request.GET.get("page"))
+        history_total = history_page.paginator.count
+        history = list(history_page.object_list)
+    except DatabaseError:
+        logger.error("role history unavailable")
+        return render(
+            request,
+            "authorization/role_history.html",
+            {
+                "title": f"Role history for {target.display_name or target.email}",
+                "target": target,
+                "history": [],
+                "error": "Role history could not be loaded. Reload the page to try again.",
+            },
+            status=503,
+        )
+    for event in history:
+        event.action_label = "Granted" if event.action == "GRANT" else "Removed"
+        role_code = "CREW" if event.role == "EMT" else event.role
+        event.role_label = ROLE_LABELS.get(role_code, role_code)
+    return render(
+        request,
+        "authorization/role_history.html",
+        {
+            "title": f"Role history for {target.display_name or target.email}",
+            "target": target,
+            "history": history,
+            "history_total": history_total,
+            "history_limit": HISTORY_LIMIT,
+            "history_page": history_page,
+            "station_zone": user.organization.station_zone,
+        },
     )

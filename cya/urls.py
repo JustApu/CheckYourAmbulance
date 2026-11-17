@@ -104,6 +104,11 @@ urlpatterns = [
     ),
     path("administration/", shell.administration, name="administration"),
     path("administration/roles/", authorization.roles, name="administration-roles"),
+    path(
+        "administration/roles/<uuid:target_id>/history/",
+        authorization.role_history,
+        name="administration-role-history",
+    ),
     path("administration/mail-relay/", relay_views.mail_relay, name="mail-relay"),
     path("administration/kits/", kit_views.library, name="kit-library"),
     path(
