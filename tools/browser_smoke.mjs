@@ -1134,6 +1134,12 @@ try {
           };
         });
         assert.ok(marks.moreEdge, `${viewport.name}: the open More is not highlighted ${JSON.stringify(marks)}`);
+        // Its places look like the app's cards: bordered, rounded and at least 48px tall.
+        const place = await page.locator(".app-nav-more-list a").first().evaluate((node) => {
+          const style = getComputedStyle(node);
+          return { border: parseFloat(style.borderTopWidth), radius: parseFloat(style.borderTopLeftRadius), height: node.getBoundingClientRect().height };
+        });
+        assert.ok(place.border >= 1 && place.radius > 0 && place.height >= 48, `${viewport.name}: More places are not styled as cards ${JSON.stringify(place)}`);
         if (marks.currentAria) {
           assert.equal(marks.currentAria, "page");
           assert.notEqual(marks.currentColor, marks.moreColor, `${viewport.name}: the page tab still looks selected while More is open ${JSON.stringify(marks)}`);

@@ -50,7 +50,11 @@ a { color: var(--accent); }
 .skip-link { position: absolute; left: 1rem; top: -4rem; background: var(--bg); padding: .75rem 1rem; z-index: 10; }
 .skip-link:focus { top: .5rem; }
 .site-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; padding: .5rem 1rem; background: var(--bg); border-top: 4px solid var(--brand-red); border-bottom: 1px solid var(--line-soft); }
-.brand { font-weight: 800; font-size: 1.125rem; color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; min-height: 48px; }
+.brand { font-weight: 800; font-size: 1.125rem; color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: .5rem; min-height: 48px; }
+/* The app icon beside the name (owner phone check, #194). A text-colour outline keeps the navy
+   shield visible on the dark theme's navy header. */
+.brand-mark { flex: none; width: 2rem; height: 2rem; }
+.brand-mark-shield { stroke: var(--fg); stroke-width: 5; stroke-linejoin: round; paint-order: stroke; }
 .header-tools { display: flex; align-items: center; gap: .75rem 1rem; flex-wrap: wrap; }
 .account { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .account form { margin: 0; }
@@ -86,6 +90,16 @@ a.button { display: inline-flex; align-items: center; text-decoration: none; }
    (screen readers still hear the current page) but steps back visually (owner, phone check). */
 .app-nav:has(.app-nav-more[aria-expanded="true"]) .app-nav-link[aria-current="page"] { color: var(--muted); border-top-color: transparent; font-weight: 600; }
 .app-nav-more[aria-expanded="true"] { color: var(--accent); border-top-color: var(--accent); font-weight: 800; }
+/* Where More is a pop-up panel, its places look like the app's other tappable cards (owner phone
+   check, #194): bordered, rounded, 56px tall, with a decorative chevron. The desktop sidebar keeps rows. */
+@media (max-width: 63.999rem) {
+  .app-nav .app-nav-more-list { display: grid; gap: .5rem; padding: .75rem 1rem .25rem; }
+  .app-nav .app-nav-more-list a { box-sizing: border-box; position: relative; min-height: 56px; padding: 0 2.5rem 0 1rem; font-weight: 600; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-card); }
+  .app-nav .app-nav-more-list a::after { content: "\203A" / ""; position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 1.5rem; line-height: 1; }
+  .app-nav .app-nav-more-list a:hover { border-color: var(--accent); }
+  .app-nav .app-nav-more-list a[aria-current="page"] { border: 2px solid var(--accent); }
+  .app-nav .app-nav-more-list a:active { transform: translateY(1px); box-shadow: inset 0 3px 0 rgb(0 0 0 / .2); }
+}
 .app-nav-more-list a { display: flex; align-items: center; gap: .75rem; min-height: 48px; padding: 0 1rem; color: var(--fg); text-decoration: none; border-left: 4px solid transparent; }
 .app-nav-more-list a:hover { background: var(--info-bg); }
 .app-nav-more-list a[aria-current="page"] { color: var(--accent); font-weight: 700; border-left-color: var(--accent); }

@@ -393,6 +393,22 @@ class SortableTableTemplateTests(TestCase):
             self.assertIn(marker, js)
 
 
+class BrandMarkTests(TestCase):
+    """Owner phone check (#194): the app icon sits beside the name in the header."""
+
+    def test_header_brand_shows_the_decorative_icon_beside_the_name(self):
+        from django.template.loader import get_template
+
+        html = render_to_string("shell/brand_mark.html")
+        self.assertIn('aria-hidden="true"', html)
+        self.assertIn('focusable="false"', html)
+        base = pathlib.Path(get_template("shell/base.html").origin.name).read_text(encoding="utf-8")
+        self.assertIn(
+            '{% include "shell/brand_mark.html" %}<span class="brand-name">Check Your Ambulance</span>',
+            base,
+        )
+
+
 class TapFeedbackTests(TestCase):
     """Issue #194 item 8: the shell's Saved toast and pressed state."""
 

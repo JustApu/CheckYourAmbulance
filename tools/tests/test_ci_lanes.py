@@ -301,6 +301,7 @@ class CoverageMapTests(unittest.TestCase):
                     "shell/base.html",
                     "shell/save_state.html",
                     "shell/empty_state.html",
+                    "shell/brand_mark.html",
                 }:
                     source_path = f"cya/shell/templates/{used_path}"
                     with self.subTest(template=str(template.relative_to(ROOT)), uses=used_path):

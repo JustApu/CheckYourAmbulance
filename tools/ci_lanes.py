@@ -66,6 +66,7 @@ SHELL_FULL_TEMPLATES = frozenset(
     {
         "cya/shell/templates/shell/base.html",
         "cya/shell/templates/shell/save_state.html",
+        "cya/shell/templates/shell/brand_mark.html",  # in every page header (issue #194)
         "cya/shell/templates/shell/empty_state.html",  # included by many apps (issue #194)
     }
 )
