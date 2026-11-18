@@ -295,6 +295,13 @@ kbd { display: inline-block; min-width: 1.4em; padding: .05rem .35rem; font: inh
 .shortcuts-list { display: grid; grid-template-columns: max-content 1fr; gap: .5rem 1rem; align-items: center; margin: 1rem 0; }
 .shortcuts-list dt { white-space: nowrap; color: var(--muted); }
 .shortcuts-list dd { margin: 0; }
+
+/* Problems badge (#194): the open-problem count in the "needs attention" amber, on the icon's
+   corner in the tab bar and rail, after the label in the sidebar. Screen readers hear ", N open". */
+.app-nav-link { position: relative; }
+.app-nav-badge { position: absolute; top: .3rem; left: calc(50% + .3rem); min-width: 1.35rem; height: 1.35rem; padding: 0 .3rem; box-sizing: border-box; border: 1px solid var(--wait-fg); border-radius: 999px; color: var(--wait-fg); background: var(--wait-bg); font-size: .75rem; font-weight: 800; line-height: calc(1.35rem - 2px); text-align: center; font-variant-numeric: tabular-nums; }
+@media (min-width: 64rem) { .app-nav-badge { position: static; margin-left: .25rem; } }
+@media (forced-colors: active) { .app-nav-badge { color: CanvasText; background: Canvas; border-color: CanvasText; } }
 /* Feedback on every tap (#194): a visible pressed state, and the Saved toast. */
 .button:active:not(:disabled), .area-card:active, .jump-button:active, .app-nav-link:active, .sort-button:active, .vehicle-link:active { transform: translateY(1px); box-shadow: inset 0 3px 0 rgb(0 0 0 / .2); }
 .button:active:not(:disabled):not(.primary) { background: var(--info-bg); }

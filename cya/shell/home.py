@@ -141,6 +141,24 @@ def problems(user):
     return {"rows": rows, "total": total}
 
 
+def open_problem_count(user):
+    """Active problems in the user's organization: the Problems tab badge (issue #194).
+
+    The same count as Home's open problems. None when it cannot be read, so the badge is left off
+    rather than the page failing.
+    """
+    from cya.deficiencies.models import DeficiencyProjection
+    from cya.deficiencies.transitions import ACTIVE_STATUSES
+
+    try:
+        return DeficiencyProjection.objects.filter(
+            organization_id=user.organization_id, status__in=ACTIVE_STATUSES
+        ).count()
+    except DatabaseError as error:
+        logger.error("problems badge unavailable (%s)", type(error).__name__)
+        return None
+
+
 def last_check(user):
     from cya.checks.models import CheckRecord
 

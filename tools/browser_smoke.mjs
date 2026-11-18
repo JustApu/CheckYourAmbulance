@@ -43,7 +43,7 @@ const html = `<!doctype html>
 <body class="has-app-nav">
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header"><a class="brand" href="#main">Check Your Ambulance</a><div class="header-tools"><div class="account"><span class="account-name">Sam Example</span></div></div></header>
-<nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">${navIcon}<span class="app-nav-label">Home</span></a></li><li><a class="app-nav-link" href="#main" aria-current="page">${navIcon}<span class="app-nav-label">Inspect</span></a></li><li><a class="app-nav-link" href="#deficiency">${navIcon}<span class="app-nav-label">Problems</span></a></li><li><a class="app-nav-link" href="#status">${navIcon}<span class="app-nav-label">Vehicles</span></a></li><li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false" hidden>${navIcon}<span class="app-nav-label">More</span></button></li></ul><div id="app-nav-more-panel" class="app-nav-more-panel"><ul class="app-nav-more-list"><li><a href="#kits">${navIcon}<span>Kits</span></a></li><li><a href="#administration">${navIcon}<span>Administration</span></a></li></ul><div class="app-nav-settings"><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><form><button class="button" type="button">Sign out</button></form></div></div></nav>
+<nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">${navIcon}<span class="app-nav-label">Home</span></a></li><li><a class="app-nav-link" href="#main" aria-current="page">${navIcon}<span class="app-nav-label">Inspect</span></a></li><li><a class="app-nav-link" href="#deficiency" aria-label="Problems, 57 open">${navIcon}<span class="app-nav-label">Problems</span><span class="app-nav-badge" aria-hidden="true">57</span></a></li><li><a class="app-nav-link" href="#status">${navIcon}<span class="app-nav-label">Vehicles</span></a></li><li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false" hidden>${navIcon}<span class="app-nav-label">More</span></button></li></ul><div id="app-nav-more-panel" class="app-nav-more-panel"><ul class="app-nav-more-list"><li><a href="#kits">${navIcon}<span>Kits</span></a></li><li><a href="#administration">${navIcon}<span>Administration</span></a></li></ul><div class="app-nav-settings"><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><form><button class="button" type="button">Sign out</button></form></div></div></nav>
 <div id="connection-banner" class="banner banner-error" role="alert" hidden><span class="indicator-icon" aria-hidden="true">&#9888;</span><strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded.</div>
 <main id="main" tabindex="-1"><h1>Unit 12 inspection</h1>
 <section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open problem</span></section>
@@ -1120,7 +1120,8 @@ try {
       const inspectTab = page.getByRole("link", { name: "Inspect" });
       assert.equal(await inspectTab.getAttribute("aria-current"), "page", `${viewport.name}: current tab is not marked`);
       for (const label of ["Home", "Inspect", "Problems", "Vehicles"]) {
-        const tab = page.getByRole("link", { name: label, exact: true });
+        // Problems carries its badge count in its name ("Problems, 57 open").
+        const tab = page.getByRole("link", { name: label === "Problems" ? "Problems, 57 open" : label, exact: true });
         assert.equal(await tab.isVisible(), true, `${viewport.name}: ${label} tab is not visible`);
         const box = await tab.boundingBox();
         assert.ok(box.height >= 48 && box.width >= 48, `${viewport.name}: ${label} tab is smaller than 48 CSS pixels ${JSON.stringify(box)}`);
@@ -1223,6 +1224,18 @@ try {
       assert.ok(metrics.statusColorsDiffer, `${viewport.name}: service states have indistinguishable backgrounds`);
       assert.ok(metrics.actionHeight >= 48, `${viewport.name}: action target is shorter than 48 CSS pixels`);
 
+      // Issue #194: the Problems badge stays inside its tab and never covers the label.
+      const badge = await page.evaluate(() => {
+        const node = document.querySelector(".app-nav-badge"), link = node.closest("a"), label = link.querySelector(".app-nav-label");
+        const b = node.getBoundingClientRect(), l = link.getBoundingClientRect(), t = label.getBoundingClientRect();
+        return {
+          visible: b.width > 0 && b.height > 0,
+          inside: b.left >= l.left - 0.5 && b.right <= l.right + 0.5 && b.top >= l.top - 0.5 && b.bottom <= l.bottom + 0.5,
+          coversLabel: !(b.right <= t.left || b.left >= t.right || b.bottom <= t.top || b.top >= t.bottom),
+        };
+      });
+      assert.ok(badge.visible && badge.inside && !badge.coversLabel, `${viewport.name}: Problems badge misplaced ${JSON.stringify(badge)}`);
+      assert.equal(await page.getByRole("link", { name: "Problems, 57 open" }).count(), 1, `${viewport.name}: the badge count is not in the link's name`);
       await page.emulateMedia({ colorScheme: "dark" });
       await openMore(page);
       if (await page.locator("#app-nav-more").isVisible()) {

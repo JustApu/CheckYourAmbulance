@@ -193,6 +193,16 @@ For mouse-and-keyboard use, mostly supervisors and administrators on laptops and
 
 Tab moves through the day, month, year and time parts of a date or time field, and Chrome stops matching `:focus-visible` once focus is inside them, so the shared focus ring vanished there. The shell shows the same ring on `:focus` for `date`, `time`, `datetime-local`, `month` and `week` inputs, with `Highlight` in forced colors. Found by the wide-screen evidence pass on fleet readiness's "as of" field; the browser smoke test covers it.
 
+## Problems badge (issue #194)
+
+- **What it counts.** The Problems tab shows the organization's active problems (`home.open_problem_count`), the same number as Home's open problems. It is one count query per page.
+- **Display.**
+  - It is hidden at zero and shows "99+" above 99.
+  - It uses the amber "needs attention" pair (`--wait-fg` on `--wait-bg`).
+  - It sits on the icon's corner in the phone tab bar and tablet rail, and after the label in the desktop sidebar.
+- **Screen readers.** The badge itself is `aria-hidden`. The link is named "Problems, 57 open" with `aria-label`, which starts with the visible label (WCAG 2.5.3). A visually hidden span was tried first, but Chrome's name computation inserted a stray space ("Problems , 57 open").
+- **Failure.** If the count cannot be read, the error is logged and the badge is left off; the page still renders.
+
 ## Stylesheet and script are inline
 
 CSS and JS are included in the page (`shell.css`, `shell.js`) so the shell needs no static-file serving, which is a deployment decision not yet made (SPEC §17). If a Content-Security-Policy is added later, these need a nonce or a move to served files.
