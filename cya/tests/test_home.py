@@ -219,3 +219,49 @@ class KeyboardShortcutTests(CrewUiCase):
         html = admin.get(reverse("home")).content.decode()
         self.assertIn("<dd>Go to Administration</dd>", html)
         self.assertIn('data-shortcut-go="a" aria-keyshortcuts="g a"', html)
+
+
+class ProblemsBadgeTests(CrewUiCase):
+    """Issue #194: the Problems tab shows the open-problem count."""
+
+    def nav(self):
+        html = self.client.get(reverse("home")).content.decode()
+        return re.search(r'<nav class="app-nav".*?</nav>', html, re.S).group(0)
+
+    def test_the_count_matches_home_open_problems(self):
+        self.assertEqual(home.open_problem_count(self.user), home.problems(self.user)["total"])
+
+    def test_the_badge_shows_the_count_and_is_announced(self):
+        with mock.patch("cya.shell.home.open_problem_count", return_value=7):
+            nav = self.nav()
+        self.assertIn(
+            '<span class="app-nav-label">Problems</span><span class="app-nav-badge" aria-hidden="true">7</span>',
+            nav,
+        )
+        self.assertEqual(nav.count("app-nav-badge"), 1)
+        # The name starts with the visible label (WCAG 2.5.3) and says the count once.
+        self.assertIn('aria-label="Problems, 7 open"', nav)
+
+    def test_large_counts_are_capped_but_announced_in_full(self):
+        with mock.patch("cya.shell.home.open_problem_count", return_value=120):
+            nav = self.nav()
+        self.assertIn('aria-label="Problems, 120 open"', nav)
+        self.assertIn('<span class="app-nav-badge" aria-hidden="true">99+</span>', nav)
+
+    def test_no_badge_without_open_problems_or_when_unreadable(self):
+        for value in (0, None):
+            with (
+                self.subTest(value=value),
+                mock.patch("cya.shell.home.open_problem_count", return_value=value),
+            ):
+                self.assertNotIn("app-nav-badge", self.nav())
+
+    def test_an_unreadable_count_is_logged_and_the_page_still_renders(self):
+        with (
+            mock.patch(
+                "cya.deficiencies.models.DeficiencyProjection.objects.filter",
+                side_effect=DatabaseError,
+            ),
+            self.assertLogs("cya.shell.home", level="ERROR"),
+        ):
+            self.assertIsNone(home.open_problem_count(self.user))
