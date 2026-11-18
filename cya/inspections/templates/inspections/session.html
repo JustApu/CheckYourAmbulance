@@ -76,6 +76,10 @@
     <button type="button" id="layout-compartments" class="button" aria-pressed="true">Compartments</button>
     <button type="button" id="layout-flat" class="button" aria-pressed="false">All items</button>
   </div>
+  {% endif %}
+  {# Issue #194: at 64rem and wider an open area shows the area list beside its items (split view). #}
+  <div id="checklist-body" class="checklist-body">
+  {% if not verification %}
   <section id="area-overview" aria-labelledby="area-overview-heading" hidden>
     <h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3>
     <p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p>
@@ -107,6 +111,7 @@
     <p id="checklist-bar-status" class="visually-hidden" role="status"></p>
   </div>
   {% endif %}
+  </div>
 </section>
 
 <dialog id="conflict-dialog" aria-labelledby="conflict-title">

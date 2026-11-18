@@ -124,6 +124,7 @@ function checklist(state = "OPEN", extra = {}) {
     urls: {checks: "/checks", checklist: "/checklist", suggestions: "/suggestions", deficiency_detail: "/problems/DEFICIENCY/", socket: "/live", odometer: "/odometer"}};
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
+  if (config.test_wide) run.window.matchMedia = () => ({matches: true, addEventListener() {}});
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
     "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   // Verification regressions exercise item actions, including the no-session retry path.
@@ -829,5 +830,33 @@ function generic(kind) {
       assert.equal(run.get("live-banner").hidden, false, "the signed-out banner still shows");
     }
   }
-  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  for (const wide of [true, false]) {
+    // Issue #194 split view: at 64rem and wider an open area keeps the area list beside its items.
+    const run = checklist("OPEN", wide ? {test_wide: true} : {});
+    const rear = {...row, item_id: "rear-item", item_label: "Rear item", kit_id: null, kit_label: null, compartment_id: "compartment-b", compartment_label: "Rear"};
+    const cab = {...row, kit_id: null, kit_label: null};
+    const group = (key, label, due) => ({key, label, total: 1, checked: 0, due, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0});
+    run.context.testUI.setRows([cab, rear]);
+    run.context.testUI.setGroups([group("compartment:compartment-a", "Driver-side exterior compartment", 1), group("compartment:compartment-b", "Rear", 0)]);
+    run.context.testUI.render(); // the saved navigation (All items) is applied on the first render
+    run.context.testUI.setLayout("COMPARTMENTS");
+    assert.equal(run.get("area-overview").hidden, false, "the overview lists the areas");
+    assert.equal(run.get("checklist-body").className, "checklist-body");
+    run.get("area-cards").children[1].fire("click");
+    const keys = run.elements.items.children.filter(child => child.dataset.itemKey).map(child => child.dataset.itemKey);
+    assert.deepEqual(keys, ["rear-item|"], "the open area shows only its items");
+    if (wide) {
+      assert.equal(run.get("checklist-body").className, "checklist-body checklist-split");
+      assert.equal(run.get("area-overview").hidden, false, "split view keeps the area list beside the items");
+      const cards = run.get("area-cards").children;
+      assert.equal(cards[1].getAttribute("aria-current"), "true", "the open area is marked");
+      assert.equal(cards[0].getAttribute("aria-current"), null);
+      assert.equal(findClass(cards[0], "area-card-short").textContent, "1 still due");
+      assert.equal(findClass(cards[1], "area-card-short").textContent, "Nothing due");
+    } else {
+      assert.equal(run.get("checklist-body").className, "checklist-body");
+      assert.equal(run.get("area-overview").hidden, true, "narrow screens open the area on its own");
+    }
+  }
+  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
