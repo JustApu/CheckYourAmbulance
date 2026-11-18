@@ -1118,6 +1118,27 @@ try {
 
       await page.emulateMedia({ colorScheme: "dark" });
       await openMore(page);
+      if (await page.locator("#app-nav-more").isVisible()) {
+        // Owner phone check (#194): the open More carries the highlight; the page's tab steps back
+        // visually but keeps aria-current="page".
+        const marks = await page.evaluate(() => {
+          const more = getComputedStyle(document.getElementById("app-nav-more"));
+          const node = document.querySelector('.app-nav-link[aria-current="page"]');
+          const current = node ? getComputedStyle(node) : null;
+          return {
+            moreEdge: more.borderTopColor === more.color || more.borderLeftColor === more.color,
+            moreColor: more.color,
+            currentColor: current && current.color,
+            currentEdge: current && (current.borderTopColor + " " + current.borderLeftColor),
+            currentAria: node && node.getAttribute("aria-current"),
+          };
+        });
+        assert.ok(marks.moreEdge, `${viewport.name}: the open More is not highlighted ${JSON.stringify(marks)}`);
+        if (marks.currentAria) {
+          assert.equal(marks.currentAria, "page");
+          assert.notEqual(marks.currentColor, marks.moreColor, `${viewport.name}: the page tab still looks selected while More is open ${JSON.stringify(marks)}`);
+        }
+      }
       const theme = page.getByLabel("Theme");
       const darkBackground = await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
       assert.equal(darkBackground, "rgb(11, 20, 38)", `${viewport.name}: Auto did not follow dark system preference`);
