@@ -78,6 +78,13 @@ operator actions; this draft has not performed them on the developer machine.
    Rehearse issuance and renewal with the client's staging service, then check its
    timer and failure alert.
 
+**DNS filtering on crew devices and networks (owner phone check, 2026-11-17).** Ad- and
+threat-blocking DNS can refuse the agency's app domain, most often because the domain is
+newly registered or uncategorized. On a phone with such a filter, the app simply does not
+load. Before go-live, ask the agency whether its phones or station networks use DNS
+filtering. If they do, have the app's domain allowlisted in each filter (or in the managed
+device profile) and test from one filtered phone. Turning the filter off is not the fix.
+
 Use the chosen distribution's versioned installation and firewall documentation
 when making a concrete host profile; do not guess package names, firewall commands or
 unit names. The [Rocky Linux 9 host profile](#rocky-linux-9-host-profile-rehearsed-2026-11-02)

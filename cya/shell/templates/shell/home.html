@@ -20,7 +20,7 @@
   <h2 id="home-glance" class="visually-hidden">At a glance</h2>
   <ul class="home-tiles">
     <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.ready }} of {{ sup.tiles.listed }}</span> <span class="home-tile-label">vehicles ready{% if sup.tiles.partial %}, counting the first {{ sup.tiles.listed }} of {{ sup.tiles.fleet }}{% endif %}</span></li>
-    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.checked }} of {{ sup.tiles.owed }}</span> <span class="home-tile-label">checks done{% if sup.tiles.partial %} on those vehicles{% endif %}</span></li>
+    <li class="home-tile">{% if sup.tiles.owed %}<span class="home-tile-value tabular">{{ sup.tiles.checked }} of {{ sup.tiles.owed }}</span> <span class="home-tile-label">checks done{% if sup.tiles.partial %} on those vehicles{% endif %}</span>{% else %}<span class="home-tile-value tabular">0</span> <span class="home-tile-label">checks due right now{% if sup.tiles.partial %} on those vehicles{% endif %}</span>{% endif %}</li>
     <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.open_problems }}</span> <span class="home-tile-label">open problem{{ sup.tiles.open_problems|pluralize }}</span></li>
     <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.for_you }}</span> <span class="home-tile-label">waiting for you</span></li>
   </ul>

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 {% if refresh_to %}<meta http-equiv="refresh" content="0;url={{ refresh_to }}">{% endif %}
 <title>{{ title }} - Check Your Ambulance</title>
 <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
@@ -21,7 +21,7 @@
 <body{% if cya_nav %} class="has-app-nav"{% endif %}>
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header">
-  <a class="brand" href="{% url 'home' %}">Check Your Ambulance</a>
+  <a class="brand" href="{% url 'home' %}">{% include "shell/brand_mark.html" %}<span class="brand-name">Check Your Ambulance</span></a>
   <div class="header-tools">
     {% if cya_user %}
     <div class="account">
