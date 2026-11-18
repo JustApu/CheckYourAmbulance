@@ -345,6 +345,27 @@ async function testChecklistAids(viewport) {
     await page.close();
   }
 }
+async function testDateTimeFocus(viewport) {
+  // Issue #194 evidence: Tab inside a date-time field's parts must keep a visible focus ring.
+  const page = await browser.newPage({ viewport });
+  const markup = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Date</title><style>${css}</style></head>
+    <body><main id="main"><h1>Readiness</h1><label for="as-of">Show the picture as of</label> <input id="as-of" name="as_of" type="datetime-local"> <button type="button" class="button">Show</button></main></body></html>`;
+  try {
+    await page.route("http://date.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: markup }));
+    await page.goto("http://date.test/", { waitUntil: "load" });
+    await page.locator("#as-of").focus();
+    for (let part = 0; part < 3; part++) {
+      const ring = await page.locator("#as-of").evaluate((el) => document.activeElement === el ? getComputedStyle(el).outlineStyle + " " + getComputedStyle(el).outlineWidth : "left");
+      if (ring === "left") break;
+      assert.equal(ring, "solid 3px", `${viewport.name}: no focus ring inside the date-time field (part ${part + 1})`);
+      await page.keyboard.press("Tab");
+    }
+    console.log(`${viewport.name}: date-time field keeps its focus ring passed`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function testInspectionNavigation(viewport) {
   const page = await browser.newPage({ viewport });
   const configForPath = (pathname) => pathname === "/another-user"
@@ -1147,6 +1168,7 @@ try {
         assert.ok(mainBox.x >= navBox.x + navBox.width, `${viewport.name}: page content overlaps the sidebar`);
       }
       await testInspectionNavigation(viewport);
+      await testDateTimeFocus(viewport);
       await testChecklistAids(viewport);
       await testTapFeedback(viewport);
       await testKeyboardShortcuts(viewport);

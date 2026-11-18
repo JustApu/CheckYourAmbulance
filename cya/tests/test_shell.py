@@ -430,6 +430,15 @@ class SafeAreaTests(TestCase):
         self.assertIn("calc(6rem + env(safe-area-inset-left))", css)
 
 
+class DateTimeFocusTests(TestCase):
+    """Issue #194 evidence: date and time fields keep a focus ring while Tab moves through their parts."""
+
+    def test_date_and_time_fields_show_a_ring_on_focus(self):
+        css = render_to_string("shell/shell.css")
+        self.assertIn('input[type="datetime-local"]:focus', css)
+        self.assertIn('input[type="date"]:focus', css)
+
+
 class TapFeedbackTests(TestCase):
     """Issue #194 item 8: the shell's Saved toast and pressed state."""
 
