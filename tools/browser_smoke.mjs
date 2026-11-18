@@ -82,8 +82,8 @@ function inspectionMarkup(userId, sessionId, timeZone = "America/New_York") {
   <section aria-labelledby="odo-heading" class="panel vehicle-readings"><h2 id="odo-heading">Vehicle readings</h2><form id="odometer-form" novalidate><div class="vehicle-readings-fields"><label class="vehicle-reading-field" for="odo-value"><span>Mileage <span class="muted">(miles)</span></span><input id="odo-value" class="number-input" type="text" inputmode="decimal" autocomplete="off" required></label><input id="odo-unit" type="hidden" value="mi"><label class="vehicle-reading-field" for="odo-hours"><span>Engine hours (optional)</span><input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off"></label><button type="submit" class="button primary" aria-describedby="readings-save-help">Record readings</button></div></form><p id="readings-save-help" class="muted readings-save-note">Audited history: select Record after entering complete values.</p><div id="odo-confirm" hidden><label for="odo-why">Why is this reading correct? (optional)</label><textarea id="odo-why" rows="2" maxlength="1000"></textarea><button id="odo-confirm-button" class="button" type="button">The reading is correct. Save it.</button></div><p id="odometer-state" class="save-state" role="status" hidden><span class="indicator-icon"></span><span class="save-state-text"></span></p></section>
   <section><h2 id="checklist-heading" tabindex="-1">Checklist</h2><div class="view-controls"><button id="view-normal" class="button" type="button">Normal</button><button id="view-priority" class="button" type="button">Priority</button><label><input id="only-attention" type="checkbox"> Needs Attention Only</label></div><p id="pref-state" role="status"></p>
   <div id="layout-controls" class="view-controls" role="group" aria-label="Inspection layout"><button id="layout-compartments" class="button" type="button">Compartments</button><button id="layout-flat" class="button" type="button">All items</button></div>
-  <section id="area-overview"><h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3><p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p><div id="area-cards" class="area-cards"></div></section>
-  <section id="area-detail" hidden><button id="area-overview-button" class="button" type="button">All areas and compartments</button><h3 id="area-heading" tabindex="-1"></h3></section><p id="screen-notice" hidden></p><ol id="items" class="items" aria-live="polite"></ol></section>
+  <div id="checklist-body" class="checklist-body"><section id="area-overview"><h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3><p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p><div id="area-cards" class="area-cards"></div></section>
+  <section id="area-detail" hidden><button id="area-overview-button" class="button" type="button">All areas and compartments</button><h3 id="area-heading" tabindex="-1"></h3></section><p id="screen-notice" hidden></p><ol id="items" class="items" aria-live="polite"></ol></div></section>
   <dialog id="conflict-dialog"><p id="conflict-text"></p><button id="conflict-cancel" type="button">Cancel</button><button id="conflict-proceed" type="button">Proceed</button></dialog>
   <dialog id="outcome-dialog"><h2 id="outcome-title"></h2><form id="outcome-form"><textarea name="outcome_explanation"></textarea><select id="outcome-existing"></select><p id="outcome-matches"></p><p id="outcome-error"></p><fieldset id="outcome-create-fields"></fieldset><button id="outcome-cancel" type="button">Cancel</button></form></dialog>
   </main><script id="cya-config" type="application/json">${JSON.stringify(config)}</script>
@@ -257,7 +257,7 @@ async function testChecklistAids(viewport) {
     const sections = page.getByRole("button", { name: "Sections" });
     await sections.click();
     assert.equal(await sections.getAttribute("aria-expanded"), "true");
-    const rear = page.getByRole("button", { name: /^Rear/ });
+    const rear = page.locator("#jump-panel").getByRole("button", { name: /^Rear/ });
     assert.match(await rear.innerText(), /1 still due/);
     assert.ok((await rear.boundingBox()).height >= 48, `${viewport.name}: a section button is shorter than 48 CSS pixels`);
     await rear.click();
@@ -316,7 +316,19 @@ async function testInspectionNavigation(viewport) {
     assert.ok(metrics.cardTarget >= 48, `${viewport.name}: compartment target is shorter than 48px`);
     await cab.click();
     await page.getByRole("heading", { name: "Cab", exact: true }).waitFor();
-    assert.equal(await page.locator("#area-overview").isVisible(), false);
+    // Issue #194 split view: at 64rem (1024px) and wider the area list stays beside the open area.
+    const split = viewport.width >= 1024;
+    assert.equal(await page.locator("#area-overview").isVisible(), split, `${viewport.name}: split view ${split ? "missing" : "shown on a narrow screen"}`);
+    if (split) {
+      const columns = await page.evaluate(() => {
+        const list = document.getElementById("area-overview").getBoundingClientRect();
+        const items = document.getElementById("items").getBoundingClientRect();
+        return { listRight: list.right, itemsLeft: items.left, listTop: list.top, itemsBottom: items.bottom };
+      });
+      assert.ok(columns.listRight <= columns.itemsLeft, `${viewport.name}: the area list is not beside the items ${JSON.stringify(columns)}`);
+      assert.equal(await page.getByRole("button", { name: /^Cab / }).getAttribute("aria-current"), "true", `${viewport.name}: the open area is not marked`);
+      assert.match(await page.getByRole("button", { name: /^Cab / }).innerText(), /2 still due/);
+    }
     assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (1)" }).count(), 1);
     assert.equal(await page.getByRole("heading", { name: "Kit instance: Airway Kit (2)" }).count(), 1);
     const compartmentItems = await page.locator("#items > li.item").evaluateAll((items) => items.map((item) => item.dataset.itemKey));

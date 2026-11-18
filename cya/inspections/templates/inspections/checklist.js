@@ -18,6 +18,8 @@
   var selectedGroupKey = pendingNavigation && pendingNavigation.mode === "COMPARTMENTS" ? pendingNavigation.groupKey : null;
   var navigationRestored = false, navigationAnchorKey = null, navigationSaveTimer = null;
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false, loadedOnce = false;
+  // Split view (issue #194): at 64rem and wider an open area keeps the area list beside its items.
+  var wideQuery = window.matchMedia ? window.matchMedia("(min-width: 64rem)") : null;
   // Loading placeholders (issue #194) stand in until the first answer; never leave them spinning.
   // One block outside both layouts, so Compartments, All items and verification all show it.
   function clearLoading(message) {
@@ -519,18 +521,26 @@
       group.no_obligation + " without an obligation · " + group.exceptions + " exceptions · " + group.open_deficiencies + " open problems";
   }
   function renderAreaCards() {
-    var cards = $("area-cards");
+    var cards = $("area-cards"), focusedGroup = null;
+    // In split view the list stays on screen through live updates: keep a focused card focused.
+    for (var node = document.activeElement; node && node !== cards; node = node.parentNode) {
+      if (node.parentNode === cards && node.dataset) { focusedGroup = node.dataset.groupKey; }
+    }
     while (cards.firstChild) { cards.removeChild(cards.firstChild); }
     groupProgressRows.forEach(function (group) {
       var button = el("button", "area-card", "");
       button.type = "button"; button.dataset.groupKey = group.key;
       button.appendChild(el("span", "area-card-title", group.label));
       button.appendChild(el("span", "area-card-summary", progressText(group)));
+      var left = group.due + group.due_soon + group.overdue;
+      button.appendChild(el("span", "area-card-short", left ? left + " still due" : "Nothing due"));
+      if (group.key === selectedGroupKey) { button.setAttribute("aria-current", "true"); }
       button.addEventListener("click", function () {
         layoutMode = "COMPARTMENTS"; selectedGroupKey = group.key; navigationAnchorKey = null;
         saveNavigation(); render(); $("area-heading").focus({preventScroll: true});
       });
       cards.appendChild(button);
+      if (group.key === focusedGroup) { button.focus({preventScroll: true}); }
     });
   }
   function applySavedNavigation() {
@@ -692,12 +702,14 @@
     }
     var overview = !!$("area-overview") && layoutMode === "COMPARTMENTS" && !selectedGroupKey;
     var detail = !!$("area-detail") && layoutMode === "COMPARTMENTS" && !!selectedGroupKey;
+    var split = detail && !!wideQuery && wideQuery.matches;
+    if ($("checklist-body")) { $("checklist-body").className = "checklist-body" + (split ? " checklist-split" : ""); }
     if ($("area-overview")) {
-      $("area-overview").hidden = !overview;
+      $("area-overview").hidden = !(overview || split);
       $("area-detail").hidden = !detail;
       $("layout-compartments").setAttribute("aria-pressed", String(layoutMode === "COMPARTMENTS"));
       $("layout-flat").setAttribute("aria-pressed", String(layoutMode === "FLAT"));
-      if (overview) { renderAreaCards(); }
+      if (overview || split) { renderAreaCards(); }
       if (detail && selectedGroup) { $("area-heading").textContent = selectedGroup.label; }
     }
     var shown = allShown;
@@ -1067,6 +1079,12 @@
       $(id).addEventListener("input", function () { odo.request = null; });  // changed intent
     });
     if (config.odometer_unit) { $("odo-unit").value = config.odometer_unit; }
+  }
+
+  if (wideQuery) {
+    var onWide = function () { if (loadedOnce) { render(); } };
+    if (wideQuery.addEventListener) { wideQuery.addEventListener("change", onWide); }
+    else if (wideQuery.addListener) { wideQuery.addListener(onWide); }
   }
 
   // ---- start ------------------------------------------------------------------------------

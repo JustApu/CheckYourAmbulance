@@ -361,6 +361,11 @@ class PageTests(CrewUiCase):
         self.assertGreater(skeleton, html.index('id="area-detail"'))
         self.assertLess(skeleton, html.index('<ol id="items"'))
         self.assertNotIn('class="area-cards"><div class="skeleton', html)
+        # Issue #194 split view: the area list and the items share one body the script lays out.
+        body = html.index('<div id="checklist-body" class="checklist-body">')
+        self.assertLess(body, html.index('id="area-overview"'))
+        self.assertLess(html.index('<ol id="items"'), html.index('id="checklist-bar"'))
+        self.assertGreater(html.index("</div>\n</section>", html.index('id="checklist-bar"')), body)
         # Issue #194: the long-checklist bar (progress, Next unchecked item, jump to a section).
         self.assertIn('id="checklist-bar"', html)
         self.assertIn(">Next unchecked item</button>", html)

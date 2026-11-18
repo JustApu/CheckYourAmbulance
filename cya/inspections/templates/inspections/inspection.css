@@ -55,6 +55,17 @@
 .kit-heading { margin: .5rem 0 0; padding: .5rem .75rem; border-bottom: 2px solid var(--line); font-size: 1rem; }
 .area-detail-heading { margin-top: .75rem; }
 @media (min-width: 48rem) { .area-cards { grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); } }
+/* Split view (#194): the area list in a narrow column beside the open area's items. The short
+   count replaces the full summary there; the open area is marked. */
+.area-card-short { display: none; }
+.area-card[aria-current="true"] { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.checklist-split { display: grid; grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr); column-gap: 1.25rem; align-items: start; }
+.checklist-split > * { grid-column: 2; }
+.checklist-split > #area-overview { grid-column: 1; grid-row: 1 / span 12; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
+.checklist-split #area-overview > p, .checklist-split .area-card-summary { display: none; }
+.checklist-split .area-cards { grid-template-columns: minmax(0, 1fr); gap: .5rem; }
+.checklist-split .area-card-short { display: block; margin-top: .25rem; color: var(--muted); }
+.checklist-split #area-overview-heading { font-size: 1rem; margin-top: 0; }
 .item { border: 2px solid var(--line); border-radius: .5rem; padding: .75rem 1rem; }
 .item-attention { border-left: 5px solid var(--bad-fg); }
 .item-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
