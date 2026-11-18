@@ -210,6 +210,8 @@ class AuditIntegrityTests(TestCase):
             "position_key",  # issue #129: organization-wide compartment and system keys
             "kit_instance_definition",  # issue #129: the kit definition a kit instance has
             "vehicle_activity_event",  # issue #130: vehicle activity history (SPEC 4.8 CFG-1)
+            "vehicle_assignment_event",  # issue #202: vehicle crew assignment (SPEC 15.4)
+            "vehicle_assignment_limit",  # issue #202: administrator-set maximum assignment length
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
             "deficiency_age_rule",  # issue 150 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/150): administrator-set age highlighting revisions
@@ -318,6 +320,8 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "kit_assignment_event",
                         "kit_seal_designation",
                         "vehicle_activity_event",
+                        "vehicle_assignment_event",
+                        "vehicle_assignment_limit",
                         "seal_event",
                         "seal_substitution",
                         "seal_substitution_obligation",
@@ -426,6 +430,8 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "kit_assignment_event",
                     "kit_seal_designation",
                     "vehicle_activity_event",
+                    "vehicle_assignment_event",
+                    "vehicle_assignment_limit",
                     "seal_event",
                     "seal_substitution",
                     "seal_substitution_obligation",

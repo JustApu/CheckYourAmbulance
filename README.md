@@ -119,6 +119,8 @@ Human-facing inspection, deficiency, vehicle-status, readiness and administrator
 
 [issue #67](https://github.com/JustApu/CheckYourAmbulance/issues/67) adds a [disposable current obligation projection](docs/current-obligation-projection.md) for checklist and readiness reads, transactional refresh from affected writers, and `manage.py rebuild_obligation_projection` with read-only `--dry-run`/`--verify` comparison. Explicit historical reads still replay immutable events; readiness retains its full window counts.
 
+[issue #202](https://github.com/JustApu/CheckYourAmbulance/issues/202) adds [vehicle crew assignment](docs/vehicle-assignment.md) (SPEC §15.4): who is working on which vehicle and until when, as an append-only event chain per person with database guards. Any role assigns, moves, extends or ends its own assignment. Anyone on a vehicle can correct its crew, including moving someone over from another vehicle. Supervisors and Administrators can change anyone's. Each assignment carries an end time, up to an Administrator-set maximum of 24 hours by default, and nothing is carried forward. Assignments never restrict who may record a check.
+
 ## Security and privacy
 
 Do not commit real crew member personal data, operational logs, credentials, API responses, medical/patient data, or production configuration. Use synthetic fixtures and follow the repository's [data hygiene rules](AGENTS.md#github-data-hygiene). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).

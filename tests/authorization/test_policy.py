@@ -53,6 +53,7 @@ class PolicyTests(unittest.TestCase):
                     author_id="actor" if name == "actor_is_author" else "other",
                     assignee_id="actor" if name == "actor_is_assignee" else "other",
                     supply_related=name == "supply_deficiency",
+                    on_vehicle=name == "actor_on_vehicle",
                     intent={"status_change_request": "request", "view": "view"}.get(name, "mutate"),
                 )
                 with self.subTest(case=case["id"], context=name):

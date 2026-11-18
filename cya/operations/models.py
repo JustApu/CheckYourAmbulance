@@ -183,3 +183,125 @@ class VehicleActivityEvent(models.Model):
 
     def __str__(self):
         return f"VehicleActivityEvent {self.pk}"
+
+
+ASSIGNMENT_ACTIONS = ("ASSIGN", "MOVE", "EXTEND", "END")
+ASSIGNMENT_SOURCES = ("SELF", "CREW", "SUPERVISOR")
+END_REASONS = ("ENDED", "VEHICLE_INACTIVE")
+# OQ-79: the longest an assignment or an extension may run; an Administrator setting.
+DEFAULT_ASSIGNMENT_HOURS = 24
+MAX_ASSIGNMENT_HOURS = 168
+
+
+class VehicleAssignmentEvent(Evidence):
+    """Who is working on which vehicle, and until when (SPEC 15.4 ASG-1 to ASG-8, issue #202).
+
+    Append-only, one linear chain per person, because the rule it protects is per person: at
+    most one vehicle at a time (ASG-3). The newest event of a person's chain says where they
+    are: none after END or once its ends_at has passed (an expiry writes no event, ASG-4).
+    ASSIGN starts a new assignment (the prior one ended or expired); MOVE puts a current
+    assignee on another vehicle in one event; EXTEND sets a later end time; END stops it early,
+    by a person (ENDED) or because the vehicle was deactivated (VEHICLE_INACTIVE). ROSTER, the
+    Humanity source of ASG-1, is added with its adapter. Migration 0007 installs the guards.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    person = models.ForeignKey("cya_accounts.User", on_delete=models.PROTECT, related_name="+")
+    sequence = models.PositiveBigIntegerField()
+    prior_event = models.OneToOneField(
+        "self", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    action = models.CharField(max_length=10)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    from_vehicle = models.ForeignKey(Vehicle, null=True, on_delete=models.PROTECT, related_name="+")
+    ends_at = models.DateTimeField(null=True)
+    source = models.CharField(max_length=12)
+    end_reason = models.CharField(max_length=20, null=True)  # noqa: DJ001
+
+    class Meta:
+        db_table = "vehicle_assignment_event"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="assignment_event_org_id"),
+            models.UniqueConstraint(
+                fields=["person", "sequence"], name="assignment_event_sequence"
+            ),
+            models.CheckConstraint(condition=models.Q(sequence__gte=1), name="assignment_seq"),
+            models.CheckConstraint(
+                condition=models.Q(prior_event__isnull=False) | models.Q(sequence=1),
+                name="assignment_first",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(action__in=ASSIGNMENT_ACTIONS), name="assignment_action"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(source__in=ASSIGNMENT_SOURCES), name="assignment_source"
+            ),
+            # END carries a reason and no end time; every other action carries an end time
+            # after it is recorded. Only MOVE names the vehicle it moved from, and never the
+            # same one. Explicit NOT NULLs: a NULL CHECK result counts as satisfied.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        action="END",
+                        ends_at__isnull=True,
+                        end_reason__in=END_REASONS,
+                        end_reason__isnull=False,
+                    )
+                    | (
+                        ~models.Q(action="END")
+                        & models.Q(
+                            ends_at__isnull=False,
+                            end_reason__isnull=True,
+                            ends_at__gt=models.F("recorded_at"),
+                        )
+                    )
+                ),
+                name="assignment_end_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(action="MOVE", from_vehicle__isnull=False)
+                    & ~models.Q(from_vehicle=models.F("vehicle"))
+                )
+                | (~models.Q(action="MOVE") & models.Q(from_vehicle__isnull=True)),
+                name="assignment_move_shape",
+            ),
+            # A new chain starts with ASSIGN.
+            models.CheckConstraint(
+                condition=~models.Q(sequence=1) | models.Q(action="ASSIGN"),
+                name="assignment_chain_start",
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleAssignmentEvent {self.pk}"
+
+
+class VehicleAssignmentLimit(Evidence):
+    """One revision of the longest an assignment may run (SPEC 15.4 ASG-4, OQ-79).
+
+    The latest revision for an organization applies; without one, DEFAULT_ASSIGNMENT_HOURS.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    revision = models.PositiveIntegerField()
+    max_hours = models.PositiveSmallIntegerField()
+
+    class Meta:
+        db_table = "vehicle_assignment_limit"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="assignment_limit_org_id"),
+            models.UniqueConstraint(
+                fields=["organization", "revision"], name="assignment_limit_revision"
+            ),
+            models.CheckConstraint(condition=models.Q(revision__gte=1), name="assignment_lim_rev"),
+            models.CheckConstraint(
+                condition=models.Q(max_hours__gte=1, max_hours__lte=MAX_ASSIGNMENT_HOURS),
+                name="assignment_limit_hours",
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleAssignmentLimit {self.pk}"

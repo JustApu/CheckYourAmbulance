@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": "SPEC.md §3.3 approved 2026-10-16; seal rows added by SPEC 1.2.0 (2026-10-20); session rows PERM-29 to PERM-31 added by SPEC amendment 1.9.0 (2026-10-24); kit-assignment row PERM-32 added by SPEC amendment 1.10.0 (2026-10-24); rows PERM-33 and PERM-34 (deficiency configuration and severity re-grade) added by SPEC amendment 1.12.0 (2026-10-25); PERM-35 (administrator invalidation of supervisor Unable completion) added by issue 82 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/82) Part A; PERM-36 (add a progress note to a deficiency) added by SPEC amendment 1.17.0 (issue 149 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); PERM-37 (record a correction) added by SPEC amendment 1.18.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-38 (close an empty-scope deficiency) proposed by SPEC amendment 1.19.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-39 added by owner-approved SPEC 1.21.0 (issue 158 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)); PERM-40 (designate a compartment or kit sealable) added by owner-approved SPEC 1.32.0 and 1.33.0 (issue #131 (https://github.com/JustApu/CheckYourAmbulance/issues/131)); PERM-41 (draft, edit, duplicate, publish or deactivate kit definitions) added by owner-approved SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129)); PERM-42 (import configuration files) and PERM-43 (download configuration templates and exports) added by owner-approved SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129)); PERM-49 (bind or unbind a checklist template to a vehicle) added by owner-approved SPEC 4.1.0 (issue #177 (https://github.com/JustApu/CheckYourAmbulance/issues/177))",
+  "source": "SPEC.md §3.3 approved 2026-10-16; seal rows added by SPEC 1.2.0 (2026-10-20); session rows PERM-29 to PERM-31 added by SPEC amendment 1.9.0 (2026-10-24); kit-assignment row PERM-32 added by SPEC amendment 1.10.0 (2026-10-24); rows PERM-33 and PERM-34 (deficiency configuration and severity re-grade) added by SPEC amendment 1.12.0 (2026-10-25); PERM-35 (administrator invalidation of supervisor Unable completion) added by issue 82 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/82) Part A; PERM-36 (add a progress note to a deficiency) added by SPEC amendment 1.17.0 (issue 149 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/149)); PERM-37 (record a correction) added by SPEC amendment 1.18.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-38 (close an empty-scope deficiency) proposed by SPEC amendment 1.19.0 (issue 153 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/153)); PERM-39 added by owner-approved SPEC 1.21.0 (issue 158 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)); PERM-40 (designate a compartment or kit sealable) added by owner-approved SPEC 1.32.0 and 1.33.0 (issue #131 (https://github.com/JustApu/CheckYourAmbulance/issues/131)); PERM-41 (draft, edit, duplicate, publish or deactivate kit definitions) added by owner-approved SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129)); PERM-42 (import configuration files) and PERM-43 (download configuration templates and exports) added by owner-approved SPEC 1.34.0 (issue #129 (https://github.com/JustApu/CheckYourAmbulance/issues/129)); PERM-49 (bind or unbind a checklist template to a vehicle) added by owner-approved SPEC 4.1.0 (issue #177 (https://github.com/JustApu/CheckYourAmbulance/issues/177)); PERM-50 to PERM-53 (vehicle crew assignment) added by owner-approved SPEC 4.4.0 (issue #202 (https://github.com/JustApu/CheckYourAmbulance/issues/202))",
   "synthetic": true,
   "roles": [
     "Crew",
@@ -11,14 +11,15 @@
   "semantics": {
     "allow": "authorized for this action",
     "deny": "server denies, logs denial, no mutation",
-    "own_only": "allow iff check author is acting user",
+    "own_only": "allow iff check author is acting user; for a vehicle assignment, iff the assigned person is the acting user",
     "author_only": "allow iff check author is acting user and COR-4 conditions hold",
     "supply_only": "allow iff deficiency classified supply-related",
     "assigned_only": "allow iff acting user is current assignee",
     "request_only": "allow status-change request but deny direct status change",
     "automatic": "no actor-triggered close action; only system closes after verification conditions",
     "view_only": "view allowed; mutations denied",
-    "role_controlled": "SPEC does not enumerate object/filter-level export scope; do not assert universal allow or deny; verify applicable access policy and deny if unspecified"
+    "role_controlled": "SPEC does not enumerate object/filter-level export scope; do not assert universal allow or deny; verify applicable access policy and deny if unspecified",
+    "on_vehicle_only": "allow iff the acting user is currently assigned to the target vehicle (SPEC 15.4 ASG-2(b))"
   },
   "rows": [
     {
@@ -504,6 +505,46 @@
     {
       "id": "PERM-49",
       "action": "bind_unbind_template",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-50",
+      "action": "assign_own_vehicle",
+      "by_role": {
+        "Crew": "own_only",
+        "Supervisor": "own_only",
+        "Supply Officer": "own_only",
+        "Administrator": "own_only"
+      }
+    },
+    {
+      "id": "PERM-51",
+      "action": "correct_vehicle_crew",
+      "by_role": {
+        "Crew": "on_vehicle_only",
+        "Supervisor": "on_vehicle_only",
+        "Supply Officer": "on_vehicle_only",
+        "Administrator": "on_vehicle_only"
+      }
+    },
+    {
+      "id": "PERM-52",
+      "action": "manage_vehicle_assignments",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "allow",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
+    },
+    {
+      "id": "PERM-53",
+      "action": "view_vehicle_assignment_history",
       "by_role": {
         "Crew": "deny",
         "Supervisor": "allow",

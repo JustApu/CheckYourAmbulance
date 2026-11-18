@@ -74,6 +74,11 @@ POLICY = MappingProxyType(
         "configure_deficiency_categories_severities": ("deny", "deny", "deny", "allow"),
         "regrade_deficiency_severity": ("deny", "allow", "deny", "allow"),
         "record_deficiency_correction": ("allow", "allow", "allow", "allow"),
+        # SPEC 15.4 ASG-2 (issue #202): yourself; the crew on a vehicle; anyone, by supervisors.
+        "assign_own_vehicle": ("own_only",) * 4,
+        "correct_vehicle_crew": ("on_vehicle_only",) * 4,
+        "manage_vehicle_assignments": ("deny", "allow", "deny", "allow"),
+        "view_vehicle_assignment_history": ("deny", "allow", "deny", "allow"),
     }
 )
 
@@ -86,6 +91,8 @@ class ResourceContext:
     assignee_id: str | None = None
     supply_related: bool = False
     intent: str = "mutate"
+    # True when the acting user is currently assigned to the target vehicle (ASG-2(b)).
+    on_vehicle: bool = False
 
 
 def _allows(mode, actor_id, context):
@@ -100,6 +107,8 @@ def _allows(mode, actor_id, context):
         return context.assignee_id is not None and context.assignee_id == actor_id
     if mode == "supply_only":
         return context.supply_related is True
+    if mode == "on_vehicle_only":
+        return context.on_vehicle is True
     if mode == "request_only":
         return context.intent == "request"
     if mode == "view_only":

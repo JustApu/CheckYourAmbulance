@@ -59,6 +59,8 @@ class PhysicalAuditManifestTests(TestCase):
                     "kit_assignment_event",
                     "kit_seal_designation",
                     "vehicle_activity_event",
+                    "vehicle_assignment_event",
+                    "vehicle_assignment_limit",
                     "seal_event",
                     "seal_substitution",
                     "seal_substitution_obligation",
