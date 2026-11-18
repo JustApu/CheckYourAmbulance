@@ -193,6 +193,8 @@ For mouse-and-keyboard use, mostly supervisors and administrators on laptops and
 
 Tab moves through the day, month, year and time parts of a date or time field, and Chrome stops matching `:focus-visible` once focus is inside them, so the shared focus ring vanished there. The shell shows the same ring on `:focus` for `date`, `time`, `datetime-local`, `month` and `week` inputs, with `Highlight` in forced colors. Found by the wide-screen evidence pass on fleet readiness's "as of" field; the browser smoke test covers it.
 
+Chromium 157 (current stable Chrome and Edge) matches neither `:focus` nor `:focus-visible` on the field while one of its parts has focus. It matches only `:focus-within`, so the ring is also shown on `:focus-within`. The wide-screen evidence pass found this in Edge 157. The CI browser, bundled Chromium 158, keeps `:focus` and does not reproduce it, so the browser smoke test alone cannot catch a regression there.
+
 ## Problems badge (issue #194)
 
 - **What it counts.** The Problems tab shows the organization's active problems (`home.open_problem_count`), the same number as Home's open problems. It is one count query per page.
