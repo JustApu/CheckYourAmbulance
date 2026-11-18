@@ -437,6 +437,8 @@ class DateTimeFocusTests(TestCase):
         css = render_to_string("shell/shell.css")
         self.assertIn('input[type="datetime-local"]:focus', css)
         self.assertIn('input[type="date"]:focus', css)
+        # Chromium 157 matches only :focus-within while a part of the field has focus.
+        self.assertIn('input[type="datetime-local"]:focus-within', css)
 
 
 class TapFeedbackTests(TestCase):

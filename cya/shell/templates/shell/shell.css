@@ -48,8 +48,10 @@ body { margin: 0; background: var(--page); color: var(--fg); font: 1rem/1.5 var(
 a { color: var(--accent); }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 /* Date and time fields (#194 wide-screen evidence): Tab moves through their day, month, year and time
-   parts, and Chrome stops matching :focus-visible there, so the ring vanished. Show it on :focus. */
-input[type="date"]:focus, input[type="time"]:focus, input[type="datetime-local"]:focus, input[type="month"]:focus, input[type="week"]:focus { outline: 3px solid var(--accent); outline-offset: 2px; }
+   parts, and Chrome stops matching :focus-visible there, so the ring vanished. Show it on :focus.
+   Chromium 157 (current stable Chrome and Edge) matches neither :focus nor :focus-visible on the
+   field while a part has focus, only :focus-within, so that is listed too. */
+input[type="date"]:focus, input[type="date"]:focus-within, input[type="time"]:focus, input[type="time"]:focus-within, input[type="datetime-local"]:focus, input[type="datetime-local"]:focus-within, input[type="month"]:focus, input[type="month"]:focus-within, input[type="week"]:focus, input[type="week"]:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
 .skip-link { position: absolute; left: 1rem; top: -4rem; background: var(--bg); padding: .75rem 1rem; z-index: 10; }
 .skip-link:focus { top: .5rem; }
 .site-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem; padding: .5rem 1rem; background: var(--bg); border-top: 4px solid var(--brand-red); border-bottom: 1px solid var(--line-soft); }
@@ -159,7 +161,7 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
 .role-history-pages { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }
 @media (forced-colors: active) {
   :focus-visible { outline-color: Highlight; }
-  input[type="date"]:focus, input[type="time"]:focus, input[type="datetime-local"]:focus, input[type="month"]:focus, input[type="week"]:focus { outline-color: Highlight; }
+  input[type="date"]:focus, input[type="date"]:focus-within, input[type="time"]:focus, input[type="time"]:focus-within, input[type="datetime-local"]:focus, input[type="datetime-local"]:focus-within, input[type="month"]:focus, input[type="month"]:focus-within, input[type="week"]:focus, input[type="week"]:focus-within { outline-color: Highlight; }
   .role-user-row, .role-option, .role-option.is-assigned, .role-administration input[type="search"],
   .role-administration select, .role-administration .button, .role-history-scroll {
     border-color: CanvasText;
