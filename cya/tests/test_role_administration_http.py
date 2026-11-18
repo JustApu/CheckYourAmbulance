@@ -295,7 +295,8 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(page.status_code, 200)
         html = page.content.decode()
         self.assertRegex(
-            html, r'<a href="/administration/" aria-current="page">.*?<span>Administration</span>'
+            html,
+            r'<a href="/administration/" aria-current="page"[^>]*>.*?<span>Administration</span>',
         )
         self.assertRegex(html, r'<button id="app-nav-more"[^>]*aria-current="true"')
         self.assertContains(page, "Organization users")
