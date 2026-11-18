@@ -368,7 +368,10 @@ class PageTests(CrewUiCase):
         self.assertGreater(html.index("</div>\n</section>", html.index('id="checklist-bar"')), body)
         # Issue #194: the long-checklist bar (progress, Next unchecked item, jump to a section).
         self.assertIn('id="checklist-bar"', html)
-        self.assertIn(">Next unchecked item</button>", html)
+        self.assertIn(
+            '>Next unchecked item<kbd class="shortcut-hint" aria-hidden="true">N</kbd></button>',
+            html,
+        )
         self.assertIn('aria-controls="jump-panel"', html)
         self.assertIn('<progress id="checklist-progress"', html)
         # An Unconfirmed save may have committed, so the live-loss banner must not say that

@@ -36,7 +36,7 @@
 <nav class="app-nav" aria-label="Main">
   <ul class="app-nav-tabs">
   {% for tab in cya_nav.tabs %}
-    <li><a class="app-nav-link" href="{{ tab.url }}"{% if tab.current %} aria-current="page"{% endif %}>{% include "shell/nav_icon.html" with name=tab.icon %}<span class="app-nav-label">{{ tab.label }}</span></a></li>
+    <li><a class="app-nav-link" href="{{ tab.url }}"{% if tab.current %} aria-current="page"{% endif %}{% if tab.shortcut %} data-shortcut-go="{{ tab.shortcut }}" aria-keyshortcuts="g {{ tab.shortcut }}"{% endif %}>{% include "shell/nav_icon.html" with name=tab.icon %}<span class="app-nav-label">{{ tab.label }}</span>{% if tab.shortcut %}<kbd class="shortcut-hint" aria-hidden="true">G {{ tab.shortcut|upper }}</kbd>{% endif %}</a></li>
   {% endfor %}
     <li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more{% if cya_nav.more_current %} is-current{% endif %}" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false"{% if cya_nav.more_current %} aria-current="true"{% endif %} hidden>{% include "shell/nav_icon.html" with name="more" %}<span class="app-nav-label">More</span></button></li>
   </ul>
@@ -44,16 +44,32 @@
     {% if cya_nav.more %}
     <ul class="app-nav-more-list">
     {% for item in cya_nav.more %}
-      <li><a href="{{ item.url }}"{% if item.current %} aria-current="page"{% endif %}>{% include "shell/nav_icon.html" with name=item.icon %}<span>{{ item.label }}</span></a></li>
+      <li><a href="{{ item.url }}"{% if item.current %} aria-current="page"{% endif %}{% if item.shortcut %} data-shortcut-go="{{ item.shortcut }}" aria-keyshortcuts="g {{ item.shortcut }}"{% endif %}>{% include "shell/nav_icon.html" with name=item.icon %}<span>{{ item.label }}</span>{% if item.shortcut %}<kbd class="shortcut-hint" aria-hidden="true">G {{ item.shortcut|upper }}</kbd>{% endif %}</a></li>
     {% endfor %}
     </ul>
     {% endif %}
     <div class="app-nav-settings">
       {% include "shell/theme_control.html" %}
       <form method="post" action="{% url 'sign-out' %}">{% csrf_token %}<button type="submit" class="button">Sign out</button></form>
+      <button type="button" id="shortcuts-open" class="button shortcuts-open" aria-keyshortcuts="?">Keyboard shortcuts</button>
     </div>
   </div>
 </nav>
+{# Keyboard shortcuts (issue #194): listed here, switchable off (WCAG 2.1.4), never while typing. #}
+<dialog id="shortcuts-dialog" class="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+  <p>Shortcuts work when you are not typing in a field. Press Escape to close this list.</p>
+  <dl class="shortcuts-list">
+    <dt><kbd>?</kbd></dt><dd>Show this list</dd>
+    <dt><kbd>/</kbd></dt><dd>Go to the search or filter box on this page</dd>
+    {% for tab in cya_nav.tabs %}{% if tab.shortcut %}<dt><kbd>G</kbd> then <kbd>{{ tab.shortcut|upper }}</kbd></dt><dd>Go to {{ tab.label }}</dd>{% endif %}{% endfor %}
+    {% for item in cya_nav.more %}{% if item.shortcut %}<dt><kbd>G</kbd> then <kbd>{{ item.shortcut|upper }}</kbd></dt><dd>Go to {{ item.label }}</dd>{% endif %}{% endfor %}
+    <dt><kbd>N</kbd></dt><dd>Next unchecked item, on a checklist</dd>
+    <dt><kbd>S</kbd></dt><dd>Sections, on a checklist</dd>
+  </dl>
+  <p><label class="check"><input type="checkbox" id="shortcuts-enabled" checked> Use keyboard shortcuts</label></p>
+  <p><button type="button" id="shortcuts-close" class="button">Close</button></p>
+</dialog>
 {% endif %}
 <div id="connection-banner" class="banner banner-error" role="alert" hidden>
   <span class="indicator-icon" aria-hidden="true">&#9888;</span>

@@ -170,6 +170,25 @@ Phones can add the app to the home screen. It then opens full screen with its ow
   - The shimmer stops under `prefers-reduced-motion`.
   - Server-rendered lists arrive complete, so they have no loading state.
 
+## Keyboard shortcuts (issue #194)
+
+For mouse-and-keyboard use, mostly supervisors and administrators on laptops and desktops.
+
+| Keys | Does |
+|---|---|
+| `?` | Opens the shortcut list |
+| `/` | Goes to the page's search or filter box |
+| `G` then `H`, `I`, `P`, `V`, `K` or `A` | Goes to Home, Inspect, Problems, Vehicles, Kits or Administration, if the person can open it |
+| `N` / `S` | Next unchecked item / Sections, on a checklist |
+
+- **Never in the way.** Shortcuts never fire while typing in a field, with Ctrl, Alt or Cmd held, or while a dialog is open.
+- **Off switch.** The list (`?`, or Keyboard shortcuts in the More panel or sidebar) has a "Use keyboard shortcuts" switch (WCAG 2.1.4). It is remembered on the device, and while it is off every shortcut, `?` included, is ignored and the hints are hidden.
+- **Visible hints.** Small `<kbd>` hints appear only with a mouse and keyboard (`hover: hover` and `pointer: fine`): on the sidebar's places at 64rem and wider, and on the checklist bar's buttons. They are `aria-hidden`; the controls carry `aria-keyshortcuts`.
+- **Adding shortcuts.**
+  - Places take their letter from `navigation.SHORTCUTS`. Letters are unique and never `G`, `N` or `S`.
+  - A page offers its own shortcut with `data-shortcut-key` on a visible control; the shell presses it.
+- **Focus.** Closing the list leaves focus where the browser returns it. The shell only steps in when focus would otherwise be lost to the page, as when the list was opened from the More panel.
+
 ## Stylesheet and script are inline
 
 CSS and JS are included in the page (`shell.css`, `shell.js`) so the shell needs no static-file serving, which is a deployment decision not yet made (SPEC §17). If a Content-Security-Policy is added later, these need a nonce or a move to served files.

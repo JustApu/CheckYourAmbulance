@@ -47,7 +47,7 @@ class StatusPageTests(StatusHttpCase):
         html = self.client.get("/status/").content.decode()
         self.assertRegex(
             html,
-            r'href="/status/" aria-current="page">.*?<span class="app-nav-label">Vehicles<',
+            r'href="/status/" aria-current="page"[^>]*>.*?<span class="app-nav-label">Vehicles<',
         )
         self.assertIn("<h1>Vehicles</h1>", html)
 

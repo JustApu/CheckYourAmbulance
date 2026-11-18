@@ -188,3 +188,34 @@ class EmptyStateTests(CrewUiCase):
         ).content.decode()
         self.assertIn("No inspections on this vehicle yet.", html)
         self.assertIn("Start one with the button above.", html)
+
+
+class KeyboardShortcutTests(CrewUiCase):
+    """Issue #194 item 12: keyboard shortcuts with visible hints and an off switch."""
+
+    def test_each_place_has_its_own_letter(self):
+        from cya.shell import navigation
+
+        letters = list(navigation.SHORTCUTS.values())
+        self.assertEqual(len(letters), len(set(letters)))
+        self.assertTrue(all(len(letter) == 1 and letter.isalpha() for letter in letters))
+        self.assertNotIn("g", letters)  # G starts every place shortcut
+        self.assertFalse({"n", "s"} & set(letters))  # the checklist's own keys
+
+    def test_crew_pages_carry_shortcuts_hints_and_the_list(self):
+        html = self.client.get(reverse("home")).content.decode()
+        self.assertIn('data-shortcut-go="h" aria-keyshortcuts="g h"', html)
+        self.assertIn('<kbd class="shortcut-hint" aria-hidden="true">G P</kbd>', html)
+        self.assertIn('<dialog id="shortcuts-dialog"', html)
+        self.assertIn('<input type="checkbox" id="shortcuts-enabled" checked>', html)
+        self.assertIn('id="shortcuts-open"', html)
+        self.assertIn("<dd>Go to Problems</dd>", html)
+        # The list names only places this person can open.
+        self.assertNotIn("Go to Administration", html)
+
+    def test_an_administrator_also_gets_administration(self):
+        admin, user = self.harness.sign_in("shortcut-admin")
+        self.grant(user, "ADMINISTRATOR")
+        html = admin.get(reverse("home")).content.decode()
+        self.assertIn("<dd>Go to Administration</dd>", html)
+        self.assertIn('data-shortcut-go="a" aria-keyshortcuts="g a"', html)

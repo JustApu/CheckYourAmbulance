@@ -115,6 +115,17 @@ def _owns(paths, path):
     return any(path == prefix if prefix == "/" else path.startswith(prefix) for prefix in paths)
 
 
+# Keyboard shortcuts (issue #194): "G" then this letter goes to the place. Letters are unique.
+SHORTCUTS = {
+    "home": "h",
+    "inspect": "i",
+    "problems": "p",
+    "vehicles": "v",
+    "kits": "k",
+    "administration": "a",
+}
+
+
 def app_navigation(user, path):
     """Tabs and More entries for the user, with the current one marked; None if no roles."""
     roles = roles_for(user)
@@ -133,6 +144,7 @@ def app_navigation(user, path):
             {
                 "key": "kits",
                 "label": "Kits",
+                "shortcut": SHORTCUTS["kits"],
                 "icon": "kits",
                 "url": reverse(kit[0]),
                 "current": _owns(kit_paths, path),
@@ -143,6 +155,7 @@ def app_navigation(user, path):
             {
                 "key": "administration",
                 "label": "Administration",
+                "shortcut": SHORTCUTS["administration"],
                 "icon": "administration",
                 "url": reverse("administration"),
                 "current": _owns(("/administration/",), path) and not _owns(kit_paths, path),
@@ -153,6 +166,7 @@ def app_navigation(user, path):
             {
                 "key": tab.key,
                 "label": tab.label,
+                "shortcut": SHORTCUTS.get(tab.key),
                 "icon": tab.icon,
                 "url": reverse(tab.url_name),
                 "current": _owns(tab.paths, path),

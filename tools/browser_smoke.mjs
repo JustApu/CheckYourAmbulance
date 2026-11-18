@@ -141,6 +141,78 @@ async function testEmptyAndLoadingStates(viewport) {
   }
 }
 
+async function testKeyboardShortcuts(viewport) {
+  // Issue #194 item 12: keyboard shortcuts with visible hints and an off switch (WCAG 2.1.4).
+  const page = await browser.newPage({ viewport });
+  const link = (key, label) => `<li><a class="app-nav-link" href="#${label.toLowerCase()}" data-shortcut-go="${key}" aria-keyshortcuts="g ${key}">${navIcon}<span class="app-nav-label">${label}</span><kbd class="shortcut-hint" aria-hidden="true">G ${key.toUpperCase()}</kbd></a></li>`;
+  const markup = `<!doctype html><html lang="en" class="js"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shortcuts</title><style>${css}</style></head>
+    <body class="has-app-nav"><header class="site-header"><a class="brand" href="#">Check Your Ambulance</a></header>
+    <nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs">${link("h", "Home")}${link("p", "Problems")}<li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false" hidden>${navIcon}<span class="app-nav-label">More</span></button></li></ul>
+    <div id="app-nav-more-panel" class="app-nav-more-panel"><div class="app-nav-settings"><button type="button" id="shortcuts-open" class="button shortcuts-open" aria-keyshortcuts="?">Keyboard shortcuts</button></div></div></nav>
+    <dialog id="shortcuts-dialog" class="shortcuts-dialog" aria-labelledby="shortcuts-title"><h2 id="shortcuts-title">Keyboard shortcuts</h2><dl class="shortcuts-list"><dt><kbd>?</kbd></dt><dd>Show this list</dd></dl>
+    <p><label class="check"><input type="checkbox" id="shortcuts-enabled" checked> Use keyboard shortcuts</label></p><p><button type="button" id="shortcuts-close" class="button">Close</button></p></dialog>
+    <main id="main"><h1>Shortcuts</h1><label for="q">Search</label><input id="q" type="search">
+    <p><button type="button" id="next" class="button primary" data-shortcut-key="n" aria-keyshortcuts="n">Next unchecked item<kbd class="shortcut-hint" aria-hidden="true">N</kbd></button></p></main>
+    <script>window.nextPresses = 0; document.getElementById("next").addEventListener("click", function () { window.nextPresses += 1; });</script>
+    <script>${shellScript}</script></body></html>`;
+  try {
+    await page.route("http://keys.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: markup }));
+    await page.goto("http://keys.test/", { waitUntil: "load" });
+    const dialog = page.locator("#shortcuts-dialog");
+    const next = page.getByRole("button", { name: "Next unchecked item" });
+    assert.equal(await next.getAttribute("aria-keyshortcuts"), "n");
+    await next.focus();
+    await page.keyboard.press("Shift+Slash");
+    assert.equal(await dialog.evaluate((node) => node.open), true, `${viewport.name}: ? did not open the shortcut list`);
+    await page.keyboard.press("Escape");
+    assert.equal(await dialog.evaluate((node) => node.open), false);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "next", `${viewport.name}: closing the list did not return focus`);
+    await page.keyboard.press("n");
+    assert.equal(await page.evaluate(() => window.nextPresses), 1, `${viewport.name}: N did not press Next unchecked item`);
+    await page.keyboard.press("Shift+KeyN");
+    assert.equal(await page.evaluate(() => window.nextPresses), 1, `${viewport.name}: Shift+N pressed Next unchecked item`);
+    await page.keyboard.press("g");
+    await page.keyboard.press("Shift+KeyP");
+    assert.equal(await page.evaluate(() => location.hash), "", `${viewport.name}: G then Shift+P went to a place`);
+    await page.keyboard.press("Slash");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "q", `${viewport.name}: / did not go to the search box`);
+    await page.keyboard.type("gp");
+    assert.equal(await page.evaluate(() => location.hash), "", `${viewport.name}: typing in a field triggered a shortcut`);
+    assert.equal(await page.locator("#q").inputValue(), "gp");
+    await next.focus();
+    await page.keyboard.press("Control+g");
+    await page.keyboard.press("p");
+    assert.equal(await page.evaluate(() => location.hash), "", `${viewport.name}: Ctrl+G started a place shortcut`);
+    await page.keyboard.press("g");
+    await page.keyboard.press("p");
+    assert.equal(await page.evaluate(() => location.hash), "#problems", `${viewport.name}: G then P did not go to Problems`);
+    const hint = page.locator(".app-nav-link .shortcut-hint").first();
+    const wide = viewport.width >= 1024;
+    assert.equal(await hint.isVisible(), wide, `${viewport.name}: sidebar shortcut hints ${wide ? "missing" : "shown on a narrow screen"}`);
+    assert.equal(await next.locator(".shortcut-hint").isVisible(), true, `${viewport.name}: the Next hint is missing with a mouse and keyboard`);
+    await page.keyboard.press("Shift+Slash");
+    await page.getByLabel("Use keyboard shortcuts").uncheck();
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.evaluate(() => { location.hash = ""; });
+    await next.focus();
+    await page.keyboard.press("g");
+    await page.keyboard.press("h");
+    await page.keyboard.press("n");
+    await page.keyboard.press("Shift+Slash");
+    assert.equal(await page.evaluate(() => location.hash), "", `${viewport.name}: shortcuts still worked when switched off`);
+    assert.equal(await page.evaluate(() => window.nextPresses), 1);
+    assert.equal(await dialog.evaluate((node) => node.open), false, `${viewport.name}: ? still opened the list when switched off`);
+    assert.equal(await next.locator(".shortcut-hint").isVisible(), false, `${viewport.name}: hints still shown when switched off`);
+    assert.equal(await page.evaluate(() => localStorage.getItem("cya.shortcuts")), "off");
+    await page.reload({ waitUntil: "load" });
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains("shortcuts-off")), true, `${viewport.name}: the off switch was not remembered`);
+    await page.evaluate(() => localStorage.removeItem("cya.shortcuts"));
+    console.log(`${viewport.name}: keyboard shortcuts, hints and the off switch passed`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function testTapFeedback(viewport) {
   // Issue #194 item 8: a pressed state, a Saved toast that never takes focus or blocks taps and
   // clears itself, and a saved check mark that only animates without reduced motion.
@@ -1077,6 +1149,7 @@ try {
       await testInspectionNavigation(viewport);
       await testChecklistAids(viewport);
       await testTapFeedback(viewport);
+      await testKeyboardShortcuts(viewport);
       await testEmptyAndLoadingStates(viewport);
       await testInspectionOutcomeSemantics(viewport);
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
