@@ -226,7 +226,8 @@
         if (shown(search)) { event.preventDefault(); search.focus(); }
         return;
       }
-      if (!/^[a-z]$/.test(key)) { pendingGo = 0; return; }
+      // Letters are plain keys only: Shift+N is not N, and Shift never completes a G sequence.
+      if (!/^[a-z]$/.test(key) || event.shiftKey) { pendingGo = 0; return; }
       if (pendingGo && Date.now() - pendingGo < 1500) {
         pendingGo = 0;
         var place = document.querySelector('[data-shortcut-go="' + key + '"]');

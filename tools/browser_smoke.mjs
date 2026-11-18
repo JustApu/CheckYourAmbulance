@@ -169,6 +169,11 @@ async function testKeyboardShortcuts(viewport) {
     assert.equal(await page.evaluate(() => document.activeElement.id), "next", `${viewport.name}: closing the list did not return focus`);
     await page.keyboard.press("n");
     assert.equal(await page.evaluate(() => window.nextPresses), 1, `${viewport.name}: N did not press Next unchecked item`);
+    await page.keyboard.press("Shift+KeyN");
+    assert.equal(await page.evaluate(() => window.nextPresses), 1, `${viewport.name}: Shift+N pressed Next unchecked item`);
+    await page.keyboard.press("g");
+    await page.keyboard.press("Shift+KeyP");
+    assert.equal(await page.evaluate(() => location.hash), "", `${viewport.name}: G then Shift+P went to a place`);
     await page.keyboard.press("Slash");
     assert.equal(await page.evaluate(() => document.activeElement.id), "q", `${viewport.name}: / did not go to the search box`);
     await page.keyboard.type("gp");
