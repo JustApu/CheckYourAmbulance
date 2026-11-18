@@ -250,7 +250,6 @@ th[aria-sort="descending"] .sort-button::after { content: "\25BC" / ""; color: v
 .empty-state-action .button { display: inline-flex; align-items: center; text-decoration: none; }
 .skeleton { list-style: none; min-height: 4.5rem; border-radius: var(--radius-card); background: linear-gradient(90deg, var(--line-soft) 25%, var(--info-bg) 50%, var(--line-soft) 75%) 0 0 / 200% 100%; animation: cya-skeleton 1.2s ease-in-out infinite; }
 .skeleton + .skeleton { margin-top: .75rem; }
-.area-cards .skeleton + .skeleton { margin-top: 0; }
 @keyframes cya-skeleton { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (forced-colors: active) { .skeleton { background: Canvas; border: 1px solid CanvasText; } }
 /* Feedback on every tap (#194): a visible pressed state, and the Saved toast. */

@@ -19,14 +19,9 @@
   var navigationRestored = false, navigationAnchorKey = null, navigationSaveTimer = null;
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false, loadedOnce = false;
   // Loading placeholders (issue #194) stand in until the first answer; never leave them spinning.
+  // One block outside both layouts, so Compartments, All items and verification all show it.
   function clearLoading(message) {
-    var holders = [$("area-cards"), list];
-    holders.forEach(function (holder) {
-      if (!holder) { return; }
-      Array.prototype.slice.call(holder.children).forEach(function (child) {
-        if (/(^| )skeleton( |$)/.test(child.className || "")) { holder.removeChild(child); }
-      });
-    });
+    if ($("checklist-skeleton")) { $("checklist-skeleton").hidden = true; }
     if ($("checklist-loading")) { $("checklist-loading").textContent = message || ""; }
   }
 
@@ -904,6 +899,7 @@
   function signedOut() {
     if (signedOutNow) { return; }
     signedOutNow = true; stopped = true; clearTimeout(reloadTimer);
+    if (!loadedOnce) { clearLoading("The checklist could not be loaded because you are signed out."); }
     if (socket) { socket.retired = true; if (socket.close) { socket.close(); } }
     liveBanner.hidden = false;
     $("live-detail").textContent = "You are signed out, so updates have stopped. Sign in again and reload. " +
