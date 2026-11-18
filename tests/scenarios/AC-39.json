@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "AC-39",
+  "criterion": "AC-39",
+  "requirements": [
+    "AUD-1",
+    "ASG-2",
+    "ASG-3",
+    "ASG-4",
+    "ASG-5",
+    "ASG-6",
+    "ASG-7",
+    "ASG-8"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "an organization with a Crew member, a second Crew member, a Supervisor, a Supply Officer and an Administrator",
+    "two active vehicles and one inactive vehicle",
+    "the default maximum assignment length of 24 hours"
+  ],
+  "when": [
+    "each role assigns itself to a vehicle, moves itself to the other, extends and ends its own assignment",
+    "a Crew member on one vehicle extends and ends a partner's assignment there, moves a person over from the other vehicle, and adds an unassigned person",
+    "a Crew member tries to extend or end an assignment on a vehicle they are not on, and posts the change directly",
+    "a person is assigned to a second vehicle",
+    "assignments are attempted with no end time, an end time in the past, one beyond the maximum, and on the inactive vehicle",
+    "an assignment reaches its end time with no further action",
+    "an unassigned person and a person assigned elsewhere open an inspection and record checks on a vehicle",
+    "the current-crew projection is rebuilt from the event history",
+    "the assigned person opens Home within 30 minutes of the end time, and a vehicle notice is sent to the current crew"
+  ],
+  "then": [
+    "every role can assign, move, extend and end its own assignment",
+    "the Crew member on the vehicle can correct its crew, including the move, and the people changed and the crew they left are notified",
+    "changes on a vehicle the actor is not on are refused server-side and nothing changes; only a Supervisor or Administrator can change any assignment",
+    "the second assignment ends the first in the same event, a vehicle accepts any number of people, and the inactive vehicle is refused",
+    "the missing, past and too-late end times are refused",
+    "the assignment stops applying at its end time with no event, and nothing renews it",
+    "both people can inspect and record checks on any vehicle, and conditional-obligation determinations are the same with or without assignments",
+    "the rebuilt projection matches the live read",
+    "Home lists the person's current vehicle first and offers Extend; each crew member receives the vehicle notice once",
+    "when adding people, someone already on another vehicle is listed with that vehicle and end time, never hidden"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral contract for owner-approved SPEC amendment 4.4.0 (issue #202). The scenario is not yet bound to application commands.",
+  "database": "commit"
+}

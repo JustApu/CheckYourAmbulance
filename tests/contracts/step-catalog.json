@@ -796,6 +796,52 @@
         "§17.8",
         "§23"
       ]
+    },
+    "AC-39": {
+      "setup": [
+        "organization_with_two_crew_and_three_roles",
+        "two_active_and_one_inactive_vehicle",
+        "default_assignment_maximum"
+      ],
+      "actions": [
+        "each_role_assigns_moves_extends_and_ends_own",
+        "crew_on_vehicle_corrects_partner_and_moves_person_over",
+        "crew_off_vehicle_attempts_change_and_direct_post",
+        "assign_person_to_second_vehicle",
+        "submit_missing_past_too_late_and_inactive",
+        "let_assignment_reach_end_time",
+        "unassigned_and_elsewhere_people_record_checks",
+        "rebuild_current_crew_projection",
+        "open_home_near_end_and_send_crew_notice"
+      ],
+      "assert": [
+        "every_role_manages_own_assignment",
+        "crew_on_vehicle_corrects_and_people_notified",
+        "off_vehicle_changes_refused_server_side",
+        "second_assignment_ends_first_in_one_event",
+        "bad_end_times_and_inactive_vehicle_refused",
+        "expiry_needs_no_event_and_never_renews",
+        "assignments_never_restrict_checks_or_determinations",
+        "rebuilt_projection_matches_live",
+        "home_orders_vehicle_and_offers_extend_notice_once",
+        "add_list_shows_people_on_other_vehicles"
+      ],
+      "requirements": [
+        "AUD-1",
+        "ASG-2",
+        "ASG-3",
+        "ASG-4",
+        "ASG-5",
+        "ASG-6",
+        "ASG-7",
+        "ASG-8"
+      ],
+      "spec_refs": [
+        "§3.3",
+        "§13",
+        "§15.4",
+        "§23"
+      ]
     }
   }
 }
