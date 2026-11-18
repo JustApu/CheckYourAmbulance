@@ -285,3 +285,22 @@ th[aria-sort="descending"] .sort-button::after { content: "\25BC" / ""; color: v
 @media (forced-colors: active) { .toast { color: CanvasText; background: Canvas; border: 2px solid CanvasText; } }
 @media print { .toast { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+/* Safe areas (owner iPhone check, #194). viewport-fit=cover makes env() report the notch, the
+   rounded corners and the home indicator (without it iOS reports 0 and the tab bar ran into the
+   corners). These keep the header, page and navigation inside them; on other devices the insets
+   are 0 and the padding is unchanged. */
+.site-header { padding-top: max(.5rem, env(safe-area-inset-top)); padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+main, .banner { padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+@media (max-width: 47.999rem) {
+  .site-header { padding-top: max(.25rem, env(safe-area-inset-top)); padding-left: max(.5rem, env(safe-area-inset-left)); padding-right: max(.5rem, env(safe-area-inset-right)); }
+  .js .has-app-nav .app-nav { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
+@media (min-width: 48rem) {
+  .site-header { padding-left: max(2rem, env(safe-area-inset-left)); padding-right: max(2rem, env(safe-area-inset-right)); }
+  main { padding-left: max(2rem, env(safe-area-inset-left)); padding-right: max(2rem, env(safe-area-inset-right)); }
+  /* The rail absorbs the left inset (a phone in landscape), so the page beside it does not. */
+  .has-app-nav { grid-template-columns: calc(6rem + env(safe-area-inset-left)) minmax(0, 1fr); }
+  .has-app-nav > .app-nav { padding-left: env(safe-area-inset-left); padding-bottom: env(safe-area-inset-bottom); }
+  .has-app-nav > main { padding-left: 2rem; }
+}
+@media (min-width: 64rem) { .has-app-nav { grid-template-columns: calc(15rem + env(safe-area-inset-left)) minmax(0, 1fr); } }

@@ -289,7 +289,10 @@ class ShellMarkupTests(ShellTestCase):
     def test_page_has_responsive_accessible_structure(self):
         html = self.page()
         self.assertIn('<html lang="en">', html)
-        self.assertIn('name="viewport" content="width=device-width, initial-scale=1"', html)
+        self.assertIn(
+            'name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"',
+            html,
+        )
         self.assertIn('<a class="skip-link" href="#main">', html)
         self.assertIn('<body class="has-app-nav">', html)
         self.assertIn('<nav class="app-nav" aria-label="Main">', html)
@@ -407,6 +410,24 @@ class BrandMarkTests(TestCase):
             '{% include "shell/brand_mark.html" %}<span class="brand-name">Check Your Ambulance</span>',
             base,
         )
+
+
+class SafeAreaTests(TestCase):
+    """Owner iPhone check (#194): without viewport-fit=cover iOS reports 0 safe-area insets and
+    the tab bar ran into the rounded corners and home indicator."""
+
+    def test_viewport_reports_safe_areas_and_the_shell_pads_by_them(self):
+        from django.template.loader import get_template
+
+        base = pathlib.Path(get_template("shell/base.html").origin.name).read_text(encoding="utf-8")
+        self.assertIn(
+            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
+            base,
+        )
+        css = render_to_string("shell/shell.css")
+        for inset in ("top", "bottom", "left", "right"):
+            self.assertIn(f"env(safe-area-inset-{inset})", css)
+        self.assertIn("calc(6rem + env(safe-area-inset-left))", css)
 
 
 class TapFeedbackTests(TestCase):
