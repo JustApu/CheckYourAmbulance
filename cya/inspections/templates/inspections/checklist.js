@@ -17,7 +17,18 @@
   var layoutMode = pendingNavigation ? pendingNavigation.mode : "COMPARTMENTS";
   var selectedGroupKey = pendingNavigation && pendingNavigation.mode === "COMPARTMENTS" ? pendingNavigation.groupKey : null;
   var navigationRestored = false, navigationAnchorKey = null, navigationSaveTimer = null;
-  var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false;
+  var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false, loadedOnce = false;
+  // Loading placeholders (issue #194) stand in until the first answer; never leave them spinning.
+  function clearLoading(message) {
+    var holders = [$("area-cards"), list];
+    holders.forEach(function (holder) {
+      if (!holder) { return; }
+      Array.prototype.slice.call(holder.children).forEach(function (child) {
+        if (/(^| )skeleton( |$)/.test(child.className || "")) { holder.removeChild(child); }
+      });
+    });
+    if ($("checklist-loading")) { $("checklist-loading").textContent = message || ""; }
+  }
 
   function uuid4() {
     var b = new Uint8Array(16);
@@ -706,7 +717,7 @@
     if (rows.length && !allShown.length) {
       message = "This vehicle's checklist changed after the session started. Start a new session to use the current one.";
     } else if (!allShown.length) {
-      message = config.verification_for_deficiency_id ? "No outstanding verification items available here. See the report for scope and status." : onlyAttention ? "Nothing needs attention right now." : "This vehicle has no checklist items.";
+      message = config.verification_for_deficiency_id ? "No outstanding verification items available here. See the report for scope and status." : onlyAttention ? "Nothing needs attention right now." : "This vehicle's checklist has no items yet. Ask an administrator to add them.";
     } else if (!shown.length && !overview) {
       message = onlyAttention ? detail ? "Nothing in this area needs attention." : "Nothing needs attention right now." : "No checklist items are available in this area.";
     }
@@ -922,9 +933,14 @@
         $("session-message").textContent = verificationNotice + " Current report: " + a.body.verification_status + ". " + a.body.remaining_scope_rows + " outstanding scope rows." +
           (a.body.unavailable_scope_rows ? " Some items are unavailable on the current checklist. Contact a supervisor; they remain outstanding." : "");
       }
-      $("stale").hidden = true; render();
+      $("stale").hidden = true; loadedOnce = true; clearLoading(); render();
     }).catch(function () {
       $("stale").hidden = false;   // data on screen may be out of date
+      if (!loadedOnce) {
+        clearLoading("The checklist could not be loaded.");
+        notice.textContent = "The checklist could not be loaded yet. It tries again when the connection returns, or refresh the page.";
+        notice.hidden = false;
+      }
     }).then(function () {
       loading = false;
       if (reloadAgain && !signedOutNow) { reloadAgain = false; scheduleReload(0); }

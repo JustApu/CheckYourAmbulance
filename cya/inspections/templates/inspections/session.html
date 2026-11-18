@@ -79,7 +79,7 @@
   <section id="area-overview" aria-labelledby="area-overview-heading">
     <h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3>
     <p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p>
-    <div id="area-cards" class="area-cards"></div>
+    <div id="area-cards" class="area-cards"><div class="skeleton skeleton-card" aria-hidden="true"></div><div class="skeleton skeleton-card" aria-hidden="true"></div><div class="skeleton skeleton-card" aria-hidden="true"></div></div>
   </section>
   <section id="area-detail" aria-labelledby="area-heading" hidden>
     <button type="button" id="area-overview-button" class="button">All areas and compartments</button>
@@ -87,7 +87,8 @@
   </section>
   {% endif %}
   <p id="screen-notice" class="notice" role="status" hidden></p>
-  <ol id="items" class="items" aria-live="polite"></ol>
+  <p id="checklist-loading" class="visually-hidden" role="status">Loading the checklist…</p>
+  <ol id="items" class="items" aria-live="polite">{% if verification %}<li class="skeleton skeleton-card" aria-hidden="true"></li><li class="skeleton skeleton-card" aria-hidden="true"></li><li class="skeleton skeleton-card" aria-hidden="true"></li>{% endif %}</ol>
   {% if not verification and state == "OPEN" %}
   <div id="checklist-bar" class="checklist-bar" role="group" aria-label="Checklist progress and navigation" hidden>
     <div class="checklist-bar-progress">

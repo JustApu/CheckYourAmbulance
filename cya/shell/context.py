@@ -15,8 +15,12 @@ def shell(request):
         ),
         None,
     )
+    nav = navigation.app_navigation(user, request.path) if user is not None else None
+    more = nav["more"] if nav else ()
     return {
         "cya_user": user,
         "cya_menu": navigation.menu(user, current),
-        "cya_nav": navigation.app_navigation(user, request.path) if user is not None else None,
+        "cya_nav": nav,
+        # Empty lists point people who can set things up to Administration (issue #194).
+        "cya_admin_url": next((m["url"] for m in more if m["key"] == "administration"), None),
     }

@@ -137,7 +137,7 @@
 {% endfor %}
 </section>
 {% empty %}
-<p>No recent checks.</p>
+{% include "shell/empty_state.html" with message="No recent checks on this vehicle." hint="Checks appear here after someone records one during an inspection." %}
 {% endfor %}
 {% endif %}
 {% endblock %}

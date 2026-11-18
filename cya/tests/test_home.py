@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from django.db import DatabaseError
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from cya.checklists.models import Vehicle
@@ -130,3 +131,60 @@ class HomeScreenTests(CrewUiCase):
         html = page[page.index("<main") : page.index("</main>")]  # the page content only
         for word in ("rank", "score", "leaderboard"):
             self.assertNotIn(word, html.lower())
+
+
+class EmptyStateTests(CrewUiCase):
+    """Issue #194 item 9: an empty list says what it means and offers the next step."""
+
+    def test_the_component_shows_message_hint_and_one_action(self):
+        html = render_to_string(
+            "shell/empty_state.html",
+            {
+                "message": "Nothing yet.",
+                "hint": "Do this.",
+                "action_url": "/x/",
+                "action_label": "Go",
+            },
+        )
+        self.assertIn('<p class="empty-state-message">Nothing yet.</p>', html)
+        self.assertIn('<p class="empty-state-hint">Do this.</p>', html)
+        self.assertIn('<a class="button" href="/x/">Go</a>', html)
+        bare = render_to_string("shell/empty_state.html", {"message": "Nothing yet."})
+        self.assertNotIn("empty-state-hint", bare)
+        self.assertNotIn("<a ", bare)
+
+    def test_no_vehicles_asks_crew_to_contact_an_administrator(self):
+        Vehicle.objects.update(active=False)
+        html = self.client.get(reverse("inspection")).content.decode()
+        self.assertIn("No active vehicles are set up yet.", html)
+        self.assertIn("Ask an administrator to add your agency", html)
+        self.assertNotIn(">Open Administration</a>", html)
+
+    def test_no_vehicles_links_an_administrator_to_set_them_up(self):
+        Vehicle.objects.update(active=False)
+        admin, user = self.harness.sign_in("empty-admin")
+        self.grant(user, "ADMINISTRATOR")
+        html = admin.get(reverse("inspection")).content.decode()
+        self.assertIn("No active vehicles are set up yet.", html)
+        self.assertIn(
+            f'<a class="button" href="{reverse("administration")}">Open Administration</a>', html
+        )
+
+    def test_an_empty_problem_list_explains_and_offers_the_next_step(self):
+        html = self.client.get(reverse("deficiencies")).content.decode()
+        self.assertIn("No open problems right now.", html)
+        self.assertIn(f'<a class="button" href="{reverse("inspection")}">Go to Inspect</a>', html)
+        filtered = self.client.get(
+            reverse("deficiencies"), {"q": "no-such-problem"}
+        ).content.decode()
+        self.assertIn("No problems match these filters.", filtered)
+        self.assertIn(
+            f'<a class="button" href="{reverse("deficiencies")}">Clear filters</a>', filtered
+        )
+
+    def test_a_vehicle_without_inspections_says_how_to_start_one(self):
+        html = self.client.get(
+            reverse("inspection-vehicle", args=[self.vehicle.pk])
+        ).content.decode()
+        self.assertIn("No inspections on this vehicle yet.", html)
+        self.assertIn("Start one with the button above.", html)

@@ -266,7 +266,7 @@
       if (sequence !== loadSequence) { return; }
       subjectsCache = data.subjects;
       list.replaceChildren();
-      if (!data.subjects.length) { list.appendChild(element("p", "No sealable kits or cabinets are configured.")); }
+      if (!data.subjects.length) { list.appendChild(element("p", "No kits or cabinets on this vehicle are sealed. An administrator chooses which ones are sealed.")); }
       data.subjects.forEach(function (subject) {
         var box = element("article"), h = element("h3", subject.label), info = element("p");
         info.textContent = (subject.kind === "kit" ? "Kit" : "Cabinet") + " · " + subject.state.replace("_", " ").toLowerCase() +
@@ -283,7 +283,12 @@
         }
         list.appendChild(box);
       });
-    }).catch(function () { if (sequence === loadSequence) { show("Seal status is unavailable. Refresh and try again."); } });
+    }).catch(function () {
+      if (sequence !== loadSequence) { return; }
+      // Never leave the loading placeholders in place of an answer (issue #194).
+      if (list.querySelector(".skeleton")) { list.replaceChildren(); }
+      show("Seal status is unavailable. Refresh and try again.");
+    });
   }
   document.getElementById("seal-cancel").addEventListener("click", function () {
     if (pending) { show("Retry the unconfirmed action before continuing."); return; } work.hidden = true;

@@ -68,7 +68,7 @@
   {% endfor %}
   </ul>
   {% else %}
-  <p>No inspection checklist is configured for this vehicle.</p>
+  {% if cya_admin_url %}{% include "shell/empty_state.html" with message="No inspection checklist is set up for this vehicle." hint="Bind a checklist template to this vehicle in Administration." action_url=cya_admin_url action_label="Open Administration" %}{% else %}{% include "shell/empty_state.html" with message="No inspection checklist is set up for this vehicle." hint="Ask an administrator to set one up. You can still report a problem." %}{% endif %}
   {% endif %}
 </section>
 
@@ -87,7 +87,7 @@
   {% endfor %}
   </ul>
   {% else %}
-  <p>No inspection sessions yet.</p>
+  {% if templates %}{% include "shell/empty_state.html" with message="No inspections on this vehicle yet." hint="Start one with the button above. It is listed here once it begins." %}{% else %}{% include "shell/empty_state.html" with message="No inspections on this vehicle yet." %}{% endif %}
   {% endif %}
 </section>
 {{ config|json_script:"cya-config" }}

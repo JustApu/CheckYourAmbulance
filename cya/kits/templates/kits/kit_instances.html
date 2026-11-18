@@ -31,7 +31,7 @@
   </tbody>
 </table>
 </div>
-{% else %}<p>No active kits.</p>{% endif %}
+{% else %}{% include "shell/empty_state.html" with message="No active kits on this vehicle." action_url="#add-heading" action_label="Add a kit" %}{% endif %}
 
 <h2 id="add-heading">Add a kit</h2>
 <form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}" aria-labelledby="add-heading" class="admin-form">

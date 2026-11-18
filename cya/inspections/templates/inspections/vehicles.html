@@ -13,6 +13,6 @@
 {% endfor %}
 </ul>
 {% else %}
-<p>No active vehicles are set up yet.</p>
+{% if cya_admin_url %}{% include "shell/empty_state.html" with message="No active vehicles are set up yet." hint="Add vehicles and their checklists in Administration." action_url=cya_admin_url action_label="Open Administration" %}{% else %}{% include "shell/empty_state.html" with message="No active vehicles are set up yet." hint="Ask an administrator to add your agency's vehicles." %}{% endif %}
 {% endif %}
 {% endblock %}

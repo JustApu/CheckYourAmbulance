@@ -114,6 +114,33 @@ async function testChecklistTimezoneFallback(viewport) {
     await page.close();
   }
 }
+async function testEmptyAndLoadingStates(viewport) {
+  // Issue #194 item 9: an empty list explains itself with a 48px next step; loading placeholders
+  // shimmer only without reduced motion and are hidden from assistive technology.
+  const page = await browser.newPage({ viewport });
+  const markup = `<!doctype html><html lang="en" class="js"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Empty</title><style>${css}</style></head>
+    <body><main id="main"><h1>Problems</h1><ul class="plain"><li class="panel"><div class="empty-state"><p class="empty-state-message">No open problems right now.</p><p class="empty-state-hint">When a check fails or someone reports a problem, it is listed here. To report one, open the vehicle in Inspect.</p><p class="empty-state-action"><a class="button" href="#inspect">Go to Inspect</a></p></div></li></ul>
+    <div id="area-cards" class="area-cards"><div class="skeleton skeleton-card" aria-hidden="true"></div><div class="skeleton skeleton-card" aria-hidden="true"></div></div></main></body></html>`;
+  try {
+    await page.route("http://empty.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: markup }));
+    await page.goto("http://empty.test/", { waitUntil: "load" });
+    const action = page.getByRole("link", { name: "Go to Inspect" });
+    assert.ok((await action.boundingBox()).height >= 48, `${viewport.name}: the empty-state action is shorter than 48 CSS pixels`);
+    const skeleton = page.locator(".skeleton").first();
+    assert.ok((await skeleton.boundingBox()).height >= 48, `${viewport.name}: the loading placeholder collapsed`);
+    assert.equal(await skeleton.evaluate((node) => getComputedStyle(node).animationName), "cya-skeleton");
+    assert.equal(await page.getByRole("main").getByText("No open problems right now.").count(), 1);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `${viewport.name}: the empty state overflows horizontally`);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await skeleton.evaluate((node) => getComputedStyle(node).animationName), "none", `${viewport.name}: placeholders shimmer under reduced motion`);
+    console.log(`${viewport.name}: empty-state next step and loading placeholders passed`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function testTapFeedback(viewport) {
   // Issue #194 item 8: a pressed state, a Saved toast that never takes focus or blocks taps and
   // clears itself, and a saved check mark that only animates without reduced motion.
@@ -1038,6 +1065,7 @@ try {
       await testInspectionNavigation(viewport);
       await testChecklistAids(viewport);
       await testTapFeedback(viewport);
+      await testEmptyAndLoadingStates(viewport);
       await testInspectionOutcomeSemantics(viewport);
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);
