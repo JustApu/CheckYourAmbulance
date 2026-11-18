@@ -97,6 +97,8 @@
     RETRY_LATER: "The service is busy."
   };
   function say(code) { return MESSAGES[code] || ("Not accepted (" + code + ")."); }
+  // The shell's Saved toast (issue #194); absent when the shell script is not on the page.
+  function toast(text, options) { if (window.cyaShell && window.cyaShell.toast) { window.cyaShell.toast(text, options); } }
 
   // ---- sending ---------------------------------------------------------------------------
   // Outcome of one POST: {kind: "committed"|"conflict"|"rejected"|"unconfirmed", ...}.
@@ -176,6 +178,7 @@
         entry.savedOutcome = answer.body.result.outcome || entry.outcome || "PASSED";
         entry.checkId = answer.body.result.check_id;
         entry.recordedAt = answer.body.result.server_recorded_at;
+        entry.savedAt = Date.now();
         var verification = answer.body.result.verification;
         if (verification) {
           var detail = verification.status === "CLOSED_VERIFIED" ? "Closed — Verified." :
@@ -188,6 +191,9 @@
           $("session-message").textContent = verificationNotice;
         }
         delete drafts[key(row)];
+        // The toast is the announcement: the item's own Saved line is rebuilt on every render.
+        toast("Saved: " + (outcomeWords[entry.savedOutcome] || "check") + " for " + row.item_label +
+          (row.kit_label ? " (" + row.kit_label + ")" : "") + ".");
         scheduleReload(0);
       } else if (answer.kind === "conflict") {
         entry.status = "idle"; entry.text = "";
@@ -364,11 +370,13 @@
     if (row.latest_check_outcome && latestAt >= completedAt) { return row.latest_check_outcome; }
     return row.obligation_outcome || null;
   }
-  function markRecorded(button, outcome, recorded) {
+  function markRecorded(button, outcome, recorded, entry) {
     if (outcome !== recorded) { return; }
     button.className += " outcome-recorded";
     button.dataset.recorded = outcome;
-    var mark = el("span", "outcome-mark", "✓ ");
+    // This person's save, just acknowledged: the check mark pops once (none with reduced motion).
+    var fresh = savedOutcome(entry) === outcome && entry.savedAt && Date.now() - entry.savedAt < 1500;
+    var mark = el("span", "outcome-mark" + (fresh ? " outcome-mark-new" : ""), "✓ ");
     mark.setAttribute("aria-hidden", "true");
     var text = button.textContent;
     button.textContent = "";
@@ -379,7 +387,8 @@
   function saveIndicator(entry) {
     // A saved result is shown on its button; the line remains for screen readers (issue #140).
     var p = el("p", "save-state save-state-" + entry.status + (entry.status === "saved" ? " visually-hidden" : ""));
-    p.setAttribute("role", "status");
+    // A saved check is announced by the shell's toast; this line stays readable on the item.
+    if (entry.status !== "saved") { p.setAttribute("role", "status"); }
     var icons = {pending: "⌛", saved: "✓", failed: "✕", unconfirmed: "?"};
     var outcome = savedOutcome(entry);
     // Say which result was saved, so a saved Fail never reads as a saved Pass (issue 87).
@@ -434,7 +443,7 @@
     } else {
       button.addEventListener("click", function () { rememberFocus(row, "pass"); startCheck(row, null); });
     }
-    if (row.allowed_outcomes.indexOf("PASSED") !== -1) { markRecorded(button, "PASSED", recorded); box.appendChild(button); }
+    if (row.allowed_outcomes.indexOf("PASSED") !== -1) { markRecorded(button, "PASSED", recorded, entry); box.appendChild(button); }
     ["FAILED", "UNABLE_TO_INSPECT"].forEach(function (outcome) {
       if (row.allowed_outcomes.indexOf(outcome) === -1 || (config.verification_for_deficiency_id && outcome === "UNABLE_TO_INSPECT")) { return; }
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
@@ -442,7 +451,7 @@
       action.dataset.action = outcome.toLowerCase();
       action.setAttribute("aria-label", "Record " + (outcome === "FAILED" ? "Fail" : "Unable to inspect") + " for " + label);
       action.addEventListener("click", function () { rememberFocus(row, outcome.toLowerCase()); openOutcome(row, outcome); });
-      markRecorded(action, outcome, recorded);
+      markRecorded(action, outcome, recorded, entry);
       box.appendChild(action);
     });
     if (entry && entry.retryable && (entry.status === "failed" || entry.status === "unconfirmed")) {
@@ -1024,6 +1033,7 @@
         odo.sending = false; odoControls(false);
         if (a.kind === "committed") {
           odoStatus("saved", "Recorded " + when(a.body.result.server_recorded_at));
+          toast("Readings saved.", {announce: false});
           $("odo-confirm").hidden = true; odo.request = null; scheduleReload(0);
         } else if (a.kind === "rejected" && a.code === "ANOMALY_CONFIRMATION_REQUIRED") {
           odo.request = null;   // the refusal wrote nothing; confirming is a new decision

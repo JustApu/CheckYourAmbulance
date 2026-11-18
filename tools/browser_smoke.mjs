@@ -114,6 +114,54 @@ async function testChecklistTimezoneFallback(viewport) {
     await page.close();
   }
 }
+async function testTapFeedback(viewport) {
+  // Issue #194 item 8: a pressed state, a Saved toast that never takes focus or blocks taps and
+  // clears itself, and a saved check mark that only animates without reduced motion.
+  const page = await browser.newPage({ viewport });
+  const markup = `<!doctype html><html lang="en" class="js"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1"><title>Feedback</title><style>${css}</style></head>
+    <body class="has-app-nav"><nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">Home</a></li><li><a class="app-nav-link" href="#inspect">Inspect</a></li></ul></nav>
+    <main id="main"><h1>Feedback</h1><p><button type="button" class="button" id="pass">Pass</button> <button type="button" class="button primary" id="save">Record readings</button></p>
+    <p><span class="outcome-mark outcome-mark-new" id="mark">✓</span></p></main><script>${shellScript}</script></body></html>`;
+  try {
+    await page.route("http://feedback.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: markup }));
+    await page.goto("http://feedback.test/", { waitUntil: "load" });
+    const pass = page.getByRole("button", { name: "Pass" });
+    const box = await pass.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    const pressed = await pass.evaluate((node) => ({ transform: getComputedStyle(node).transform, shadow: getComputedStyle(node).boxShadow }));
+    await page.mouse.up();
+    assert.ok(pressed.transform !== "none" && pressed.shadow !== "none", `${viewport.name}: a pressed button shows no pressed state ${JSON.stringify(pressed)}`);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "pass");
+    await page.evaluate(() => window.cyaShell.toast("Saved: Pass for Oxygen."));
+    const toast = page.locator(".toast");
+    assert.equal(await toast.getAttribute("role"), "status");
+    assert.equal(await toast.getAttribute("aria-hidden"), null);
+    assert.equal(await toast.textContent(), "✓Saved: Pass for Oxygen.", `${viewport.name}: toast text`);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".toast")).opacity === "1");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "pass", `${viewport.name}: the toast took focus`);
+    const place = await page.evaluate(() => {
+      const t = document.querySelector(".toast").getBoundingClientRect(), nav = document.querySelector(".app-nav");
+      const hit = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2);
+      return { left: t.left, right: t.right, bottom: t.bottom, navTop: nav.getBoundingClientRect().top, navFixed: getComputedStyle(nav).position === "fixed", height: innerHeight, width: innerWidth, blocks: !!hit && hit.closest(".toast") !== null };
+    });
+    assert.ok(place.left >= 0 && place.right <= place.width && place.bottom <= place.height, `${viewport.name}: the toast is off screen ${JSON.stringify(place)}`);
+    if (place.navFixed) { assert.ok(place.bottom <= place.navTop, `${viewport.name}: the toast covers the tab bar ${JSON.stringify(place)}`); }
+    assert.equal(place.blocks, false, `${viewport.name}: the toast blocks taps on what is beneath it`);
+    await page.evaluate(() => window.cyaShell.toast("Readings saved.", { announce: false }));
+    assert.equal(await toast.getAttribute("aria-hidden"), "true", `${viewport.name}: a visual-only toast is still announced`);
+    await page.waitForFunction(() => !document.querySelector(".toast").classList.contains("is-shown"), null, { timeout: 4500 });
+    await page.waitForFunction(() => document.querySelector(".toast").textContent === "", null, { timeout: 1500 });
+    assert.equal(await page.locator("#mark").evaluate((node) => getComputedStyle(node).animationName), "cya-saved-pop");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await page.locator("#mark").evaluate((node) => getComputedStyle(node).animationName), "none", `${viewport.name}: the check mark animates under reduced motion`);
+    console.log(`${viewport.name}: pressed state, Saved toast and reduced-motion check mark passed`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function testChecklistAids(viewport) {
   // Issue #194: the checklist bar stays above the phone tab bar, shows progress, moves through
   // unchecked items across areas, and jumps to a section.
@@ -989,10 +1037,13 @@ try {
       }
       await testInspectionNavigation(viewport);
       await testChecklistAids(viewport);
+      await testTapFeedback(viewport);
       await testInspectionOutcomeSemantics(viewport);
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);
-      assert.equal(await page.getByRole("status").count(), 1);
+      // The page save line plus the shell toast region (issue #194), which stays empty until a save.
+      assert.equal(await page.getByRole("status").count(), 2);
+      assert.equal(await page.locator(".toast").textContent(), "");
       assert.equal(await page.getByLabel("Theme").inputValue(), "auto");
       assert.equal(await page.getByText("2 pending requests").count(), 1);
       assert.equal(await page.locator('.pending-pill[data-count="2"]').isVisible(), true);
@@ -1061,7 +1112,7 @@ try {
         window.cyaShell.setSaveState(state, "unconfirmed");
         window.dispatchEvent(new Event("offline"));
       });
-      assert.match(await page.getByRole("status").innerText(), /Unconfirmed\. It may or may not be recorded\./);
+      assert.match(await page.locator("#save-state").innerText(), /Unconfirmed\. It may or may not be recorded\./);
       assert.equal(await page.getByRole("alert").isVisible(), true);
       await page.evaluate(() => window.dispatchEvent(new Event("online")));
       assert.equal(await page.getByRole("alert").isVisible(), false);
