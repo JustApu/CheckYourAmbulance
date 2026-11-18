@@ -398,7 +398,11 @@ class TapFeedbackTests(TestCase):
 
     def test_toast_is_one_status_region_that_never_takes_focus(self):
         js = render_to_string("shell/shell.js")
-        for marker in ('toastNode.setAttribute("role", "status")', "toast: showToast", 'options.announce === false'):
+        for marker in (
+            'toastNode.setAttribute("role", "status")',
+            "toast: showToast",
+            "options.announce === false",
+        ):
             self.assertIn(marker, js)
         self.assertNotIn("toastNode.focus", js)
         css = render_to_string("shell/shell.css")
