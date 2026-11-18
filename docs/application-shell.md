@@ -157,6 +157,19 @@ Phones can add the app to the home screen. It then opens full screen with its ow
 - **Check mark.** The ✓ on the recorded result's button pops once when this person's save is acknowledged. It does not move under `prefers-reduced-motion`; the shell also turns off all animation there.
 - **Not covered.** Server-rendered administration forms still confirm on the next page. They do not show a toast.
 
+## Empty and loading states (issue #194)
+
+- **Empty lists.** `shell/empty_state.html` (`message`, optional `hint`, optional `action_url` and `action_label`) says what an empty list means and offers one next step.
+  - Where the next step is setting something up (vehicles, a checklist binding), people who can open Administration get an Open Administration button. The shell context provides `cya_admin_url` only for them; everyone else is told to ask an administrator.
+  - Used on Inspect, Vehicles, Home, fleet readiness, Problems (with Clear filters when filters hide everything), a vehicle's inspection page, check history, and the vehicle, checklist template, kit definition and kit-on-vehicle admin lists, where the action jumps to the create form below.
+  - The checklist and seal scripts word their own empty messages the same way.
+  - Because many apps include it, a change to `empty_state.html` runs the full suite in CI.
+- **Loading.** The two lists that load by script after the page arrives show grey placeholders (`.skeleton`, `aria-hidden`) instead of a blank area: the checklist (area cards, or the item list for verification) and the sealed kits and cabinets.
+  - A visually hidden line says the list is loading.
+  - The first answer replaces the placeholders. If the first load fails, they are removed and the page says the list could not be loaded, so a placeholder never stands in for an error.
+  - The shimmer stops under `prefers-reduced-motion`.
+  - Server-rendered lists arrive complete, so they have no loading state.
+
 ## Stylesheet and script are inline
 
 CSS and JS are included in the page (`shell.css`, `shell.js`) so the shell needs no static-file serving, which is a deployment decision not yet made (SPEC §17). If a Content-Security-Policy is added later, these need a nonce or a move to served files.

@@ -27,7 +27,7 @@
 </div>
 {% if rows|length == list_limit %}<p>Showing the first {{ list_limit }} templates.</p>{% endif %}
 {% else %}
-<p>No checklist templates yet.</p>
+{% include "shell/empty_state.html" with message="No checklist templates yet." action_url="#create-heading" action_label="Create the first template" %}
 {% endif %}
 
 <h2 id="create-heading">Create a template</h2>

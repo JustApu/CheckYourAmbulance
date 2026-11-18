@@ -25,7 +25,7 @@
 <p>Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}</p>
 </li>
 {% empty %}
-<li class="panel">{% if applied_filters or filter_errors %}No problems match these filters. Clear filters or adjust the search.{% else %}No outstanding problems.{% endif %}</li>
+<li class="panel">{% if applied_filters or filter_errors %}{% url 'deficiencies' as all_problems %}{% include "shell/empty_state.html" with message="No problems match these filters." hint="Adjust the search, or clear the filters to see every problem." action_url=all_problems action_label="Clear filters" %}{% else %}{% url 'inspection' as inspect_url %}{% include "shell/empty_state.html" with message="No open problems right now." hint="When a check fails or someone reports a problem, it is listed here. To report one, open the vehicle in Inspect." action_url=inspect_url action_label="Go to Inspect" %}{% endif %}</li>
 {% endfor %}
 </ul>
 {% include "inspections/deficiency_pagination.html" %}

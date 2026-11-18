@@ -26,7 +26,7 @@
 {% elif query %}
 <p>No vehicle matches “{{ query }}”.</p>
 {% else %}
-<p>No vehicles yet.</p>
+{% include "shell/empty_state.html" with message="No vehicles yet." action_url="#create-heading" action_label="Add the first vehicle" %}
 {% endif %}
 
 <h2 id="create-heading">Add a vehicle</h2>

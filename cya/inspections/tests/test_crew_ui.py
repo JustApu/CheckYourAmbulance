@@ -353,6 +353,14 @@ class PageTests(CrewUiCase):
         self.assertIn('id="layout-flat"', html)
         self.assertIn('id="area-overview"', html)
         self.assertNotIn('id="reopen-session"', html)
+        # Issue #194: placeholders sit outside both layouts; the script reveals the overview.
+        self.assertIn(
+            '<section id="area-overview" aria-labelledby="area-overview-heading" hidden>', html
+        )
+        skeleton = html.index('id="checklist-skeleton"')
+        self.assertGreater(skeleton, html.index('id="area-detail"'))
+        self.assertLess(skeleton, html.index('<ol id="items"'))
+        self.assertNotIn('class="area-cards"><div class="skeleton', html)
         # Issue #194: the long-checklist bar (progress, Next unchecked item, jump to a section).
         self.assertIn('id="checklist-bar"', html)
         self.assertIn(">Next unchecked item</button>", html)

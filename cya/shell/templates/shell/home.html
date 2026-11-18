@@ -71,7 +71,7 @@
   </table>
   </div>
   {% if sup.truncated %}<p class="muted">Only the first {{ sup.vehicles|length }} vehicles are shown. <a href="{% url 'fleet-readiness' %}">Open fleet readiness</a></p>{% endif %}
-  {% else %}<p>No active vehicles are set up yet.</p>{% endif %}
+  {% else %}{% if cya_admin_url %}{% include "shell/empty_state.html" with message="No active vehicles are set up yet." hint="Add vehicles and their checklists in Administration." action_url=cya_admin_url action_label="Open Administration" %}{% else %}{% include "shell/empty_state.html" with message="No active vehicles are set up yet." hint="Ask an administrator to add your agency's vehicles." %}{% endif %}{% endif %}
 </section>
 {% endwith %}{% endif %}
 
@@ -92,7 +92,7 @@
   {% endfor %}
   </ul>
   {% if home.due.truncated %}<p class="notice" role="status">Only the first {{ home.due.rows|length }} vehicles are shown here. <a href="{% url 'inspection' %}">See every vehicle in Inspect</a></p>{% endif %}
-  {% else %}<p>No active vehicles are set up yet.</p>{% endif %}
+  {% else %}{% if cya_admin_url %}{% include "shell/empty_state.html" with message="No active vehicles are set up yet." hint="Add vehicles and their checklists in Administration." action_url=cya_admin_url action_label="Open Administration" %}{% else %}{% include "shell/empty_state.html" with message="No active vehicles are set up yet." hint="Ask an administrator to add your agency's vehicles." %}{% endif %}{% endif %}
 </section>
 
 <section class="home-section panel" aria-labelledby="home-problems">
@@ -105,7 +105,7 @@
   {% endfor %}
   </ul>
   {% if home.problems.total > home.problems.rows|length %}<p><a href="{% url 'deficiencies' %}">All {{ home.problems.total }} open problems</a></p>{% endif %}
-  {% else %}<p>No open problems.</p>{% endif %}
+  {% else %}<p>No open problems. Anything reported, or found by a failed check, shows here.</p>{% endif %}
   <p><a class="button" href="{% url 'deficiencies' %}">Report a problem</a></p>
 </section>
 

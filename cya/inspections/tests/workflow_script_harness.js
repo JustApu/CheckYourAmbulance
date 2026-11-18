@@ -805,5 +805,29 @@ function generic(kind) {
     assert.equal(run.get("next-unchecked").listeners.click, undefined);
     assert.equal(run.get("jump-sections").listeners.click, undefined);
   }
-  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, checklist bar progress and Next unchecked item, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  for (const outcome of ["ok", "failed", "signed-out"]) {
+    // Issue #194: one placeholder block, outside both layouts, stands in until the first answer
+    // and never outlives it, including a first-load 401 that returns before the error handler.
+    const run = checklist(), skeleton = run.get("checklist-skeleton");
+    run.get("checklist-loading").textContent = "Loading the checklist…";
+    assert.equal(skeleton.hidden, false);
+    run.context.testUI.reload();
+    const read = run.requests.at(-1);
+    if (outcome === "ok") { response(read, 200, {status: "OK", items: [], group_progress: [], vehicle_status: {status: "IN_SERVICE"}}); }
+    else if (outcome === "failed") { response(read, 503, {status: "REJECTED", code: "RETRY_LATER"}); }
+    else { response(read, 401, {status: "REJECTED", code: "AUTHENTICATION_REQUIRED"}); }
+    await tick(); await tick();
+    assert.equal(skeleton.hidden, true, `${outcome}: the placeholders are removed`);
+    if (outcome === "ok") {
+      assert.equal(run.get("checklist-loading").textContent, "");
+    } else if (outcome === "failed") {
+      assert.equal(run.get("checklist-loading").textContent, "The checklist could not be loaded.");
+      assert(run.get("screen-notice").textContent.includes("could not be loaded yet"), "a failed first load says so instead of showing placeholders");
+      assert.equal(run.get("screen-notice").hidden, false);
+    } else {
+      assert.equal(run.get("checklist-loading").textContent, "The checklist could not be loaded because you are signed out.");
+      assert.equal(run.get("live-banner").hidden, false, "the signed-out banner still shows");
+    }
+  }
+  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

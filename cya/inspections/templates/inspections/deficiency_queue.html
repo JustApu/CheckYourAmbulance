@@ -14,7 +14,7 @@
 {% for row in group.page.rows %}
 <li class="deficiency-list-entry"><a class="deficiency-summary-link" href="{% url 'deficiencies-detail' row.deficiency_id %}">Review {{ row.deficiency.summary }}</a> — {{ row.deficiency.vehicle.display_name }}<p>{{ row.status_label }} · {{ row.severity_version.label }} · Assigned to: {{ row.assignee.display_name|default:"Unassigned" }}{% if row.governing %} · governing deadline {{ row.governing|station_time }}{% endif %}{% if row.requested_at %} · requested {{ row.requested_at|station_time }}{% endif %}</p></li>
 {% empty %}
-<li>None.</li>
+<li>Nothing here right now.</li>
 {% endfor %}
 </ul>
 {% with page=group.page %}{% include "inspections/deficiency_pagination.html" %}{% endwith %}

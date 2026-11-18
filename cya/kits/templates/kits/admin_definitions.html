@@ -26,7 +26,7 @@
 </table>
 </div>
 {% if rows|length == list_limit %}<p>Showing the first {{ list_limit }} kit definitions.</p>{% endif %}
-{% else %}<p>No kit definitions yet.</p>{% endif %}
+{% else %}{% include "shell/empty_state.html" with message="No kit definitions yet." action_url="#create-heading" action_label="Create the first kit definition" %}{% endif %}
 
 <h2 id="create-heading">Create a kit definition</h2>
 <p>The key identifies the definition in files and kit lists. It is set now and never changes.</p>

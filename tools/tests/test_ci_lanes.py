@@ -297,7 +297,11 @@ class CoverageMapTests(unittest.TestCase):
             app = template.relative_to(ROOT).parts[1]
             for used_path in set(reference.findall(template.read_text(encoding="utf-8"))):
                 used = used_path.split("/", 1)[0]
-                if used_path in {"shell/base.html", "shell/save_state.html"}:
+                if used_path in {
+                    "shell/base.html",
+                    "shell/save_state.html",
+                    "shell/empty_state.html",
+                }:
                     source_path = f"cya/shell/templates/{used_path}"
                     with self.subTest(template=str(template.relative_to(ROOT)), uses=used_path):
                         self.assertEqual(ci_lanes.classify([source_path])["django-mode"], "full")
