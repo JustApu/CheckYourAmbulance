@@ -152,6 +152,7 @@
   function startCheck(row, value, outcome, deficiency, explanation) {
     var k = key(row);
     if (entries[k] && (entries[k].status === "pending" || entries[k].status === "unconfirmed")) { return; }
+    if (k === targetKey) { targetKey = null; }
     var entry = {status: "pending", operationId: uuid4(), basis: row.latest_check_id, value: value,
                  retryable: true, outcome: outcome, deficiency: deficiency, explanation: explanation,
                  dueAt: row.due_at || null};
@@ -543,14 +544,18 @@
       window.requestAnimationFrame(function () { anchor.scrollIntoView({block: "start"}); });
     }
   }
-  function appendItemRows(target, itemRows) {
-    var buckets = [], kits = Object.create(null), labelCounts = Object.create(null), labelIndexes = Object.create(null);
+  function kitBuckets(itemRows) {
+    var buckets = [], kits = Object.create(null);
     itemRows.forEach(function (row) {
       if (!row.kit_id) { buckets.push({rows: [row]}); return; }
       var kitKey = String(row.kit_id), bucket = kits[kitKey];
       if (!bucket) { bucket = {kitId: kitKey, label: row.kit_label || "Kit", rows: []}; kits[kitKey] = bucket; buckets.push(bucket); }
       bucket.rows.push(row);
     });
+    return buckets;
+  }
+  function appendItemRows(target, itemRows) {
+    var buckets = kitBuckets(itemRows), labelCounts = Object.create(null), labelIndexes = Object.create(null);
     buckets.forEach(function (bucket) { if (bucket.kitId) { labelCounts[bucket.label] = (labelCounts[bucket.label] || 0) + 1; } });
     var index = 0;
     buckets.forEach(function (bucket) {
@@ -593,9 +598,9 @@
 
   function itemNode(row, index) {
     var k = key(row), entry = entries[k];
-    var li = el("li", "item" + (row.item_attention === "ATTENTION" ? " item-attention" : ""));
+    var li = el("li", "item" + (row.item_attention === "ATTENTION" ? " item-attention" : "") + (k === targetKey ? " item-target" : ""));
     li.id = "item-" + index;
-    li.dataset.itemKey = k; li.tabIndex = -1;
+    li.dataset.itemKey = k; li.dataset.groupKey = groupKeyForRow(row); li.tabIndex = -1;
     var head = el("div", "item-head");
     var titleText = row.item_label;
     if (row.kit_label && (layoutMode === "FLAT" || config.verification_for_deficiency_id)) { titleText += " — " + row.kit_label; }
@@ -722,6 +727,149 @@
       }
     }
     restoreNavigationAnchor();
+    renderBar();
+  }
+
+  // ---- checklist aids (issue #194): progress, Next unchecked item, jump to a section -------
+  // The bar sits at the bottom of the checklist. Progress uses the server's counts for the whole
+  // checklist (not the Needs Attention Only filter); Next moves through the rows on this screen.
+  // Pressing Next moves focus to the button, so the last item that had focus is remembered.
+  var dueStates = {DUE: true, CURRENT: true, OVERDUE: true}, targetKey = null, lastItemKey = null;
+  function itemKeyFrom(node) {
+    for (; node && node !== list; node = node.parentNode) {
+      if (node.parentNode === list && node.dataset && node.dataset.itemKey) { return node.dataset.itemKey; }
+    }
+    return null;
+  }
+  list.addEventListener("focusin", function (event) { lastItemKey = itemKeyFrom(event.target) || lastItemKey; });
+  function needsCheck(row) {
+    var entry = entries[key(row)];
+    if (entry && entry.status === "pending") { return false; }
+    // A saved tap counts until the reloaded row carries that check.
+    if (savedOutcome(entry) && entry.checkId && row.latest_check_id !== entry.checkId) { return false; }
+    return !!dueStates[row.obligation_state];
+  }
+  function flattenBuckets(itemRows) {
+    var out = [];
+    kitBuckets(itemRows).forEach(function (bucket) { Array.prototype.push.apply(out, bucket.rows); });
+    return out;
+  }
+  // The rows in the order the crew member meets them: area by area in Compartments.
+  function orderedRows() {
+    var all = checklistRows();
+    if (layoutMode !== "COMPARTMENTS") { return all; }
+    var out = [];
+    groupProgressRows.forEach(function (group) {
+      Array.prototype.push.apply(out, flattenBuckets(all.filter(function (row) { return groupKeyForRow(row) === group.key; })));
+    });
+    return out;
+  }
+  function progressCounts() {
+    var done = 0, left = 0;
+    groupProgressRows.forEach(function (group) { done += group.checked; left += group.due + group.due_soon + group.overdue; });
+    return {done: done, left: left};
+  }
+  function renderBar() {
+    var bar = $("checklist-bar");
+    if (!bar || config.verification_for_deficiency_id || config.state !== "OPEN") { return; }
+    bar.hidden = !groupProgressRows.length;
+    var counts = progressCounts(), total = counts.done + counts.left;
+    var progress = $("checklist-progress");
+    progress.max = total || 1; progress.value = total ? counts.done : 1;
+    $("checklist-progress-text").textContent = !total ? "Nothing is due right now." :
+      counts.done + " of " + total + " checked" + (counts.left ? " · " + counts.left + " still due" : " · all done");
+    if (!$("jump-panel").hidden) { renderJumpList(); }
+  }
+  function currentPosition() {
+    var focusedKey = itemKeyFrom(document.activeElement);
+    if (focusedKey) { return {key: focusedKey, after: true}; }
+    if (list.hidden) { return null; }
+    if (lastItemKey && itemForKey(lastItemKey)) { return {key: lastItemKey, after: true}; }
+    for (var i = 0; i < list.children.length; i++) {
+      var item = list.children[i], rect = item.getBoundingClientRect();
+      if (item.dataset.itemKey && rect.bottom > 0 && rect.top < window.innerHeight) { return {key: item.dataset.itemKey, after: false}; }
+    }
+    return null;
+  }
+  function showItem(itemKey) {
+    var item = itemForKey(itemKey);
+    if (!item) { return; }
+    if (typeof item.scrollIntoView === "function") { item.scrollIntoView({block: "center"}); }
+    item.focus({preventScroll: true});
+  }
+  function goToRow(row) {
+    var groupKey = groupKeyForRow(row);
+    targetKey = key(row);
+    if (layoutMode === "COMPARTMENTS" && groupKey !== selectedGroupKey) {
+      selectedGroupKey = groupKey; navigationAnchorKey = null; saveNavigation();
+    }
+    render();
+    lastItemKey = targetKey;
+    showItem(targetKey);
+  }
+  function nextUnchecked() {
+    var ordered = orderedRows(), status = $("checklist-bar-status"), start = 0, position = currentPosition();
+    if (position) {
+      for (var i = 0; i < ordered.length; i++) {
+        if (key(ordered[i]) === position.key) { start = i + (position.after ? 1 : 0); break; }
+      }
+    }
+    for (var n = 0; n < ordered.length; n++) {
+      var row = ordered[(start + n) % ordered.length];
+      if (needsCheck(row)) { status.textContent = ""; goToRow(row); return; }
+    }
+    status.textContent = progressCounts().left && onlyAttention ?
+      "No unchecked items are shown. Turn off Needs Attention Only to see the rest." :
+      progressCounts().left ? "No unchecked items are shown on this screen." : "Every due item is checked.";
+  }
+  function jumpTo(groupKey) {
+    if (layoutMode === "COMPARTMENTS") {
+      selectedGroupKey = groupKey; navigationAnchorKey = null; saveNavigation(); render();
+      var heading = $("area-heading");
+      if (typeof heading.scrollIntoView === "function") { heading.scrollIntoView({block: "start"}); }
+      heading.focus({preventScroll: true});
+      return;
+    }
+    for (var i = 0; i < list.children.length; i++) {
+      if (list.children[i].dataset.groupKey === groupKey) { showItem(list.children[i].dataset.itemKey); return; }
+    }
+  }
+  function renderJumpList() {
+    var target = $("jump-list"), focusedKey = null;
+    for (var node = document.activeElement; node && node !== target; node = node.parentNode) {
+      if (node.dataset && node.dataset.groupKey && node.parentNode && node.parentNode.parentNode === target) { focusedKey = node.dataset.groupKey; }
+    }
+    while (target.firstChild) { target.removeChild(target.firstChild); }
+    var flat = layoutMode !== "COMPARTMENTS", present = {};
+    if (flat) { checklistRows().forEach(function (row) { present[groupKeyForRow(row)] = true; }); }
+    groupProgressRows.forEach(function (group) {
+      if (flat && !present[group.key]) { return; }
+      var item = el("li"), button = el("button", "jump-button"), left = group.due + group.due_soon + group.overdue;
+      button.type = "button"; button.dataset.groupKey = group.key;
+      button.appendChild(el("span", "jump-label", group.label));
+      button.appendChild(el("span", "jump-count", left ? left + " still due" : "Nothing due"));
+      if (!flat && group.key === selectedGroupKey) { button.setAttribute("aria-current", "true"); }
+      button.addEventListener("click", function () { closeJump(false); jumpTo(group.key); });
+      item.appendChild(button); target.appendChild(item);
+      if (focusedKey === group.key) { button.focus({preventScroll: true}); }
+    });
+  }
+  function closeJump(returnFocus) {
+    $("jump-panel").hidden = true;
+    $("jump-sections").setAttribute("aria-expanded", "false");
+    if (returnFocus) { $("jump-sections").focus({preventScroll: true}); }
+  }
+  if ($("checklist-bar") && !config.verification_for_deficiency_id && config.state === "OPEN") {
+    $("next-unchecked").addEventListener("click", function () { closeJump(false); nextUnchecked(); });
+    $("jump-sections").addEventListener("click", function () {
+      if (!$("jump-panel").hidden) { closeJump(true); return; }
+      renderJumpList();
+      $("jump-panel").hidden = false;
+      $("jump-sections").setAttribute("aria-expanded", "true");
+    });
+    $("checklist-bar").addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !$("jump-panel").hidden) { event.preventDefault(); closeJump(true); }
+    });
   }
 
   // ---- loading and live updates ----------------------------------------------------------

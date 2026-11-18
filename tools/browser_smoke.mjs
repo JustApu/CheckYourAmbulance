@@ -114,6 +114,90 @@ async function testChecklistTimezoneFallback(viewport) {
     await page.close();
   }
 }
+async function testChecklistAids(viewport) {
+  // Issue #194: the checklist bar stays above the phone tab bar, shows progress, moves through
+  // unchecked items across areas, and jumps to a section.
+  const page = await browser.newPage({ viewport });
+  const base = sampleRows[0];
+  const make = (id, compartment, state) => ({ ...base, item_id: id, item_label: `Item ${id}`, compartment_id: compartment, compartment_label: compartment === "comp-cab" ? "Cab" : "Rear", obligation_state: state, obligation_outcome: state === "SATISFIED" ? "PASSED" : null, item_attention: "CLEAR", needs_action: state !== "SATISFIED" });
+  const cabStates = ["SATISFIED", "SATISFIED", "SATISFIED", "SATISFIED", "DUE", "UPCOMING", "UPCOMING", "UPCOMING", "UPCOMING", "OVERDUE", "SATISFIED", "SATISFIED", "SATISFIED", "SATISFIED", "SATISFIED", "SATISFIED"];
+  const rows = cabStates.map((state, index) => make(`c${index + 1}`, "comp-cab", state)).concat([make("r1", "comp-rear", "DUE"), make("r2", "comp-rear", "SATISFIED")]);
+  const groups = [
+    { key: "compartment:comp-cab", label: "Cab", total: 16, checked: 10, due: 1, due_soon: 0, overdue: 1, not_due: 4, no_obligation: 0, exceptions: 0, open_deficiencies: 0 },
+    { key: "compartment:comp-rear", label: "Rear", total: 2, checked: 1, due: 1, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0 },
+  ];
+  const bar = `<div id="checklist-bar" class="checklist-bar" role="group" aria-label="Checklist progress and navigation" hidden><div class="checklist-bar-progress"><span id="checklist-progress-text" class="checklist-progress-text"></span><progress id="checklist-progress" max="1" value="0" aria-label="Checklist progress"></progress></div><div class="checklist-bar-actions"><button type="button" id="next-unchecked" class="button primary">Next unchecked item</button><button type="button" id="jump-sections" class="button" aria-expanded="false" aria-controls="jump-panel">Sections</button></div><div id="jump-panel" class="jump-panel" hidden><h3 id="jump-heading" class="jump-heading">Jump to a section</h3><ul id="jump-list" class="jump-list" aria-labelledby="jump-heading"></ul></div><p id="checklist-bar-status" class="visually-hidden" role="status"></p></div>`;
+  const markup = inspectionMarkup("emt-aids", `session-aids-${viewport.name}`)
+    .replace('<html lang="en">', '<html lang="en" class="js">')
+    .replace("<body>", '<body class="has-app-nav"><nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">Home</a></li><li><a class="app-nav-link" href="#inspect" aria-current="page">Inspect</a></li><li><a class="app-nav-link" href="#problems">Problems</a></li><li><a class="app-nav-link" href="#vehicles">Vehicles</a></li></ul></nav>')
+    .replace('<ol id="items" class="items" aria-live="polite"></ol>', `<ol id="items" class="items" aria-live="polite"></ol>${bar}`);
+  await page.route("http://aids.test/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith("/api/")) {
+      const body = url.pathname === "/api/checklist"
+        ? { status: "OK", items: rows, group_progress: groups, vehicle_status: { status: "IN_SERVICE", restrictions: "" } }
+        : { status: "COMMITTED", result: {} };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "text/html", body: markup });
+  });
+  try {
+    await page.goto("http://aids.test/", { waitUntil: "load" });
+    const checklistBar = page.getByRole("group", { name: "Checklist progress and navigation" });
+    await checklistBar.waitFor();
+    assert.equal(await page.locator("#checklist-progress-text").textContent(), "11 of 14 checked · 3 still due");
+    const next = page.getByRole("button", { name: "Next unchecked item" });
+    const focusedKey = () => page.evaluate(() => document.activeElement.dataset.itemKey || null);
+    const expectFocus = async (itemKey, message) => {
+      await page.waitForFunction((k) => document.activeElement && document.activeElement.dataset.itemKey === k, itemKey, { timeout: 3000 }).catch(() => {});
+      assert.equal(await focusedKey(), itemKey, `${viewport.name}: ${message}`);
+      const place = await page.evaluate(() => {
+        const item = document.activeElement.getBoundingClientRect(), stuck = document.getElementById("checklist-bar").getBoundingClientRect();
+        return { top: item.top, barTop: stuck.top };
+      });
+      assert.ok(place.top >= 0 && place.top < place.barTop, `${viewport.name}: the item Next moved to is hidden behind the bar ${JSON.stringify(place)}`);
+    };
+    await next.click();
+    await expectFocus("c5|", "Next did not open the first area at its first due item");
+    assert.equal(await page.locator("#area-heading").textContent(), "Cab");
+    const layout = await page.evaluate(() => {
+      const stuck = document.getElementById("checklist-bar").getBoundingClientRect();
+      const nav = document.querySelector(".app-nav").getBoundingClientRect();
+      return { barBottom: stuck.bottom, barTop: stuck.top, navTop: nav.top, navFixed: getComputedStyle(document.querySelector(".app-nav")).position === "fixed", height: innerHeight, scrollWidth: document.documentElement.scrollWidth };
+    });
+    assert.ok(layout.barBottom <= layout.height + 0.5, `${viewport.name}: the checklist bar is below the screen ${JSON.stringify(layout)}`);
+    if (layout.navFixed) { assert.ok(layout.barBottom <= layout.navTop + 0.5, `${viewport.name}: the checklist bar is under the tab bar ${JSON.stringify(layout)}`); }
+    assert.ok(layout.scrollWidth <= viewport.width, `${viewport.name}: the checklist bar causes horizontal overflow ${JSON.stringify(layout)}`);
+    for (const target of [next, page.getByRole("button", { name: "Sections" })]) {
+      assert.ok((await target.boundingBox()).height >= 48, `${viewport.name}: a checklist bar button is shorter than 48 CSS pixels`);
+    }
+    await next.click();
+    await expectFocus("c10|", "Next did not continue to the overdue item");
+    await next.click();
+    await expectFocus("r1|", "Next did not cross into the next area");
+    assert.equal(await page.locator("#area-heading").textContent(), "Rear");
+    await next.click();
+    await expectFocus("c5|", "Next did not wrap to the first unchecked item");
+    const sections = page.getByRole("button", { name: "Sections" });
+    await sections.click();
+    assert.equal(await sections.getAttribute("aria-expanded"), "true");
+    const rear = page.getByRole("button", { name: /^Rear/ });
+    assert.match(await rear.innerText(), /1 still due/);
+    assert.ok((await rear.boundingBox()).height >= 48, `${viewport.name}: a section button is shorter than 48 CSS pixels`);
+    await rear.click();
+    assert.equal(await page.locator("#jump-panel").isVisible(), false, `${viewport.name}: choosing a section left the panel open`);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "area-heading", `${viewport.name}: the section jump did not move focus to its heading`);
+    assert.equal(await page.locator("#area-heading").textContent(), "Rear");
+    await sections.click();
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#jump-panel").isVisible(), false, `${viewport.name}: Escape did not close the section list`);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "jump-sections", `${viewport.name}: Escape did not return focus to Sections`);
+    console.log(`${viewport.name}: checklist bar progress, Next unchecked item and section jump passed`);
+  } finally {
+    await page.close();
+  }
+}
 async function testInspectionNavigation(viewport) {
   const page = await browser.newPage({ viewport });
   const configForPath = (pathname) => pathname === "/another-user"
@@ -904,6 +988,7 @@ try {
         assert.ok(mainBox.x >= navBox.x + navBox.width, `${viewport.name}: page content overlaps the sidebar`);
       }
       await testInspectionNavigation(viewport);
+      await testChecklistAids(viewport);
       await testInspectionOutcomeSemantics(viewport);
       assert.equal(await page.getByRole("button", { name: "Record passed" }).count(), 1);
       assert.equal(await page.getByLabel("Inspection note").count(), 1);

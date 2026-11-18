@@ -88,6 +88,23 @@
   {% endif %}
   <p id="screen-notice" class="notice" role="status" hidden></p>
   <ol id="items" class="items" aria-live="polite"></ol>
+  {% if not verification and state == "OPEN" %}
+  <div id="checklist-bar" class="checklist-bar" role="group" aria-label="Checklist progress and navigation" hidden>
+    <div class="checklist-bar-progress">
+      <span id="checklist-progress-text" class="checklist-progress-text"></span>
+      <progress id="checklist-progress" max="1" value="0" aria-label="Checklist progress"></progress>
+    </div>
+    <div class="checklist-bar-actions">
+      <button type="button" id="next-unchecked" class="button primary">Next unchecked item</button>
+      <button type="button" id="jump-sections" class="button" aria-expanded="false" aria-controls="jump-panel">Sections</button>
+    </div>
+    <div id="jump-panel" class="jump-panel" hidden>
+      <h3 id="jump-heading" class="jump-heading">Jump to a section</h3>
+      <ul id="jump-list" class="jump-list" aria-labelledby="jump-heading"></ul>
+    </div>
+    <p id="checklist-bar-status" class="visually-hidden" role="status"></p>
+  </div>
+  {% endif %}
 </section>
 
 <dialog id="conflict-dialog" aria-labelledby="conflict-title">

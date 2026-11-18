@@ -124,7 +124,7 @@ function checklist(state = "OPEN", extra = {}) {
   Object.assign(config, extra);
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   // Verification regressions exercise item actions, including the no-session retry path.
   if (config.verification_for_deficiency_id) run.get("layout-flat").fire("click");
   return run;
@@ -752,5 +752,53 @@ function generic(kind) {
     assert.equal(run.requests.length, count);
     assert.equal(run.requests.some(r => String(r.url).startsWith("/auth/")), false);
   }
-  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  {
+    // Issue #194: the checklist bar shows progress, moves to the next unchecked item and wraps.
+    const run = checklist(), items = () => run.elements.items.children.filter(child => child.dataset.itemKey);
+    const make = (id, state) => ({...row, item_id: id, item_label: "Item " + id, kit_id: null, kit_label: null, obligation_state: state, latest_check_id: null});
+    const group = {key: "compartment:compartment-a", label: "Driver-side exterior compartment", total: 4, checked: 1, due: 1, due_soon: 0, overdue: 1, not_due: 1, no_obligation: 0, exceptions: 0, open_deficiencies: 0};
+    run.context.testUI.setRows([make("a", "SATISFIED"), make("b", "DUE"), make("c", "UPCOMING"), make("d", "OVERDUE")]);
+    run.context.testUI.setGroups([group]); run.context.testUI.render();
+    run.get("next-unchecked").type = "button"; // a pointer press moves focus to the button itself
+    assert.equal(run.get("checklist-bar").hidden, false, "the bar appears once progress is loaded");
+    assert.equal(run.get("checklist-progress-text").textContent, "1 of 3 checked · 2 still due");
+    assert.equal(run.get("checklist-progress").value, 1); assert.equal(run.get("checklist-progress").max, 3);
+    const label = () => findClass(run.document.activeElement, "item-head").children.find(child => child.type === "h3").textContent;
+    run.get("next-unchecked").fire("click");
+    assert.equal(label(), "Item b", "Next skips checked and not-due items");
+    assert(run.document.activeElement.className.includes("item-target"), "the item Next moved to is highlighted");
+    run.get("next-unchecked").fire("click");
+    assert.equal(label(), "Item d", "Next continues after the focused item");
+    run.get("next-unchecked").fire("click");
+    assert.equal(label(), "Item b", "Next wraps to the start");
+    findAction(items()[1], "pass").fire("click");
+    assert(!items()[1].className.includes("item-target"), "recording a check ends the highlight");
+    run.get("jump-sections").fire("click");
+    assert.equal(run.get("jump-panel").hidden, false); assert.equal(run.get("jump-sections").getAttribute("aria-expanded"), "true");
+    const jump = run.get("jump-list").children[0].children[0];
+    assert.equal(jump.textContent, "Driver-side exterior compartment2 still due");
+    jump.fire("click");
+    assert.equal(run.get("jump-panel").hidden, true, "choosing a section closes the panel");
+    assert.equal(run.document.activeElement, items()[0], "a section jump moves to its first item");
+    run.context.testUI.setRows(["a", "b", "c", "d"].map(id => make(id, "SATISFIED")));
+    run.context.testUI.setGroups([{...group, checked: 4, due: 0, overdue: 0, not_due: 0}]); run.context.testUI.render();
+    assert.equal(run.get("checklist-progress-text").textContent, "4 of 4 checked · all done");
+    run.get("next-unchecked").fire("click");
+    assert.equal(run.get("checklist-bar-status").textContent, "Every due item is checked.");
+  }
+  {
+    // Needs Attention Only can hide due items; the bar says so instead of claiming all are done.
+    const run = checklist("OPEN", {needs_attention_only: true});
+    run.context.testUI.setRows([{...row, obligation_state: "SATISFIED"}]);
+    run.context.testUI.setGroups([{key: "vehicle", label: "Vehicle-wide checks", total: 3, checked: 1, due: 2, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0}]);
+    run.context.testUI.render(); run.get("next-unchecked").fire("click");
+    assert(run.get("checklist-bar-status").textContent.includes("Turn off Needs Attention Only"));
+  }
+  {
+    // Verification has no bar: its controls are never wired.
+    const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency", session_id: undefined});
+    assert.equal(run.get("next-unchecked").listeners.click, undefined);
+    assert.equal(run.get("jump-sections").listeners.click, undefined);
+  }
+  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, checklist bar progress and Next unchecked item, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
