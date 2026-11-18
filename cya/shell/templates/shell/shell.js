@@ -170,6 +170,74 @@
       toastTimer = setTimeout(function () { toastNode.textContent = ""; }, 250);
     }, 3000);
   }
+  // Keyboard shortcuts (issue #194). "?" lists them, "/" goes to the page's search box, "G" then a
+  // letter goes to a place, and a page may offer its own (data-shortcut-key, e.g. N on a checklist).
+  // They never fire while typing, with Ctrl, Alt or Cmd held, or while a dialog is open, and the list
+  // has an off switch (WCAG 2.1.4), remembered on this device.
+  var shortcutsDialog = document.getElementById("shortcuts-dialog");
+  if (shortcutsDialog) {
+    var shortcutsKey = "cya.shortcuts", shortcutsOn = true, pendingGo = 0, shortcutsOpener = null;
+    var enabledBox = document.getElementById("shortcuts-enabled");
+    try { shortcutsOn = window.localStorage.getItem(shortcutsKey) !== "off"; } catch (_error) { /* storage is optional */ }
+    var applyShortcuts = function () {
+      document.documentElement.classList.toggle("shortcuts-off", !shortcutsOn);
+      enabledBox.checked = shortcutsOn;
+    };
+    applyShortcuts();
+    enabledBox.addEventListener("change", function () {
+      shortcutsOn = enabledBox.checked;
+      try { window.localStorage.setItem(shortcutsKey, shortcutsOn ? "on" : "off"); } catch (_error) { /* storage is optional */ }
+      applyShortcuts();
+    });
+    var openShortcuts = function () {
+      shortcutsOpener = document.activeElement;
+      if (typeof shortcutsDialog.showModal === "function") { shortcutsDialog.showModal(); } else { shortcutsDialog.setAttribute("open", ""); }
+    };
+    // The browser returns focus when a modal dialog closes. Step in only when focus was lost to the
+    // page (the opener was hidden, as when the list was opened from the More panel), never taking it
+    // from where the person has already moved on to.
+    shortcutsDialog.addEventListener("close", function () {
+      var lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) {
+        var target = shortcutsOpener && shortcutsOpener.getClientRects().length ? shortcutsOpener : (more && !more.hidden ? more : null);
+        if (target) { target.focus(); }
+      }
+      shortcutsOpener = null;
+    });
+    document.getElementById("shortcuts-close").addEventListener("click", function () { shortcutsDialog.close(); });
+    var shortcutsOpen = document.getElementById("shortcuts-open");
+    if (shortcutsOpen) {
+      shortcutsOpen.addEventListener("click", function () {
+        if (more && !wideNav.matches) { setMore(false); }
+        openShortcuts();
+      });
+    }
+    var typing = function (node) {
+      return !!node && (node.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName));
+    };
+    var shown = function (node) { return !!node && node.getClientRects().length > 0 && !node.disabled; };
+    document.addEventListener("keydown", function (event) {
+      if (!shortcutsOn || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) { return; }
+      if (typing(event.target) || document.querySelector("dialog[open]")) { pendingGo = 0; return; }
+      var key = event.key.length === 1 ? event.key.toLowerCase() : "";
+      if (key === "?") { event.preventDefault(); openShortcuts(); return; }
+      if (key === "/") {
+        var search = document.querySelector('main input[type="search"]');
+        if (shown(search)) { event.preventDefault(); search.focus(); }
+        return;
+      }
+      if (!/^[a-z]$/.test(key)) { pendingGo = 0; return; }
+      if (pendingGo && Date.now() - pendingGo < 1500) {
+        pendingGo = 0;
+        var place = document.querySelector('[data-shortcut-go="' + key + '"]');
+        if (place) { event.preventDefault(); place.click(); }
+        return;
+      }
+      if (key === "g") { pendingGo = Date.now(); event.preventDefault(); return; }
+      var action = document.querySelector('[data-shortcut-key="' + key + '"]');
+      if (shown(action)) { event.preventDefault(); action.click(); }
+    });
+  }
   // Feature code calls cyaShell.setSaveState(element, "pending" | "saved" | "failed").
   // Unknown states are shown as failed: an unconfirmed entry is never shown as saved.
   window.cyaShell = {

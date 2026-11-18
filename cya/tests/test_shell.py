@@ -110,7 +110,7 @@ class NavigationTests(ShellTestCase):
         nav = self.nav(response)
         return (
             re.findall(r'<span class="app-nav-label">([^<]+)</span>', nav),
-            re.findall(r"</svg><span>([^<]+)</span></a>", nav),
+            re.findall(r"</svg><span>([^<]+)</span>(?:<kbd [^>]*>[^<]*</kbd>)?</a>", nav),
         )
 
     def test_each_role_sees_the_same_tabs_and_its_more_items(self):
@@ -135,7 +135,7 @@ class NavigationTests(ShellTestCase):
             with self.subTest(role=role):
                 client = self.client_for(self.make_user(str(index), [role]))
                 self.assertRegex(
-                    self.nav(client.get("/")), rf'<a href="{url}">.*?<span>Kits</span>'
+                    self.nav(client.get("/")), rf'<a href="{url}"[^>]*>.*?<span>Kits</span>'
                 )
 
     def test_legacy_emt_constant_aliases_crew(self):
@@ -160,7 +160,7 @@ class NavigationTests(ShellTestCase):
                 self.assertEqual(nav.count('aria-current="page"'), 1)
                 self.assertRegex(
                     nav,
-                    r'aria-current="page"><svg [^>]*aria-hidden="true".*?</svg>'
+                    r'aria-current="page"[^>]*><svg [^>]*aria-hidden="true".*?</svg>'
                     rf'<span class="app-nav-label">{label}</span>',
                 )
 
@@ -171,9 +171,9 @@ class NavigationTests(ShellTestCase):
         # The visible More button tells assistive technology the current page is in its group.
         more = re.search(r'<button id="app-nav-more".*?>', nav).group(0)
         self.assertIn('aria-current="true"', more)
-        self.assertRegex(nav, r'<a href="/administration/" aria-current="page">')
+        self.assertRegex(nav, r'<a href="/administration/" aria-current="page"[^>]*>')
         nav = self.nav(client.get("/administration/kits/"))
-        self.assertRegex(nav, r'<a href="/administration/kits/" aria-current="page">')
+        self.assertRegex(nav, r'<a href="/administration/kits/" aria-current="page"[^>]*>')
         self.assertNotRegex(nav, r'<a href="/administration/" aria-current')
         nav = self.nav(client.get("/inspection/"))
         self.assertNotIn("is-current", nav)
