@@ -393,6 +393,20 @@ class SortableTableTemplateTests(TestCase):
             self.assertIn(marker, js)
 
 
+class TapFeedbackTests(TestCase):
+    """Issue #194 item 8: the shell's Saved toast and pressed state."""
+
+    def test_toast_is_one_status_region_that_never_takes_focus(self):
+        js = render_to_string("shell/shell.js")
+        for marker in ('toastNode.setAttribute("role", "status")', "toast: showToast", 'options.announce === false'):
+            self.assertIn(marker, js)
+        self.assertNotIn("toastNode.focus", js)
+        css = render_to_string("shell/shell.css")
+        self.assertIn("pointer-events: none", css)
+        self.assertIn("animation: none !important", css)
+        self.assertIn(".button:active:not(:disabled)", css)
+
+
 class SaveStateIndicatorTests(TestCase):
     STATES = {
         "pending": ("Saving", "save-state-pending"),

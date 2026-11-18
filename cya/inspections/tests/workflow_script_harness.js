@@ -72,6 +72,7 @@ function environment(config, forms = []) {
       toUtc(text) { return new Date(text + "Z").toISOString(); },
       formatUtc(text) { const date = new Date(text); return isNaN(date) ? "" : date.toISOString(); },
     },
+    cyaShell: {toasts: [], toast(text, options) { this.toasts.push({text, announce: !(options && options.announce === false)}); }},
     localStorage: {getItem(key) { return key.endsWith(":user:session") ? JSON.stringify({version: 1, mode: "FLAT"}) : null; }, setItem() {}},
     scrollBy(_x, y) { this.scrollY += y; }};
   const document = {
@@ -229,8 +230,11 @@ function generic(kind) {
     response(posted, 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "FAILED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     let saved = findClass(item(), "save-state");
     assert(saved.className.includes("save-state-saved")); assert(saved.textContent.startsWith("✓Saved: Fail."), saved.textContent);
-    assert(saved.className.includes("visually-hidden"), "the Saved line is announced but not shown; the button shows the result");
-    assert.equal(saved.getAttribute("role"), "status");
+    assert(saved.className.includes("visually-hidden"), "the Saved line is readable but not shown; the button shows the result");
+    // Issue #194: the shell's toast announces the save once; the rebuilt line is not a second live region.
+    assert.equal(saved.getAttribute("role"), null);
+    assert.deepEqual(run.window.cyaShell.toasts, [{text: "Saved: Fail for Portable suction unit (Airway response kit A).", announce: true}]);
+    assert(findAction(item(), "failed").children[0].className.includes("outcome-mark-new"), "the fresh check mark pops once");
     assert.deepEqual(marked(item()), ["failed"], "the acknowledged Fail is marked on its button");
     const fail = findAction(item(), "failed");
     assert.equal(fail.textContent, "✓ Fail"); assert.equal(fail.children[0].getAttribute("aria-hidden"), "true");
@@ -735,6 +739,7 @@ function generic(kind) {
     });
     response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T16:00:00Z"}}); await tick();
     assert(run.get("odometer-state").querySelector(".save-state-text").textContent.includes("Recorded"), "the server acknowledgement is shown after recording");
+    assert.deepEqual(run.window.cyaShell.toasts, [{text: "Readings saved.", announce: false}], "the readings line already announces; the toast is visual");
   }
   {
     // Issue 37: a 401 from the verification re-read means signed out. Stop reloading, keep the

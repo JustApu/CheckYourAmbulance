@@ -144,6 +144,19 @@ Phones can add the app to the home screen. It then opens full screen with its ow
 - **No service worker.** The app stays online-only (SPEC).
 - **Changing an icon.** Give the new file a new name: browsers keep the old one for a year.
 
+## Feedback on every tap (issue #194)
+
+- **Pressed state.** Buttons, area cards, section buttons, tabs, sort headers and vehicle cards shift down 1 px and show an inset shadow while pressed. A plain button also takes the info background, and a primary button a darker fill.
+- **Saved toast.** `cyaShell.toast(text, options)` shows a short message near the bottom of the screen for about three seconds.
+  - It is one `role="status"` region, created when the page loads, so screen readers announce what is put in it later.
+  - It never takes focus and never blocks a tap (`pointer-events: none`).
+  - It sits above the phone tab bar, and above the checklist bar while that is shown.
+  - Call it only after the server has confirmed a save; there is no undo for audited records.
+  - `{announce: false}` keeps it visual only. Use this when the page's own status line already announces the save, as the readings form, problem workflows and status requests do.
+- **Checklist saves.** A saved check shows a toast such as "Saved: Pass for Oxygen." That toast is the announcement: the item's own "Saved: …" line is rebuilt on every render, so it stays readable on the item but is no longer a live region. Pending, not-saved and unconfirmed lines are still announced from the item.
+- **Check mark.** The ✓ on the recorded result's button pops once when this person's save is acknowledged. It does not move under `prefers-reduced-motion`; the shell also turns off all animation there.
+- **Not covered.** Server-rendered administration forms still confirm on the next page. They do not show a toast.
+
 ## Stylesheet and script are inline
 
 CSS and JS are included in the page (`shell.css`, `shell.js`) so the shell needs no static-file serving, which is a deployment decision not yet made (SPEC §17). If a Content-Security-Policy is added later, these need a nonce or a move to served files.

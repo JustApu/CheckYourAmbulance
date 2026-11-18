@@ -140,6 +140,14 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .jump-label { overflow-wrap: anywhere; }
 .jump-count { flex: none; color: var(--muted); }
 .item-target { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* A check mark that pops once when this person's result saves (#194); still under reduced motion. */
+.outcome-mark { display: inline-block; white-space: pre; }
+.outcome-mark-new { animation: cya-saved-pop .35s ease-out; }
+@keyframes cya-saved-pop { 0% { transform: scale(.3); opacity: 0; } 60% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .outcome-mark-new { animation: none; } }
+/* The toast rises above the checklist bar while the bar is shown. */
+html:has(#checklist-bar:not([hidden])) .toast { bottom: calc(8rem + env(safe-area-inset-bottom)); }
+@media (max-width: 47.999rem) { .js:has(#checklist-bar:not([hidden])) .has-app-nav .toast { bottom: calc(57px + 8rem + env(safe-area-inset-bottom)); } }
 html:has(#checklist-bar:not([hidden])) { scroll-padding-bottom: 8rem; }
 @media (max-width: 47.999rem) {
   /* Flush with the tab bar: 56px tabs plus its 1px top border, above the safe area. */

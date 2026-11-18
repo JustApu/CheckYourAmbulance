@@ -147,9 +147,33 @@
     applyTheme(savedTheme, false);
     themeSelect.addEventListener("change", function () { applyTheme(themeSelect.value, true); });
   }
+  // Saved toast (issue #194). One role="status" region, created at load so that screen readers
+  // announce later changes. It never takes focus and never blocks a tap (pointer-events: none),
+  // and it fades after a few seconds. Call it only after the server has confirmed the save.
+  // {announce: false} keeps it visual when the page's own status line already says the same.
+  var toastNode = document.createElement("div"), toastTimer = null;
+  toastNode.className = "toast";
+  toastNode.setAttribute("role", "status");
+  document.body.appendChild(toastNode);
+  function showToast(text, options) {
+    if (options && options.announce === false) { toastNode.setAttribute("aria-hidden", "true"); }
+    else { toastNode.removeAttribute("aria-hidden"); }
+    toastNode.textContent = "";
+    var icon = document.createElement("span");
+    icon.className = "toast-icon"; icon.setAttribute("aria-hidden", "true"); icon.textContent = "\u2713";
+    toastNode.appendChild(icon);
+    toastNode.appendChild(document.createTextNode(text));
+    toastNode.className = "toast is-shown";
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toastNode.className = "toast";
+      toastTimer = setTimeout(function () { toastNode.textContent = ""; }, 250);
+    }, 3000);
+  }
   // Feature code calls cyaShell.setSaveState(element, "pending" | "saved" | "failed").
   // Unknown states are shown as failed: an unconfirmed entry is never shown as saved.
   window.cyaShell = {
+    toast: showToast,
     setSaveState: function (el, state) {
       if (!labels[state]) { state = "failed"; }
       el.className = "save-state save-state-" + state;

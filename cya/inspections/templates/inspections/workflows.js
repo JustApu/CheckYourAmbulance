@@ -1,5 +1,7 @@
 (function () {
   "use strict";
+  // The shell's Saved toast (issue #194); absent when the shell script is not on the page.
+  function toast(text, options) { if (window.cyaShell && window.cyaShell.toast) { window.cyaShell.toast(text, options); } }
   var configNode = document.getElementById("workflow-config");
   var config = configNode ? JSON.parse(configNode.textContent) : {};
   function uuid4() {
@@ -231,6 +233,7 @@
         busy = false;
         if (answer.kind === "saved") {
           finished = true; message.textContent = "Saved. View or refresh history for the current state.";
+          toast("Saved.", {announce: false});
           button.textContent = "Saved"; form.querySelector(".workflow-refresh").hidden = false;
         } else if (answer.kind === "failed") {
           request = null; controls(form, false, false); button.textContent = original;

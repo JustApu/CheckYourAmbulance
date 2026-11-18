@@ -1,5 +1,7 @@
 (function () {
   "use strict";
+  // The shell's Saved toast (issue #194); absent when the shell script is not on the page.
+  function toast(text, options) { if (window.cyaShell && window.cyaShell.toast) { window.cyaShell.toast(text, options); } }
   var config = JSON.parse(document.getElementById("status-config").textContent);
   var live = document.getElementById("status-live");
   var banner = document.getElementById("status-live-banner");
@@ -146,6 +148,7 @@
             request = null; form.unsettled = false; controls(form, false, false); button.textContent = original;
             if (form.reset) { form.reset(); }
             message.textContent = "Saved.";
+            toast("Saved.", {announce: false});
             refresh(true);
           } else if (answer.kind === "failed") {
             request = null; form.unsettled = false; controls(form, false, false); button.textContent = original;

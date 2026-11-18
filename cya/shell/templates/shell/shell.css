@@ -240,4 +240,14 @@ th[aria-sort="descending"] .sort-button::after { content: "\25BC" / ""; color: v
   .js .has-app-nav .app-nav-more-panel { position: absolute; left: 0; right: 0; bottom: 100%; max-height: calc(100vh - 80px); overflow-y: auto; background: var(--bg); border-top: 1px solid var(--line-soft); box-shadow: 0 -4px 12px rgb(0 0 0 / .14); }
   .js:has(.has-app-nav) { scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+/* Feedback on every tap (#194): a visible pressed state, and the Saved toast. */
+.button:active:not(:disabled), .area-card:active, .jump-button:active, .app-nav-link:active, .sort-button:active, .vehicle-link:active { transform: translateY(1px); box-shadow: inset 0 3px 0 rgb(0 0 0 / .2); }
+.button:active:not(:disabled):not(.primary) { background: var(--info-bg); }
+.button.primary:active:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.toast { position: fixed; left: 50%; bottom: calc(1rem + env(safe-area-inset-bottom)); z-index: 30; display: flex; align-items: center; gap: .5rem; max-width: min(calc(100vw - 2rem), 28rem); padding: .75rem 1.25rem; color: var(--accent-fg); background: var(--accent); border-radius: var(--radius-card); box-shadow: 0 4px 16px rgb(0 0 0 / .25); font-weight: 700; pointer-events: none; opacity: 0; transform: translate(-50%, 1rem); transition: opacity .2s ease-out, transform .2s ease-out; }
+.toast.is-shown { opacity: 1; transform: translate(-50%, 0); }
+.toast-icon { font-size: 1.25rem; line-height: 1; }
+@media (max-width: 47.999rem) { .js .has-app-nav .toast { bottom: calc(57px + 1rem + env(safe-area-inset-bottom)); } }
+@media (forced-colors: active) { .toast { color: CanvasText; background: Canvas; border: 2px solid CanvasText; } }
+@media print { .toast { display: none; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
