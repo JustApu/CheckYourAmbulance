@@ -353,6 +353,11 @@ class PageTests(CrewUiCase):
         self.assertIn('id="layout-flat"', html)
         self.assertIn('id="area-overview"', html)
         self.assertNotIn('id="reopen-session"', html)
+        # Issue #194: the long-checklist bar (progress, Next unchecked item, jump to a section).
+        self.assertIn('id="checklist-bar"', html)
+        self.assertIn(">Next unchecked item</button>", html)
+        self.assertIn('aria-controls="jump-panel"', html)
+        self.assertIn('<progress id="checklist-progress"', html)
         # An Unconfirmed save may have committed, so the live-loss banner must not say that
         # anything not marked Saved was not recorded (REC-4).
         banner = re.search(r'<div id="live-banner".*?</div>', html, re.S).group(0)
@@ -393,6 +398,7 @@ class PageTests(CrewUiCase):
         self.assertEqual(self.config(page)["state"], "CLOSED")
         self.assertIn('id="reopen-session"', html)
         self.assertNotIn('id="odometer-form"', html)
+        self.assertNotIn('id="checklist-bar"', html)
 
     def test_the_page_uses_the_saved_view_preference(self):
         session_id = self.open().json()["result"]["session_id"]

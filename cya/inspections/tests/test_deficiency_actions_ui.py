@@ -230,6 +230,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         screen = self.client.get(f"/problems/{pk}/verification/")
         self.assertEqual(screen.status_code, 200)
         self.assertNotContains(screen, 'id="odometer-form"')
+        self.assertNotContains(screen, 'id="checklist-bar"')
         config = self.config(screen)
         self.assertEqual(config["verification_for_deficiency_id"], pk)
         self.assertEqual(config["time_zone"], self.org.station_zone)
