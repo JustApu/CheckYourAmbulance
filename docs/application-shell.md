@@ -189,6 +189,10 @@ For mouse-and-keyboard use, mostly supervisors and administrators on laptops and
   - A page offers its own shortcut with `data-shortcut-key` on a visible control; the shell presses it.
 - **Focus.** Closing the list leaves focus where the browser returns it. The shell only steps in when focus would otherwise be lost to the page, as when the list was opened from the More panel.
 
+## Focus on date and time fields (issue #194)
+
+Tab moves through the day, month, year and time parts of a date or time field, and Chrome stops matching `:focus-visible` once focus is inside them, so the shared focus ring vanished there. The shell shows the same ring on `:focus` for `date`, `time`, `datetime-local`, `month` and `week` inputs, with `Highlight` in forced colors. Found by the wide-screen evidence pass on fleet readiness's "as of" field; the browser smoke test covers it.
+
 ## Stylesheet and script are inline
 
 CSS and JS are included in the page (`shell.css`, `shell.js`) so the shell needs no static-file serving, which is a deployment decision not yet made (SPEC §17). If a Content-Security-Policy is added later, these need a nonce or a move to served files.
