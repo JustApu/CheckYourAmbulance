@@ -35,4 +35,5 @@ def vehicle_seals(request, vehicle_id):
     }
     return render(request, "seals/vehicle.html", {"vehicle": vehicle, "config": config})
 
+
 # Measurement-only change for issue #158 (option 2 timing); never merged.
