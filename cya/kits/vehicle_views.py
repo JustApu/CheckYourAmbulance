@@ -171,6 +171,14 @@ def template(request, fmt):
         return deny_section(request, user, roles, "VIEW_VEHICLE_FILES")
     if fmt not in vehicle_files.FORMATS:
         return HttpResponse("Unknown format.", status=404, content_type="text/plain")
+    from cya.checklists.ownership import cutover_at
+
+    if cutover_at(str(user.organization_id)) is not None:
+        # SPEC 5.0.0 IMP-7: after the cutover a vehicle file carries its own checklists.
+        from cya.kits import vehicle_files_v2
+
+        data = vehicle_files_v2.render(vehicle_files_v2.TEMPLATE_VEHICLE, fmt)
+        return _download(data, fmt, "vehicle-template")
     return _download(vehicle_files.template(fmt), fmt, "vehicle-template")
 
 

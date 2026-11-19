@@ -34,6 +34,7 @@ from cya.checklists.models import (
     KINDS,
     ChecklistItemDef,
     ChecklistTemplate,
+    ChecklistVersion,
     Compartment,
     Item,
     KitInstance,
@@ -68,6 +69,7 @@ from cya.kits.models import (
     PositionKey,
     VehicleKitListVersion,
     VehicleKitRequirement,
+    VehiclePositionKey,
 )
 from cya.obligations.models import RequirementBinding
 from cya.schedules.models import ScheduleRule
@@ -102,6 +104,10 @@ class VehiclePlan:
     new_kits: list = field(default_factory=list)  # (definition, slot, how many)
     binding_slot: str | None = None
     kit_lines_in_force: dict = field(default_factory=dict)  # (definition, slot) -> line
+    # SPEC 5.0.0, after the cutover: positions use the vehicle's own keys and the checklist part
+    # is the vehicle's own checklists (cya.kits.vehicle_import_v2.plan_checklists).
+    per_vehicle: bool = False
+    checklists: list = field(default_factory=list)
 
     def summary(self):
         return {
@@ -115,6 +121,19 @@ class VehiclePlan:
             "kit_list_changed": self.kit_list_changed,
             "kits_added": sum(n for _d, _s, n in self.new_kits),
             "binding_slot": self.binding_slot,
+            # Only after the cutover, so an earlier import keeps its summary unchanged.
+            **(
+                {
+                    "checklists_created": sum(c["existing"] is None for c in self.checklists),
+                    "checklist_drafts": sum(c["changed"] for c in self.checklists),
+                    "assignments_added": sum(len(c["assign"]) for c in self.checklists),
+                    "not_placed_items": sum(
+                        1 for c in self.checklists for i in c["items"] if i[2] is None
+                    ),
+                }
+                if self.per_vehicle
+                else {}
+            ),
         }
 
 
@@ -232,6 +251,18 @@ def build_plan(organization_id, vehicle, source=""):
     if found is not None and not found.active:
         errors.append("vin: that vehicle is inactive; a remount is a new vehicle with a new VIN")
 
+    # SPEC 5.0.0: after the cutover a file carries the vehicle's own checklists (schema 2), and a
+    # file from before (schema 1) takes the versioned legacy path; before it, only schema 1.
+    from cya.checklists.ownership import cutover_at
+    from cya.kits import vehicle_import_v2
+
+    plan.per_vehicle = cutover_at(org) is not None
+    if vehicle.get("schema_version", 1) == 2 and not plan.per_vehicle:
+        errors.append("file: vehicle files with checklists are imported after the cutover")
+        return plan
+    if plan.per_vehicle and vehicle.get("schema_version", 1) != 2:
+        vehicle = vehicle_import_v2.legacy_to_v2(org, vehicle, errors)
+
     # Template and the version in force (IMP-7).
     template_key = vehicle.get("template")
     template = (
@@ -239,7 +270,9 @@ def build_plan(organization_id, vehicle, source=""):
         if isinstance(template_key, str)
         else None
     )
-    if template is None or not template.active:
+    if plan.per_vehicle:
+        template = None
+    elif template is None or not template.active:
         errors.append("template: no active template has that key")
     else:
         plan.template = template
@@ -255,9 +288,20 @@ def build_plan(organization_id, vehicle, source=""):
     # Positions (IMP-6).
     slots = {kind: {} for kind in KIND_OF.values()}  # kind -> key -> slot (None: new)
     for kind in KIND_OF.values():
-        for slot, key in PositionKey.objects.filter(organization_id=org, kind=kind).values_list(
-            "stable_slot_id", "key"
-        ):
+        if plan.per_vehicle:
+            # SPEC 5.0.0 IMP-6: a key names a position of this vehicle only.
+            keyed = (
+                VehiclePositionKey.objects.filter(vehicle=found, kind=kind).values_list(
+                    "stable_slot_id", "key"
+                )
+                if found
+                else []
+            )
+        else:
+            keyed = PositionKey.objects.filter(organization_id=org, kind=kind).values_list(
+                "stable_slot_id", "key"
+            )
+        for slot, key in keyed:
             slots[kind][key] = str(slot)
     # Each position's newest revision: a relabel appends after it and keeps its designation,
     # and a revision scheduled for later is refused rather than overtaken (as designations do).
@@ -443,6 +487,22 @@ def build_plan(organization_id, vehicle, source=""):
                 "fields": fields,
             }
         )
+    if plan.per_vehicle:
+        context = vehicle_import_v2._Context(
+            org, found, now, position, slots, slot_of, by_label, errors
+        )
+        all_labels = [
+            e.get("item")
+            for c in vehicle.get("checklists") or []
+            for e in c.get("items") or []
+            if isinstance(e.get("item"), str)
+        ]
+        context.by_label = _active_items_by_label(org, all_labels)
+        by_label = context.by_label
+        plan.checklists, plan.new_items = vehicle_import_v2.plan_checklists(
+            context, vehicle.get("checklists") or [], _check_item
+        )
+        _refuse_retired_assignments(org, found, plan.checklists, retired, now, errors)
     if plan.item_changes and override is not None:
         changed = {c["item_id"] for c in plan.item_changes if c["item_id"]}
         plan.carried_entries = [
@@ -612,9 +672,46 @@ def build_plan(organization_id, vehicle, source=""):
             )
             if found
             else [],
+            # Only after the cutover: the vehicle's checklists and their versions.
+            **(
+                {
+                    "checklists": sorted(
+                        ChecklistVersion.objects.filter(template__vehicle=found).values_list(
+                            "template_id", "pk"
+                        )
+                    )
+                    if found
+                    else []
+                }
+                if plan.per_vehicle
+                else {}
+            ),
         }
     )
     return plan
+
+
+def _refuse_retired_assignments(org, found, checklists, retired, now, errors):
+    """SPEC 4.8 CFG-2: an assignment never makes a retired position required again."""
+    if found is None:
+        return
+    from cya.kits.positions import template_slot_rows
+
+    for entry in checklists:
+        if entry["existing"] is None or not entry["assign"]:
+            continue
+        for kind, row_ids in template_slot_rows(org, entry["existing"].pk, now).items():
+            placed = set(
+                SLOT_MODEL[kind]
+                .objects.filter(pk__in=row_ids)
+                .values_list("stable_slot_id", flat=True)
+            )
+            if {str(s) for s in placed} & retired[kind]:
+                errors.append(
+                    f"checklist {entry['label']!r}: it places items in a position retired on "
+                    "this vehicle, so it cannot be assigned"
+                )
+                break
 
 
 def preview_vehicle_file(organization_id, data, fmt):
@@ -683,7 +780,17 @@ def _apply(org, plan, receipt, current, vehicle_id, kit_ids):
             # and its display order (CFG-2); a retired position never reaches here.
             display_order=p["row"].display_order if p["row"] else None,
         )
-        if p["action"] == "NEW_POSITION":
+        if p["action"] == "NEW_POSITION" and plan.per_vehicle:
+            VehiclePositionKey.objects.create(
+                id=new_id(),
+                organization_id=org,
+                vehicle=vehicle,
+                kind=p["kind"],
+                stable_slot_id=slot,
+                key=p["key"],
+                **evidence,
+            )
+        elif p["action"] == "NEW_POSITION":
             PositionKey.objects.create(
                 id=new_id(),
                 organization_id=org,
@@ -694,11 +801,12 @@ def _apply(org, plan, receipt, current, vehicle_id, kit_ids):
             )
         rows[(p["kind"], p["key"])] = row
     for kind in KIND_OF.values():
-        keyed = dict(
-            PositionKey.objects.filter(organization_id=org, kind=kind).values_list(
-                "key", "stable_slot_id"
-            )
+        keys = (
+            VehiclePositionKey.objects.filter(vehicle=vehicle, kind=kind)
+            if plan.per_vehicle
+            else PositionKey.objects.filter(organization_id=org, kind=kind)
         )
+        keyed = dict(keys.values_list("key", "stable_slot_id"))
         for key, slot in keyed.items():
             if (kind, key) not in rows:
                 row = (
@@ -843,6 +951,11 @@ def _apply(org, plan, receipt, current, vehicle_id, kit_ids):
                 id=new_id(), organization_id=org, kit=kit, definition=definition, **evidence
             )
 
+    if plan.per_vehicle:
+        from cya.kits import vehicle_import_v2
+
+        vehicle_import_v2.apply_checklists(org, vehicle, plan.checklists, rows, created, evidence)
+
     if plan.binding_slot is not None:
         prior = (
             RequirementBinding.objects.filter(
@@ -958,6 +1071,10 @@ def vehicle_file(organization_id, vehicle_id, template_id=None):
         raise ImportRefused(["vehicle: not found"])
     if vehicle.key is None:
         raise ImportRefused(["vehicle: set its VIN before exporting it"])
+    from cya.checklists.ownership import cutover_at
+
+    if cutover_at(org) is not None:
+        return _vehicle_file_v2(org, vehicle, now)
     latest = {}
     for binding in RequirementBinding.objects.filter(organization_id=org, vehicle=vehicle).order_by(
         "template_id", "slot", "-revision"
@@ -1060,6 +1177,64 @@ def vehicle_file(organization_id, vehicle_id, template_id=None):
     }
 
 
+def _vehicle_file_v2(org, vehicle, now):
+    """The vehicle in schema 2 (SPEC 5.0.0 IMP-7): its own positions, checklists and kit list."""
+    from cya.kits import vehicle_files_v2, vehicle_import_v2
+
+    keys = {
+        kind: {
+            str(s): k
+            for s, k in VehiclePositionKey.objects.filter(vehicle=vehicle, kind=kind).values_list(
+                "stable_slot_id", "key"
+            )
+        }
+        for kind in KIND_OF.values()
+    }
+    positions, key_of_row = {}, {}
+    for name, kind in KIND_OF.items():
+        positions[name] = []
+        current = {s: r for s, r in _latest_rows(vehicle, SLOT_MODEL[kind], now).items()}
+        for slot, row in sorted(
+            ((s, r) for s, r in current.items() if not r.retired),
+            key=lambda x: (x[1].display_order is None, x[1].display_order or 0, x[1].label),
+        ):
+            if slot not in keys[kind]:
+                raise ImportRefused(
+                    [f"{name}: set the key of position {row.label!r} before exporting"]
+                )
+            positions[name].append({"key": keys[kind][slot], "label": row.label})
+        for pk, slot in (
+            SLOT_MODEL[kind].objects.filter(vehicle=vehicle).values_list("pk", "stable_slot_id")
+        ):
+            if str(slot) in keys[kind]:
+                key_of_row[str(pk)] = keys[kind][str(slot)]
+    kits = []
+    in_force = kit_list_effective_at(org, str(vehicle.pk), now)
+    if in_force is not None:
+        for line in (
+            VehicleKitRequirement.objects.filter(version=in_force)
+            .select_related("definition", "compartment")
+            .order_by("display_order", "id")
+        ):
+            kits.append(
+                {
+                    "kit": line.definition.key,
+                    "compartment": keys["COMPARTMENT"].get(str(line.compartment.stable_slot_id)),
+                    "count": line.required_count,
+                }
+            )
+    return {
+        "schema_version": vehicle_files_v2.SCHEMA_VERSION,
+        "vin": vehicle.key,
+        "display_name": vehicle.display_name,
+        "number": vehicle.number,
+        "compartments": positions["compartments"],
+        "systems": positions["systems"],
+        "checklists": vehicle_import_v2.export_checklists(org, vehicle, now, key_of_row),
+        "kits": kits,
+    }
+
+
 def audited_vehicle_export(*, vehicle_id, fmt, template_id=None, **context):
     """Export one vehicle as an audited, write-free command (IMP-4, RPT-2).
 
@@ -1080,7 +1255,9 @@ def audited_vehicle_export(*, vehicle_id, fmt, template_id=None, **context):
             "file_type": vehicle_files.FILE_TYPE,
             "format": fmt,
             "vehicle_id": vehicle_id,
-            "items": len(vehicle["items"]),
+            "items": len(vehicle["items"])
+            if "items" in vehicle
+            else sum(len(c["items"]) for c in vehicle["checklists"]),
             "kits": len(vehicle["kits"]),
         }
 
