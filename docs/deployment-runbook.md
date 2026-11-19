@@ -385,16 +385,25 @@ and runs after a host reboot. Failed runs of these jobs alert through [operation
   idempotent, and locks/replans each vehicle and due instant; failures produce a
   nonzero exit after reporting the failed units. If a run is missed longer than
   the configured lookback, increase `--lookback-hours` for the recovery run.
-- **Notifications:** when a sender is configured, run
+- **Notification delivery:** when a sender is configured, run
   `manage.py deliver_notifications --limit 50`; each pass covers every active
-  organization. Choose the delivery cadence to meet the approved operational
-  expectation, which is not specified by the current product rules. Prevent
+  organization. The host profiles run it every minute (`cya-notify-delivery`); the
+  product rules set no delivery cadence. Prevent
   overlapping delivery runs: SMTP can accept a message before its attempt row is
   written, so an overlapping/repeated attempt can send a duplicate. Check the
   printed `errors` and `collisions` counts even if the process exits successfully.
   If `CYA_NOTIFICATION_SENDER` is unset, the command refuses to run and email
-  intents remain queued. No current business event enqueues notifications; see
+  intents remain queued (in-app notices still appear); see
   [notification delivery](notifications.md) before enabling this timer.
+- **Overdue problem notices:** run `manage.py notify_overdue --limit 50` every
+  5 minutes (`cya-notify-overdue`). Each pass covers every active organization and
+  notifies each overdue deficiency once per governing deadline, so a late or
+  repeated pass sends nothing twice. It needs no sender: it writes notices, and
+  delivery emails them.
+- **Check-due notices:** run `manage.py notify_check_due --limit 50` every
+  5 minutes (`cya-notify-check-due`). It notifies each vehicle's crew once per due
+  instant (issue #202). Releases before issue #202 part 3 do not have the command;
+  the host profiles' unit skips the run on such a release instead of failing.
 - **Session cleanup:** run `manage.py close_inactive_sessions --limit 200` on an
   operator-selected cadence. It is idempotent and closes at most 200 oldest
   eligible sessions per pass; sessions are treated as closed after six idle
@@ -402,9 +411,10 @@ and runs after a host reboot. Failed runs of these jobs alert through [operation
 
 The scheduler must not make application startup depend on job success. Alert on
 missed or failed runs through the approved operational path; do not silently
-ignore nonzero exits or positive notification `errors`/`collisions`. The exact
-frequency for notification delivery and session cleanup is a deployment choice,
-not a new product default. See [obligation generation](obligation-generation.md),
+ignore nonzero exits or positive notification `errors`/`collisions`; the
+notification commands exit successfully when only some notices fail, so read
+those counts in the journal. The exact frequency for notification jobs and
+session cleanup is a deployment choice, not a new product default. See [obligation generation](obligation-generation.md),
 [notification delivery](notifications.md) and [session cleanup](inspection-sessions.md).
 
 ## Proxy and application service
@@ -543,7 +553,7 @@ application, its virtual environment or the database is down.
 - a full backup not completed within 26 hours, or binary-log shipping not completed within 20 minutes;
 - `mariadb-admin ping` failing;
 - 20 or more 5xx responses in the last 10 minutes of the nginx access log. Only the last 4 MB is read;
-- a watched job whose last run failed: obligations, sessions, both backups, the relay export;
+- a watched job whose last run failed: obligations, sessions, the three notification jobs, both backups, the relay export;
 - a missing host copy, or one more than 2 hours old;
 - from the probe host, the site unreachable.
 
@@ -773,8 +783,38 @@ package comes from Rocky's own repositories except Certbot (EPEL).
 9. **Recurring jobs.** Install the `cya-obligations` and `cya-sessions` service and timer
    units (the obligations unit names the organization) and `systemctl enable --now` both
    timers. A oneshot service never runs twice at once, so a late timer does not overlap.
-   Do not install a notification timer until a sender is configured: the delivery command
-   refuses to run without one.
+
+   The notification jobs are three more pairs, installed the same way. Each runs as `cya`
+   with `runtime.env`, the same sandboxing and a 5-minute start timeout; a failed run is
+   in the journal and the next tick runs again.
+
+   | Unit | Runs | Every |
+   |---|---|---|
+   | `cya-notify-overdue` | `notify_overdue --limit 50` | 5 minutes |
+   | `cya-notify-check-due` | `notify_check_due --limit 50`; skipped while the release lacks the command | 5 minutes |
+   | `cya-notify-delivery` | `deliver_notifications --limit 50` | minute |
+
+   ```sh
+   install -m 0644 cya-notify-*.service cya-notify-*.timer /etc/systemd/system/
+   systemctl daemon-reload
+   systemctl start cya-notify-overdue.service cya-notify-check-due.service   # one pass each now
+   systemctl status cya-notify-overdue.service cya-notify-check-due.service
+   systemctl enable --now cya-notify-overdue.timer cya-notify-check-due.timer
+   ```
+
+   Enable delivery only once `runtime.env` names a working `CYA_NOTIFICATION_SENDER`: the
+   command refuses to run without one, so its unit would fail every minute. Then run one
+   pass by hand, read its counts and enable the timer:
+
+   ```sh
+   systemctl start cya-notify-delivery.service
+   journalctl -u cya-notify-delivery.service -n 20 --no-pager   # sent=… errors=0 collisions=0
+   systemctl enable --now cya-notify-delivery.timer
+   ```
+
+   Check with `systemctl list-timers 'cya-*'`. Add the three services to the `jobs` in
+   `monitor.json` (the example lists them) so a failed run alerts. To pause one, use
+   `systemctl disable --now <name>.timer`.
 
 10. **Teardown.** Remove any temporary passwordless sudo rule and test credentials, and
     destroy the throwaway host and its certificate when the rehearsal is recorded.
