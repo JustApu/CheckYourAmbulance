@@ -213,7 +213,7 @@ class NavigationTests(ShellTestCase):
         self.assertEqual(
             titles["kits"], ["Kit definitions", "Kit lists", "Kit instances", "Kit library"]
         )
-        self.assertEqual(titles["system"], ["Outgoing mail"])
+        self.assertEqual(titles["system"], ["Outgoing mail", "Crew assignments"])
 
     def test_administration_hides_groups_with_no_page_for_the_role(self):
         html = (

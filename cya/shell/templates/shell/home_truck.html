@@ -1,0 +1,42 @@
+{# "Your truck" on Home (SPEC 15.4 ASG-5, ASG-7; issue #202). #}
+{% if home.truck.unavailable %}<p class="notice" role="status">Your truck assignment is unavailable right now.</p>
+{% else %}
+<section class="home-section home-wide panel home-truck" aria-labelledby="home-truck">
+  <h2 id="home-truck">Your truck</h2>
+  {% if crew_saved %}{% include "shell/save_state.html" with state="saved" %}<p role="status">{{ crew_saved }}</p>{% endif %}
+  {% if crew_error %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed. {{ crew_error }}</p></div></div>{% endif %}
+  {% if home.truck %}
+  <p>You're on <a href="{{ home.truck.url }}">{{ home.truck.vehicle }}</a> until {{ home.truck.until }}.</p>
+  {% if home.truck.ending_soon %}
+  <form method="post" action="{% url 'vehicle-crew' %}" class="crew-inline">
+    {% csrf_token %}
+    <input type="hidden" name="stage" value="extend"><input type="hidden" name="vehicle_id" value="{{ home.truck.vehicle_id }}">
+    <input type="hidden" name="operation_id" value="{{ home.truck.operation_id }}"><input type="hidden" name="next" value="home">
+    <label for="home-extend-until">Still on {{ home.truck.vehicle }}? Extend until</label>
+    <input id="home-extend-until" name="until" type="time" required>
+    <button type="submit" class="button">Extend</button>
+  </form>
+  {% endif %}
+  <form method="post" action="{% url 'vehicle-crew' %}" class="crew-inline">
+    {% csrf_token %}
+    <input type="hidden" name="stage" value="end"><input type="hidden" name="vehicle_id" value="{{ home.truck.vehicle_id }}">
+    <input type="hidden" name="operation_id" value="{{ home.truck.end_operation_id }}"><input type="hidden" name="next" value="home">
+    <button type="submit" class="button">I'm off this truck</button>
+  </form>
+  {% elif home.truck_choices and not home.truck_choices.unavailable %}
+  <form method="post" action="{% url 'vehicle-crew' %}" class="crew-form">
+    {% csrf_token %}
+    <input type="hidden" name="stage" value="assign"><input type="hidden" name="operation_id" value="{{ home.truck_operation_id }}"><input type="hidden" name="next" value="home">
+    <p class="muted">Which truck are you on? Anyone can still inspect any vehicle.</p>
+    <label for="home-truck-vehicle">Truck</label>
+    <select id="home-truck-vehicle" name="vehicle_id" required>
+      <option value="">Choose a truck</option>
+      {% for v in home.truck_choices %}<option value="{{ v.id }}">{{ v.display_name }}{% if v.number %} #{{ v.number }}{% endif %}</option>{% endfor %}
+    </select>
+    <label for="home-truck-until">Until (station time)</label>
+    <input id="home-truck-until" name="until" type="time" required>
+    <button type="submit" class="button">I'm on this truck</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}

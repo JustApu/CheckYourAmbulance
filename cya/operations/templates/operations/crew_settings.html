@@ -1,0 +1,14 @@
+{% extends "shell/base.html" %}
+{% block content %}
+<p><a href="{% url 'administration' %}">Administration</a> · Crew assignments</p>
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+<p>Crew members put themselves on a truck until a time they choose. This is the longest an assignment, or an extension, may run from the moment it is made. Nothing is ever carried forward on its own.</p>
+<form method="post" action="{% url 'crew-assignment-settings' %}" class="admin-form">
+  {% csrf_token %}
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <p><label for="max-hours">Longest assignment, in hours (1 to 168)</label><br>
+  <input id="max-hours" name="max_hours" type="number" min="1" max="168" step="1" size="4" value="{{ max_hours }}" required></p>
+  <p><button type="submit" class="button primary">Save</button></p>
+</form>
+{% endblock %}

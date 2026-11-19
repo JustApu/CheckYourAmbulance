@@ -76,14 +76,25 @@ Anything else is denied and audited, and nothing changes. `view_current_crew` (P
 - `assignment_history(organization_id, person_id=None, vehicle_id=None)`: events newest first. A vehicle's history includes moves off it. Callers check `view_vehicle_assignment_history`.
 - `assignment_limit_hours(organization_id)`: the current limit.
 
+## Screens (`cya.operations.crew_views`, issue #202 part 2)
+
+The four tabs are unchanged (owner, 2026-11-18), so crew lives where people already look. Every change is a plain form posted to `/status/crew/` (`vehicle-crew`), which runs the audited command and returns to the page it came from. Hiding a control is only a convenience: the command decides who may act.
+
+- **Times.** Each form takes an "until" time of day in station time (`HH:MM`). The assignment ends the next time the station clock reaches it, so an overnight shift is entered as its morning end (`until_instant`). The command still refuses a time more than the limit ahead. Times show as "18:00", or "Thu 06:00" when not today.
+- **Vehicles tab.**
+  - The list shows each vehicle's crew ("Crew: You, Sam" or "No crew assigned"); every role may see it (`view_current_crew`).
+  - A vehicle's page has a **Crew** section: who is on it until when, with Extend and End where the viewer may change that person, and "I'm on this truck", or "Move me here" when you are on another vehicle.
+  - Anyone on the vehicle, and Supervisors and Administrators, also get **Add someone**. Its list shows every active user, and anyone on another vehicle is labelled "(on Medic 4 until 18:00, moves them)", never hidden (ASG-2).
+  - Supervisors and Administrators see the last 20 events under **Crew history** (`view_vehicle_assignment_history`).
+- **Home.** A **Your truck** card for every role:
+  - with no assignment: "Which truck are you on?", with a truck and an until time;
+  - with one: "You're on Medic 7 until 18:00", an "I'm off this truck" button, and, from 30 minutes before the end, "Still on Medic 7? Extend until ..." (ASG-5).
+  - Your truck is listed first in Due today and in the supervisor vehicles table (ASG-7).
+- **Administration.** A **Crew assignments** page under System (`/administration/crew-assignments/`), for Administrators, sets the limit in whole hours from 1 to 168.
+
 ## Still to come in #202
 
-- **Screens:**
-  - "your truck" first on Home, with the Extend prompt from 30 minutes before the end;
-  - each vehicle's crew list, with add, move, extend and end, where people on other vehicles are shown with that vehicle and end time and never hidden;
-  - a screen showing every vehicle's crew;
-  - the Administrator's limit setting.
-- **Notices:**
+- **Notices** (part 3):
   - "the vehicle's current crew" as a recipient;
   - "your assignment was changed";
   - "a crew member was moved off your vehicle";

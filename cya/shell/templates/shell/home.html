@@ -13,6 +13,7 @@
 {% endif %}
 {% else %}
 <div class="home">
+{% include "shell/home_truck.html" %}
 {% if home.supervisor %}
 {% with sup=home.supervisor %}
 {% if sup.unavailable %}<p class="notice" role="status">The fleet summary is unavailable right now. Try again in a moment.</p>{% else %}

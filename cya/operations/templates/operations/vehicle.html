@@ -8,6 +8,7 @@
 <div id="status-live">
 {% include "operations/panel.html" %}
 </div>
+{% include "operations/crew.html" %}
 {% if can_set %}
 <form class="panel status-write" data-kind="set" aria-labelledby="set-heading">
 {% csrf_token %}

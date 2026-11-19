@@ -26,6 +26,7 @@ from cya.odometer import api as odometer_api
 from cya.operations import api as operations_api
 from cya.operations import (
     binding_admin_views,
+    crew_views,
     override_admin_views,
     template_admin_views,
     vehicle_admin_views,
@@ -93,6 +94,7 @@ urlpatterns = [
         name="inspection-check-history",
     ),
     path("status/", operations_views.vehicles, name="status"),
+    path("status/crew/", crew_views.crew, name="vehicle-crew"),
     path(
         "status/vehicles/<str:vehicle_id>/",
         operations_views.vehicle,
@@ -111,6 +113,11 @@ urlpatterns = [
         name="administration-role-history",
     ),
     path("administration/mail-relay/", relay_views.mail_relay, name="mail-relay"),
+    path(
+        "administration/crew-assignments/",
+        crew_views.limit_settings,
+        name="crew-assignment-settings",
+    ),
     path("administration/kits/", kit_views.library, name="kit-library"),
     path(
         "administration/kits/template.<str:fmt>",

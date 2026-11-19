@@ -8,7 +8,7 @@
 {% for v in vehicles %}
   <li class="vehicle-card">
     <a class="vehicle-link" href="{{ v.url }}">
-      <span class="vehicle-name">{{ v.name }}{% if v.number %} <span class="muted">#{{ v.number }}</span>{% endif %}</span>
+      <span class="vehicle-name">{{ v.name }}{% if v.number %} <span class="muted">#{{ v.number }}</span>{% endif %}<span class="vehicle-crew muted">{% if v.crew %}Crew: {{ v.crew|join:", " }}{% else %}No crew assigned{% endif %}</span></span>
       <span class="vehicle-badges">
         <span class="pill pending-pill" data-count="{{ v.pending }}">{{ v.pending }} pending request{{ v.pending|pluralize }}</span>
         <span class="pill status-pill" data-status="{{ v.code }}">{{ v.label }}</span>

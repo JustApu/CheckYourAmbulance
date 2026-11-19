@@ -106,6 +106,7 @@ def due_today(picture):
         counts = vehicle.counts
         rows.append(
             {
+                "vehicle_id": str(vehicle.vehicle_id),
                 "vehicle": vehicle.display_name,
                 "url": reverse("inspection-vehicle", args=[vehicle.vehicle_id]),
                 "overdue": counts.get("OVERDUE", 0) + counts.get("MISSED", 0),
@@ -205,6 +206,7 @@ def supervisor(user, picture):
         owed += vehicle.progress.get("owed", 0)
         vehicles.append(
             {
+                "vehicle_id": str(vehicle.vehicle_id),
                 "vehicle": vehicle.display_name,
                 "url": reverse("status-vehicle", args=[vehicle.vehicle_id]),
                 "status": vehicle.status,
@@ -264,4 +266,30 @@ def build(user, now=None):
             if isinstance(picture, Unavailable)
             else _guarded("supervisor", lambda: supervisor(user, picture))
         )
+    # SPEC 15.4 ASG-7 (issue #202): your truck first, with Extend near its end.
+    from cya.operations import crew_views
+
+    truck = _guarded("your truck", lambda: crew_views.mine(user, now))
+    context["truck"] = truck
+    if truck is None:
+        context["truck_choices"] = _guarded("vehicles", lambda: crew_views.vehicle_choices(user))
+        context["truck_operation_id"] = admin_pages_operation_id()
+    elif not isinstance(truck, Unavailable):
+        mine_first(context["due"], truck["vehicle_id"])
+        if context["supervisor"] and not isinstance(context["supervisor"], Unavailable):
+            mine_first(context["supervisor"], truck["vehicle_id"], key="vehicles")
     return context
+
+
+def admin_pages_operation_id():
+    from cya.kits import admin_pages
+
+    return admin_pages.new_operation_id()
+
+
+def mine_first(section, vehicle_id, key="rows"):
+    """Move the assigned vehicle to the top of a section's list (ASG-7); order is otherwise kept."""
+    if isinstance(section, Unavailable) or not section or key not in section:
+        return
+    rows = section[key]
+    section[key] = sorted(rows, key=lambda row: row.get("vehicle_id") != vehicle_id)

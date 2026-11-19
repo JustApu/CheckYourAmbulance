@@ -73,6 +73,9 @@ def vehicles(request, user):
     counts = {}
     for row in pending["requests"]:
         counts[row["vehicle_id"]] = counts.get(row["vehicle_id"], 0) + 1
+    from cya.operations import crew_views
+
+    crew = crew_views.crew_names(user, now)
     rows = []
     for vehicle in found:
         event = status_at(user.organization_id, vehicle.pk, now)
@@ -86,6 +89,7 @@ def vehicles(request, user):
                 "label": STATUS_LABELS[code],
                 "recorded": event is not None,
                 "pending": counts.get(str(vehicle.pk), 0),
+                "crew": crew.get(str(vehicle.pk), []),
             }
         )
     return render(
@@ -150,7 +154,13 @@ def _panel_context(user, vehicle):
 def vehicle(request, user, vehicle_id):
     found = _vehicle(user, vehicle_id)
     context = _panel_context(user, found)
+    from cya.operations import crew_views
+
+    crew_saved, crew_error = crew_views.message_for(request, user)
+    context.update(crew_views.crew_context(user, found))
     context.update(
+        crew_saved=crew_saved,
+        crew_error=crew_error,
         title=found.display_name,
         config={
             "vehicle_id": str(found.pk),
