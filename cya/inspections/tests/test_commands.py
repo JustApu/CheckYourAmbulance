@@ -481,3 +481,27 @@ class SessionComplianceTests(ObligationCase):
             current_state(InspectionSession.objects.get(pk=opened.body["session_id"])).state,
             "INCOMPLETE",
         )
+
+
+class VehicleChecklistSessionTests(SessionCase):
+    """SPEC 5.0.0 CHK-1, CHK-4, CHK-8 and 18.2: which checklist a new session may pin."""
+
+    def test_a_session_open_at_the_cutover_can_still_be_joined(self):
+        opened = self.open().body["session_id"]
+        self.record_cutover()
+        joined = self.open(actor=self.supervisor).body
+        self.assertEqual((joined["code"], joined["session_id"]), ("SESSION_JOINED", opened))
+
+    def test_no_new_session_pins_a_legacy_template_after_the_cutover(self):
+        self.record_cutover()
+        with self.assertRaisesRegex(commands.SessionError, "each vehicle"):
+            self.open()
+
+    def test_a_vehicle_checklist_is_inspected_on_its_own_vehicle_only(self):
+        self.record_cutover()
+        own = self.vehicle_checklist()
+        version = self.publish_checklist(own, self.own_items())
+        with self.assertRaisesRegex(commands.SessionError, "another vehicle"):
+            self.open(vehicle=self.vehicles[1], template=own)
+        opened = self.open(template=own).body
+        self.assertEqual(opened["checklist_version_id"], version)

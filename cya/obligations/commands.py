@@ -110,6 +110,11 @@ def bind_requirement(
             raise BindingError("vehicle not found")
         if template is None or not template.active:
             raise BindingError("template not found or not active")
+        # SPEC 5.0.0 CFG-7: a vehicle checklist is assigned only to its own vehicle, and only
+        # after the cutover; a legacy template's bindings are read-only after it.
+        from cya.checklists.ownership import require_template_writable
+
+        require_template_writable(organization_id, template, vehicle_id, BindingError)
         if not ScheduleRule.objects.filter(organization_id=organization_id, slot=slot).exists():
             raise BindingError("no schedule has been published for that slot")
         prior = (

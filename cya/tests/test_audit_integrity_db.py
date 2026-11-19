@@ -212,6 +212,7 @@ class AuditIntegrityTests(TestCase):
             "vehicle_activity_event",  # issue #130: vehicle activity history (SPEC 4.8 CFG-1)
             "vehicle_assignment_event",  # issue #202: vehicle crew assignment (SPEC 15.4)
             "vehicle_assignment_limit",  # issue #202: administrator-set maximum assignment length
+            "checklist_cutover",  # issue #220: SPEC 5.0.0 move to vehicle-owned checklists
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_requeue",  # issue #224: an administrator sent given-up notification email again
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
@@ -324,6 +325,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "vehicle_activity_event",
                         "vehicle_assignment_event",
                         "vehicle_assignment_limit",
+                        "checklist_cutover",
                         "seal_event",
                         "seal_substitution",
                         "seal_substitution_obligation",
@@ -435,6 +437,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "vehicle_activity_event",
                     "vehicle_assignment_event",
                     "vehicle_assignment_limit",
+                    "checklist_cutover",
                     "seal_event",
                     "seal_substitution",
                     "seal_substitution_obligation",

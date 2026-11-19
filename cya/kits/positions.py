@@ -30,6 +30,7 @@ from cya.authorization.persistence import digest
 from cya.checklists.models import (
     ChecklistItemDef,
     ChecklistPublication,
+    ChecklistTemplate,
     Compartment,
     KitInstance,
     Vehicle,
@@ -166,13 +167,33 @@ def _binding_chains(**filters):
     return chains
 
 
+def _legacy_retired(organization_id, now):
+    """True once the cutover is recorded and reached: legacy bindings no longer govern (18.2)."""
+    from cya.checklists.ownership import cutover_at
+
+    cutover = cutover_at(organization_id)
+    return cutover is not None and now >= cutover
+
+
 def templates_bound_now_or_later(organization_id, vehicle_id, now=None):
-    """Templates bound to the vehicle at `now` or by a binding scheduled to take effect later."""
+    """Templates bound to the vehicle at `now` or by a binding scheduled to take effect later.
+
+    After the organization's cutover only vehicle checklists count: a legacy template's
+    bindings govern nothing from then on (SPEC 5.0.0 18.2), so they never block a retirement.
+    """
     now = now or timezone.now()
     chains = _binding_chains(organization_id=organization_id, vehicle_id=vehicle_id)
-    return sorted(
-        {template for (_v, template, _s), rows in chains.items() if _bound_now_or_later(rows, now)}
-    )
+    found = {
+        template for (_v, template, _s), rows in chains.items() if _bound_now_or_later(rows, now)
+    }
+    if found and _legacy_retired(organization_id, now):
+        found = set(
+            str(t)
+            for t in ChecklistTemplate.objects.filter(
+                pk__in=found, vehicle__isnull=False
+            ).values_list("pk", flat=True)
+        )
+    return sorted(found)
 
 
 def retired_blockers(organization_id, vehicle_id, kind, stable_slot_id, now):
@@ -192,12 +213,16 @@ def retired_blockers(organization_id, vehicle_id, kind, stable_slot_id, now):
         now,
         lambda p: str(p.checklist_version.template_id),
     )
-    overrides = _in_force_and_later(
-        ChecklistPublication.objects.filter(override_version__vehicle_id=vehicle_id).select_related(
-            "override_version__template_version"
-        ),
-        now,
-        lambda p: str(p.override_version.template_version.template_id),
+    overrides = (
+        []
+        if _legacy_retired(org, now)
+        else _in_force_and_later(
+            ChecklistPublication.objects.filter(
+                override_version__vehicle_id=vehicle_id
+            ).select_related("override_version__template_version"),
+            now,
+            lambda p: str(p.override_version.template_version.template_id),
+        )
     )
     field = f"{ITEM_FIELD[kind]}_id__in"
     for publication in versions:

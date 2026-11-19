@@ -222,6 +222,15 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
                         apply,
                         current={"session_id": str(candidate.pk), "state": "OPEN"},
                     )
+        # SPEC 5.0.0 CHK-1, CHK-8: a new session inspects a vehicle checklist on its own vehicle
+        # only, and after the cutover never pins a legacy template. Joining a session that is
+        # already open (above) is unaffected, so open sessions keep their version (CHK-4, 18.2).
+        from cya.checklists.ownership import cutover_at
+
+        if template.vehicle_id is not None and str(template.vehicle_id) != str(vehicle_id):
+            raise SessionError("that checklist belongs to another vehicle")
+        if template.vehicle_id is None and cutover_at(org) is not None:
+            raise SessionError("checklists belong to each vehicle now; choose this vehicle's own")
         opened_at = timezone.now()
         try:
             resolved = resolve_checklist(

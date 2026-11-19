@@ -123,11 +123,29 @@ def _existing_item(spec, organization_id):
     return item_id
 
 
-def validate_definition(organization_id, spec, new_item_ids=frozenset()):
+def _require_own_vehicle(vehicle_id, compartment, system):
+    """A vehicle checklist places items only on its own vehicle (SPEC 5.0.0 CHK-8, CFG-9).
+
+    A kit_id needs no check of its own: it is a reference naming its compartment's slot
+    (_require_kit_in_compartment), and resolution finds the vehicle's own kits in that slot.
+    """
+    for model, row_id in ((Compartment, compartment), (VehicleSystem, system)):
+        if (
+            row_id is not None
+            and not model.objects.filter(pk=row_id, vehicle_id=vehicle_id).exists()
+        ):
+            raise ChecklistValidationError(
+                f"position {row_id} is not on this checklist's vehicle {vehicle_id}"
+            )
+
+
+def validate_definition(organization_id, spec, new_item_ids=frozenset(), vehicle_id=None):
     """Return model keyword arguments for one definition, or raise.
 
     new_item_ids are items the same command creates (save_template_draft's new items). They
-    are not in the database yet; the command has already checked them.
+    are not in the database yet; the command has already checked them. vehicle_id is the owner
+    of a vehicle checklist (SPEC 5.0.0): its items are placed on that vehicle or not placed at
+    all (CHK-9). Without it (a legacy template or override) a placement is required.
     """
     if not isinstance(spec, dict):
         raise ChecklistValidationError("a definition must be an object")
@@ -155,10 +173,17 @@ def validate_definition(organization_id, spec, new_item_ids=frozenset()):
     compartment = reference(spec, "compartment_id", Compartment, organization_id)
     system = reference(spec, "system_id", VehicleSystem, organization_id)
     kit = reference(spec, "kit_id", KitInstance, organization_id)
-    if (compartment is None) == (system is None) or (kit is not None and compartment is None):
+    unplaced = compartment is None and system is None and kit is None
+    if (
+        (compartment is not None and system is not None)
+        or (kit is not None and compartment is None)
+        or (unplaced and vehicle_id is None)
+    ):
         raise ChecklistValidationError(
             "give exactly one of compartment_id or system_id; a kit_id needs a compartment_id"
         )
+    if vehicle_id is not None:
+        _require_own_vehicle(vehicle_id, compartment, system)
     if kit is not None:
         _require_kit_in_compartment(kit, compartment)
     # SPEC 4.8 CFG-2: a draft cannot place an item in a retired position. The referenced row
@@ -188,11 +213,13 @@ def validate_definition(organization_id, spec, new_item_ids=frozenset()):
     }
 
 
-def validate_definitions(organization_id, specs, new_item_ids=frozenset()):
+def validate_definitions(organization_id, specs, new_item_ids=frozenset(), vehicle_id=None):
     """Validate a full item set: bounded, nonempty, one definition per item."""
     if not isinstance(specs, list) or not 1 <= len(specs) <= MAX_ITEMS:
         raise ChecklistValidationError(f"provide 1-{MAX_ITEMS} item definitions")
-    validated = [validate_definition(organization_id, spec, new_item_ids) for spec in specs]
+    validated = [
+        validate_definition(organization_id, spec, new_item_ids, vehicle_id) for spec in specs
+    ]
     item_ids = [definition["item_id"] for definition in validated]
     if len(set(item_ids)) != len(item_ids):
         raise ChecklistValidationError("an item may appear only once in a version")

@@ -3,7 +3,8 @@
 Table kinds follow the contract: vehicle, kit_instance, checklist_template and
 item are mutable (M); compartment, vehicle_system, checklist_version,
 checklist_item_def, vehicle_override_version, vehicle_override_item and
-stocking_deviation are versioned (V); checklist_publication is append-only (A).
+stocking_deviation are versioned (V); checklist_publication and checklist_cutover
+are append-only (A).
 Migration 0002 installs the freeze triggers, composite organization foreign
 keys and UUID checks. Nothing here is a draft-editing API: a draft is changed by
 inserting a new revision (SPEC CHK-2), and published rows are frozen by the
@@ -185,20 +186,52 @@ class KitInstance(models.Model):
 
 
 class ChecklistTemplate(models.Model):
+    """A checklist: a vehicle checklist (SPEC 5.0.0 CHK-1) or a legacy shared template.
+
+    With vehicle set, this row is one vehicle-owned checklist (the logical vehicle_checklist of
+    SPEC 18): its versions, item rows and publications are the ordinary checklist_version,
+    checklist_item_def and checklist_publication rows, and a schedule assignment is a
+    requirement_binding row naming the same vehicle. With vehicle null it is a template from
+    before 5.0.0, read-only once the organization's cutover is recorded (ChecklistCutover).
+    The owner and the precedence ordinal are set at creation and never changed (trigger).
+    """
+
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
     organization = organization_fk()
     label = models.CharField(max_length=200)
     active = models.BooleanField(default=True)
-    # The template key files name (SPEC 2.1.0 IMP-6): set once, then never changed.
+    # The template key files name (SPEC 2.1.0 IMP-6): set once, then never changed. Vehicle
+    # checklists have none (5.0.0 IMP-6: a template key is no longer used).
     key = models.CharField(  # noqa: DJ001
         max_length=MAX_KEY, null=True, blank=True, db_collation="ascii_bin"
     )
+    # SPEC 5.0.0 CHK-1: the owning vehicle; null for a legacy shared template.
+    vehicle = models.ForeignKey(Vehicle, null=True, on_delete=models.PROTECT, related_name="+")
+    # SPEC 5.0.0 CHK-10: the stable checklist-precedence ordinal within the vehicle. It orders
+    # checklists that require the same routine anchor; a new checklist gets the next one.
+    precedence = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         db_table = "checklist_template"
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="template_org_id"),
             models.UniqueConstraint(fields=["organization", "key"], name="template_org_key"),
+            models.UniqueConstraint(fields=["vehicle", "precedence"], name="template_precedence"),
+            # Targets of the requirement_binding (vehicle, template) owner check.
+            models.UniqueConstraint(fields=["vehicle", "id"], name="template_vehicle_id"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(vehicle__isnull=True, precedence__isnull=True)
+                    # IS NOT NULL is explicit: a CHECK passes when it evaluates to NULL.
+                    | models.Q(
+                        vehicle__isnull=False,
+                        precedence__isnull=False,
+                        precedence__gte=1,
+                        key__isnull=True,
+                    )
+                ),
+                name="template_owner_precedence",
+            ),
             models.CheckConstraint(
                 condition=models.Q(key__isnull=True) | models.Q(key__regex=KEY_PATTERN),
                 name="template_key_format",
@@ -355,11 +388,14 @@ class ChecklistItemDef(models.Model):
                 condition=models.Q(expiration_tracked__in=[True, False]),
                 name="itemdef_expiration_bool",
             ),
-            # Exactly one of compartment or ambulance-wide system; a kit sits in a compartment.
+            # At most one of compartment or ambulance-wide system; a kit sits in a compartment.
+            # Neither is a vehicle checklist's Not placed item (SPEC 5.0.0 CHK-9); the owner
+            # trigger of migration 0008 allows that only on a vehicle checklist version.
             models.CheckConstraint(
                 condition=(
                     models.Q(compartment__isnull=False, system__isnull=True)
                     | models.Q(compartment__isnull=True, system__isnull=False, kit__isnull=True)
+                    | models.Q(compartment__isnull=True, system__isnull=True, kit__isnull=True)
                 ),
                 name="itemdef_one_placement",
             ),
@@ -423,6 +459,34 @@ class VehicleOverrideItem(models.Model):
 
     def __str__(self):
         return f"VehicleOverrideItem {self.pk}"
+
+
+class ChecklistCutover(models.Model):
+    """The instant an organization moved to vehicle-owned checklists (SPEC 5.0.0 18.2).
+
+    Append-only, at most one per organization, written by the migration command. Before it, the
+    legacy templates, overrides and bindings govern; from it on, only vehicle checklists do, and
+    the legacy rows are read-only (cya.checklists.ownership).
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    command = models.ForeignKey(
+        "cya_core.CommandReceipt", on_delete=models.PROTECT, related_name="+"
+    )
+    recorded_at = models.DateTimeField()
+    actor_user = models.ForeignKey("cya_accounts.User", on_delete=models.PROTECT, related_name="+")
+    actor_roles_at_time = models.JSONField(default=list)
+
+    class Meta:
+        db_table = "checklist_cutover"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="cutover_org_id"),
+            models.UniqueConstraint(fields=["organization"], name="cutover_one_per_org"),
+        ]
+
+    def __str__(self):
+        return f"ChecklistCutover {self.pk}"
 
 
 class StockingDeviation(models.Model):

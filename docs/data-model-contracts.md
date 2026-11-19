@@ -96,9 +96,10 @@ No deletion frees an identity for a different person (AUTH-2).
 
 | Table | Kind | Columns and keys beyond common identity |
 |---|---|---|
-| `checklist_template` | M | label, active, key? (lowercase key format, unique per organization, set once and then immutable; IMP-6); version contents stored separately |
+| `checklist_template` | M | label, active, key? (lowercase key format, unique per organization, set once and then immutable; IMP-6); vehicle_id? ref and precedence? (SPEC 5.0.0: with a vehicle, the row is that vehicle's own checklist, the logical `vehicle_checklist` of SPEC §18, with a stable precedence ordinal ≥ 1 unique per vehicle and no key; without one, a legacy shared template, read-only after the cutover; owner and precedence set at creation, then immutable); version contents stored separately |
 | `checklist_version` | V | template_id ref, revision; unique template/revision; publication is identified by its referencing publication row |
 | `checklist_publication` | A | checklist_version_id ref unique, effective_at, override_version_id? ref; published versions and children frozen |
+| `checklist_cutover` | A | one per organization; command ref (`CHECKLIST_CUTOVER`), recorded_at, actor; the instant the organization moved to vehicle-owned checklists (SPEC 5.0.0 §18.2): legacy templates, overrides and bindings govern only before it and accept no writes after it, vehicle checklists only from it |
 | `item` | M | stable logical item/slot identity, label, active; used across versions |
 | `checklist_item_def` | V | checklist_version_id ref, item_id ref, compartment_id? ref, system_id? ref, kit_id? ref, asset_id? ref, display_order, instructions, kind, expected_quantity?, unit?, allowed_outcomes, na_rule_id? ref; unique version/item; bulk_eligible reserved false |
 | `vehicle_override_version` | V | vehicle_id ref, template_version_id ref, revision, publication ref? |

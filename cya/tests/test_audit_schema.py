@@ -21,6 +21,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "audit_event",
                     "role_grant",
                     "checklist_publication",
+                    "checklist_cutover",
                     "roster_snapshot",
                     "roster_member",
                     "session_roster_correction",
