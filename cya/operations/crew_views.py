@@ -9,7 +9,7 @@ an overnight shift is entered as its morning end).
 """
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -49,6 +49,7 @@ ERRORS = {
     "PERSON_INACTIVE": "That person can't be assigned.",
     "NOT_FOUND": "That vehicle or person no longer exists.",
     "MALFORMED_REQUEST": "Enter a time such as 18:00.",
+    "TIME_SKIPPED": "That time is skipped by the clock change tonight. Choose another time.",
 }
 
 
@@ -59,21 +60,41 @@ def zone_of(user):
         return ZoneInfo("UTC")
 
 
+class SkippedTime(ValueError):
+    """The next time the station clock would read this time, it does not: the spring change."""
+
+
 def until_instant(text, zone, now):
-    """The next instant after now when the station clock reads `text` (HH:MM), or None."""
+    """The next instant after now when the station clock reads `text` (HH:MM), or None.
+
+    Daylight saving time (PR #219 review): in the autumn hour that repeats, the earlier of the
+    two readings that is still ahead is chosen, so the end is never already past. When the next
+    day the clock would show the time skips it (the spring gap), SkippedTime is raised rather
+    than silently moving the end. Instants are compared in UTC.
+    """
     try:
         parsed = time.fromisoformat((text or "").strip())
     except ValueError:
         return None
-    if parsed.second or parsed.microsecond:
+    if parsed.second or parsed.microsecond or parsed.tzinfo is not None:
         return None
-    local_now = now.astimezone(zone)
-    candidate = datetime.combine(local_now.date(), parsed.replace(tzinfo=None)).replace(tzinfo=zone)
-    if candidate <= local_now:
-        candidate = datetime.combine(
-            local_now.date() + timedelta(days=1), parsed.replace(tzinfo=None)
-        ).replace(tzinfo=zone)
-    return candidate
+    now_utc = now.astimezone(UTC)
+    local_day = now.astimezone(zone).date()
+    for offset in range(3):
+        day = local_day + timedelta(days=offset)
+        wall = datetime.combine(day, parsed)
+        readings = []
+        for fold in (0, 1):
+            candidate = wall.replace(tzinfo=zone, fold=fold)
+            back = candidate.astimezone(UTC).astimezone(zone)
+            if back.replace(tzinfo=None, fold=0) == wall:  # this wall time exists on that day
+                readings.append(candidate.astimezone(UTC))
+        ahead = sorted(r for r in set(readings) if r > now_utc)
+        if ahead:
+            return ahead[0].astimezone(zone)
+        if not readings and wall > now.astimezone(zone).replace(tzinfo=None):
+            raise SkippedTime(text)
+    return None
 
 
 def when(instant, zone, now):
@@ -269,7 +290,10 @@ def crew(request):
     ids = {**_context_ids(user), "operation_id": operation_id}
     until = None
     if stage != "end":
-        until = until_instant(request.POST.get("until"), zone_of(user), timezone.now())
+        try:
+            until = until_instant(request.POST.get("until"), zone_of(user), timezone.now())
+        except SkippedTime:
+            return _back(request, vehicle.pk, error="TIME_SKIPPED")
         if until is None:
             return _back(request, vehicle.pk, error="MALFORMED_REQUEST")
     try:

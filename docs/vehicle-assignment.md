@@ -80,7 +80,7 @@ Anything else is denied and audited, and nothing changes. `view_current_crew` (P
 
 The four tabs are unchanged (owner, 2026-11-18), so crew lives where people already look. Every change is a plain form posted to `/status/crew/` (`vehicle-crew`), which runs the audited command and returns to the page it came from. Hiding a control is only a convenience: the command decides who may act.
 
-- **Times.** Each form takes an "until" time of day in station time (`HH:MM`). The assignment ends the next time the station clock reaches it, so an overnight shift is entered as its morning end (`until_instant`). The command still refuses a time more than the limit ahead. Times show as "18:00", or "Thu 06:00" when not today.
+- **Times.** Each form takes an "until" time of day in station time (`HH:MM`). The assignment ends the next time the station clock reaches it, so an overnight shift is entered as its morning end (`until_instant`). The command still refuses a time more than the limit ahead. Clock changes (PR #219 review): in the autumn hour that repeats, the end is the earlier reading of that time that is still ahead, so it is never already past; a time the spring change skips is refused with "That time is skipped by the clock change tonight" rather than moved. Times show as "18:00", or "Thu 06:00" when not today.
 - **Vehicles tab.**
   - The list shows each vehicle's crew ("Crew: You, Sam" or "No crew assigned"); every role may see it (`view_current_crew`).
   - A vehicle's page has a **Crew** section: who is on it until when, with Extend and End where the viewer may change that person, and "I'm on this truck", or "Move me here" when you are on another vehicle.

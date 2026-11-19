@@ -8,7 +8,7 @@ from django.test import SimpleTestCase
 
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 from cya.operations.assignments import current_assignment, current_crew
-from cya.operations.crew_views import until_instant, when
+from cya.operations.crew_views import SkippedTime, until_instant, when
 from cya.operations.models import VehicleAssignmentEvent
 
 CREW = "/status/crew/"
@@ -33,6 +33,46 @@ class UntilTests(SimpleTestCase):
             self.assertIsNone(until_instant(bad, zone, now))
         self.assertEqual(when(until_instant("06:00", zone, now), zone, now), "Thu 06:00")
         self.assertEqual(when(until_instant("18:00", zone, now), zone, now), "18:00")
+
+
+class DaylightSavingTests(SimpleTestCase):
+    """PR #219 review: station-time ends across clock changes (America/Chicago, 2026)."""
+
+    zone = ZoneInfo("America/Chicago")
+
+    def test_the_repeated_autumn_hour_picks_the_next_reading_still_ahead(self):
+        # 2026-11-01: 01:00-02:00 happens twice (CDT then CST). Now is the second 01:15.
+        now = datetime(2026, 11, 1, 7, 15, tzinfo=UTC)  # 01:15 CST
+        end = until_instant("01:30", self.zone, now)
+        self.assertEqual(end.astimezone(UTC), datetime(2026, 11, 1, 7, 30, tzinfo=UTC))
+        self.assertGreater(end, now)
+        # During the first 01:15 (CDT), 01:30 is the first 01:30, fifteen minutes away.
+        first = datetime(2026, 11, 1, 6, 15, tzinfo=UTC)  # 01:15 CDT
+        self.assertEqual(
+            until_instant("01:30", self.zone, first).astimezone(UTC),
+            datetime(2026, 11, 1, 6, 30, tzinfo=UTC),
+        )
+        # An earlier time already passed in both readings is tomorrow.
+        self.assertEqual(
+            until_instant("01:10", self.zone, now).astimezone(UTC),
+            datetime(2026, 11, 2, 7, 10, tzinfo=UTC),
+        )
+
+    def test_a_time_skipped_by_the_spring_change_is_refused_not_moved(self):
+        # 2026-03-08: 02:00-03:00 does not exist. Now is 23:00 the evening before.
+        now = datetime(2026, 3, 8, 5, 0, tzinfo=UTC)  # 2026-03-07 23:00 CST
+        with self.assertRaises(SkippedTime):
+            until_instant("02:30", self.zone, now)
+        self.assertEqual(
+            until_instant("03:30", self.zone, now).astimezone(UTC),
+            datetime(2026, 3, 8, 8, 30, tzinfo=UTC),  # 03:30 CDT
+        )
+        # Once past the gap, the same wall time is the next day's, which exists.
+        later = datetime(2026, 3, 8, 9, 0, tzinfo=UTC)  # 04:00 CDT
+        self.assertEqual(
+            until_instant("02:30", self.zone, later).astimezone(UTC),
+            datetime(2026, 3, 9, 7, 30, tzinfo=UTC),
+        )
 
 
 class CrewScreenCase(CrewUiCase):
