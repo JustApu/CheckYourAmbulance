@@ -325,3 +325,18 @@ class KitReferencePageTests(CrewUiCase):
         ):
             page = self.client.get(self.URL)
         self.assertEqual(page.status_code, 503)
+
+
+class NotPlacedSheetTests(SimpleTestCase):
+    def test_a_not_placed_item_prints_in_its_own_section(self):
+        sections, _kits = printable.outage_sheet(
+            [
+                row(item_label="Cab light", compartment_id="c1", compartment_label="Cab"),
+                row(item_label="Spare fuse", not_placed=True),
+            ],
+            frozenset({"c1"}),
+        )
+        self.assertEqual(
+            [(s.heading, s.sealed, [r.label for r in s.rows]) for s in sections],
+            [("Cab", True, []), ("Not placed", False, ["Spare fuse"])],
+        )

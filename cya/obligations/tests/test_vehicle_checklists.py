@@ -253,3 +253,39 @@ class BeforeCutoverTests(ObligationCase):
             str(self.org.pk), str(self.vehicle.pk), self.at(), self.at(days=2) + timedelta(hours=12)
         )
         self.assertEqual(len(found), 3)
+
+
+class NotPlacedDisplayTests(CutoverCase):
+    """SPEC 5.0.0 CHK-9, DEP-11, CAB-2: a Not placed item is shown, grouped and printed as such."""
+
+    def setUp(self):
+        super().setUp()
+        own = self.vehicle_checklist()
+        self.publish_checklist(own, self.own_items())
+        self.assign(own)
+        self.clock.set(self.at(days=2, hours=5, minutes=30))
+        self.generate()
+
+    def checklist(self):
+        from cya.attention.checklist import vehicle_checklist
+
+        return vehicle_checklist(self.org_id, self.vehicle_id)
+
+    def test_the_item_is_listed_as_due_under_not_placed(self):
+        result = self.checklist()
+        siren = next(r for r in result.rows if r.item_id == str(self.siren.pk))
+        self.assertTrue(siren.not_placed)
+        self.assertIsNotNone(siren.obligation_state)  # still owed, not exempt
+        others = [r for r in result.rows if r.item_id != str(self.siren.pk)]
+        self.assertFalse(any(r.not_placed for r in others))
+        groups = {g["label"]: g for g in result.group_progress}
+        self.assertEqual(groups["Not placed"]["total"], 1)
+
+    def test_the_paper_sheet_prints_a_not_placed_section_no_seal_covers(self):
+        from cya.inspections import printable
+
+        cabinet = str(self.own_row(self.cabinet, self.vehicle).pk)
+        sections, _kits = printable.outage_sheet(self.checklist().rows, frozenset({cabinet}))
+        by_heading = {s.heading: s for s in sections}
+        self.assertEqual([r.label for r in by_heading["Not placed"].rows], [self.siren.label])
+        self.assertFalse(by_heading["Not placed"].sealed)

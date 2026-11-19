@@ -84,7 +84,13 @@ def _print_row(row):
 
 
 def _section_key(row):
-    """Rows group by compartment, then vehicle system, else vehicle-wide."""
+    """Rows group by compartment, then vehicle system, else vehicle-wide.
+
+    A checklist item with no position prints in its own "Not placed" section (SPEC 5.0.0 CHK-9,
+    DEP-11), which is never a sealed section: a cabinet seal never covers it (CAB-2).
+    """
+    if getattr(row, "not_placed", False):
+        return ("not-placed", None), "Not placed"
     if row.compartment_label:
         return ("compartment", row.compartment_id), row.compartment_label
     if row.system_label:

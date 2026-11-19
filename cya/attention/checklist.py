@@ -111,6 +111,9 @@ class ChecklistRow:
     # A kit presence row (SPEC 2.0.0 KDEF-10, KDEF-12): the kit list line a count is recorded
     # against; kit_id is then None and expected_quantity is the line's exact count.
     kit_requirement_id: str | None = None
+    # SPEC 5.0.0 CHK-9: a checklist item with no position. It is still due and checked, and is
+    # listed under "Not placed", never under a compartment or system.
+    not_placed: bool = False
 
 
 @dataclass(frozen=True)
@@ -582,6 +585,7 @@ def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=Fals
                 compartment_label=resolved.compartment_label,
                 system_id=str(resolved.system_id) if resolved.system_id else None,
                 system_label=resolved.system_label,
+                not_placed=_not_placed(requirement, resolved),
                 display_order=requirement.display_order,
                 obligation_state=state.state.value if state else None,
                 due_at=state.obligation.due_at if state else None,
@@ -616,10 +620,22 @@ def _priority_group(row):
     return 1 if row.needs_action else 2
 
 
+def _not_placed(requirement, resolved):
+    """A checklist item row with no position (SPEC 5.0.0 CHK-9), not a kit or presence row."""
+    return (
+        requirement.source in ("TEMPLATE", "OVERRIDE")
+        and not requirement.kit_id
+        and not resolved.compartment_id
+        and not resolved.system_id
+    )
+
+
 def _group_progress(rows):
     groups, by_key = [], {}
     for row in rows:
-        if row.compartment_id:
+        if row.not_placed:
+            key, label = "not-placed", "Not placed"
+        elif row.compartment_id:
             key, label = f"compartment:{row.compartment_id}", row.compartment_label
         elif row.system_id:
             key, label = f"system:{row.system_id}", f"Vehicle system: {row.system_label}"
