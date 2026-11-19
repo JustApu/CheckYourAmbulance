@@ -64,10 +64,18 @@ notification is written by the command that causes it, in its transaction, throu
 | `vehicle.status_change_requested` | a crew status-change request | all supervisors |
 | `vehicle.status_request_decided` | the decision on a request | the requester |
 | `session.reopened` | a session reopened | the other recorded participants |
+| `deficiency.reported` | `REPORTED`, a new problem (issue #202) | the vehicle's current crew and all supervisors |
+| `vehicle.check_due` | the check-due job ([below](#checks-coming-due)) | the vehicle's current crew |
+| `vehicle_assignment.changed` | someone else assigned, moved, extended or ended a person's vehicle assignment, including by deactivating the vehicle | the person |
+| `vehicle_assignment.moved_off` | a person moved from one vehicle to another | nobody by default; the crew left on the vehicle they left can be switched on |
 
 Recipient kinds: `ASSIGNEE` (the deficiency's assignee after the event), `REPORTER`, `REQUESTER`
 (of the extension or status request), `PARTICIPANTS` (of the session), `SUPERVISORS` and
-`ADMINISTRATORS` (every active holder of that role). Each event lists the kinds it can name.
+`ADMINISTRATORS` (every active holder of that role), `PERSON` (the person whose vehicle assignment
+changed) and `VEHICLE_CREW` (the active people assigned to the vehicle when the event is recorded,
+SPEC 15.4 ASG-7; for a move, the vehicle left). Each event lists the kinds it can name. The
+reopened-problem events can also name the vehicle's crew; it is off by default. The crew-notice
+defaults are the owner's decisions of 2026-11-18 on [issue #202](https://github.com/JustApu/CheckYourAmbulance/issues/202).
 
 - **Never the actor.** The person whose action caused the event is not told about it, so assigning
   yourself or reopening your own solo session notifies nobody.
@@ -116,6 +124,23 @@ deadline), not the stored base deadline, so an extended deficiency is not a cand
 date passes. The pass pages through them oldest governing deadline first, 200 per query, and
 recognizes those already notified with one receipt query per page; neither they nor suppressed
 ones count toward the limit, so a backlog cannot keep a newly overdue deficiency from being reached.
+
+### Checks coming due
+
+A check coming due has no event, so `manage.py notify_check_due` runs a bounded pass per active
+organization (cron or a timer, like `notify_overdue`; `--limit`, default 50 notices). It finds
+selected routine obligations whose window opened within the last two hours and whose grace has not
+passed, on active vehicles, and sends **one notice per vehicle per due instant** with the number of
+checks (owner, 2026-11-18). By default it goes to the vehicle's current crew when the notice is
+written. A vehicle out of service at the due instant is skipped, because those obligations are
+exempt. A window opened more than two hours ago is not announced, so a job that was down sends
+nothing stale. A vehicle with nobody assigned has its notice recorded with no recipients, and it is
+not sent again when someone is assigned later.
+
+Each notice is a worker command (service `worker.vehicle_check_due`, command
+`VEHICLE_CHECK_DUE_NOTICE`, job key `["<vehicle id>","<due instant>"]`) whose operation id is
+derived from the key, so a repeat or a second worker replays without writing. One vehicle's failure
+is logged and counted and never blocks the others.
 
 ## Email delivery
 

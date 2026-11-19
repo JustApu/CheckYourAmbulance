@@ -18,6 +18,8 @@ from cya.notifications.recipients import notify
 
 # deficiency_event.event_type -> notification event type (default_recipients.json)
 EVENT_NOTICES = {
+    # SPEC 15.4 ASG-7 (issue #202): a report tells the vehicle's current crew and supervisors.
+    "REPORTED": "deficiency.reported",
     "ASSIGNED": "deficiency.assigned",
     "VERIFICATION_ADDED": "deficiency.reopened_verification_added",
     "VERIFICATION_REOPENED": "deficiency.reopened_verification_invalidated",
@@ -86,4 +88,5 @@ def notify_event(receipt, event):
         assignee_id=assignee,
         reporter_id=reporter,
         requester_id=requester,
+        crew_vehicle_id=vehicle,
     )

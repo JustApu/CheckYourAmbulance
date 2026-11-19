@@ -278,6 +278,7 @@ def insert_deficiency(
         severity_version=severity,
         last_applied_event=event,
     )
+    notices.notify_event(receipt, event)  # REPORTED: the vehicle's crew and supervisors (#202)
     return header
 
 

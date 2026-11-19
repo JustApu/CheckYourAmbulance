@@ -92,10 +92,19 @@ The four tabs are unchanged (owner, 2026-11-18), so crew lives where people alre
   - Your truck is listed first in Due today and in the supervisor vehicles table (ASG-7).
 - **Administration.** A **Crew assignments** page under System (`/administration/crew-assignments/`), for Administrators, sets the limit in whole hours from 1 to 168.
 
-## Still to come in #202
+## Notices (issue #202 part 3)
 
-- **Notices** (part 3):
-  - "the vehicle's current crew" as a recipient;
-  - "your assignment was changed";
-  - "a crew member was moved off your vehicle";
-  - "check due on a vehicle".
+The owner chose the defaults on 2026-11-18. Administrators can switch any available recipient on
+or off for each event ([notifications](notifications.md#which-events-notify-and-whom)).
+
+| Notice | On by default | Also available |
+|---|---|---|
+| `vehicle.check_due`: one per vehicle per due instant, from `manage.py notify_check_due` | the vehicle's current crew | Supervisors, Administrators |
+| `deficiency.reported`: a problem reported on a vehicle | the vehicle's current crew and Supervisors | Administrators |
+| `vehicle_assignment.changed`: someone else assigned, moved, extended or ended your assignment, including a vehicle deactivation | the person | Supervisors |
+| `vehicle_assignment.moved_off`: someone moved off a vehicle | nobody | the crew left on that vehicle, Supervisors |
+
+The reopened-problem notices can also name the vehicle's crew; that is off by default. The person
+who caused an event is never told about their own action. Assignment notices are written in the
+same command as the event (`_notify` in `cya.operations.assignments`), so the crew left on a
+vehicle is read after the move.

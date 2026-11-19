@@ -32,6 +32,11 @@ class DefaultsTests(NotificationCase):
             "vehicle.status_change_requested": ["SUPERVISORS"],
             "vehicle.status_request_decided": ["REQUESTER"],
             "session.reopened": ["PARTICIPANTS"],
+            # Owner decisions of 2026-11-18 (issue #202, SPEC 15.4 ASG-7).
+            "deficiency.reported": ["VEHICLE_CREW", "SUPERVISORS"],
+            "vehicle.check_due": ["VEHICLE_CREW"],
+            "vehicle_assignment.changed": ["PERSON"],
+            "vehicle_assignment.moved_off": [],
         }
         self.assertEqual({event: list(d) for event, (_a, d) in defaults.items()}, expected)
         for available, _default in defaults.values():

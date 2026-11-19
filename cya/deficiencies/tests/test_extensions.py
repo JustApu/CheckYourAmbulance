@@ -90,7 +90,10 @@ class RequestTests(ExtensionCase):
         self.assertNotIn(REASON, json.dumps([audit.new_snapshot, audit.prior_snapshot]))
         # Issue 14: the request notifies the supervisors (in-app and email), nobody else.
         self.assertEqual(notified("deficiency.extension_requested", event.pk), [self.supervisor.pk])
-        self.assertEqual(NotificationOutbox.objects.count(), 2)
+        # The report in setUp also notified (deficiency.reported, issue #202); count the rest.
+        self.assertEqual(
+            NotificationOutbox.objects.exclude(event_type="deficiency.reported").count(), 2
+        )
 
     def test_a_request_needs_a_deadline_and_a_later_future_date_and_a_reason(self):
         self.refused("NO_DEADLINE", 422, self.ask)
