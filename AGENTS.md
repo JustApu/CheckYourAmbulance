@@ -41,9 +41,9 @@ For committed content, obtain the ID from the repository root with `git rev-pars
 | [/docs/coordination.md](docs/coordination.md) | `98cd3e6510cd702208b58889ec2e04fc31033d95` | Normative |
 | [/docs/review.md](docs/review.md) | `4a0964ec9c600b5730e8b752ed97cc63f3ad8c98` | Normative |
 | [/docs/engineering-standards.md](docs/engineering-standards.md) | `6a257f572234461e028004ef6865525a97ff3f1e` | Normative |
-| [/docs/ci-routing.md](docs/ci-routing.md) | `bf4cdf430263f38c09128fd81a8365aa35584d6f` | Non-normative |
+| [/docs/ci-routing.md](docs/ci-routing.md) | `44aaea23e0db4d882b99c48ad264d92cfa8ee724` | Non-normative |
 | [/docs/model-efficiency.md](docs/model-efficiency.md) | `9abf40f5511a0c4996bfd78c5ca0c11f9900e476` | Non-normative |
-| [/CONTRIBUTING.md](CONTRIBUTING.md) | `cd746244ec371d31bef7e72153659948fbd4849a` | Non-normative |
+| [/CONTRIBUTING.md](CONTRIBUTING.md) | `19686957a368d938f53c6818e58c65fc9fe11092` | Non-normative |
 | [/docs/deployment-runbook.md](docs/deployment-runbook.md) | `2dcd71364689d7a97e8d6b1002591b215bd0c304` | Non-normative |
 
 ## Model and reasoning efficiency

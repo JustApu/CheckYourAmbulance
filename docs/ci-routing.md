@@ -53,7 +53,7 @@ A CSS-only change currently starts both MariaDB jobs and accounts for 6.8 of the
 
 ## Issue #158: migration test tags
 
-Tests that reverse or reapply migrations carry the Django test tag `migration_rollback`, and `tools/migration_test_tags.py` (run with the tool tests) fails if a migrating test class is missing it. CI does not use the tag yet: the server lane still runs every test, so coverage is unchanged. The tag is groundwork for issue #158 item 4. That item, which needs an owner decision, proposes running the tagged tests only when a PR changes migrations or migration tests, plus a scheduled full run, and splitting the Django suite across parallel jobs.
+Tests that reverse or reapply migrations carry the Django test tag `migration_rollback`, and `tools/migration_test_tags.py` (run with the tool tests) fails if a migrating test class is missing it. Since item 4 option 2 (below), CI uses the tag to leave these tests out of pull requests that cannot affect them.
 
 Measured on the Rocky 9 / MariaDB 10.11 test host on 2026-11-15 (NFS-backed storage, synthetic data):
 - `AuditSchemaLifecycleTests.test_integrity_migrations_reverse_and_reapply_on_empty_disposable_schema`: 410 s;
@@ -69,4 +69,35 @@ Before the change, from PR runs 43675239946 and 43674589307:
 - Django jobs took 19 to 27 minutes, and the test step 1119 to 1507 s (about 94% of the job). Container start, dependency install and migrations together took about 1.5 minutes.
 - The tagged migration tests took roughly 214 to 242 s of the test step (15 to 18%). This was estimated from per-class result timestamps with 2 processes, so it is approximate. They are cheaper in CI than on the test hosts because the CI database runs on tmpfs with flushes off.
 
-Each process gets its own copy of the test database, about 15 MB each in a local run, on the service's 1 GiB tmpfs. The change's own CI run is the after measurement. Options 2 (skip tagged tests on PRs that do not touch migrations) and 3 (shard the suite) wait for that result and need a further owner decision.
+Each process gets its own copy of the test database, about 15 MB each in a local run, on the service's 1 GiB tmpfs. After the change, the test step took 884 s (MariaDB 11.8) and 1073 s (10.11).
+
+### Item 4, options 2 and 3: route the migration tests and shard the suite
+
+The owner deferred options 2 and 3 on 2026-11-16 and asked to revisit them on 2026-11-19. Before this change, on 2026-11-19, full Django jobs took 17 to 19 minutes, of which the test step took 15.5 to 17.5 minutes (PR runs [44581299409](https://github.com/JustApu/CheckYourAmbulance/actions/runs/44581299409), [44574198877](https://github.com/JustApu/CheckYourAmbulance/actions/runs/44574198877) and [44569928424](https://github.com/JustApu/CheckYourAmbulance/actions/runs/44569928424), and push run [44581105734](https://github.com/JustApu/CheckYourAmbulance/actions/runs/44581105734)). Two runs measured the change on 2026-11-19, both green with 3 shards:
+
+| Run | Migration tests | Django jobs (6) | Test steps | Runner minutes, Django jobs | Wall time |
+|---|---|---|---|---:|---:|
+| Before: 4 runs above (2 jobs each) | included | 17 to 19 min | 15.5 to 17.5 min | 34 to 38 | 17 to 19 min |
+| PR #232 handoff, [44590447850](https://github.com/JustApu/CheckYourAmbulance/actions/runs/44590447850) | included (the PR changes the classifier) | 6.8 to 12.5 min | 333 to 647 s | 53.1 | 12.7 min |
+| Measurement PR #233, [44590519874](https://github.com/JustApu/CheckYourAmbulance/actions/runs/44590519874) (one non-migration Python file) | excluded | 5.3 to 8.8 min | 247 to 430 s | 38.7 | 9.1 min |
+
+- Wall time falls by a quarter to a third for a run that includes the migration tests, and by about half for an ordinary PR. Runner minutes rise by about half when the migration tests run, because each extra job repeats about 1.5 minutes of setup and creates its own test database; an ordinary PR uses about the same runner minutes as before.
+- The shards are uneven when the migration tests run: the class hash put 13 of the 22 tagged tests in shard 1, whose MariaDB 11.8 job was the slowest at 12.5 minutes. Its `--durations` list was led by the audit lifecycle test (154 s), eight migration-reversal tests (47 to 95 s each) and four seeded projection-history tests (36 to 61 s). Without them the shards are within 3.5 minutes of each other. A change of `DJANGO_SHARDS` moves classes between shards; it should be measured the same way before it is adopted.
+
+**Option 3, sharding.** A full run splits the Django suite into `DJANGO_SHARDS` jobs (3) per MariaDB version, so 6 jobs instead of 2. Each job passes `--shard K/N` to the project test runner (`cya/testing/runner.py`), which keeps only the test classes whose SHA-256 hash of module and class name falls in shard K (`cya/testing/sharding.py`). Every job computes the same split independently, and a class always stays whole in one shard, so class-level setup and Django's per-class process split are unchanged. A test module that fails to import is reported in every shard. A shard that selects no tests from a non-empty suite stops the run instead of passing.
+
+- `cya/tests/test_test_sharding.py` loads the whole suite and checks that the configured shard count, run through the real runner, puts every test and every class in exactly one non-empty shard; it checks other counts with the same function.
+- Lint, the audit helper tests in `tests/` and the authorization policy tests run once, in shard 1.
+- Focused (template) runs stay in one job. Each extra job repeats the container start, dependency install, migrations and test-database creation, about 2 to 3 minutes of runner time, so sharding uses more runner minutes in exchange for shorter wall time.
+- The test step prints the 15 slowest tests (`--durations 15`), so an unbalanced shard can be seen and the count or split revisited.
+
+**Option 2, routing the migration tests.** On a pull request, a full run passes `--exclude-tag migration_rollback` unless the PR changes one of these inputs (`is_migration_input` in `tools/ci_lanes.py`):
+
+- any file in an app's `migrations/` package;
+- an application module a migration imports (`MIGRATION_IMPORTS`);
+- a test module with a tagged class, or a test-support module those modules import, directly or through each other (`MIGRATION_TEST_INPUTS`);
+- the shared test package `cya/testing/`, settings, the database session checks in `cya/core/db.py`, `manage.py`, `pyproject.toml`, dependencies, the tag check, and the classifier and its tests.
+
+The tool tests fail if a tagged module, a test-support module it imports, or a module a migration imports is missing from these lists, and check that no focused label reaches a tagged module. Every fail-closed route also runs the tagged tests: a failed, empty or possibly truncated changed-file query, CI configuration, an unclassified path, and a UI path without focused coverage. A PR that changes migrations therefore keeps the same handoff coverage as before ([issue #158](https://github.com/JustApu/CheckYourAmbulance/issues/158) acceptance criteria).
+
+Pushes to `main`, manual dispatches and a new nightly scheduled run (10:23 UTC, `main` only) run the whole suite, including the tagged tests. The trade-off, which is the owner's decision in approving this option: a PR that changes application code without touching any migration input, but still breaks a migration test (for example through a model or service the test uses after reapplying migrations), is caught by the `main` push run or the nightly run after merge, not before. GitHub notifies the author of the most recent change to the schedule when a scheduled run fails, and disables schedules in a public repository after 60 days without repository activity.
