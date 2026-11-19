@@ -87,7 +87,7 @@ class MigrationCase(ObligationCase):
             override_version_id=draft, effective_at=effective_at, **self.context()
         )
 
-    def migrate(self, actor=None, operation_id=None):
+    def cut_over(self, actor=None, operation_id=None):
         return migrate_to_vehicle_checklists(
             organization_id=self.org_id,
             actor_id=str((actor or self.admin).pk),
@@ -113,7 +113,7 @@ class MigrationCase(ObligationCase):
 
 class MigrationShapeTests(MigrationCase):
     def test_each_vehicle_template_pair_becomes_one_checklist_without_merging(self):
-        result = self.migrate()
+        result = self.cut_over()
         self.assertEqual(result.body["checklists"], 3)
         own_t, own_t2 = self.checklist(self.a, self.template), self.checklist(self.a, self.second)
         self.assertNotEqual(own_t.pk, own_t2.pk)
@@ -125,13 +125,13 @@ class MigrationShapeTests(MigrationCase):
             self.assertEqual(str(checklist.vehicle_id), str(self.a.pk))
 
     def test_precedence_follows_the_legacy_template_identity_order(self):
-        self.migrate()
+        self.cut_over()
         first, second = sorted([self.template, self.second], key=lambda t: str(t.pk))
         self.assertEqual(self.checklist(self.a, first).precedence, 1)
         self.assertEqual(self.checklist(self.a, second).precedence, 2)
 
     def test_the_override_is_folded_into_the_vehicle_checklist(self):
-        self.migrate()
+        self.cut_over()
         own_a, own_b = self.checklist(self.a, self.template), self.checklist(self.b, self.template)
         self.assertIn(str(self.suction.pk), self.items_of(own_a, 1))
         self.assertNotIn(str(self.suction.pk), self.items_of(own_b, 1))
@@ -139,7 +139,7 @@ class MigrationShapeTests(MigrationCase):
         self.assertEqual(str(placed.compartment.vehicle_id), str(self.b.pk))
 
     def test_future_versions_and_assignment_ends_keep_their_instants(self):
-        self.migrate()
+        self.cut_over()
         own_b = self.checklist(self.b, self.template)
         publications = ChecklistPublication.objects.filter(
             checklist_version__template=own_b
@@ -149,7 +149,7 @@ class MigrationShapeTests(MigrationCase):
         self.assertEqual(self.chain(own_b), [("BIND", self.clock.now), ("UNBIND", self.at(days=4))])
 
     def test_positions_and_keys_become_vehicle_local(self):
-        self.migrate()
+        self.cut_over()
         for vehicle in (self.a, self.b):
             key = VehiclePositionKey.objects.get(vehicle=vehicle, kind="COMPARTMENT")
             self.assertEqual(
@@ -163,7 +163,7 @@ class MigrationShapeTests(MigrationCase):
             ChecklistVersion.objects.filter(template__vehicle__isnull=True).count(),
             RequirementBinding.objects.filter(template__vehicle__isnull=True).count(),
         )
-        self.migrate()
+        self.cut_over()
         after = (
             ChecklistTemplate.objects.filter(vehicle__isnull=True).count(),
             ChecklistVersion.objects.filter(template__vehicle__isnull=True).count(),
@@ -183,7 +183,7 @@ class CarryOverTests(MigrationCase):
     def test_existing_obligations_are_not_recomputed(self):
         before = self.selections()
         self.assertTrue(before)
-        self.migrate()
+        self.cut_over()
         self.generate()
         # Later due instants are added, but no earlier selection is replaced or retired: every
         # obligation from before the cutover keeps its legacy requirement (SPEC 18.2 step 3).
@@ -195,7 +195,7 @@ class CarryOverTests(MigrationCase):
         )
 
     def test_new_obligations_come_from_the_vehicle_checklists(self):
-        self.migrate()
+        self.cut_over()
         self.clock.set(self.at(days=2, hours=12))
         self.generate()
         own = {str(self.checklist(self.a, t).pk) for t in (self.template, self.second)}
@@ -215,14 +215,14 @@ class CarryOverTests(MigrationCase):
             return desired.items[(str(self.masks.pk), NO_KIT)].publication_id
 
         before = ChecklistPublication.objects.get(pk=winner(None)).checklist_version.template_id
-        self.migrate()
+        self.cut_over()
         after = ChecklistPublication.objects.get(pk=winner(None)).checklist_version.template
         self.assertEqual(
             str(LegacyChecklistMap.objects.get(checklist=after).legacy_template_id), str(before)
         )
 
     def test_ending_a_migrated_assignment_lists_the_legacy_pinned_obligations(self):
-        self.migrate()
+        self.cut_over()
         own = self.checklist(self.a, self.template)
         preview = unbind_preview(
             self.org_id, str(self.a.pk), str(own.pk), "test-1800", self.clock.now
@@ -234,30 +234,30 @@ class CarryOverTests(MigrationCase):
 class CommandTests(MigrationCase):
     def test_a_rerun_replays_and_writes_nothing(self):
         operation = str(uuid4())
-        first = self.migrate(operation_id=operation)
+        first = self.cut_over(operation_id=operation)
         count = ChecklistTemplate.objects.count()
-        again = self.migrate(operation_id=operation)
+        again = self.cut_over(operation_id=operation)
         self.assertTrue(again.replayed)
         self.assertEqual(again.body, first.body)
         self.assertEqual(ChecklistTemplate.objects.count(), count)
 
     def test_only_administrators_may_migrate(self):
         with self.assertRaises(CommandDenied):
-            self.migrate(actor=self.supervisor)
+            self.cut_over(actor=self.supervisor)
         self.assertFalse(ChecklistCutover.objects.exists())
 
     def test_a_second_migration_is_refused(self):
-        self.migrate()
+        self.cut_over()
         self.grant(self.supervisor, "ADMINISTRATOR")
         with self.assertRaisesRegex(CutoverError, "already moved"):
-            self.migrate(actor=self.supervisor)
+            self.cut_over(actor=self.supervisor)
 
     def test_a_difference_in_resolution_refuses_everything(self):
         with (
             mock.patch("cya.obligations.legacy.carried_over", return_value=False),
             self.assertRaisesRegex(CutoverError, "would change future requirements"),
         ):
-            self.migrate()
+            self.cut_over()
         self.assertFalse(ChecklistCutover.objects.exists())
         self.assertFalse(ChecklistTemplate.objects.filter(vehicle__isnull=False).exists())
 
@@ -269,7 +269,7 @@ class CommandTests(MigrationCase):
         plan = plan_cutover(self.org_id)
         self.assertTrue(any("override" in p for p in plan.problems), plan.problems)
         with self.assertRaises(CutoverError):
-            self.migrate()
+            self.cut_over()
         self.assertFalse(ChecklistCutover.objects.exists())
 
     def test_the_management_command_dry_run_writes_nothing(self):
