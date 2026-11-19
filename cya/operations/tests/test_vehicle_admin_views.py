@@ -121,9 +121,13 @@ class VehiclePagesTests(KitCase):
         # A saved name goes back to the list, which names the vehicle (owner, 2026-11-18).
         self.assertEqual(saved["Location"], f"{LIST}?saved={self.vehicle.pk}")
         listing = self.client_.get(saved["Location"])
-        self.assertContains(listing, '<p role="status">Saved Synthetic Renamed.</p>', html=True)
+        # One status line, announced once (PR #218 review): the indicator carries the name.
+        self.assertContains(
+            listing, '<span class="save-state-text">Saved Synthetic Renamed.</span>', html=True
+        )
+        self.assertContains(listing, 'data-save-state="saved"', count=1)
         self.assertNotContains(
-            self.client_.get(f"{LIST}?saved=not-a-vehicle"), '<p role="status">Saved'
+            self.client_.get(f"{LIST}?saved=not-a-vehicle"), 'data-save-state="saved"'
         )
         self.vehicle.refresh_from_db()
         self.assertEqual(
