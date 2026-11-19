@@ -43,6 +43,7 @@ Authoritative mappings: `contracts/step-catalog.json` (`cases[*].requirements`);
 | AC-37 | [AC-37.json](scenarios/AC-37.json) | AUD-1, REC-4, CFG-1, CFG-2, CFG-7, CFG-8, RPT-5a | Symbolic; unimplemented |
 | AC-38 | [AC-38.json](scenarios/AC-38.json) | AUD-1, DEP-10, DEP-12, DEP-13 | Symbolic; unimplemented |
 | AC-39 | [AC-39.json](scenarios/AC-39.json) | AUD-1, ASG-2, ASG-3, ASG-4, ASG-5, ASG-6, ASG-7, ASG-8 | Symbolic; unimplemented |
+| AC-40 | [AC-40.json](scenarios/AC-40.json) | AUD-1, CHK-1, CHK-2, CHK-3, CHK-4, CHK-5, CHK-8, CHK-9, CHK-10, CFG-2, CFG-4, CFG-7, CFG-8, CFG-9, IMP-2, IMP-6, IMP-7, KDEF-4, KDEF-9, TIME-1a, CAB-2, CAB-4, CAB-5, DEP-11 | Symbolic; unimplemented |
 
 ## Supplemental coverage
 

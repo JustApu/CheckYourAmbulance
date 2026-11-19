@@ -842,6 +842,84 @@
         "§15.4",
         "§23"
       ]
+    },
+    "AC-40": {
+      "setup": [
+        "migrate_many_to_many_vehicle_checklists",
+        "shared_schedules_and_kit_definition",
+        "existing_future_effective_versions",
+        "sealed_compartment_with_assigned_kit",
+        "overlapping_anchor_across_slots_and_checklists"
+      ],
+      "actions": [
+        "run_migration_and_replay",
+        "read_asof_before_and_after_cutover",
+        "publish_vehicle_a_checklist_change",
+        "record_unplaced_item_check_then_place",
+        "export_edit_import_vehicle",
+        "preview_legacy_file_and_ambiguous_file",
+        "resolve_overlapping_anchor_before_and_after_migration",
+        "move_kit_and_verify_existing_seal_rules",
+        "rebuild_checklist_and_obligation_projections"
+      ],
+      "assert": [
+        "vehicle_positions_independent",
+        "legacy_asof_preserved",
+        "many_to_many_assignments_preserved",
+        "future_binding_boundaries_and_dst_preserved",
+        "migration_idempotent",
+        "checklist_publication_vehicle_scoped",
+        "unplaced_item_due_and_listed",
+        "future_placement_does_not_rewrite_history",
+        "import_self_contained_and_remapped",
+        "physical_kits_and_operational_history_not_copied",
+        "legacy_import_resolved_or_atomically_refused",
+        "one_requirement_wins_by_slot_text_then_template_id",
+        "overlap_creates_one_routine_obligation",
+        "overlap_winner_preserved_by_migration",
+        "overlapping_changes_are_not_refused",
+        "kit_move_follows_TIME_1a_and_CAB_4",
+        "open_sessions_obligations_kit_lists_and_seals_preserved",
+        "projection_matches_history",
+        "unauthorized_checklist_edit_and_assignment_denied"
+      ],
+      "requirements": [
+        "AUD-1",
+        "CHK-1",
+        "CHK-2",
+        "CHK-3",
+        "CHK-4",
+        "CHK-5",
+        "CHK-8",
+        "CHK-9",
+        "CHK-10",
+        "CFG-2",
+        "CFG-4",
+        "CFG-7",
+        "CFG-8",
+        "CFG-9",
+        "IMP-2",
+        "IMP-6",
+        "IMP-7",
+        "KDEF-4",
+        "KDEF-9",
+        "TIME-1a",
+        "CAB-2",
+        "CAB-4",
+        "CAB-5",
+        "DEP-11"
+      ],
+      "spec_refs": [
+        "§3.3",
+        "§4.3",
+        "§4.7",
+        "§4.8",
+        "§5.7",
+        "§10.2",
+        "§17.8",
+        "§18",
+        "§23"
+      ]
     }
   }
 }
