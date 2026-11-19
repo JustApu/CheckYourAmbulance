@@ -1,13 +1,13 @@
 """Vehicle crew screens (SPEC 15.4 ASG-2 to ASG-8, AC-39, issue #202 part 2)."""
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.test import SimpleTestCase
 
 from cya.inspections.tests.test_crew_ui import CrewUiCase
-from cya.operations.assignments import current_assignment, current_crew
+from cya.operations.assignments import current_assignment, current_crew, set_assignment_limit
 from cya.operations.crew_views import SkippedTime, until_instant, when
 from cya.operations.models import VehicleAssignmentEvent
 
@@ -157,7 +157,7 @@ class VehicleCrewPageTests(CrewScreenCase):
         self.assertIsNotNone(current_assignment(str(self.org.pk), str(self.crew_user.pk)))
 
     def test_bad_times_are_explained_and_change_nothing(self):
-        for until, text in (("6pm", "Enter a time such as 18:00."),):
+        for until, text in (("6pm", "Enter a time such as 18:00"),):
             done = self.assign(self.client, self.a, until=until)
             self.assertIn("crew_error=MALFORMED_REQUEST", done["Location"])
             self.assertContains(self.client.get(done["Location"].split("#")[0]), text)
@@ -182,6 +182,53 @@ class VehicleCrewPageTests(CrewScreenCase):
         self.assertContains(
             page, f"{self.crew_user.display_name} on {self.a.display_name} until 19:00"
         )
+
+
+class LongShiftTests(CrewScreenCase):
+    """PR #219 review: with the limit above 24 hours, a dated end reaches it from the screens."""
+
+    def test_a_dated_end_assigns_and_extends_past_a_day(self):
+        admin, user = self.harness.sign_in("crew-admin-48")
+        self.grant(user, "ADMINISTRATOR")
+        set_assignment_limit(max_hours=48, **self.context(user))
+        start = self.clock.now  # 07:00 station time (UTC) on day 0
+        day1 = (start + timedelta(days=1)).date().isoformat()
+        day2 = (start + timedelta(days=2)).date().isoformat()
+        done = self.assign(self.client, self.a, until="19:00", until_date=day1)  # 36 hours
+        self.assertIn("crew=assigned", done["Location"])
+        here = current_assignment(str(self.org.pk), str(self.crew_user.pk))
+        self.assertEqual(
+            here.ends_at, datetime.combine(start.date() + timedelta(days=1), time(19), UTC)
+        )
+        self.assertContains(self.client.get(self.page(self.a)), "until Tue 19:00")
+        self.form(
+            self.client,
+            self.page(self.a),
+            stage="extend",
+            vehicle_id=str(self.a.pk),
+            until="06:00",
+            until_date=day2,
+        )
+        here = current_assignment(str(self.org.pk), str(self.crew_user.pk))
+        self.assertEqual(
+            here.ends_at, datetime.combine(start.date() + timedelta(days=2), time(6), UTC)
+        )
+        # Past the limit, already past, or malformed: refused with a reason, nothing changes.
+        late = self.form(
+            self.client,
+            self.page(self.a),
+            stage="extend",
+            vehicle_id=str(self.a.pk),
+            until="08:00",
+            until_date=day2,
+        )
+        self.assertIn("crew_error=END_TOO_LATE", late["Location"])
+        past = self.assign(
+            self.partner_client, self.a, until="06:00", until_date=start.date().isoformat()
+        )
+        self.assertIn("crew_error=END_PASSED", past["Location"])
+        bad = self.assign(self.partner_client, self.a, until="06:00", until_date="2026-13-40")
+        self.assertIn("crew_error=MALFORMED_REQUEST", bad["Location"])
 
 
 class HomeTruckTests(CrewScreenCase):

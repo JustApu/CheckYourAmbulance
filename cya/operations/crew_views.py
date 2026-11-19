@@ -9,7 +9,7 @@ an overnight shift is entered as its morning end).
 """
 
 import logging
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -48,7 +48,8 @@ ERRORS = {
     "VEHICLE_INACTIVE": "This vehicle is inactive.",
     "PERSON_INACTIVE": "That person can't be assigned.",
     "NOT_FOUND": "That vehicle or person no longer exists.",
-    "MALFORMED_REQUEST": "Enter a time such as 18:00.",
+    "MALFORMED_REQUEST": "Enter a time such as 18:00, and a date only for a shift past tomorrow.",
+    "END_PASSED": "That date and time have already passed.",
     "TIME_SKIPPED": "That time is skipped by the clock change tonight. Choose another time.",
 }
 
@@ -62,6 +63,39 @@ def zone_of(user):
 
 class SkippedTime(ValueError):
     """The next time the station clock would read this time, it does not: the spring change."""
+
+
+def _readings(day, parsed, zone):
+    """The UTC instants at which the station clock reads `parsed` on `day` (0, 1 or 2)."""
+    wall = datetime.combine(day, parsed)
+    found = set()
+    for fold in (0, 1):
+        candidate = wall.replace(tzinfo=zone, fold=fold)
+        back = candidate.astimezone(UTC).astimezone(zone)
+        if back.replace(tzinfo=None, fold=0) == wall:
+            found.add(candidate.astimezone(UTC))
+    return sorted(found)
+
+
+def until_on(day_text, text, zone, now):
+    """The end at time `text` on station date `day_text` (YYYY-MM-DD), for shifts past a day.
+
+    PR #219 review: a time alone can only reach the next 24 hours, but the limit may be up to
+    168. The earliest reading after now on that date is used; a time the clock skips that day
+    raises SkippedTime; a date and time already past, or malformed input, gives None.
+    """
+    try:
+        parsed = time.fromisoformat((text or "").strip())
+        day = date.fromisoformat((day_text or "").strip())
+    except ValueError:
+        return None
+    if parsed.second or parsed.microsecond or parsed.tzinfo is not None:
+        return None
+    readings = _readings(day, parsed, zone)
+    if not readings:
+        raise SkippedTime(text)
+    ahead = [r for r in readings if r > now.astimezone(UTC)]
+    return ahead[0].astimezone(zone) if ahead else None
 
 
 def until_instant(text, zone, now):
@@ -291,11 +325,24 @@ def crew(request):
     until = None
     if stage != "end":
         try:
-            until = until_instant(request.POST.get("until"), zone_of(user), timezone.now())
+            day = request.POST.get("until_date", "").strip()
+            until = (
+                until_on(day, request.POST.get("until"), zone_of(user), timezone.now())
+                if day
+                else until_instant(request.POST.get("until"), zone_of(user), timezone.now())
+            )
         except SkippedTime:
             return _back(request, vehicle.pk, error="TIME_SKIPPED")
         if until is None:
-            return _back(request, vehicle.pk, error="MALFORMED_REQUEST")
+            day = request.POST.get("until_date", "").strip()
+            code = "MALFORMED_REQUEST"
+            try:
+                if day and time.fromisoformat(request.POST.get("until", "").strip()):
+                    date.fromisoformat(day)
+                    code = "END_PASSED"
+            except ValueError:
+                pass
+            return _back(request, vehicle.pk, error=code)
     try:
         if stage == "assign":
             result = assignments.assign_vehicle(

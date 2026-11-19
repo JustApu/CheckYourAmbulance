@@ -14,6 +14,8 @@
     <input type="hidden" name="operation_id" value="{{ home.truck.operation_id }}"><input type="hidden" name="next" value="home">
     <label for="home-extend-until">Still on {{ home.truck.vehicle }}? Extend until</label>
     <input id="home-extend-until" name="until" type="time" required>
+  <label for="home-extend-until-date">Date <span class="muted">(only for a shift past tomorrow)</span></label>
+  <input id="home-extend-until-date" name="until_date" type="date">
     <button type="submit" class="button">Extend</button>
   </form>
   {% endif %}
@@ -35,6 +37,8 @@
     </select>
     <label for="home-truck-until">Until (station time)</label>
     <input id="home-truck-until" name="until" type="time" required>
+  <label for="home-truck-until-date">Date <span class="muted">(only for a shift past tomorrow)</span></label>
+  <input id="home-truck-until-date" name="until_date" type="date">
     <button type="submit" class="button">I'm on this truck</button>
   </form>
   {% endif %}
