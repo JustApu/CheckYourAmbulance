@@ -62,6 +62,12 @@ class SmtpReplyCodeTests(SimpleTestCase):
             (smtplib.SMTPDataError(452, b"insufficient storage"), "DEFERRED"),
             (smtplib.SMTPDataError(554, b"rejected"), "REJECTED"),
             (smtplib.SMTPResponseException(421, b"closing"), "DEFERRED"),
+            (smtplib.SMTPConnectError(554, b"no service for you"), "REJECTED"),
+            (smtplib.SMTPConnectError(421, b"too busy"), "DEFERRED"),
+            (smtplib.SMTPHeloError(550, b"not allowed"), "REJECTED"),
+            (smtplib.SMTPResponseException(454, b"TLS not available now"), "DEFERRED"),
+            (smtplib.SMTPAuthenticationError(535, b"bad credentials"), "AUTH_FAILED"),
+            (smtplib.SMTPNotSupportedError("no STARTTLS"), "TLS_FAILED"),
             (smtplib.SMTPResponseException(502, b"unknown"), "REJECTED"),
             (smtplib.SMTPResponseException(-1, b"broken"), "CONNECT_FAILED"),
         ]

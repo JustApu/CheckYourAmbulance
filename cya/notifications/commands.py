@@ -370,6 +370,53 @@ def configure_mail_relay(
     )
 
 
+def requeue_email(**context):
+    """Administrator sends given-up notification email again (SPEC 13 NOT-4; issue #224).
+
+    Reopens at most delivery.GIVEN_UP_PAGE given-up emails, oldest first; the next delivery run
+    sends them through the relay. Use it after fixing the relay or a recipient's address.
+    """
+    from cya.notifications import delivery
+    from cya.notifications.models import NotificationRequeue
+
+    org = context["organization_id"]
+
+    def build(actor):
+        found = delivery.given_up(org)
+
+        def apply(receipt, current):
+            NotificationRequeue.objects.bulk_create(
+                [
+                    NotificationRequeue(
+                        organization_id=org,
+                        command=receipt,
+                        outbox=row,
+                        after_attempt=last.attempt_number,
+                        actor_user_id=receipt.actor_user_id,
+                        recorded_at=receipt.recorded_at,
+                    )
+                    for row, last in found
+                ]
+            )
+
+        ids = [str(row.pk) for row, _last in found]
+        return Plan(
+            response_body={"code": "REQUEUED", "count": len(ids)},
+            apply=apply,
+            target_type="ORGANIZATION",
+            target_id=org,
+            new_snapshot={"schema_version": 1, "values": {"outbox_ids": ids}},
+        )
+
+    return _execute(
+        command_type="NOTIFICATION_REQUEUE",
+        request={"requeue": True},
+        build=build,
+        permission=POLICY_ACTION,
+        **context,
+    )
+
+
 def request_mail_relay_test(**context):
     """Administrator asks for a test email (DEP-13). Audited; the caller sends after it commits.
 

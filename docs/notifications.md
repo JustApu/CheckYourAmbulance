@@ -12,6 +12,7 @@ overdue notice until the owner decides.
 |---|---|---|
 | `notification_outbox` | A | One row per source event, channel (`IN_APP`, `EMAIL`) and recipient; written in the causing command's transaction. |
 | `notification_delivery_event` | A | One row per email attempt: outcome `SENT`, `RETRY` or `GAVE_UP` and a fixed safe `error_code`. |
+| `notification_requeue` | A | An Administrator sent a given-up email again, after its `GAVE_UP` attempt (issue #224). |
 | `notification_read` | A | The recipient marked an in-app item read; at most one per item. |
 | `notification_pref` | M | A user's optional on/off switch per event type and channel. |
 | `notification_policy` | M | Administrator policy: which event/channel pairs are mandatory. |
@@ -157,6 +158,15 @@ best effort: the outbox row is the durable intent.
   `CYA_NOTIFICATION_RETRY_SECONDS` doubled per earlier attempt, up to
   `CYA_NOTIFICATION_MAX_ATTEMPTS`, then `GAVE_UP`. `REJECTED` and `INVALID_ADDRESS` give up at once.
   An inactive recipient is `GAVE_UP` with `INVALID_ADDRESS` and is not emailed.
+- **Sending given-up email again.** A given-up email stays given up until an Administrator sends it
+  again from **Administration → Outgoing mail** ("Email not sent", then **Try again**), usually
+  after fixing the relay. The audited `requeue_email` command (`NOTIFICATION_REQUEUE`) writes one
+  `notification_requeue` row per given-up email, at most 200 per request, oldest first. Each row
+  reopens the email after its `GAVE_UP` attempt: the next delivery pass sends it, and attempts and
+  the retry delay count again from there (attempt numbers keep rising). Its insert trigger refuses
+  a row that does not match an Administrator's `NOTIFICATION_REQUEUE` receipt, or that reopens an
+  email whose latest attempt did not give up; the unique key allows one reopening per given-up
+  attempt.
 - **Safe errors.** Only a fixed code is stored (`TRANSIENT`, `REJECTED`, `INVALID_ADDRESS`,
   `UNAVAILABLE`, `UNKNOWN`). Exception text, addresses and provider detail are never persisted.
   `delivery.failures(organization_id)` lists intents that failed and are not yet sent, for
@@ -196,8 +206,11 @@ The settings live in `mail_relay`, one row per organization:
 - **Send test email** records an audited `MAIL_RELAY_TEST` request, then sends one message through
   the saved relay to every operator and deputy address. The page shows a fixed safe result (`SENT`,
   `CONNECT_FAILED`, `TLS_FAILED`, `AUTH_FAILED`, `REJECTED`, `DEFERRED`, `TIMEOUT`, `KEY_MISSING`,
-  `UNKNOWN`). No provider reply or exception text is stored or shown. A refusal or other reply
-  with an SMTP 5xx code is `REJECTED`; a 4xx code is temporary (RFC 5321) and is `DEFERRED`.
+  `UNKNOWN`). No provider reply or exception text is stored or shown. Any SMTP reply is classified
+  by its code, whatever the phase (greeting, HELO, STARTTLS, sender, recipient or data; RFC 5321
+  §4.2.1): 5xx is permanent (`REJECTED`), 4xx is temporary (`DEFERRED`). A failed login keeps
+  `AUTH_FAILED`; a relay without STARTTLS, or a TLS error, is `TLS_FAILED`; a reply without a
+  valid code, a dropped connection or a network error is `CONNECT_FAILED`.
 - **The host copy.** `manage.py export_mail_relay --organization <id> --output <file>` writes the
   settings the host alerts need, including the decrypted password, as JSON. It writes mode 0600
   through a temporary file and an atomic rename. On any failure, such as a missing or wrong key, it
@@ -213,8 +226,9 @@ recipient through the same transport as the test email (TLS required, password o
 with the `X-CYA-Reference` header. An organization with no relay is skipped with a note, and its
 email stays queued; the job still succeeds, so its timer does not fail. Relay outcomes map to
 delivery codes as follows:
-- `REJECTED` (a 5xx refusal) is permanent (given up);
-- `DEFERRED` (a 4xx refusal), `CONNECT_FAILED` and `TIMEOUT` are `TRANSIENT`;
+- `REJECTED` (a 5xx reply in any phase) is permanent: the email gives up at once and waits on
+  "Email not sent" until an Administrator sends it again;
+- `DEFERRED` (a 4xx reply), `CONNECT_FAILED` and `TIMEOUT` are `TRANSIENT`;
 - `TLS_FAILED`, `AUTH_FAILED` and `KEY_MISSING` are `UNAVAILABLE`, retried until the operator fixes
   the relay or the attempts run out;
 - anything else is `UNKNOWN`.

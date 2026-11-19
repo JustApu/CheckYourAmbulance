@@ -339,6 +339,7 @@ cannot fulfill the audit. Event-tip conflicts fail without writing.
 | `audit_event` | A | command_id? ref, request_attempt_id, actor_user_id?, roles_at_time, action, typed target refs?, recorded_at, correlation_id, outcome, reason_code, prior/new snapshot or immutable row refs; no raw requests/tokens |
 | `notification_outbox` | A | command_id ref, source event ref (typed name and id), event_type, channel (`IN_APP`/`EMAIL`), recipient_user_id ref, template_key, minimal payload, same-site deep_link, mandatory flag at enqueue; unique source event/channel/recipient |
 | `notification_delivery_event` | A | outbox_id ref, attempt_number, outcome, safe error_code?, recorded_at; unique outbox/attempt |
+| `notification_requeue` | A | outbox_id ref (an email), after_attempt (its latest attempt, which gave up), actor_user_id ref (the Administrator), command_id ref, recorded_at; unique outbox/after_attempt; delivery counts attempts again after it (issue #224) |
 | `notification_read` | A | outbox_id ref (in-app item), user_id ref (the recipient), command_id ref, recorded_at; unique outbox; "unread" is the absence of a row |
 | `attachment` | A | typed parent FK, object key, media type, byte size, digest, validation result; no uploaded bytes in DB; access derives from parent |
 | `notification_pref` | M | user_id ref, event/channel, enabled; unique user/event/channel; cannot override mandatory organization policy |
@@ -524,6 +525,7 @@ references a command receipt with an authorized `command_type`:
 | `vehicle_activity_event` | `cya_vehicle_activity_event_bi` | `CHANGE`: `'VEHICLE_CREATE'`, `'VEHICLE_IMPORT'`, `'VEHICLE_ACTIVE_SET'`, `'VEHICLE_DUPLICATE'`; `BASELINE`: `'VEHICLE_ACTIVITY_BASELINE'` |
 | `vehicle_assignment_event` | `cya_vehicle_assignment_event_bi` | `ASSIGN`, `MOVE`: `'VEHICLE_ASSIGN'`; `EXTEND`: `'VEHICLE_ASSIGNMENT_EXTEND'`; `END` with reason `ENDED`: `'VEHICLE_ASSIGNMENT_END'`; `END` with reason `VEHICLE_INACTIVE`: `'VEHICLE_ACTIVE_SET'` |
 | `vehicle_assignment_limit` | `cya_vehicle_assignment_limit_bi` | `'VEHICLE_ASSIGNMENT_LIMIT_SET'` |
+| `notification_requeue` | `cya_notification_requeue_bi` | `'NOTIFICATION_REQUEUE'` |
 | `schedule_rule` | `cya_schedule_rule_bi` | `'SCHEDULE_PUBLISH'`, `'SCHEDULE_SEED'` |
 | `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'`, `'VEHICLE_DUPLICATE'` |
 | `requirement_version` | `cya_requirement_version_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by binding origin |

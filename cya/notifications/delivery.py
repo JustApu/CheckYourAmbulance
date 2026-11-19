@@ -12,6 +12,11 @@ Delivery is at-least-once. The sender is called before the attempt row is writte
 callback may not touch the network), so a crash after the transport accepted a message but before
 the row commits leaves an ambiguous outcome: the next run repeats the same attempt number and the
 message may be sent again. The intent is never lost, and no exactly-once claim is made.
+
+An email that gave up (REJECTED, or out of attempts) stays given up until an administrator sends
+it again (commands.requeue_email, from the Outgoing-mail page): a notification_requeue row reopens
+it after its GAVE_UP attempt, and attempts and the retry delay count again from there. Attempt
+numbers keep rising, so job keys stay unique.
 """
 
 import json
@@ -28,13 +33,18 @@ from cya.accounts.models import Organization, User
 from cya.authorization.persistence import digest
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
 from cya.notifications import senders
-from cya.notifications.models import NotificationDeliveryEvent, NotificationOutbox
+from cya.notifications.models import (
+    NotificationDeliveryEvent,
+    NotificationOutbox,
+    NotificationRequeue,
+)
 from tools.command_identity import worker_operation_id
 
 logger = logging.getLogger(__name__)
 SERVICE = "worker.notifications"
 COMMAND = "NOTIFICATION_DELIVERY_ATTEMPT"
 SCAN_FACTOR = 5
+GIVEN_UP_PAGE = 200  # given-up emails shown and sent again per request
 
 
 @dataclass
@@ -96,11 +106,19 @@ def _record(organization_id, outbox, attempt, outcome, error_code):
     )
 
 
+def _final_events():
+    """Delivery events that end an email: SENT, or a GAVE_UP nobody has sent again."""
+    reopened = NotificationRequeue.objects.filter(
+        outbox=OuterRef("outbox"), after_attempt=OuterRef("attempt_number")
+    )
+    return NotificationDeliveryEvent.objects.filter(
+        Q(outcome="SENT") | (Q(outcome="GAVE_UP") & ~Exists(reopened))
+    )
+
+
 def _unresolved(organization_id, page, after=None):
     """One page of unresolved EMAIL rows in (recorded_at, id) order, after the `after` key."""
-    final = NotificationDeliveryEvent.objects.filter(
-        outbox=OuterRef("pk"), outcome__in=("SENT", "GAVE_UP")
-    )
+    final = _final_events().filter(outbox=OuterRef("pk"))
     rows = NotificationOutbox.objects.filter(
         organization_id=organization_id, channel="EMAIL"
     ).filter(~Exists(final))
@@ -117,11 +135,12 @@ def _due_rows(organization_id, now, retry_base, limit):
         rows = _unresolved(organization_id, limit * SCAN_FACTOR, after)
         if not rows:
             break
-        history = _attempts(rows)
+        history, reopened = _attempts(rows), _reopened(rows)
         for outbox in rows:
             events = history.get(outbox.pk, [])
-            if _due(events, now, retry_base):
-                due.append((outbox, events))
+            current = [e for e in events if e.attempt_number > reopened.get(outbox.pk, 0)]
+            if _due(current, now, retry_base):
+                due.append((outbox, events, current))
                 if len(due) >= limit:
                     break
         after = (rows[-1].recorded_at, rows[-1].pk)
@@ -136,11 +155,21 @@ def _attempts(rows):
     return found
 
 
-def _due(events, now, retry_base):
-    if not events:
+def _reopened(rows):
+    """{outbox id: the attempt after which it was last sent again}."""
+    found = {}
+    for outbox_id, after in NotificationRequeue.objects.filter(outbox__in=rows).values_list(
+        "outbox_id", "after_attempt"
+    ):
+        found[outbox_id] = max(after, found.get(outbox_id, 0))
+    return found
+
+
+def _due(current, now, retry_base):
+    """`current`: the attempts since the email was last sent again (all of them if never)."""
+    if not current:
         return True
-    last = events[-1]
-    return last.recorded_at + retry_base * (2 ** (last.attempt_number - 1)) <= now
+    return current[-1].recorded_at + retry_base * (2 ** (len(current) - 1)) <= now
 
 
 def _outcome(error_code, attempt, max_attempts):
@@ -182,10 +211,10 @@ def deliver_pending(
     retry_base = retry_base or timedelta(seconds=settings.CYA_NOTIFICATION_RETRY_SECONDS)
     base_url = settings.CYA_PUBLIC_BASE_URL if base_url is None else base_url
     report = DeliveryReport()
-    for outbox, events in _due_rows(organization_id, now, retry_base, limit):
+    for outbox, events, current in _due_rows(organization_id, now, retry_base, limit):
         attempt = len(events) + 1
         error_code = _send(sender, outbox, base_url)
-        outcome = _outcome(error_code, attempt, max_attempts)
+        outcome = _outcome(error_code, len(current) + 1, max_attempts)
         report.outbox_ids.append(str(outbox.pk))
         try:
             result = _record(organization_id, outbox, attempt, outcome, error_code)
@@ -204,6 +233,37 @@ def deliver_pending(
         else:
             report.gave_up += 1
     return report
+
+
+def given_up(organization_id, limit=GIVEN_UP_PAGE):
+    """EMAIL outbox rows that gave up and were not sent again, oldest first, at most `limit`.
+
+    Returns [(outbox row, its last delivery event)].
+    """
+    reopened = NotificationRequeue.objects.filter(
+        outbox=OuterRef("outbox"), after_attempt=OuterRef("attempt_number")
+    )
+    open_give_up = NotificationDeliveryEvent.objects.filter(
+        outbox=OuterRef("pk"), outcome="GAVE_UP"
+    ).filter(~Exists(reopened))
+    rows = list(
+        NotificationOutbox.objects.filter(organization_id=organization_id, channel="EMAIL")
+        .filter(Exists(open_give_up))
+        .order_by("recorded_at", "id")[:limit]
+    )
+    history = _attempts(rows)
+    return [(row, history[row.pk][-1]) for row in rows]
+
+
+def given_up_count(organization_id):
+    reopened = NotificationRequeue.objects.filter(
+        outbox=OuterRef("outbox"), after_attempt=OuterRef("attempt_number")
+    )
+    return (
+        NotificationDeliveryEvent.objects.filter(organization_id=organization_id, outcome="GAVE_UP")
+        .filter(~Exists(reopened))
+        .count()
+    )
 
 
 def failures(organization_id, limit=200):
