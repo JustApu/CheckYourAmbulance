@@ -106,9 +106,22 @@ def _listing(user, query):
     return rows
 
 
+def _just_saved(user, request):
+    """The vehicle a name or number save came back from, named on the list (owner, 2026-11-18)."""
+    vehicle_id = request.GET.get("saved", "")
+    if not vehicle_id:
+        return None
+    return (
+        Vehicle.objects.filter(organization_id=user.organization_id, pk=vehicle_id[:36])
+        .values_list("display_name", flat=True)
+        .first()
+    )
+
+
 def _list_page(request, user, *, status=200, errors=None, form=None):
     query = request.GET.get("q", "").strip()[:MAX_QUERY]
     context = {
+        "saved_name": None if errors else _just_saved(user, request),
         "title": "Vehicles",
         "query": query,
         "vehicles": _listing(user, query),
@@ -283,6 +296,11 @@ def vehicle(request, vehicle_id):
     _result, failed = _run(request, render_error, call)
     if failed:
         return failed
+    if stage == "update":
+        # Renaming is often done for several vehicles in a row, so a saved name or number goes
+        # back to the list, which names the vehicle saved (owner, 2026-11-18).
+        url = reverse("vehicle-admin-list")
+        return HttpResponseRedirect(url + "?" + urlencode({"saved": str(vehicle.pk)}))
     url = reverse("vehicle-admin", args=[vehicle.pk])
     return HttpResponseRedirect(url + "?" + urlencode({"saved": saved}))
 
