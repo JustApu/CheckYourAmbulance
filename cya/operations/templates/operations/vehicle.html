@@ -8,11 +8,10 @@
 <div id="status-live">
 {% include "operations/panel.html" %}
 </div>
-{% include "operations/crew.html" %}
 {% if can_set %}
 <form class="panel status-write" data-kind="set" aria-labelledby="set-heading">
 {% csrf_token %}
-<h2 id="set-heading">Set status</h2>
+<h2 id="set-heading">Set status for {{ vehicle.display_name }}</h2>
 <label>Status <select name="status" required>
 {% for code, label in statuses %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
 </select></label>
@@ -24,7 +23,7 @@
 {% elif can_request %}
 <form class="panel status-write" data-kind="request" aria-labelledby="request-heading">
 {% csrf_token %}
-<h2 id="request-heading">Request a status change</h2>
+<h2 id="request-heading">Request a status change for {{ vehicle.display_name }}</h2>
 <p>A supervisor decides. Nothing changes until they do.</p>
 <label>Requested status <select name="requested_status" required>
 {% for code, label in statuses %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
@@ -34,6 +33,7 @@
 <p class="status-result" role="status"></p>
 </form>
 {% endif %}
+{% include "operations/crew.html" %}
 {% endblock %}
 {% block scripts %}{{ config|json_script:"status-config" }}<script>
 {% include "operations/status.js" %}

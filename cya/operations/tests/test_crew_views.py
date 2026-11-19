@@ -69,6 +69,10 @@ class VehicleCrewPageTests(CrewScreenCase):
         page = self.client.get(self.page(self.a))
         self.assertContains(page, "Nobody is assigned to this vehicle right now.")
         self.assertContains(page, "Put me on this truck")
+        # The status form names its truck, and Crew comes after it (owner, 2026-11-18).
+        self.assertContains(page, f"Request a status change for {self.a.display_name}")
+        body = page.content.decode()
+        self.assertLess(body.index('id="request-heading"'), body.index('id="crew"'))
         done = self.assign(self.client, self.a)
         self.assertEqual(done["Location"], f"{self.page(self.a)}?crew=assigned#crew")
         page = self.client.get(f"{self.page(self.a)}?crew=assigned")
