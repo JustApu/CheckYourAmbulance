@@ -961,6 +961,9 @@ def verification_items(request, user, deficiency_id):
         {
             "status": "OK",
             "vehicle_status": result.vehicle_status,
+            # checklist.js refuses a response without this array. The verification screen has
+            # no compartment overview, so it is always empty here (issue #234).
+            "group_progress": [],
             "items": [checklist_row(r, authors.get(r.latest_check_id)) for r in rows],
             "verification_status": STATUS_LABELS[events[-1].to_status],
             "remaining_scope_rows": len(needed),

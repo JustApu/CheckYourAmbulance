@@ -1,6 +1,7 @@
 """Issue #15 crew actions over synthetic HTTP and the real command layer."""
 
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 from uuid import uuid4
@@ -311,6 +312,22 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertEqual({r["kit_id"] for r in items["items"]}, {self.reference, self.kit_b})
         self.assertEqual(items["remaining_scope_rows"], 2)
         self.assertContains(self.detail(pk), "Outstanding", count=2)
+
+    def test_verification_items_satisfy_the_checklist_script(self):
+        # checklist.js reload() throws unless status is OK and both arrays are present; a
+        # missing group_progress left every verification screen unloadable (issue #234).
+        pk = self.pending()
+        body = self.client.get(f"/problems/{pk}/verification-items/").json()
+        self.assertEqual(body["status"], "OK")
+        self.assertIsInstance(body["items"], list)
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["group_progress"], [])
+        self.assertIn("status", body["vehicle_status"])
+        script = (
+            Path(__file__).resolve().parents[1] / "templates" / "inspections" / "checklist.js"
+        ).read_text()
+        for field in ("group_progress", "items", "vehicle_status"):
+            self.assertIn(f"a.body.{field}", script)
 
     def test_verification_failure_preserves_history_and_returns_to_work(self):
         pk = self.pending()
