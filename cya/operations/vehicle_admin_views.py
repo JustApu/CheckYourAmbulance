@@ -52,7 +52,7 @@ SAVED = {
 EXPECTED = (vehicle_rules.VehicleError, KeyRuleError, ValueError)
 # The vehicle's other configuration pages, each shown only to those who may open it.
 CONFIGURATION_LINKS = (
-    ("vehicle-bindings", "Checklist bindings", "bind_unbind_template"),
+    ("vehicle-bindings", "Checklist assignments", "bind_unbind_template"),
     ("vehicle-positions", "Compartments and systems", "manage_vehicle_positions"),
     ("vehicle-kit-list", "Kit list", "manage_vehicle_kit_lists"),
     ("vehicle-kit-instances", "Kit instances", "manage_kit_assignment"),
@@ -308,9 +308,11 @@ def vehicle(request, vehicle_id):
 def _shown(user, vehicle, preview):
     """The duplication preview with the names a person reads in place of ids."""
     org = user.organization_id
-    template_ids = {o["template_id"] for o in preview["overrides"]} | {
-        b["template_id"] for b in preview["bindings"]
-    }
+    template_ids = (
+        {o["template_id"] for o in preview["overrides"]}
+        | {b["template_id"] for b in preview["bindings"]}
+        | {c["checklist_id"] for c in preview["checklists"]}
+    )
     templates = dict(
         ChecklistTemplate.objects.filter(organization_id=org, pk__in=template_ids).values_list(
             "pk", "label"
@@ -351,6 +353,19 @@ def _shown(user, vehicle, preview):
         "bindings": [
             {"template": templates.get(template_id, template_id), "slots": slots}
             for template_id, slots in bindings.items()
+        ],
+        # SPEC 5.0.0 CFG-4: after the cutover, the source's own checklists and assignments.
+        "checklists": [
+            {
+                "label": templates.get(c["checklist_id"], c["checklist_id"]),
+                "items": len(c["items"]),
+                "slots": [
+                    a["slot"]
+                    for a in preview["assignments"]
+                    if a["checklist_id"] == c["checklist_id"]
+                ],
+            }
+            for c in preview["checklists"]
         ],
         "excluded": preview["excluded"],
         "never_copied": preview["never_copied"],

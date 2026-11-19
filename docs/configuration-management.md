@@ -99,7 +99,13 @@ Part 5b opens the Administration section to Supervisors, and part 5c to Supply O
 
 ## Checklist templates (part 6a)
 
-> **SPEC 5.0.0 ([issue #220](https://github.com/JustApu/CheckYourAmbulance/issues/220)).** Checklists now belong to each vehicle. The template screens below describe the legacy shared templates, which stay usable until the organization's cutover and are read-only after it; the commands refuse every legacy write then. `create_vehicle_checklist` creates a vehicle's own checklist; the per-vehicle screens follow in issue #220 part 3. See [vehicle-owned checklists](checklists-implementation.md#vehicle-owned-checklists-spec-500-issue-220).
+> **SPEC 5.0.0 ([issue #220](https://github.com/JustApu/CheckYourAmbulance/issues/220)).** Checklists now belong to each vehicle. The template screens below describe the legacy shared templates, which stay usable until the organization's cutover and are read-only after it; the commands refuse every legacy write then. `create_vehicle_checklist` creates a vehicle's own checklist. See [vehicle-owned checklists](checklists-implementation.md#vehicle-owned-checklists-spec-500-issue-220).
+>
+> After the cutover (issue #220 part 3):
+> - **Checklists page** (`/administration/checklists/`) lists each vehicle's checklists and creates a new one for a chosen vehicle, with no key. The checklist page and item editor are the template screens: the editor offers only the owning vehicle's positions and kits, plus **Not placed** (CHK-9), and the publish preview checks only that vehicle. Override and duplicate links are not shown; a legacy template's page says it is read-only history.
+> - **Checklist assignments** (the vehicle's former bindings page) lists and offers only the vehicle's own checklists, with "Assign" and "End assignment" (CFG-7, CFG-8). The commands and the end-assignment preview are unchanged.
+> - **Positions** (CFG-2, IMP-6): adding a position always creates a new stable slot, and its key is unique within the vehicle only (`vehicle_position_key`). An Administrator sets a missing key per vehicle with `set_vehicle_position_key`; the organization-wide `set_position_key` refuses.
+> - **Duplicating a vehicle** (CFG-4) copies the source's own checklists as drafts of the version in force (or the first scheduled one), with their precedence, the assignments in force, and the position keys of copied positions. Copied positions keep their stable slots, which are local to each vehicle. An item placed in a retired position is copied as Not placed. Overrides and legacy bindings are no longer copied.
 
 The screens are in `cya/operations/template_admin_views.py`, behind `draft_edit_template`. Publishing needs `publish_template`, and duplicating needs `duplicate_configuration`. Each command checks its own action.
 

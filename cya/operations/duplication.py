@@ -190,6 +190,12 @@ class VehicleCopyPlan:
     kit_lines: list = field(default_factory=list)  # VehicleKitRequirement rows in force
     overrides: list = field(default_factory=list)  # (template_id, override, [(entry, def)])
     bindings: list = field(default_factory=list)  # (template_id, slot)
+    # SPEC 5.0.0 CFG-4, after the cutover: the source's own checklists, each as
+    # (checklist, version copied or None, [item rows], [kit-definition rows]), and their
+    # assignments in force (checklist id, slot) and the position keys of copied positions.
+    checklists: list = field(default_factory=list)
+    assignments: list = field(default_factory=list)
+    keys: list = field(default_factory=list)  # (kind, stable slot, key)
     excluded: list = field(default_factory=list)  # what the copy leaves out, and why
     slot_of: dict = field(default_factory=dict)  # named source row id -> (kind, stable slot)
 
@@ -227,6 +233,18 @@ class VehicleCopyPlan:
                 for template_id, override, entries in self.overrides
             ],
             "bindings": [{"template_id": t, "slot": s} for t, s in self.bindings],
+            "checklists": [
+                {
+                    "checklist_id": str(checklist.pk),
+                    "precedence": checklist.precedence,
+                    "version_id": str(version.pk) if version else None,
+                    "items": [str(d.pk) for d in definitions],
+                    "kits": [str(p.pk) for p in placements],
+                }
+                for checklist, version, definitions, placements in self.checklists
+            ],
+            "assignments": [{"checklist_id": c, "slot": s} for c, s in self.assignments],
+            "keys": [list(k) for k in self.keys],
             "excluded": list(self.excluded),
             "never_copied": list(NEVER_COPIED),
         }
@@ -312,6 +330,10 @@ def plan_vehicle_copy(organization_id, source_vehicle_id, now=None):
         if in_force is not None
         else []
     )
+    from cya.checklists.ownership import cutover_at
+
+    if cutover_at(org) is not None:
+        return _plan_own_checklists(plan, org, source, now, lines, copied_slots)
     plan.bindings = _bindings_now(org, str(source.pk), now)
     candidates = []  # (template_id, override, [(entry, definition)])
     for template_id in sorted({t for t, _slot in plan.bindings}):
@@ -363,6 +385,130 @@ def plan_vehicle_copy(organization_id, source_vehicle_id, now=None):
             kept.append((entry, definition))
         plan.overrides.append((template_id, override, kept))
     return plan
+
+
+def _version_to_copy(checklist, now):
+    """The checklist's version in force now, else its first scheduled one, else None."""
+    from cya.checklists.models import ChecklistPublication
+
+    publications = ChecklistPublication.objects.filter(checklist_version__template=checklist)
+    found = (
+        publications.filter(effective_at__lte=now).order_by("-effective_at").first()
+        or publications.filter(effective_at__gt=now).order_by("effective_at").first()
+    )
+    return found.checklist_version if found else None
+
+
+def _plan_own_checklists(plan, org, source, now, lines, copied_slots):
+    """CFG-4 after the cutover: copy the source's own checklists, assignments and keys."""
+    from cya.kits.models import VehiclePositionKey
+
+    named = [line.compartment_id for line in lines]
+    for checklist in ChecklistTemplate.objects.filter(organization_id=org, vehicle=source).order_by(
+        "precedence"
+    ):
+        version = _version_to_copy(checklist, now)
+        definitions = (
+            list(ChecklistItemDef.objects.filter(checklist_version=version).order_by("id"))
+            if version
+            else []
+        )
+        placements = list(placements_of(version.pk)) if version else []
+        named += [d.compartment_id for d in definitions] + [d.system_id for d in definitions]
+        plan.checklists.append((checklist, version, definitions, placements))
+    own = {str(c.pk) for c, _v, _d, _p in plan.checklists}
+    plan.assignments = [
+        (t, slot) for t, slot in _bindings_now(org, str(source.pk), now) if t in own
+    ]
+    plan.slot_of = _slots_of(source, named)
+    for line in lines:
+        if plan.slot_of.get(str(line.compartment_id)) in copied_slots:
+            plan.kit_lines.append(line)
+        else:
+            plan.excluded.append(f"kit list line {line.definition.key}: its compartment is retired")
+    for checklist, _version, definitions, _placements in plan.checklists:
+        for definition in definitions:
+            row = definition.compartment_id or definition.system_id
+            if row is not None and plan.slot_of.get(str(row)) not in copied_slots:
+                plan.excluded.append(
+                    f"the place of an item of {checklist.label}: its position is retired, so "
+                    "the copy lists the item as Not placed"
+                )
+    plan.keys = sorted(
+        (kind, str(slot), key)
+        for kind, slot, key in VehiclePositionKey.objects.filter(vehicle=source).values_list(
+            "kind", "stable_slot_id", "key"
+        )
+        if (kind, str(slot)) in copied_slots
+    )
+    return plan
+
+
+def _copy_checklists(org, plan, vehicle_id, row_for, evidence):
+    """The copy's own checklists (drafts), assignments and keys (CFG-4, after the cutover)."""
+    from cya.kits.models import VehiclePositionKey
+
+    at = evidence["recorded_at"]
+    copied = {}
+    for checklist, version, definitions, placements in plan.checklists:
+        copy = ChecklistTemplate.objects.create(
+            id=new_id(),
+            organization_id=org,
+            label=checklist.label,
+            active=checklist.active,
+            vehicle_id=vehicle_id,
+            precedence=checklist.precedence,  # CHK-10: the order is preserved
+        )
+        copied[str(checklist.pk)] = copy
+        if version is None:
+            continue
+        draft = ChecklistVersion.objects.create(
+            id=new_id(), organization_id=org, template=copy, revision=1, created_at=at
+        )
+        for definition in definitions:
+            values = {name: getattr(definition, name) for name in DEFINITION_FIELDS}
+            for name in ("compartment_id", "system_id"):
+                if values[name] is not None:
+                    values[name] = row_for.get(str(values[name]))
+            if values["compartment_id"] is None:
+                values["kit_id"] = None  # a retired position: Not placed (CHK-9)
+            ChecklistItemDef.objects.create(
+                id=new_id(), organization_id=org, checklist_version=draft, **values
+            )
+        ChecklistKitPlacement.objects.bulk_create(
+            ChecklistKitPlacement(
+                id=new_id(),
+                organization_id=org,
+                checklist_version=draft,
+                definition_id=p.definition_id,
+                display_order=p.display_order,
+            )
+            for p in placements
+        )
+    for checklist_id, slot in plan.assignments:
+        RequirementBinding.objects.create(
+            organization_id=org,
+            vehicle_id=vehicle_id,
+            template=copied[checklist_id],
+            slot=slot,
+            revision=1,
+            action="BIND",
+            effective_at=at,
+            **evidence,
+        )
+    VehiclePositionKey.objects.bulk_create(
+        VehiclePositionKey(
+            id=new_id(),
+            organization_id=org,
+            vehicle_id=vehicle_id,
+            kind=kind,
+            stable_slot_id=slot,
+            key=key,
+            **evidence,
+        )
+        for kind, slot, key in plan.keys
+    )
+    return [c.pk for c in copied.values()]
 
 
 def preview_vehicle_duplicate(organization_id, source_vehicle_id):
@@ -492,6 +638,17 @@ def duplicate_vehicle(*, source_vehicle_id, vin, display_name, number=None, base
                             else None
                         ),
                     )
+            if plan.checklists:
+                copies = _copy_checklists(org, plan, vehicle_id, row_for, evidence)
+                from cya.checks.locks import ensure_item_locks
+
+                ensure_item_locks(
+                    org,
+                    [vehicle_id],
+                    ChecklistItemDef.objects.filter(checklist_version__template_id__in=copies)
+                    .values_list("item_id", flat=True)
+                    .distinct(),
+                )
             for template_id, slot in plan.bindings:
                 RequirementBinding.objects.create(
                     organization_id=org,
@@ -529,6 +686,12 @@ def duplicate_vehicle(*, source_vehicle_id, vin, display_name, number=None, base
             "override_entries": sum(len(o["entries"]) for o in shown["overrides"]),
             "bindings": shown["bindings"],
             "excluded": shown["excluded"],
+            # Only after the cutover, so a duplication before it keeps its result unchanged.
+            **(
+                {"checklists": len(shown["checklists"]), "assignments": shown["assignments"]}
+                if plan.checklists
+                else {}
+            ),
         }
         return _plan(org, body, apply)
 

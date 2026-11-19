@@ -5,7 +5,13 @@
 {% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
 
 <div class="kit-library">
+{% if vehicle_checklist %}
+<p><a href="{% url 'checklist-templates' %}">All checklists</a> · {{ template.label }} · Vehicle {{ template.vehicle.display_name }}{% if not template.active %} · Inactive{% endif %} · <a href="{% url 'vehicle-bindings' template.vehicle_id %}">Schedule assignments</a></p>
+<p>This checklist belongs to {{ template.vehicle.display_name }} only. Items are placed in its own compartments and systems, or left Not placed: a Not placed item is still checked.</p>
+{% else %}
 <p><a href="{% url 'checklist-templates' %}">All templates</a> · {{ template.label }} · Key {{ template.key|default:"not set" }}{% if not template.active %} · Inactive{% endif %}</p>
+{% if read_only %}<p>Checklists now belong to each vehicle. This shared template is kept as history and can no longer be changed.</p>{% endif %}
+{% endif %}
 {% if can_duplicate and latest %}<p><a href="{% url 'checklist-template-duplicate' template.pk %}">Duplicate this template</a></p>{% endif %}
 
 {% if impact %}
