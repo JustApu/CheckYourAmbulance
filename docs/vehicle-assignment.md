@@ -67,7 +67,7 @@ The command reads the facts under the actor's and person's identity locks, then 
 - for an assignment or move, the vehicle the person is going to. So a partner can move someone over from the wrong truck, or add an unassigned person, onto their own vehicle.
 - for an extension or end, the person's current vehicle. So crew can extend or end assignments only on the vehicle they are on.
 
-Anything else is denied and audited, and nothing changes. `view_vehicle_assignment_history` (PERM-53, Supervisor and Administrator) governs `assignment_history`.
+Anything else is denied and audited, and nothing changes. `view_current_crew` (PERM-54, every role) governs `current_crew` screens, and `view_vehicle_assignment_history` (PERM-53, Supervisor and Administrator) governs `assignment_history`.
 
 ## Reads
 

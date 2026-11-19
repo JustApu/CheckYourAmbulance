@@ -78,6 +78,7 @@ POLICY = MappingProxyType(
         "assign_own_vehicle": ("own_only",) * 4,
         "correct_vehicle_crew": ("on_vehicle_only",) * 4,
         "manage_vehicle_assignments": ("deny", "allow", "deny", "allow"),
+        "view_current_crew": ("allow",) * 4,
         "view_vehicle_assignment_history": ("deny", "allow", "deny", "allow"),
     }
 )
