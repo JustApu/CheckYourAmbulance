@@ -3,6 +3,7 @@
 These assert the configured patterns and the fail-closed behavior, not GitHub's path filtering.
 """
 
+import ast
 import io
 import json
 import re
@@ -239,12 +240,21 @@ class RoutingTests(unittest.TestCase):
                     "run-django",
                     "django-mode",
                     "django-labels",
+                    "django-exclude-tags",
+                    "django-shard-count",
+                    "django-shards",
                     "run-client-scripts",
                     "run-browser-smoke",
                 ),
             )
             if key == "django-labels":
                 self.assertTrue(set(value.split()) <= allowed, value)
+            elif key == "django-exclude-tags":
+                self.assertIn(value, ("", ci_lanes.MIGRATION_TAG))
+            elif key == "django-shard-count":
+                self.assertIn(value, ("1", str(ci_lanes.DJANGO_SHARDS)))
+            elif key == "django-shards":
+                self.assertRegex(value, r"^\[[1-9][0-9]*(?:,[1-9][0-9]*)*\]$")
             else:
                 self.assertIn(value, ("true", "false", "full", "focused", "none"))
 
@@ -267,14 +277,220 @@ class RoutingTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 ci_lanes.main(["--all", "--github-output", str(target)])
             written = target.read_text().splitlines()
+        shards = ",".join(str(index) for index in range(1, ci_lanes.DJANGO_SHARDS + 1))
         for line in (
             "run-django=true",
             "django-mode=full",
             "django-labels=cya",
+            "django-exclude-tags=",
+            f"django-shard-count={ci_lanes.DJANGO_SHARDS}",
+            f"django-shards=[{shards}]",
             "run-client-scripts=true",
             "run-browser-smoke=true",
         ):
             self.assertIn(line, written)
+
+
+def excluded(*paths, **kwargs):
+    return ci_lanes.classify(list(paths), **kwargs)["django-exclude-tags"]
+
+
+class MigrationRoutingTests(unittest.TestCase):
+    """Issue #158 item 4, option 2: when a full PR run may leave out the migration tests."""
+
+    TAG = (ci_lanes.MIGRATION_TAG,)
+
+    def test_a_server_change_without_migration_inputs_excludes_the_tagged_tests(self):
+        for path in (
+            "cya/deficiencies/commands.py",
+            "cya/operations/tests/test_status.py",
+            "tests/test_audit_grants.py",
+            "tools/validate_scenarios.py",
+            "docs/data-model-contracts.md",
+            "tools/browser_smoke.mjs",
+            "cya/shell/templates/shell/base.html",
+        ):
+            with self.subTest(path):
+                decision = ci_lanes.classify([path])
+                self.assertEqual(decision["django-mode"], "full")
+                self.assertEqual(decision["django-exclude-tags"], self.TAG)
+
+    def test_a_pr_changing_migrations_runs_the_tagged_tests(self):
+        for path in (
+            "cya/deficiencies/migrations/0019_example.py",
+            "cya/newapp/migrations/0001_initial.py",
+            "cya/obligations/migrations/__init__.py",
+            "cya/core/migrations/sql/trigger.sql",  # not Python: also unclassified, all lanes
+        ):
+            with self.subTest(path):
+                decision = ci_lanes.classify([path, "cya/deficiencies/commands.py"])
+                self.assertEqual(decision["django-mode"], "full")
+                self.assertEqual(decision["django-exclude-tags"], ())
+
+    def test_migration_imports_tests_and_tooling_run_the_tagged_tests(self):
+        paths = sorted(ci_lanes.MIGRATION_IMPORTS | ci_lanes.MIGRATION_TEST_INPUTS) + [
+            "cya/testing/runner.py",
+            "cya/testing/sharding.py",
+            "cya/settings.py",
+            "cya/core/db.py",
+            "manage.py",
+            "pyproject.toml",
+            "requirements/base.txt",
+            "tools/migration_test_tags.py",
+            "tools/tests/test_migration_test_tags.py",
+            "tools/ci_lanes.py",
+            "tools/tests/test_ci_lanes.py",
+        ]
+        for path in paths:
+            with self.subTest(path):
+                self.assertEqual(excluded(path), ())
+
+    def test_a_rename_or_deletion_of_a_migration_input_runs_the_tagged_tests(self):
+        # The workflow passes both names of a rename, and a deleted file's path.
+        self.assertEqual(
+            excluded("cya/deficiencies/tests/test_correction.py", "cya/deficiencies/tests/x.py"),
+            (),
+        )
+        self.assertEqual(excluded("cya/kits/migrations/0002_old.py"), ())
+
+    def test_every_fail_closed_route_runs_the_tagged_tests(self):
+        self.assertEqual(excluded(query_failed=True), ())
+        self.assertEqual(excluded(), ())
+        self.assertEqual(excluded("cya/x.py", changed_files=3000), ())
+        self.assertEqual(excluded("cya/x.py", changed_files="unknown"), ())
+        self.assertEqual(excluded(".github/workflows/checks.yml"), ())
+        self.assertEqual(excluded("Dockerfile", "cya/x.py"), ())
+        self.assertEqual(excluded("cya/shell/templates/shell/unknown.dat"), ())
+
+    def test_a_non_full_run_never_excludes_and_uses_one_job(self):
+        for paths in ((TEMPLATE,), (SCRIPT,), ("README.md",), (sorted(ci_lanes.BROWSER_CSS)[0],)):
+            with self.subTest(paths):
+                decision = ci_lanes.classify(list(paths))
+                self.assertNotEqual(decision["django-mode"], "full")
+                self.assertEqual(decision["django-exclude-tags"], ())
+                self.assertEqual(decision["django-shard-count"], 1)
+
+    def test_full_runs_are_sharded_and_list_every_shard(self):
+        self.assertGreaterEqual(ci_lanes.DJANGO_SHARDS, 1)
+        for paths in (("cya/x.py",), ("cya/kits/migrations/0002_x.py",)):
+            lines = ci_lanes.output_lines(ci_lanes.classify(list(paths)))
+            count = ci_lanes.DJANGO_SHARDS
+            self.assertIn(f"django-shard-count={count}", lines)
+            shards = next(line for line in lines if line.startswith("django-shards="))
+            self.assertEqual(json.loads(shards.partition("=")[2]), list(range(1, count + 1)))
+
+    def test_main_reports_the_exclusion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "out"
+            sys.stdin, original = io.StringIO("cya/deficiencies/commands.py\n"), sys.stdin
+            try:
+                with redirect_stdout(io.StringIO()) as printed:
+                    ci_lanes.main(["--github-output", str(target)])
+            finally:
+                sys.stdin = original
+            written = target.read_text().splitlines()
+        self.assertIn(f"django-exclude-tags={ci_lanes.MIGRATION_TAG}", written)
+        self.assertIn("tests excluded", printed.getvalue())
+
+
+def _module_path(name):
+    """The repository file for a dotted cya module name, or None."""
+    if not name or not name.startswith("cya"):
+        return None
+    base = ROOT.joinpath(*name.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate.relative_to(ROOT).as_posix()
+    return None
+
+
+def _imported_files(path):
+    """Repository files that a module imports by absolute or relative cya name."""
+    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
+    package = ".".join(Path(path).with_suffix("").parts[:-1])
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                parts = package.split(".")
+                base = ".".join(parts[: len(parts) - node.level + 1])
+                module = f"{base}.{node.module}" if node.module else base
+            else:
+                module = node.module or ""
+            names = [module] + [f"{module}.{alias.name}" for alias in node.names]
+        else:
+            continue
+        for name in names:
+            resolved = _module_path(name)
+            if resolved:
+                found.add(resolved)
+    return found
+
+
+def _is_test_support(path):
+    return "/tests/" in path or path.startswith("cya/testing/")
+
+
+class MigrationInputMapTests(unittest.TestCase):
+    """The migration-input lists stay true to the repository (issue #158)."""
+
+    def tagged_modules(self):
+        marker = f'@tag("{ci_lanes.MIGRATION_TAG}")'
+        return {
+            path.relative_to(ROOT).as_posix()
+            for path in ROOT.glob("cya/**/tests/**/test_*.py")
+            if marker in path.read_text(encoding="utf-8")
+        }
+
+    def test_every_tagged_module_is_a_migration_input(self):
+        tagged = self.tagged_modules()
+        self.assertIn("cya/tests/test_audit_integrity_db.py", tagged)  # the scan finds them
+        self.assertLessEqual(tagged, ci_lanes.MIGRATION_TEST_INPUTS)
+
+    def test_test_support_imported_by_tagged_modules_is_a_migration_input(self):
+        pending = sorted(self.tagged_modules())
+        seen = set()
+        while pending:
+            path = pending.pop()
+            if path in seen:
+                continue
+            seen.add(path)
+            pending.extend(p for p in _imported_files(path) if _is_test_support(p))
+        # cya/testing/ is covered by MIGRATION_TOOLING; package __init__ modules hold no tests.
+        support = {
+            p for p in seen if not p.startswith("cya/testing/") and not p.endswith("/__init__.py")
+        }
+        self.assertIn("cya/deficiencies/tests/support.py", support)
+        self.assertEqual(support, set(ci_lanes.MIGRATION_TEST_INPUTS))
+
+    def test_every_application_module_a_migration_imports_is_listed(self):
+        imported = set()
+        for migration in ROOT.glob("cya/*/migrations/*.py"):
+            for path in _imported_files(migration.relative_to(ROOT).as_posix()):
+                if not ci_lanes.MIGRATION_PATH.match(path):
+                    imported.add(path)
+        # Package __init__ modules run on import but hold no migration logic here.
+        imported = {path for path in imported if not path.endswith("/__init__.py")}
+        self.assertIn("cya/accounts/fields.py", imported)
+        self.assertEqual(imported, set(ci_lanes.MIGRATION_IMPORTS))
+
+    def test_every_listed_input_exists(self):
+        for path in ci_lanes.MIGRATION_IMPORTS | ci_lanes.MIGRATION_TEST_INPUTS:
+            with self.subTest(path):
+                self.assertTrue((ROOT / path).is_file())
+
+    def test_no_focused_label_contains_a_tagged_module(self):
+        # Focused runs never pass --exclude-tag, so they must not reach a tagged test.
+        for labels in ci_lanes.UI_TESTS.values():
+            for label in labels:
+                prefix = label.replace(".", "/")
+                for module in self.tagged_modules():
+                    with self.subTest(label=label, module=module):
+                        self.assertFalse(
+                            module == f"{prefix}.py" or module.startswith(f"{prefix}/")
+                        )
 
 
 class CoverageMapTests(unittest.TestCase):

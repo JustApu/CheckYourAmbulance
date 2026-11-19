@@ -18,6 +18,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Nightly full run of main, including the migration tests that ordinary PRs skip (issue #158).
+  # GitHub runs schedules on the default branch only, at best effort, in UTC.
+  schedule:
+    - cron: '23 10 * * *'
 
 permissions:
   contents: read
@@ -49,6 +53,9 @@ jobs:
       run-django: ${{ steps.filter.outputs.run-django }}
       django-mode: ${{ steps.filter.outputs.django-mode }}
       django-labels: ${{ steps.filter.outputs.django-labels }}
+      django-exclude-tags: ${{ steps.filter.outputs.django-exclude-tags }}
+      django-shard-count: ${{ steps.filter.outputs.django-shard-count }}
+      django-shards: ${{ steps.filter.outputs.django-shards }}
       run-client-scripts: ${{ steps.filter.outputs.run-client-scripts }}
       run-browser-smoke: ${{ steps.filter.outputs.run-browser-smoke }}
     env:
@@ -94,6 +101,8 @@ jobs:
           assert "--changed-files" in workflow, "the 3,000-file list limit must fail closed"
           assert "run-browser-smoke" in workflow, "browser smoke routing output is missing"
           assert "  workflow_dispatch:\n" in workflow, "manual full-check dispatch is missing"
+          # Issue #158: PRs may skip the migration tests only because these still run them.
+          assert re.search(r"^  schedule:\n    - cron: '[^']+'\n", workflow, re.MULTILINE), "nightly run is missing"
           event_expression = "$" + "{{ github.event_name }}"
           dispatch_condition = f'if [ "{event_expression}" != "pull_request" ]; then'
           assert dispatch_condition in workflow
@@ -108,7 +117,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "Non-PR event; running all checks in both lanes."
+            echo "Non-PR event (push, dispatch or schedule); running all checks in both lanes."
             python3 tools/ci_lanes.py --all --github-output "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -294,7 +303,7 @@ jobs:
           retention-days: 7
 
   django:
-    name: django (MariaDB ${{ matrix.mariadb.version }})
+    name: django (MariaDB ${{ matrix.mariadb.version }}, shard ${{ matrix.shard }}/${{ needs.stack-neutral.outputs.django-shard-count }})
     needs: [stack-neutral]
     if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'synchronize')) && needs.stack-neutral.outputs.run-django == 'true'
     runs-on: ubuntu-24.04
@@ -302,10 +311,12 @@ jobs:
     # and the cap keeps a margin. MariaDB 11.8 ran about 30% slower on the rehearsal hosts (issue
     # 56), so the cap is 30 minutes.
     timeout-minutes: 30
-    # SPEC 17.5 (1.25.0, issue 56): both allowed MariaDB versions run the same job.
+    # SPEC 17.5 (1.25.0, issue 56): both allowed MariaDB versions run the same job. A full run
+    # splits the suite into shards by test class (issue #158); a focused run has one shard.
     strategy:
       fail-fast: false
       matrix:
+        shard: ${{ fromJSON(needs.stack-neutral.outputs.django-shards || '[1]') }}
         mariadb:
           # mariadb:10.11; same digest as compose.yaml.
           - version: "10.11"
@@ -354,7 +365,7 @@ jobs:
           local/venv/bin/pip install --require-hashes -r requirements/dev.txt
 
       - name: Lint and format check
-        if: matrix.mariadb.version == '10.11'
+        if: matrix.mariadb.version == '10.11' && matrix.shard == 1
         run: |
           local/venv/bin/ruff check .
           local/venv/bin/ruff format --check .
@@ -386,24 +397,45 @@ jobs:
         run: local/venv/bin/python manage.py migrate --noinput
 
       # Full mode runs the whole suite (label "cya"); focused mode runs only the labels covering
-      # the changed templates. The labels are the classifier's own constants.
-      - name: Offline tests against MariaDB ${{ matrix.mariadb.version }} (${{ needs.stack-neutral.outputs.django-mode }})
+      # the changed templates. The labels are the classifier's own constants. A full run takes
+      # this job's shard of the test classes, and on a PR that changes no migration input it
+      # leaves out the migration_rollback tests (issue #158; tools/ci_lanes.py).
+      - name: Offline tests against MariaDB ${{ matrix.mariadb.version }} (${{ needs.stack-neutral.outputs.django-mode }}, shard ${{ matrix.shard }}/${{ needs.stack-neutral.outputs.django-shard-count }})
         env:
           DJANGO_LABELS: ${{ needs.stack-neutral.outputs.django-labels }}
+          DJANGO_EXCLUDE_TAGS: ${{ needs.stack-neutral.outputs.django-exclude-tags }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ needs.stack-neutral.outputs.django-shard-count }}
+        shell: bash
         run: |
           test "${CYA_DB_SECURITY_TESTS:-}" = 1
           test -n "$DJANGO_LABELS"
+          # The classifier prints only its own constants; refuse anything else.
+          case "$DJANGO_EXCLUDE_TAGS" in ''|migration_rollback) ;; *) echo "unexpected tag: $DJANGO_EXCLUDE_TAGS"; exit 1 ;; esac
+          case "$SHARD" in ''|*[!0-9]*) echo "bad shard: $SHARD"; exit 1 ;; esac
+          case "$SHARD_COUNT" in ''|*[!0-9]*) echo "bad shard count: $SHARD_COUNT"; exit 1 ;; esac
+          test "$SHARD" -ge 1 && test "$SHARD" -le "$SHARD_COUNT"
+          options=()
+          if [ -n "$DJANGO_EXCLUDE_TAGS" ]; then
+            echo "No migration test input changed; leaving out tests tagged ${DJANGO_EXCLUDE_TAGS}."
+            options+=(--exclude-tag "$DJANGO_EXCLUDE_TAGS")
+          fi
+          if [ "$SHARD_COUNT" -gt 1 ]; then
+            options+=(--shard "${SHARD}/${SHARD_COUNT}")
+          fi
           # One test process per runner CPU, at most 4 (issue #158). Each process gets its own
           # copy of the test database (about 15 MB each) on the service's 1 GiB tmpfs.
           cpus=$(nproc)
           test "$cpus" -ge 1
           workers=$(( cpus < 4 ? cpus : 4 ))
           echo "Runner CPUs: ${cpus}; test processes: ${workers}"
-          # Word splitting of the label list is intended.
-          local/venv/bin/python manage.py test $DJANGO_LABELS --noinput -v 2 --parallel "$workers"
+          # Word splitting of the label list is intended. --durations lists the slowest tests,
+          # the evidence for rebalancing shards.
+          local/venv/bin/python manage.py test $DJANGO_LABELS --noinput -v 2 --parallel "$workers" \
+            --durations 15 "${options[@]}"
 
       - name: Audit helper and transaction tests
-        if: needs.stack-neutral.outputs.django-mode == 'full'
+        if: needs.stack-neutral.outputs.django-mode == 'full' && matrix.shard == 1
         env:
           DJANGO_SETTINGS_MODULE: cya.settings
         run: local/venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
@@ -411,5 +443,5 @@ jobs:
       # Formerly the separate authorization-policy workflow; the server lane runs it once.
       # No database is involved, so one matrix entry runs it.
       - name: Offline authorization policy tests
-        if: needs.stack-neutral.outputs.django-mode == 'full' && matrix.mariadb.version == '10.11'
+        if: needs.stack-neutral.outputs.django-mode == 'full' && matrix.mariadb.version == '10.11' && matrix.shard == 1
         run: python3 -m unittest discover -s tests/authorization -v
