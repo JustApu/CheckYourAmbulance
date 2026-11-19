@@ -107,7 +107,11 @@ def current_crew(organization_id, vehicle_id=None, at=None):
         person_id=OuterRef("person_id"), sequence__gt=OuterRef("sequence")
     )
     rows = VehicleAssignmentEvent.objects.filter(
-        ~Exists(later), ~Q(action="END"), organization_id=organization_id, ends_at__gt=at
+        ~Exists(later),
+        ~Q(action="END"),
+        organization_id=organization_id,
+        ends_at__gt=at,
+        person__active=True,  # a deactivated user is not shown as crew (ASG-8)
     )
     if vehicle_id is not None:
         rows = rows.filter(vehicle_id=vehicle_id)
@@ -182,7 +186,7 @@ def _locked_vehicles(organization_id, vehicle_ids):
     return rows
 
 
-def _authorizer(organization_id, actor_id, person_id, target_vehicle, decision):
+def _authorizer(organization_id, actor_id, person_id, target_vehicle, decision, *, ending=False):
     """Lock the actor and the person, then decide who may act and with which source (ASG-2).
 
     target_vehicle(person_current) returns the vehicle the change is on. decision receives the
@@ -222,8 +226,9 @@ def _authorizer(organization_id, actor_id, person_id, target_vehicle, decision):
                 require_permission(principal, organization_id, action, context=context)
             except PermissionDenied:
                 raise CommandDenied(actor) from None
-            # ASG-2: the person must be an active user with a role.
-            if not person.active or not roles_of(person):
+            # ASG-2: only an active user with a role is put on, or kept on, a vehicle. Ending is
+            # always allowed, so a deactivated person's assignment can still be cleared.
+            if not ending and (not person.active or not roles_of(person)):
                 raise AssignmentError(
                     "the person is not an active user with a role", code="PERSON_INACTIVE"
                 )
@@ -362,7 +367,7 @@ def assign_vehicle(*, person_id, vehicle_id, ends_at, **context):
     return _run(context, ASSIGN_COMMAND, request, authorize, build)
 
 
-def _on_current(person_id, command_type, request, context, make):
+def _on_current(person_id, command_type, request, context, make, *, ending=False):
     """Shared shape of extend and end: both act on the person's current assignment."""
     _ids(context["organization_id"], context["actor_id"], person_id)
     org = context["organization_id"]
@@ -384,6 +389,7 @@ def _on_current(person_id, command_type, request, context, make):
         person_id,
         lambda current: current.vehicle_id if current else None,
         decision,
+        ending=ending,
     )
     return _run(context, command_type, request, authorize, build)
 
@@ -460,7 +466,7 @@ def end_assignment(*, person_id, **context):
         }
         return _plan(org, body, apply, current, {"schema_version": 1, "values": body})
 
-    return _on_current(person_id, END_COMMAND, {"person_id": person_id}, context, make)
+    return _on_current(person_id, END_COMMAND, {"person_id": person_id}, context, make, ending=True)
 
 
 def end_assignments_for_deactivation(vehicle_id, receipt, current_actor):

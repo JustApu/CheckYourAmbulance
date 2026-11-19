@@ -49,7 +49,7 @@ Each command runs through `run_command`, which handles the receipt, replay and a
 
 Other errors raise `AssignmentError` with `code`, `status` and `path`:
 - `NOT_ASSIGNED`: the person has no current assignment to extend or end;
-- `PERSON_INACTIVE`: the person is not an active user with a role;
+- `PERSON_INACTIVE`: the person is not an active user with a role. Ending an assignment is still allowed, so a deactivated person's assignment can be cleared;
 - `NOT_FOUND`;
 - `MALFORMED_REQUEST`.
 
@@ -72,7 +72,7 @@ Anything else is denied and audited, and nothing changes. `view_current_crew` (P
 ## Reads
 
 - `current_assignment(organization_id, person_id, at=None)`: the person's `Assignment` (event, vehicle, `ends_at`), or `None`.
-- `current_crew(organization_id, vehicle_id=None, at=None)`: everyone currently assigned, for one vehicle or all, ordered by vehicle and then end time. Every active user with a role may see it (ASG-8). It is rebuilt on every read from the newest event of each chain and the clock, so it cannot disagree with the history (AC-39 (6)).
+- `current_crew(organization_id, vehicle_id=None, at=None)`: everyone currently assigned, for one vehicle or all, ordered by vehicle and then end time. Every active user with a role may see it (ASG-8, `view_current_crew`). It lists only active users. It is rebuilt on every read from the newest event of each chain and the clock, so it cannot disagree with the history (AC-39 (6)).
 - `assignment_history(organization_id, person_id=None, vehicle_id=None)`: events newest first. A vehicle's history includes moves off it. Callers check `view_vehicle_assignment_history`.
 - `assignment_limit_hours(organization_id)`: the current limit.
 

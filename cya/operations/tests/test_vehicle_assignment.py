@@ -5,6 +5,7 @@ from datetime import timedelta
 from django.db import DatabaseError, transaction
 
 from cya.accounts.fields import new_id
+from cya.accounts.models import User
 from cya.checklists.models import Vehicle
 from cya.core.audit_commands import CommandDenied
 from cya.obligations.tests.support import ObligationCase
@@ -217,6 +218,20 @@ class SupervisorTests(AssignmentCase):
         self.assign(self.crew, self.b)
         on_a = assignment_history(str(self.org.pk), vehicle_id=str(self.a.pk))
         self.assertEqual([e.action for e in on_a], ["MOVE", "ASSIGN"])
+
+
+class InactivePersonTests(AssignmentCase):
+    def test_a_deactivated_person_leaves_the_crew_list_and_can_still_be_ended(self):
+        self.assign(self.crew, self.a)
+        User.objects.filter(pk=self.crew.pk).update(active=False)
+        self.assertEqual(current_crew(str(self.org.pk), str(self.a.pk)), [])
+        with self.assertRaises(AssignmentError) as caught:
+            extend_assignment(
+                person_id=str(self.crew.pk), ends_at=self.hours(20), **self.context(self.supervisor)
+            )
+        self.assertEqual(caught.exception.code, "PERSON_INACTIVE")
+        end_assignment(person_id=str(self.crew.pk), **self.context(self.supervisor))
+        self.assertEqual(chain(self.crew)[-1], ("END", "SUPERVISOR"))
 
 
 class InactiveVehicleTests(AssignmentCase):
