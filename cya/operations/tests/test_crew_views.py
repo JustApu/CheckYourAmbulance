@@ -209,6 +209,28 @@ class VehicleCrewPageTests(CrewScreenCase):
             until_date=self.today(),
         )
         self.assertContains(self.client.get(self.page(self.a)), "until 21:00")
+        # PR #219 review: a future time not after the current end says so, not "already passed".
+        early = self.form(
+            self.client,
+            self.page(self.a),
+            stage="extend",
+            vehicle_id=str(self.a.pk),
+            until="20:00",
+            until_date=self.today(),
+        )
+        self.assertIn("crew_error=NOT_LATER", early["Location"])
+        self.assertContains(
+            self.client.get(early["Location"].split("#")[0]), "later than the current end"
+        )
+        past = self.form(
+            self.client,
+            self.page(self.a),
+            stage="extend",
+            vehicle_id=str(self.a.pk),
+            until="06:00",
+            until_date=self.today(),
+        )
+        self.assertIn("crew_error=END_PASSED", past["Location"])
         self.form(self.client, self.page(self.a), stage="end", vehicle_id=str(self.a.pk))
         self.assertEqual(current_crew(str(self.org.pk)), [])
 

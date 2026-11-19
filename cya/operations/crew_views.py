@@ -321,7 +321,13 @@ def crew(request):
                 if day and time.fromisoformat(request.POST.get("until", "").strip()):
                     date.fromisoformat(day)
                     code = "END_PASSED"
-            except ValueError:
+                    # PR #219 review: a future time that is not after the current end is not
+                    # "already passed"; say it must be later than the current end.
+                    if after is not None and until_on(
+                        day, request.POST.get("until"), zone_of(user), timezone.now()
+                    ):
+                        code = "NOT_LATER"
+            except (ValueError, SkippedTime):
                 pass
             return _back(request, vehicle.pk, error=code)
     try:
