@@ -78,6 +78,8 @@ Every mutable change has an audit entry in the same transaction.
 | `position_key` | A | kind (`COMPARTMENT` or `SYSTEM`), stable_slot_id, key (lowercase key format); unique per organization and kind on both the slot and the key; the slot must exist; actor, command_id ref (`POSITION_KEY_SET`, `VEHICLE_IMPORT` or `POSITION_ADD`; the slot row must already exist); one key per position, never changed or removed (SPEC 2.1.0 IMP-6, [issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129)) |
 | `vehicle_status_event` | A | vehicle_id ref, prior_event_id? ref, status, explanation, restrictions?; sequence unique per vehicle |
 | `vehicle_activity_event` | A | vehicle_id ref, prior_event_id? ref, active, basis (`CHANGE` or `BASELINE`); sequence unique per vehicle. A baseline is only a vehicle's first event and has no user actor (its receipt names the service identity); active equals the vehicle's flag when written (SPEC 4.8 CFG-1, [issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130)) |
+| `vehicle_assignment_event` | A | person_id ref, vehicle_id ref, from_vehicle_id? ref (`MOVE` only, never the same vehicle), action (`ASSIGN`, `MOVE`, `EXTEND`, `END`), ends_at (after recorded_at; none for `END`), source (`SELF` exactly when the actor is the person, `CREW`, `SUPERVISOR`), end_reason (`ENDED` or `VEHICLE_INACTIVE`, `END` only); sequence unique per person, one linear chain per person. `ASSIGN` only without a current assignment; `MOVE`, `EXTEND` and `END` only on a current one; `EXTEND` only later; `ASSIGN`, `MOVE` and `EXTEND` only to an active vehicle. Expiry writes no event (SPEC 15.4 ASG-3 to ASG-8, [issue #202](https://github.com/JustApu/CheckYourAmbulance/issues/202)) |
+| `vehicle_assignment_limit` | A | revision (consecutive from 1 per organization), max_hours 1 to 168; the latest revision applies, else 24 hours (ASG-4, OQ-79) |
 | `status_request` | A | vehicle_id ref, requested_status, reason, request_id? ref, action (`REQUEST`, `APPROVE`, `DENY`), decision_explanation? |
 
 Role changes lock the affected user before reading grants; concurrent attempts
@@ -520,6 +522,8 @@ references a command receipt with an authorized `command_type`:
 | `status_request` | `cya_status_request_bi` | `'STATUS_REQUEST'`, `'STATUS_REQUEST_DECIDE'` |
 | `vehicle_status_event` | `cya_vehicle_status_event_bi` | `'VEHICLE_STATUS_SET'`, `'STATUS_REQUEST_DECIDE'` |
 | `vehicle_activity_event` | `cya_vehicle_activity_event_bi` | `CHANGE`: `'VEHICLE_CREATE'`, `'VEHICLE_IMPORT'`, `'VEHICLE_ACTIVE_SET'`, `'VEHICLE_DUPLICATE'`; `BASELINE`: `'VEHICLE_ACTIVITY_BASELINE'` |
+| `vehicle_assignment_event` | `cya_vehicle_assignment_event_bi` | `ASSIGN`, `MOVE`: `'VEHICLE_ASSIGN'`; `EXTEND`: `'VEHICLE_ASSIGNMENT_EXTEND'`; `END` with reason `ENDED`: `'VEHICLE_ASSIGNMENT_END'`; `END` with reason `VEHICLE_INACTIVE`: `'VEHICLE_ACTIVE_SET'` |
+| `vehicle_assignment_limit` | `cya_vehicle_assignment_limit_bi` | `'VEHICLE_ASSIGNMENT_LIMIT_SET'` |
 | `schedule_rule` | `cya_schedule_rule_bi` | `'SCHEDULE_PUBLISH'`, `'SCHEDULE_SEED'` |
 | `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'`, `'VEHICLE_DUPLICATE'` |
 | `requirement_version` | `cya_requirement_version_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by binding origin |

@@ -208,6 +208,11 @@ def set_vehicle_active(*, vehicle_id, active, **context):
             # The vehicle row first: the event's guard checks that the two agree.
             Vehicle.objects.filter(pk=vehicle.pk).update(active=active)
             append_activity(vehicle_id, active, "CHANGE", receipt, current, event_id)
+            if not active:
+                # SPEC 15.4 ASG-3: deactivating a vehicle ends its current assignments.
+                from cya.operations.assignments import end_assignments_for_deactivation
+
+                end_assignments_for_deactivation(vehicle_id, receipt, current)
             # Owed obligations change: open screens refresh (delivered only if this commits).
             from cya.live_updates.publish import publish_vehicle_update
 
