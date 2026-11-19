@@ -30,6 +30,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "vehicle_status_event",
                     "notification_outbox",
                     "notification_delivery_event",
+                    "notification_requeue",
                     "notification_read",
                     "status_request",
                     "requirement_binding",

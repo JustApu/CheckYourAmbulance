@@ -12,7 +12,12 @@ export writes for the host alerts.
   root-owned secrets file (DEP-10 exception). It is never rendered back; the audit snapshot
   records only whether one is set.
 - **Errors** from the transport map to a fixed set of safe codes. No exception text, address or
-  provider reply reaches the database or the page.
+  provider reply reaches the database or the page. Any SMTP reply is classified by its code,
+  whatever the phase (greeting, HELO, STARTTLS, sender, recipient or data; RFC 5321 4.2.1): 4xx is
+  temporary (DEFERRED), 5xx is permanent (REJECTED). A rejected notification email can be sent
+  again by an administrator after the relay is fixed (cya.notifications.delivery.requeue).
+  Authentication keeps its own code (AUTH_FAILED), and a missing STARTTLS extension, which has no
+  reply code, is TLS_FAILED.
 """
 
 import json
@@ -46,6 +51,7 @@ SEND_CODES = (
     "TLS_FAILED",
     "AUTH_FAILED",
     "REJECTED",
+    "DEFERRED",
     "TIMEOUT",
     "KEY_MISSING",
     "UNKNOWN",
@@ -60,6 +66,14 @@ class SendFailure(Exception):
     def __init__(self, code):
         super().__init__(code)
         self.code = code if code in SEND_CODES else "UNKNOWN"
+
+
+def _refusal(codes):
+    """DEFERRED when every refusal code is a temporary 4xx reply, else REJECTED."""
+    codes = list(codes)
+    if codes and all(isinstance(c, int) and 400 <= c < 500 for c in codes):
+        return "DEFERRED"
+    return "REJECTED"
 
 
 def _fernet():
@@ -202,11 +216,13 @@ def host_copy(relay, organization_id):
 class SmtpTransport:
     """Send one message through a relay over TLS; map every failure to a safe code."""
 
-    def send(self, relay, password, recipients, subject, body):
+    def send(self, relay, password, recipients, subject, body, headers=None):
         message = EmailMessage()
         message["From"] = relay.sender
         message["To"] = ", ".join(recipients)
         message["Subject"] = subject
+        for name, value in (headers or {}).items():
+            message[name] = value
         message.set_content(body)
         context = ssl.create_default_context()
         try:
@@ -223,18 +239,27 @@ class SmtpTransport:
                     client.login(relay.username, password)
                 refused = client.send_message(message)
             if refused:
-                raise SendFailure("REJECTED")
+                raise SendFailure(_refusal(code for code, _text in refused.values()))
         except SendFailure:
             raise
         except smtplib.SMTPAuthenticationError:
             raise SendFailure("AUTH_FAILED") from None
         except (smtplib.SMTPNotSupportedError, ssl.SSLError, ssl.CertificateError):
             raise SendFailure("TLS_FAILED") from None
-        except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError):
-            raise SendFailure("REJECTED") from None
+        except smtplib.SMTPRecipientsRefused as error:
+            raise SendFailure(_refusal(code for code, _text in error.recipients.values())) from None
+        except smtplib.SMTPResponseException as error:
+            # Every other reply, in any phase: the greeting (SMTPConnectError), HELO
+            # (SMTPHeloError), STARTTLS, the sender, the data or anything else. SMTPException is
+            # an OSError, so this precedes it. A reply without a valid code (smtplib uses -1) is a
+            # broken connection.
+            if isinstance(error.smtp_code, int) and 400 <= error.smtp_code < 600:
+                raise SendFailure(_refusal([error.smtp_code])) from None
+            raise SendFailure("CONNECT_FAILED") from None
         except TimeoutError:
             raise SendFailure("TIMEOUT") from None
-        except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, OSError):
+        except OSError:
+            # SMTPServerDisconnected and network errors.
             raise SendFailure("CONNECT_FAILED") from None
         except Exception:
             raise SendFailure("UNKNOWN") from None

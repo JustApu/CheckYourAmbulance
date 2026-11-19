@@ -1,6 +1,7 @@
 """Notification outbox, delivery attempts, read marks, preferences and mandatory policy (SPEC 13).
 
-notification_outbox, notification_delivery_event and notification_read are append-only (A);
+notification_outbox, notification_delivery_event, notification_requeue and notification_read are
+append-only (A);
 notification_pref and notification_policy are mutable (M) with audited writers. The outbox row is
 written in the same transaction as the event that causes it, so the intent commits or rolls back
 with that event (NOT-5). One row per source event, channel and recipient. Migration 0002 installs
@@ -120,6 +121,38 @@ class NotificationDeliveryEvent(models.Model):
 
     def __str__(self):
         return f"NotificationDeliveryEvent {self.pk}"
+
+
+class NotificationRequeue(models.Model):
+    """An administrator sent one given-up email again (SPEC 13 NOT-4; issue #224).
+
+    It reopens the email after its GAVE_UP attempt `after_attempt`: delivery counts attempts and
+    the retry delay again from there. One reopening per given-up attempt.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    command = models.ForeignKey(
+        "cya_core.CommandReceipt", on_delete=models.PROTECT, related_name="+"
+    )
+    outbox = models.ForeignKey(NotificationOutbox, on_delete=models.PROTECT, related_name="+")
+    after_attempt = models.PositiveSmallIntegerField()
+    actor_user = models.ForeignKey("cya_accounts.User", on_delete=models.PROTECT, related_name="+")
+    recorded_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "notification_requeue"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["outbox", "after_attempt"], name="notif_requeue_attempt"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(after_attempt__gte=1), name="notif_requeue_number"
+            ),
+        ]
+
+    def __str__(self):
+        return f"NotificationRequeue {self.pk}"
 
 
 class NotificationRead(models.Model):

@@ -5,9 +5,11 @@ SenderError(code) for a failure it understands, and any other exception is recor
 no exception text, address or provider detail reaches the database. The message carries a fixed
 subject and a deep link, never payload text: patient data cannot leak through an email body.
 
-SmtpSender sends through Django's configured email backend. SMTP has no idempotency key, so a
-message handed to the server whose attempt row was never written can be sent again (at-least-once);
-see docs/notifications.md.
+RelaySender sends through the organization's Outgoing-mail relay (SPEC DEP-13: "Email
+notifications (§13) use the same relay"; issue #224). SmtpSender sends through Django's configured
+email backend and remains available as the CYA_NOTIFICATION_SENDER override. SMTP has no idempotency
+key, so a message handed to the server whose attempt row was never written can be sent again
+(at-least-once); see docs/notifications.md.
 """
 
 from dataclasses import dataclass
@@ -65,6 +67,54 @@ class SmtpSender:
             raise
         except Exception as error:
             raise SenderError("UNAVAILABLE") from error
+
+
+# Relay outcomes (relay.SEND_CODES) as delivery error codes: a 5xx refusal is permanent; a 4xx
+# refusal (DEFERRED), connection and timeout problems are transient; TLS, authentication and a missing key need the
+# operator, and are retried until fixed or the attempts run out.
+RELAY_CODES = {
+    "REJECTED": "REJECTED",
+    "DEFERRED": "TRANSIENT",
+    "CONNECT_FAILED": "TRANSIENT",
+    "TIMEOUT": "TRANSIENT",
+    "TLS_FAILED": "UNAVAILABLE",
+    "AUTH_FAILED": "UNAVAILABLE",
+    "KEY_MISSING": "UNAVAILABLE",
+}
+
+
+class RelaySender:
+    """Send through one organization's Outgoing-mail relay (DEP-13), one recipient per message."""
+
+    def __init__(self, relay):
+        self.relay = relay
+
+    def send(self, message):
+        from cya.notifications import relay as relay_rules
+
+        try:
+            password = relay_rules.decrypt_password(self.relay.password_ciphertext)
+            relay_rules.transport().send(
+                self.relay,
+                password,
+                [message.to],
+                message.subject,
+                message.body,
+                headers={"X-CYA-Reference": message.reference},
+            )
+        except relay_rules.SendFailure as failure:
+            raise SenderError(RELAY_CODES.get(failure.code, "UNKNOWN")) from None
+
+
+def sender_for(organization_id):
+    """The override named by CYA_NOTIFICATION_SENDER, else the organization's relay, else None."""
+    override = configured_sender()
+    if override is not None:
+        return override
+    from cya.notifications.models import MailRelay
+
+    relay = MailRelay.objects.filter(organization_id=organization_id).first()
+    return RelaySender(relay) if relay is not None else None
 
 
 def configured_sender():

@@ -213,6 +213,7 @@ class AuditIntegrityTests(TestCase):
             "vehicle_assignment_event",  # issue #202: vehicle crew assignment (SPEC 15.4)
             "vehicle_assignment_limit",  # issue #202: administrator-set maximum assignment length
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
+            "notification_requeue",  # issue #224: an administrator sent given-up notification email again
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
             "deficiency_age_rule",  # issue 150 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/150): administrator-set age highlighting revisions
             # issue 151 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/151): administrator-set acknowledgement maximum
@@ -291,6 +292,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "vehicle_status_event",
                         "notification_outbox",
                         "notification_delivery_event",
+                        "notification_requeue",
                         "notification_read",
                         "status_request",
                         "requirement_binding",
@@ -401,6 +403,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "vehicle_status_event",
                     "notification_outbox",
                     "notification_delivery_event",
+                    "notification_requeue",
                     "notification_read",
                     "status_request",
                     "requirement_binding",

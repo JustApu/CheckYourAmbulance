@@ -127,7 +127,7 @@ does not claim a root-only source file prevents exposure by the running process.
 | `CYA_LATE_COMPLETION_HOURS` | `w_late` (SPEC SCH-2/SCH-3): hours after an obligation's grace deadline that a late check may still complete it; default 12, allowed 0–168 (0 turns late completion off) |
 | `CYA_CURRENT_FACTS_CACHE_ROWS` | Decoded obligation-projection rows each worker process keeps for current checklist and readiness reads (issue #99); default 50000, allowed 0–1000000 (0 turns it off). About 2.6 KB per row on the local synthetic set, so the default bounds it near 130 MB per worker; a page with more rows than this still answers correctly but gains less. On the Rocky rehearsal set a worker's peak memory under 1× load fell from about 1.2 GB to 0.6–0.7 GB with the cache, because rows are no longer decoded on every read (issue #99) |
 | `CYA_PUBLIC_BASE_URL` | Public HTTPS base URL used for email deep links; unset sends a bare path |
-| `CYA_NOTIFICATION_SENDER` | Dotted path to the sender factory; unset leaves email queued and the delivery command refuses to run |
+| `CYA_NOTIFICATION_SENDER` | Optional override for the email sender (a dotted path to a factory). Unset: each organization's email goes through its Outgoing-mail relay (Administration → Outgoing mail, DEP-13); an organization without a relay keeps its email queued |
 | `CYA_NOTIFICATION_MAX_ATTEMPTS` | Attempts before `GAVE_UP`; default 5, allowed 1–20 |
 | `CYA_NOTIFICATION_RETRY_SECONDS` | Base retry delay, doubled per attempt; default 60 seconds, allowed 1–86400 |
 | `CYA_MAIL_RELAY_KEY` | Fernet key for the outgoing-mail relay password (SPEC DEP-10 exception, DEP-13). Generate privately with `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` and keep it only in the root-owned runtime file. Rotating it means re-entering the relay password on **Administration → Outgoing mail**. Not needed when the relay authenticates by IP address |
@@ -392,9 +392,10 @@ and runs after a host reboot. Failed runs of these jobs alert through [operation
   overlapping delivery runs: SMTP can accept a message before its attempt row is
   written, so an overlapping/repeated attempt can send a duplicate. Check the
   printed `errors` and `collisions` counts even if the process exits successfully.
-  If `CYA_NOTIFICATION_SENDER` is unset, the command refuses to run and email
-  intents remain queued (in-app notices still appear); see
-  [notification delivery](notifications.md) before enabling this timer.
+  Email goes through each organization's Outgoing-mail relay (issue #224); an
+  organization without a relay is skipped and its email stays queued (in-app
+  notices still appear), so set the relay and send its test email first. See
+  [notification delivery](notifications.md).
 - **Overdue problem notices:** run `manage.py notify_overdue --limit 50` every
   5 minutes (`cya-notify-overdue`). Each pass covers every active organization and
   notifies each overdue deficiency once per governing deadline, so a late or
@@ -803,9 +804,9 @@ package comes from Rocky's own repositories except Certbot (EPEL).
    systemctl enable --now cya-notify-overdue.timer cya-notify-check-due.timer
    ```
 
-   Enable delivery only once `runtime.env` names a working `CYA_NOTIFICATION_SENDER`: the
-   command refuses to run without one, so its unit would fail every minute. Then run one
-   pass by hand, read its counts and enable the timer:
+   Enable delivery once the organization's Outgoing-mail relay is saved in Administration and
+   its test email arrives (issue #224); until then the command skips that organization and
+   exits normally. Then run one pass by hand, read its counts and enable the timer:
 
    ```sh
    systemctl start cya-notify-delivery.service

@@ -44,5 +44,26 @@
   <p><button type="submit" class="button">Send test email</button></p>
 </form>
 {% endif %}
+
+<h2 id="not-sent-heading">Email not sent</h2>
+{% if requeued is not None %}<p role="status">{% if requeued %}{{ requeued }} email{{ requeued|pluralize }} will be tried again on the next delivery run.{% else %}There was no email to try again.{% endif %}</p>{% endif %}
+{% if given_up_count %}
+<p>{{ given_up_count }} notification email{{ given_up_count|pluralize }} could not be sent and {{ given_up_count|pluralize:"was,were" }} given up. Fix the relay settings (and send a test email), then try again.{% if given_up_count > given_up_page %} The {{ given_up_page }} oldest are shown and tried each time.{% endif %}</p>
+<table>
+  <caption class="visually-hidden">Notification email given up, oldest first</caption>
+  <thead><tr><th scope="col">Queued</th><th scope="col">Notice</th><th scope="col">Attempts</th><th scope="col">Why</th></tr></thead>
+  <tbody>{% for row in given_up %}
+    <tr><td>{{ row.queued_at|date:"M j, H:i" }}</td><td>{{ row.event_type }}</td><td>{{ row.attempts }}</td><td>{{ row.reason }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+<form method="post" action="{% url 'mail-relay' %}" aria-labelledby="not-sent-heading">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="requeue">
+  <input type="hidden" name="operation_id" value="{{ requeue_operation_id }}">
+  <p><button type="submit" class="button">Try again</button></p>
+</form>
+{% else %}
+<p>All notification email has been sent or is still being tried.</p>
+{% endif %}
 </div>
 {% endblock %}

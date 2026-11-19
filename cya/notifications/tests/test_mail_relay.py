@@ -37,11 +37,18 @@ class StubTransport:
     sent = []
     fail = None
 
-    def send(self, relay, password, recipients, subject, body):
+    def send(self, relay, password, recipients, subject, body, headers=None):
         if StubTransport.fail:
             raise SendFailure(StubTransport.fail)
         StubTransport.sent.append(
-            {"host": relay.host, "password": password, "to": recipients, "subject": subject}
+            {
+                "host": relay.host,
+                "password": password,
+                "to": recipients,
+                "subject": subject,
+                "body": body,
+                "headers": headers or {},
+            }
         )
 
 
@@ -317,6 +324,25 @@ class RelayPageTests(NotificationCase):
         self.assertEqual(
             AuditEvent.objects.filter(action="MAIL_RELAY_TEST", outcome="SUCCEEDED").count(), 2
         )
+
+    def test_given_up_email_is_listed_and_can_be_tried_again(self):
+        # Codex review of PR #225: a relay refusal gives up; the administrator sends it again.
+        self.post(**self.form())
+        self.emit(user_ids=[str(self.crew.pk)], event_type="deficiency.reported")
+        StubTransport.fail = "REJECTED"
+        call_command("deliver_notifications", stdout=StringIO())
+        page = self.client_.get(self.URL)
+        self.assertContains(page, "1 notification email could not be sent and was given up.")
+        self.assertContains(page, "<td>deficiency.reported</td>")
+        self.assertContains(page, "<td>The relay refused it.</td>")
+        retried = self.post(stage="requeue")
+        self.assertEqual(retried.status_code, 302)
+        page = self.client_.get(retried["Location"])
+        self.assertContains(page, "1 email will be tried again on the next delivery run.")
+        self.assertContains(page, "All notification email has been sent or is still being tried.")
+        StubTransport.fail = None
+        call_command("deliver_notifications", stdout=StringIO())
+        self.assertEqual(len(StubTransport.sent), 1)
 
     def test_a_test_never_sends_through_a_revision_it_did_not_audit(self):
         # PR #188 review: the audited request names revision 1; a save before the send
