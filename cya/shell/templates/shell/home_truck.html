@@ -3,7 +3,7 @@
 {% else %}
 <section class="home-section home-wide panel home-truck" aria-labelledby="home-truck">
   <h2 id="home-truck">Your truck</h2>
-  {% if crew_saved %}{% include "shell/save_state.html" with state="saved" %}<p role="status">{{ crew_saved }}</p>{% endif %}
+  {% if crew_saved %}<p class="save-state save-state-saved" data-save-state="saved" role="status"><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ crew_saved }}</span></p>{% endif %}
   {% if crew_error %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed. {{ crew_error }}</p></div></div>{% endif %}
   {% if home.truck %}
   <p>You're on <a href="{{ home.truck.url }}">{{ home.truck.vehicle }}</a> until {{ home.truck.until }}.</p>

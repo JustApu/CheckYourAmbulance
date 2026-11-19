@@ -72,7 +72,11 @@ class VehicleCrewPageTests(CrewScreenCase):
         done = self.assign(self.client, self.a)
         self.assertEqual(done["Location"], f"{self.page(self.a)}?crew=assigned#crew")
         page = self.client.get(f"{self.page(self.a)}?crew=assigned")
-        self.assertContains(page, '<p role="status">You&#x27;re on this vehicle.</p>', html=True)
+        # One status line, announced once (PR #218 review).
+        self.assertContains(
+            page, '<span class="save-state-text">You&#x27;re on this vehicle.</span>', html=True
+        )
+        self.assertContains(page, 'data-save-state="saved"', count=1)
         self.assertContains(page, '<span class="crew-name">You</span>', html=True)
         self.assertContains(page, "until 19:00")
         self.assertContains(self.client.get("/status/"), "Crew: You")
