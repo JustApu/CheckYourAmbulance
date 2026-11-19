@@ -414,8 +414,9 @@ missed or failed runs through the approved operational path; do not silently
 ignore nonzero exits or positive notification `errors`/`collisions`; the
 notification commands exit successfully when only some notices fail, so read
 those counts in the journal. The exact frequency for notification jobs and
-session cleanup is a deployment choice, not a new product default. See [obligation generation](obligation-generation.md),
-[notification delivery](notifications.md) and [session cleanup](inspection-sessions.md).
+session cleanup is a deployment choice, not a new product default. See
+[obligation generation](obligation-generation.md), [notification delivery](notifications.md)
+and [session cleanup](inspection-sessions.md).
 
 ## Proxy and application service
 
