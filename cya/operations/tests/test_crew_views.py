@@ -8,7 +8,7 @@ from django.test import SimpleTestCase
 
 from cya.inspections.tests.test_crew_ui import CrewUiCase
 from cya.operations.assignments import current_assignment, current_crew, set_assignment_limit
-from cya.operations.crew_views import SkippedTime, until_instant, when
+from cya.operations.crew_views import SkippedTime, until_on, when
 from cya.operations.models import VehicleAssignmentEvent
 
 CREW = "/status/crew/"
@@ -16,23 +16,41 @@ TOKEN = re.compile(r'name="csrfmiddlewaretoken" value="([^"]+)"')
 
 
 class UntilTests(SimpleTestCase):
-    def test_the_next_time_the_station_clock_reads_it(self):
-        zone = ZoneInfo("America/Chicago")
+    """The end is a station date and time, both entered (owner, 2026-11-18)."""
+
+    zone = ZoneInfo("America/Chicago")
+
+    def test_a_date_and_time_in_station_time(self):
         now = datetime(2026, 11, 18, 23, 30, tzinfo=UTC)  # 17:30 in Chicago
         self.assertEqual(
-            until_instant("18:00", zone, now), datetime(2026, 11, 18, 18, 0, tzinfo=zone)
+            until_on("2026-11-18", "18:00", self.zone, now),
+            datetime(2026, 11, 18, 18, 0, tzinfo=self.zone),
         )
-        # An earlier clock time is tomorrow morning: an overnight shift.
+        # An overnight shift is entered with tomorrow's date.
         self.assertEqual(
-            until_instant("06:00", zone, now), datetime(2026, 11, 19, 6, 0, tzinfo=zone)
+            until_on("2026-11-19", "06:00", self.zone, now),
+            datetime(2026, 11, 19, 6, 0, tzinfo=self.zone),
+        )
+        # Today's date with a morning time has already passed: refused, never moved to tomorrow.
+        self.assertIsNone(until_on("2026-11-18", "06:00", self.zone, now))
+        for day, text in (
+            ("2026-11-18", ""),
+            ("2026-11-18", "25:00"),
+            ("2026-11-18", "6pm"),
+            ("2026-11-18", None),
+            ("2026-11-18", "18:00:30"),
+            ("", "18:00"),
+            ("2026-13-40", "18:00"),
+            (None, "18:00"),
+        ):
+            with self.subTest(day=day, text=text):
+                self.assertIsNone(until_on(day, text, self.zone, now))
+        self.assertEqual(
+            when(until_on("2026-11-19", "06:00", self.zone, now), self.zone, now), "Thu 06:00"
         )
         self.assertEqual(
-            until_instant("17:30", zone, now), datetime(2026, 11, 19, 17, 30, tzinfo=zone)
+            when(until_on("2026-11-18", "18:00", self.zone, now), self.zone, now), "18:00"
         )
-        for bad in ("", "25:00", "6pm", None, "18:00:30"):
-            self.assertIsNone(until_instant(bad, zone, now))
-        self.assertEqual(when(until_instant("06:00", zone, now), zone, now), "Thu 06:00")
-        self.assertEqual(when(until_instant("18:00", zone, now), zone, now), "18:00")
 
 
 class DaylightSavingTests(SimpleTestCase):
@@ -40,37 +58,32 @@ class DaylightSavingTests(SimpleTestCase):
 
     zone = ZoneInfo("America/Chicago")
 
-    def test_the_repeated_autumn_hour_picks_the_next_reading_still_ahead(self):
+    def test_the_repeated_autumn_hour_picks_the_reading_still_ahead(self):
         # 2026-11-01: 01:00-02:00 happens twice (CDT then CST). Now is the second 01:15.
         now = datetime(2026, 11, 1, 7, 15, tzinfo=UTC)  # 01:15 CST
-        end = until_instant("01:30", self.zone, now)
+        end = until_on("2026-11-01", "01:30", self.zone, now)
         self.assertEqual(end.astimezone(UTC), datetime(2026, 11, 1, 7, 30, tzinfo=UTC))
         self.assertGreater(end, now)
         # During the first 01:15 (CDT), 01:30 is the first 01:30, fifteen minutes away.
         first = datetime(2026, 11, 1, 6, 15, tzinfo=UTC)  # 01:15 CDT
         self.assertEqual(
-            until_instant("01:30", self.zone, first).astimezone(UTC),
+            until_on("2026-11-01", "01:30", self.zone, first).astimezone(UTC),
             datetime(2026, 11, 1, 6, 30, tzinfo=UTC),
         )
-        # An earlier time already passed in both readings is tomorrow.
-        self.assertEqual(
-            until_instant("01:10", self.zone, now).astimezone(UTC),
-            datetime(2026, 11, 2, 7, 10, tzinfo=UTC),
-        )
+        # A time already past in both readings that day has passed.
+        self.assertIsNone(until_on("2026-11-01", "01:10", self.zone, now))
 
     def test_a_time_skipped_by_the_spring_change_is_refused_not_moved(self):
         # 2026-03-08: 02:00-03:00 does not exist. Now is 23:00 the evening before.
         now = datetime(2026, 3, 8, 5, 0, tzinfo=UTC)  # 2026-03-07 23:00 CST
         with self.assertRaises(SkippedTime):
-            until_instant("02:30", self.zone, now)
+            until_on("2026-03-08", "02:30", self.zone, now)
         self.assertEqual(
-            until_instant("03:30", self.zone, now).astimezone(UTC),
+            until_on("2026-03-08", "03:30", self.zone, now).astimezone(UTC),
             datetime(2026, 3, 8, 8, 30, tzinfo=UTC),  # 03:30 CDT
         )
-        # Once past the gap, the same wall time is the next day's, which exists.
-        later = datetime(2026, 3, 8, 9, 0, tzinfo=UTC)  # 04:00 CDT
         self.assertEqual(
-            until_instant("02:30", self.zone, later).astimezone(UTC),
+            until_on("2026-03-09", "02:30", self.zone, now).astimezone(UTC),
             datetime(2026, 3, 9, 7, 30, tzinfo=UTC),
         )
 
@@ -93,7 +106,11 @@ class CrewScreenCase(CrewUiCase):
     def page(self, vehicle):
         return f"/status/vehicles/{vehicle.pk}/"
 
+    def today(self, days=0):
+        return (self.clock.now + timedelta(days=days)).date().isoformat()
+
     def assign(self, client, vehicle, until="19:00", **fields):
+        fields.setdefault("until_date", self.today())
         return self.form(
             client,
             self.page(vehicle),
@@ -157,7 +174,7 @@ class VehicleCrewPageTests(CrewScreenCase):
         self.assertIsNotNone(current_assignment(str(self.org.pk), str(self.crew_user.pk)))
 
     def test_bad_times_are_explained_and_change_nothing(self):
-        for until, text in (("6pm", "Enter a time such as 18:00"),):
+        for until, text in (("6pm", "a time such as 18:00"),):
             done = self.assign(self.client, self.a, until=until)
             self.assertIn("crew_error=MALFORMED_REQUEST", done["Location"])
             self.assertContains(self.client.get(done["Location"].split("#")[0]), text)
@@ -166,7 +183,12 @@ class VehicleCrewPageTests(CrewScreenCase):
     def test_extend_and_end_from_the_vehicle_page(self):
         self.assign(self.client, self.a)
         self.form(
-            self.client, self.page(self.a), stage="extend", vehicle_id=str(self.a.pk), until="21:00"
+            self.client,
+            self.page(self.a),
+            stage="extend",
+            vehicle_id=str(self.a.pk),
+            until="21:00",
+            until_date=self.today(),
         )
         self.assertContains(self.client.get(self.page(self.a)), "until 21:00")
         self.form(self.client, self.page(self.a), stage="end", vehicle_id=str(self.a.pk))
@@ -236,7 +258,13 @@ class HomeTruckTests(CrewScreenCase):
         home = self.client.get("/")
         self.assertContains(home, "Which truck are you on?")
         done = self.form(
-            self.client, "/", stage="assign", vehicle_id=str(self.b.pk), until="08:00", next="home"
+            self.client,
+            "/",
+            stage="assign",
+            vehicle_id=str(self.b.pk),
+            until="08:00",
+            until_date=self.today(),
+            next="home",
         )
         self.assertEqual(done["Location"], "/?crew=assigned")
         home = self.client.get("/?crew=assigned")

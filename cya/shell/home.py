@@ -274,6 +274,7 @@ def build(user, now=None):
     if truck is None:
         context["truck_choices"] = _guarded("vehicles", lambda: crew_views.vehicle_choices(user))
         context["truck_operation_id"] = admin_pages_operation_id()
+        context["truck_today"] = now.astimezone(crew_views.zone_of(user)).date().isoformat()
     elif not isinstance(truck, Unavailable):
         mine_first(context["due"], truck["vehicle_id"])
         if context["supervisor"] and not isinstance(context["supervisor"], Unavailable):

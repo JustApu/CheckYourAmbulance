@@ -3,9 +3,10 @@
 The crew section of a vehicle's page, the crew column of the vehicle list, and the "your truck"
 card on Home all read cya.operations.assignments. Every change posts a plain form to `crew`,
 which runs the audited command; hiding a control is only a convenience, because the command
-decides who may act (SPEC 3.2). A form carries an "until" time of day in station time, and the
-assignment ends the next time the clock reaches it (ASG-4: an end time entered every time, so
-an overnight shift is entered as its morning end).
+decides who may act (SPEC 3.2). A form carries an end date and time of day in station time
+(ASG-4: an end time entered every time). The date is required and pre-filled, today for a new
+assignment and the current end's date for an extension (owner, 2026-11-18); a date and time
+already past are refused, so a forgotten date is caught rather than guessed.
 """
 
 import logging
@@ -48,9 +49,9 @@ ERRORS = {
     "VEHICLE_INACTIVE": "This vehicle is inactive.",
     "PERSON_INACTIVE": "That person can't be assigned.",
     "NOT_FOUND": "That vehicle or person no longer exists.",
-    "MALFORMED_REQUEST": "Enter a time such as 18:00, and a date only for a shift past tomorrow.",
+    "MALFORMED_REQUEST": "Enter the end date and a time such as 18:00.",
     "END_PASSED": "That date and time have already passed.",
-    "TIME_SKIPPED": "That time is skipped by the clock change tonight. Choose another time.",
+    "TIME_SKIPPED": "That time is skipped by the clock change on that date. Choose another time.",
 }
 
 
@@ -98,39 +99,6 @@ def until_on(day_text, text, zone, now):
     return ahead[0].astimezone(zone) if ahead else None
 
 
-def until_instant(text, zone, now):
-    """The next instant after now when the station clock reads `text` (HH:MM), or None.
-
-    Daylight saving time (PR #219 review): in the autumn hour that repeats, the earlier of the
-    two readings that is still ahead is chosen, so the end is never already past. When the next
-    day the clock would show the time skips it (the spring gap), SkippedTime is raised rather
-    than silently moving the end. Instants are compared in UTC.
-    """
-    try:
-        parsed = time.fromisoformat((text or "").strip())
-    except ValueError:
-        return None
-    if parsed.second or parsed.microsecond or parsed.tzinfo is not None:
-        return None
-    now_utc = now.astimezone(UTC)
-    local_day = now.astimezone(zone).date()
-    for offset in range(3):
-        day = local_day + timedelta(days=offset)
-        wall = datetime.combine(day, parsed)
-        readings = []
-        for fold in (0, 1):
-            candidate = wall.replace(tzinfo=zone, fold=fold)
-            back = candidate.astimezone(UTC).astimezone(zone)
-            if back.replace(tzinfo=None, fold=0) == wall:  # this wall time exists on that day
-                readings.append(candidate.astimezone(UTC))
-        ahead = sorted(r for r in set(readings) if r > now_utc)
-        if ahead:
-            return ahead[0].astimezone(zone)
-        if not readings and wall > now.astimezone(zone).replace(tzinfo=None):
-            raise SkippedTime(text)
-    return None
-
-
 def when(instant, zone, now):
     """'18:00', or 'Thu 06:00' when it is not today in station time."""
     local, today = instant.astimezone(zone), now.astimezone(zone).date()
@@ -175,6 +143,9 @@ def mine(user, now=None):
         "vehicle": vehicle.display_name if vehicle else "",
         "url": reverse("status-vehicle", args=[current.vehicle_id]),
         "until": when(current.ends_at, zone, now),
+        # Pre-filled extend date: the current end's station date (owner, 2026-11-18).
+        "end_date": current.ends_at.astimezone(zone).date().isoformat(),
+        "today": now.astimezone(zone).date().isoformat(),
         "ending_soon": current.ends_at - now <= EXTEND_WINDOW,
         "operation_id": admin_pages.new_operation_id(),
         "end_operation_id": admin_pages.new_operation_id(),
@@ -216,6 +187,7 @@ def crew_context(user, vehicle, now=None):
                 "person_id": person,
                 "name": _person_label(names.get(a.person_id), user.pk, person),
                 "until": when(a.ends_at, zone, now),
+                "end_date": a.ends_at.astimezone(zone).date().isoformat(),
                 "is_me": person == actor,
                 # ASG-2: yourself, anyone on this vehicle, or a Supervisor or Administrator.
                 "can_change": person == actor or on_this or can_any,
@@ -262,6 +234,8 @@ def crew_context(user, vehicle, now=None):
         "crew_people": people,
         "crew_history": history,
         "crew_limit": assignments.assignment_limit_hours(org),
+        # Pre-filled assign date: today in station time (owner, 2026-11-18).
+        "crew_today": now.astimezone(zone).date().isoformat(),
         "crew_self_operation_id": admin_pages.new_operation_id(),
         "crew_add_operation_id": admin_pages.new_operation_id(),
     }
@@ -326,11 +300,7 @@ def crew(request):
     if stage != "end":
         try:
             day = request.POST.get("until_date", "").strip()
-            until = (
-                until_on(day, request.POST.get("until"), zone_of(user), timezone.now())
-                if day
-                else until_instant(request.POST.get("until"), zone_of(user), timezone.now())
-            )
+            until = until_on(day, request.POST.get("until"), zone_of(user), timezone.now())
         except SkippedTime:
             return _back(request, vehicle.pk, error="TIME_SKIPPED")
         if until is None:

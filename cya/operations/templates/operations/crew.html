@@ -14,8 +14,8 @@
   <input type="hidden" name="person_id" value="{{ member.person_id }}"><input type="hidden" name="operation_id" value="{{ member.extend_operation_id }}">
   <label for="extend-{{ member.person_id }}">Extend {% if member.is_me %}your time{% else %}{{ member.name }}{% endif %} until</label>
   <input id="extend-{{ member.person_id }}" name="until" type="time" required>
-  <label for="extend-{{ member.person_id }}-date">Date <span class="muted">(only for a shift past tomorrow)</span></label>
-  <input id="extend-{{ member.person_id }}-date" name="until_date" type="date">
+  <label for="extend-{{ member.person_id }}-date">End date</label>
+  <input id="extend-{{ member.person_id }}-date" name="until_date" type="date" value="{{ member.end_date }}" required>
   <button type="submit" class="button">Extend</button>
 </form>
 <form method="post" action="{% url 'vehicle-crew' %}" class="crew-inline">
@@ -41,8 +41,8 @@
   <input type="hidden" name="operation_id" value="{{ crew_self_operation_id }}">
   <label for="crew-self-until">Until (station time)</label>
   <input id="crew-self-until" name="until" type="time" required>
-  <label for="crew-self-until-date">Date <span class="muted">(only for a shift past tomorrow)</span></label>
-  <input id="crew-self-until-date" name="until_date" type="date">
+  <label for="crew-self-until-date">End date</label>
+  <input id="crew-self-until-date" name="until_date" type="date" value="{{ crew_today }}" required>
   <button type="submit" class="button primary">{% if crew_self_moves_from %}Move me here{% else %}Put me on this truck{% endif %}</button>
 </form>
 {% endif %}
@@ -60,12 +60,12 @@
   </select>
   <label for="crew-add-until">Until (station time)</label>
   <input id="crew-add-until" name="until" type="time" required>
-  <label for="crew-add-until-date">Date <span class="muted">(only for a shift past tomorrow)</span></label>
-  <input id="crew-add-until-date" name="until_date" type="date">
+  <label for="crew-add-until-date">End date</label>
+  <input id="crew-add-until-date" name="until_date" type="date" value="{{ crew_today }}" required>
   <button type="submit" class="button">Add to crew</button>
 </form>
 {% endif %}
-<p class="muted">Times are station time; an assignment ends the next time the clock reaches it, at most {{ crew_limit }} hours ahead. Anyone can inspect any vehicle, assigned or not.</p>
+<p class="muted">Dates and times are station time. An assignment can end at most {{ crew_limit }} hours ahead; for an overnight shift, set tomorrow's date. Anyone can inspect any vehicle, assigned or not.</p>
 
 {% if crew_history %}
 <details class="crew-history"><summary>Crew history</summary>
