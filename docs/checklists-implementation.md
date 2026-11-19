@@ -48,6 +48,8 @@ SPEC 5.0.0 replaces shared templates, vehicle overrides and template bindings wi
 
 Nothing old changes: templates, overrides, bindings, position keys, obligations, checks, open sessions, kit lists, seals and audit events keep their rows and meaning. After the cutover the planner keeps an existing obligation whose legacy requirement maps unchanged onto the migrated one (`carried_over`), so the migration recomputes nothing. A later real change still replaces it under §5.7. Ending a migrated assignment previews and supersedes the obligations still pinned to its legacy binding too.
 
+**Not placed (CHK-9, DEP-11, CAB-2; issue #220 part 4).** A checklist row whose requirement is a checklist item with no compartment, system or kit has `not_placed` set (`cya/attention/checklist.py`; the API row carries it). The crew screen and its group progress list it under **Not placed**, and the printed outage sheet prints it in a **Not placed** section (`cya/inspections/printable.py`), which is never a sealed section, so no cabinet seal covers it. It stays owed under the ordinary rules.
+
 **Precedence (CHK-10).** When two checklists governing one due instant require the same item (and kit instance), the generator picks the lowest schedule-slot text (code-point order, as the `utf8mb4_bin` column compares), then the lowest checklist precedence. Legacy templates keep their old order, by `template_id`; the two models never govern the same due instant.
 
 ## Freeze rules

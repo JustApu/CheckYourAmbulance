@@ -50,6 +50,7 @@ def checklist_row(row, authors):
         "compartment_label": row.compartment_label,
         "system_id": row.system_id,
         "system_label": row.system_label,
+        "not_placed": row.not_placed,
         "display_order": row.display_order,
         "obligation_state": row.obligation_state,
         "obligation_outcome": row.obligation_outcome,

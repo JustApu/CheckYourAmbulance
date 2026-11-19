@@ -499,12 +499,14 @@
     } catch (_error) { /* Navigation remains usable when storage is unavailable. */ }
   }
   function groupKeyForRow(row) {
+    if (row.not_placed) { return "not-placed"; }
     if (row.compartment_id) { return "compartment:" + row.compartment_id; }
     if (row.system_id) { return "system:" + row.system_id; }
     if (row.kit_id) { return "kit:" + row.kit_id; }
     return "vehicle";
   }
   function groupLabelForRow(row) {
+    if (row.not_placed) { return "Not placed"; }
     if (row.compartment_label) { return row.compartment_label; }
     if (row.system_label) { return "Vehicle system: " + row.system_label; }
     if (row.kit_label) { return "Kit: " + row.kit_label; }
