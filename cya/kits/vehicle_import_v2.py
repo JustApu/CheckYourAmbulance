@@ -32,6 +32,7 @@ from cya.checklists.models import (
     ChecklistVersion,
     Item,
 )
+from cya.checklists.validation import MAX_ITEMS
 from cya.kits.library_import import ImportRefused
 from cya.kits.models import ChecklistKitPlacement, KitDefinition
 from cya.obligations.models import RequirementBinding
@@ -296,6 +297,10 @@ def plan_checklists(ctx, checklists, check_item):
             ctx.errors.append(f"{where}.label: the vehicle has several checklists named {label!r}")
             continue
         current = same[0] if same else None
+        if len(entry.get("items") or []) > MAX_ITEMS:
+            # The bound a checklist draft has (cya.checklists.validation.MAX_ITEMS).
+            ctx.errors.append(f"{where}.items: more than {MAX_ITEMS} items")
+            continue
         items = _file_items(ctx, entry.get("items") or [], where, check_item, new_items)
         definitions = _kit_definitions(ctx, entry.get("kits") or [], where)
         slots = _schedules(ctx, entry.get("schedules") or [], where)

@@ -213,3 +213,16 @@ class BeforeCutoverTests(VehicleImportCase):
         document = {"file_type": "vehicle", "schema_version": 2, "vehicle": {"vin": SOURCE_VIN}}
         plan = preview_vehicle_file(str(self.org.pk), json.dumps(document).encode(), "json")
         self.assertTrue(any("after the cutover" in e for e in plan.errors), plan.errors)
+
+
+class BoundTests(VehicleFileV2Case):
+    def test_a_checklist_with_too_many_items_is_refused(self):
+        from cya.checklists.validation import MAX_ITEMS
+
+        document = json.loads(self.export())
+        item = document["vehicle"]["checklists"][0]["items"][0]
+        document["vehicle"]["checklists"][0]["items"] = [
+            dict(item, item=f"Synthetic {n}") for n in range(MAX_ITEMS + 1)
+        ]
+        plan = self.preview(json.dumps(document).encode())
+        self.assertTrue(any("more than" in e for e in plan.errors), plan.errors)
