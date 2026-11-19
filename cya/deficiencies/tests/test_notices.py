@@ -179,6 +179,7 @@ class RollbackTests(NoticeCase):
             DeficiencyProjection.objects.get(deficiency_id=self.deficiency_id),
         )
         receipts = CommandReceipt.objects.count()
+        outbox = NotificationOutbox.objects.count()  # the report already notified (issue #202)
         with (
             mock.patch.object(
                 NotificationOutbox.objects, "bulk_create", side_effect=DatabaseError("synthetic")
@@ -191,7 +192,7 @@ class RollbackTests(NoticeCase):
             DeficiencyProjection.objects.get(deficiency_id=self.deficiency_id).assignee_id
         )
         self.assertEqual(CommandReceipt.objects.count(), receipts)
-        self.assertFalse(NotificationOutbox.objects.exists())
+        self.assertEqual(NotificationOutbox.objects.count(), outbox)
 
 
 class AddedVerificationTests(VerificationBase):

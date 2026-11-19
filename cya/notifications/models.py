@@ -208,6 +208,9 @@ RECIPIENT_KINDS = (
     "PARTICIPANTS",
     "SUPERVISORS",
     "ADMINISTRATORS",
+    # SPEC 15.4 ASG-7 (issue #202): the vehicle's current crew, and the assigned person.
+    "VEHICLE_CREW",
+    "PERSON",
 )
 
 

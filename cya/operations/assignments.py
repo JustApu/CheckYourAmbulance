@@ -277,7 +277,7 @@ def _snapshot(assignment):
 
 
 def _append(receipt, current, *, event_id, org, person_id, prior, action, vehicle_id, **fields):
-    return VehicleAssignmentEvent.objects.create(
+    event = VehicleAssignmentEvent.objects.create(
         id=event_id,
         organization_id=org,
         person_id=person_id,
@@ -288,6 +288,49 @@ def _append(receipt, current, *, event_id, org, person_id, prior, action, vehicl
         **fields,
         **_evidence(receipt, current),
     )
+    _notify(receipt, event)
+    return event
+
+
+def _notify(receipt, event):
+    """NOT-3 crew notices (SPEC 15.4 ASG-2; owner defaults on issue #202, 2026-11-18).
+
+    A change by someone else tells the person; a move tells the crew left on the vehicle the
+    person moved from (off by default). Written in the command's transaction, after the event,
+    so the remaining crew is read without the person who moved. The actor is never told.
+    """
+    from cya.notifications.recipients import notify
+
+    payload = {
+        "person_id": str(event.person_id),
+        "vehicle_id": str(event.vehicle_id),
+        "action": event.action,
+    }
+    if event.end_reason:
+        payload["end_reason"] = event.end_reason
+    link = f"/status/vehicles/{event.vehicle_id}/"
+    if event.source != "SELF":
+        notify(
+            receipt,
+            event_type="vehicle_assignment.changed",
+            source_event_type="vehicle_assignment_event",
+            source_event_id=event.pk,
+            deep_link=link,
+            payload=payload,
+            actor_user_id=receipt.actor_user_id,
+            person_id=event.person_id,
+        )
+    if event.action == "MOVE":
+        notify(
+            receipt,
+            event_type="vehicle_assignment.moved_off",
+            source_event_type="vehicle_assignment_moved_off",
+            source_event_id=event.pk,
+            deep_link=f"/status/vehicles/{event.from_vehicle_id}/",
+            payload={**payload, "from_vehicle_id": str(event.from_vehicle_id)},
+            actor_user_id=receipt.actor_user_id,
+            crew_vehicle_id=event.from_vehicle_id,
+        )
 
 
 def _plan(org, body, apply, prior, new):

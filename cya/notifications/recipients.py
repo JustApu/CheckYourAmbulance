@@ -28,7 +28,7 @@ from cya.notifications.models import RECIPIENT_KINDS, NotificationRecipientRule
 
 DEFAULTS_FILE = Path(__file__).with_name("default_recipients.json")
 ROLE_KINDS = {"SUPERVISORS": Role.SUPERVISOR.value, "ADMINISTRATORS": Role.ADMINISTRATOR.value}
-PERSON_KINDS = ("ASSIGNEE", "REPORTER", "REQUESTER", "PARTICIPANTS")
+PERSON_KINDS = ("ASSIGNEE", "REPORTER", "REQUESTER", "PARTICIPANTS", "PERSON", "VEHICLE_CREW")
 
 
 @cache
@@ -104,6 +104,15 @@ def configuration(organization_id):
     return result
 
 
+def _crew(receipt, vehicle_id):
+    if not vehicle_id:
+        return []
+    from cya.operations.assignments import current_crew
+
+    crew = current_crew(str(receipt.organization_id), str(vehicle_id), at=receipt.recorded_at)
+    return [a.person_id for a in crew]
+
+
 def notify(
     receipt,
     *,
@@ -117,10 +126,14 @@ def notify(
     reporter_id=None,
     requester_id=None,
     participant_ids=(),
+    person_id=None,
+    crew_vehicle_id=None,
 ):
     """Enqueue event_type for its effective recipients inside the causing command's transaction.
 
     The person arguments say who those kinds mean for this event; a kind left unset names nobody.
+    VEHICLE_CREW is the current crew of crew_vehicle_id when the event is recorded (SPEC 15.4
+    ASG-7), read after the causing command wrote its own changes.
     Returns the outbox rows written (none when every recipient is off, inactive or the actor).
     """
     event = known_event(event_type)
@@ -130,6 +143,8 @@ def notify(
         "REPORTER": [reporter_id],
         "REQUESTER": [requester_id],
         "PARTICIPANTS": list(participant_ids),
+        "PERSON": [person_id],
+        "VEHICLE_CREW": _crew(receipt, crew_vehicle_id) if "VEHICLE_CREW" in kinds else [],
     }
     named = {str(p) for kind in PERSON_KINDS if kind in kinds for p in people[kind] if p}
     active = {
