@@ -34,3 +34,5 @@ def vehicle_seals(request, vehicle_id):
         "can_request_audit": bool(roles_for(user) & {"SUPERVISOR", "ADMINISTRATOR"}),
     }
     return render(request, "seals/vehicle.html", {"vehicle": vehicle, "config": config})
+
+# Measurement-only change for issue #158 (option 2 timing); never merged.
