@@ -19,6 +19,11 @@
 {% elif copy.kit_lines %}
 <ul id="copy-kit-list">{% for line in copy.kit_lines %}<li>{{ line.required_count }} × {{ line.definition }} in {{ line.compartment }}</li>{% endfor %}</ul>
 {% else %}<p id="copy-kit-list">An empty kit list: the vehicle carries no kits.</p>{% endif %}
+{% if copy.checklists %}
+<h3>Checklists (as drafts)</h3>
+<p>Each is the copy's own checklist, independent of {{ vehicle.display_name }}'s after the copy. Publish each draft before activating the copy.</p>
+<ul id="copy-checklists">{% for c in copy.checklists %}<li>{{ c.label }}: {{ c.items }} item{{ c.items|pluralize }}{% if c.slots %}; assigned to {{ c.slots|join:", " }}{% endif %}</li>{% endfor %}</ul>
+{% else %}
 <h3>Overrides (as drafts)</h3>
 {% if copy.overrides %}
 <ul id="copy-overrides">{% for o in copy.overrides %}<li>{{ o.template }}: {{ o.entries }} entr{{ o.entries|pluralize:"y,ies" }}</li>{% endfor %}</ul>
@@ -27,6 +32,7 @@
 {% if copy.bindings %}
 <ul id="copy-bindings">{% for b in copy.bindings %}<li>{{ b.template }}: {{ b.slots|join:", " }}</li>{% endfor %}</ul>
 {% else %}<p>None.</p>{% endif %}
+{% endif %}
 
 <h2 id="excluded-heading">Not copied</h2>
 <ul id="copy-excluded">

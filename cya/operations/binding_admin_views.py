@@ -27,6 +27,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
 from cya.checklists.models import ChecklistTemplate
+from cya.checklists.ownership import cutover_at
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
 from cya.kits.views import UNAVAILABLE, _context_ids
@@ -41,6 +42,8 @@ DENIAL = "BIND_UNBIND_TEMPLATE"
 SAVED = {
     "bound": "Template bound.",
     "unbound": "Template unbound. The inspections listed as superseded are no longer owed.",
+    "assigned": "Checklist assigned.",
+    "ended": "Assignment ended. The inspections listed as superseded are no longer owed.",
 }
 # Continuing obligations by state (cya.obligations.state.State), as the preview counts them.
 STATE_LABELS = {
@@ -57,11 +60,19 @@ STATE_LABELS = {
 CHANGED = "Inspections or the binding changed since the preview. Review the updated preview."
 
 
-def _chains(organization_id, vehicle_id):
-    """The latest revision of each (template, slot) binding of the vehicle, by template label."""
+def _chains(organization_id, vehicle_id, per_vehicle=False):
+    """The latest revision of each (template, slot) binding of the vehicle, by template label.
+
+    per_vehicle (after the cutover): only the vehicle's own checklists' assignments; the legacy
+    bindings are read-only history (SPEC 5.0.0 18.2).
+    """
+    chains = RequirementBinding.objects.filter(
+        organization_id=organization_id, vehicle_id=vehicle_id
+    )
+    if per_vehicle:
+        chains = chains.filter(template__vehicle_id=vehicle_id)
     tops = list(
-        RequirementBinding.objects.filter(organization_id=organization_id, vehicle_id=vehicle_id)
-        .values("template_id", "slot")
+        chains.values("template_id", "slot")
         .annotate(top=Max("revision"))
         .order_by("template_id", "slot")[: admin_pages.LIST_LIMIT]
     )
@@ -85,9 +96,9 @@ def _chains(organization_id, vehicle_id):
     return sorted(revisions, key=lambda r: (r.template.label.casefold(), r.slot))
 
 
-def _rows(organization_id, vehicle_id, now):
+def _rows(organization_id, vehicle_id, now, per_vehicle=False):
     rows = []
-    for revision in _chains(organization_id, vehicle_id):
+    for revision in _chains(organization_id, vehicle_id, per_vehicle):
         bound = revision.action == "BIND"
         upcoming = revision.effective_at > now
         if bound:
@@ -108,11 +119,13 @@ def _rows(organization_id, vehicle_id, now):
     return rows
 
 
-def _templates(organization_id):
+def _templates(organization_id, vehicle_id=None):
+    """Active checklists the form offers: the vehicle's own after the cutover (CFG-7)."""
+    found = ChecklistTemplate.objects.filter(organization_id=organization_id, active=True)
+    if vehicle_id is not None:
+        found = found.filter(vehicle_id=vehicle_id)
     return list(
-        ChecklistTemplate.objects.filter(organization_id=organization_id, active=True)
-        .order_by("label", "id")
-        .values("id", "label")[: admin_pages.LIST_LIMIT]
+        found.order_by("precedence", "label", "id").values("id", "label")[: admin_pages.LIST_LIMIT]
     )
 
 
@@ -141,11 +154,18 @@ def _slots(organization_id):
 def _page(request, user, vehicle, *, status=200, errors=None, form=None, preview=None):
     now = timezone.now()
     org = str(user.organization_id)
+    # SPEC 5.0.0 CFG-7, CFG-8: after the cutover a binding is the assignment of one of the
+    # vehicle's own checklists to a shared schedule slot.
+    per_vehicle = cutover_at(org) is not None
     context = {
-        "title": f"Checklist bindings: {vehicle.display_name}",
+        "title": (
+            f"Checklist assignments: {vehicle.display_name}"
+            if per_vehicle
+            else f"Checklist bindings: {vehicle.display_name}"
+        ),
         "vehicle": vehicle,
-        "rows": _rows(org, str(vehicle.pk), now),
-        "templates": _templates(org),
+        "rows": _rows(org, str(vehicle.pk), now, per_vehicle),
+        "templates": _templates(org, str(vehicle.pk) if per_vehicle else None),
         "slots": _slots(org),
         "list_limit": admin_pages.LIST_LIMIT,
         "bind_operation_id": admin_pages.new_operation_id(),
@@ -155,7 +175,8 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None, preview
         "errors": errors or [],
         "saved": SAVED.get(request.GET.get("saved", "")),
     }
-    return render(request, "operations/admin_bindings.html", context, status=status)
+    page = "admin_assignments.html" if per_vehicle else "admin_bindings.html"
+    return render(request, f"operations/{page}", context, status=status)
 
 
 def _ids(request, user):
@@ -278,7 +299,7 @@ def bindings(request, vehicle_id):
             effective_at = admin_pages.local_effective_at(request.POST, BindingError)
         except BindingError as error:
             return render_error(400, [str(error)])
-        saved = "bound"
+        saved = "assigned" if template.vehicle_id else "bound"
 
         def call():
             return bind_requirement(
@@ -291,7 +312,7 @@ def bindings(request, vehicle_id):
             )
 
     else:
-        saved = "unbound"
+        saved = "ended" if template.vehicle_id else "unbound"
 
         def call():
             return bind_requirement(

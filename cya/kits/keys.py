@@ -27,7 +27,7 @@ from cya.checklists.models import (
 )
 from cya.core.audit_commands import Plan, run_command
 from cya.kits import definitions
-from cya.kits.models import POSITION_KINDS, PositionKey
+from cya.kits.models import POSITION_KINDS, PositionKey, VehiclePositionKey
 
 ACTION = "set_configuration_keys"
 VIN_COMMAND = "VEHICLE_VIN_SET"
@@ -165,6 +165,10 @@ def set_position_key(*, kind, stable_slot_id, key, **context):
     key = check_key(key, "position key")
 
     def build(actor):
+        # SPEC 5.0.0 IMP-6: keys are vehicle-local after the cutover (set_vehicle_position_key).
+        from cya.checklists.ownership import require_legacy_writable
+
+        require_legacy_writable(org, KeyRuleError)
         if (
             not SLOT_MODELS[kind]
             .objects.filter(organization_id=org, stable_slot_id=stable_slot_id)
@@ -213,3 +217,84 @@ def position_keys(organization_id, kind):
             organization_id=organization_id, kind=kind
         ).values_list("stable_slot_id", "key")
     }
+
+
+def vehicle_position_keys(organization_id, vehicle_id, kind):
+    """{stable slot id: key} of one vehicle's positions of one kind (SPEC 5.0.0 IMP-6).
+
+    After the organization's cutover a key belongs to its vehicle (vehicle_position_key);
+    before it, the organization-wide key of the position is the vehicle's key too.
+    """
+    from cya.checklists.ownership import cutover_at
+
+    if cutover_at(organization_id) is None:
+        return position_keys(organization_id, kind)
+    return {
+        str(slot): key
+        for slot, key in VehiclePositionKey.objects.filter(
+            organization_id=organization_id, vehicle_id=vehicle_id, kind=kind
+        ).values_list("stable_slot_id", "key")
+    }
+
+
+def set_vehicle_position_key(*, vehicle_id, kind, stable_slot_id, key, **context):
+    """Set a vehicle's key for one of its positions once (SPEC 5.0.0 IMP-6, after the cutover).
+
+    Administrators (set_configuration_keys), as for every missing key (SPEC 3.3). The key is
+    unique within the vehicle only; equal keys on two vehicles name unrelated positions.
+    """
+    if kind not in POSITION_KINDS:
+        raise KeyRuleError(f"kind must be one of {list(POSITION_KINDS)}")
+    canonical_id(vehicle_id)
+    canonical_id(stable_slot_id)
+    org = context["organization_id"]
+    key = check_key(key, "position key")
+
+    def build(actor):
+        from cya.checklists.ownership import cutover_at
+
+        if cutover_at(org) is None:
+            raise KeyRuleError("vehicle position keys start at the cutover; set the shared key")
+        vehicle = (
+            Vehicle.objects.select_for_update().filter(organization_id=org, pk=vehicle_id).first()
+        )
+        if vehicle is None:
+            raise KeyRuleError("vehicle not found")
+        if (
+            not SLOT_MODELS[kind]
+            .objects.filter(vehicle=vehicle, stable_slot_id=stable_slot_id)
+            .exists()
+        ):
+            raise KeyRuleError("the vehicle has no such position")
+        existing = VehiclePositionKey.objects.filter(vehicle=vehicle, kind=kind)
+        if existing.filter(stable_slot_id=stable_slot_id).exists():
+            raise KeyRuleError("the position's key is already set and never changes")
+        if existing.filter(key=key).exists():
+            raise KeyRuleError("another position of that kind on this vehicle has that key")
+        key_id = new_id()
+
+        def apply(receipt, current):
+            VehiclePositionKey.objects.create(
+                id=key_id,
+                organization_id=org,
+                vehicle=vehicle,
+                kind=kind,
+                stable_slot_id=stable_slot_id,
+                key=key,
+                command=receipt,
+                recorded_at=receipt.recorded_at,
+                actor_user=current.user,
+                actor_roles_at_time=list(current.roles),
+            )
+
+        body = {
+            "code": POSITION_COMMAND,
+            "vehicle_id": vehicle_id,
+            "kind": kind,
+            "stable_slot_id": stable_slot_id,
+            "key": key,
+        }
+        return _plan(org, body, apply)
+
+    request = {"vehicle_id": vehicle_id, "kind": kind, "stable_slot_id": stable_slot_id, "key": key}
+    return _run(context, POSITION_COMMAND, request, build)

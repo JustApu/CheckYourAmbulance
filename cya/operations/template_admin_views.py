@@ -15,6 +15,7 @@ action; the commands check it on the server.
 
 import logging
 from urllib.parse import urlencode
+from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db.models import F, Min, OuterRef, Subquery
@@ -38,9 +39,11 @@ from cya.checklists.models import (
     Vehicle,
     VehicleSystem,
 )
+from cya.checklists.ownership import cutover_at
 from cya.checklists.validation import ChecklistValidationError
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
+from cya.kits import keys as key_rules
 from cya.kits import positions as position_rules
 from cya.kits.keys import KeyRuleError
 from cya.kits.models import KitDefinition, PositionKey
@@ -50,6 +53,7 @@ from cya.operations.duplication import _specs, duplicate_template
 from cya.operations.templates import (
     TemplateError,
     create_template,
+    create_vehicle_checklist,
     publication_impact,
 )
 from cya.operations.vehicles import VehicleError
@@ -242,8 +246,10 @@ def _rows(version):
             where = compartments.get(d.compartment_id, "")
             if d.kit_id:
                 where = f"{where}, kit {kits.get(d.kit_id, '')}"
-        else:
+        elif d.system_id:
             where = systems.get(d.system_id, "")
+        else:
+            where = "Not placed"  # SPEC 5.0.0 CHK-9: still checked, listed under Not placed
         if d.kind == "QUANTITY":
             target = str(d.expected_quantity)
         elif d.unit:
@@ -264,14 +270,18 @@ def _rows(version):
     return rows
 
 
-def _slot_choices(org, query="", keep=None):
+NOT_PLACED = "NOT_PLACED"  # SPEC 5.0.0 CHK-9: a vehicle checklist item with no position
+
+
+def _slot_choices(org, query="", keep=None, vehicle_id=None):
     """(places, whether more match than are shown): one per compartment or system slot.
 
     A template definition names one vehicle's row; resolution maps it by stable slot to each
     vehicle's own row (cya.checklists.overlay.vehicle_slots). Each choice is a current row of
     the slot that is not retired. At most CHOICE_LIMIT slots are read (SPEC NFR-6); a name
     query narrows them, so every slot stays reachable. `keep` is the (kind, row id) of the
-    item's current place, always offered when it is still in use.
+    item's current place, always offered when it is still in use. With vehicle_id (a vehicle
+    checklist, SPEC 5.0.0 CHK-8) only that vehicle's own positions and keys are offered.
     """
     now = timezone.now()
     choices, more = [], False
@@ -280,6 +290,8 @@ def _slot_choices(org, query="", keep=None):
         ("SYSTEM", "System", VehicleSystem),
     ):
         rows = model.objects.filter(organization_id=org, effective_at__lte=now)
+        if vehicle_id is not None:
+            rows = rows.filter(vehicle_id=vehicle_id)
         matching = rows.filter(label__icontains=query) if query else rows
         slots = list(
             matching.order_by("stable_slot_id")
@@ -291,11 +303,14 @@ def _slot_choices(org, query="", keep=None):
         if keep and keep[0] == kind:
             kept = model.objects.filter(pk=keep[1]).values_list("stable_slot_id", flat=True)
             slots += [slot for slot in kept if slot not in slots]
-        keys = dict(
-            PositionKey.objects.filter(
-                organization_id=org, kind=kind, stable_slot_id__in=slots
-            ).values_list("stable_slot_id", "key")
-        )
+        if vehicle_id is not None:
+            keys = key_rules.vehicle_position_keys(org, vehicle_id, kind)
+        else:
+            keys = dict(
+                PositionKey.objects.filter(
+                    organization_id=org, kind=kind, stable_slot_id__in=slots
+                ).values_list("stable_slot_id", "key")
+            )
         # One row per slot, chosen in the database: a vehicle's newest revision of the slot that
         # is not retired. The rows read are at most the slots, however long the history is.
         newest = (
@@ -317,7 +332,7 @@ def _slot_choices(org, query="", keep=None):
         )
         for row in model.objects.filter(pk__in=list(picked)).order_by("stable_slot_id"):
             slot = row.stable_slot_id
-            key = keys.get(slot)
+            key = keys.get(slot) or keys.get(str(slot))
             label = f"{row.label} ({key})" if key else row.label
             choices.append(
                 {
@@ -329,9 +344,14 @@ def _slot_choices(org, query="", keep=None):
     return sorted(choices, key=lambda c: c["label"].lower()), more
 
 
-def _kit_choices(org, query="", keep=None):
-    """(kits, whether more match than are shown), at most CHOICE_LIMIT; a query narrows them."""
+def _kit_choices(org, query="", keep=None, vehicle_id=None):
+    """(kits, whether more match than are shown), at most CHOICE_LIMIT; a query narrows them.
+
+    With vehicle_id (a vehicle checklist) only that vehicle's own kits are offered.
+    """
     kits = KitInstance.objects.filter(organization_id=org, active=True, compartment__isnull=False)
+    if vehicle_id is not None:
+        kits = kits.filter(vehicle_id=vehicle_id)
     if query:
         kits = kits.filter(label__icontains=query)
     found = list(
@@ -389,9 +409,16 @@ def _list_page(request, user, *, status=200, errors=None, form=None):
     org = str(user.organization_id)
     now = timezone.now()
     rows = []
-    for template in ChecklistTemplate.objects.filter(organization_id=org).order_by(
-        "-active", "label", "id"
-    )[: admin_pages.LIST_LIMIT]:
+    # SPEC 5.0.0: after the cutover each vehicle owns its checklists; the legacy shared
+    # templates are read-only history and are no longer listed for editing.
+    per_vehicle = cutover_at(org) is not None
+    listed = ChecklistTemplate.objects.filter(organization_id=org)
+    if per_vehicle:
+        listed = listed.filter(vehicle__isnull=False).select_related("vehicle")
+        order = ("vehicle__display_name", "vehicle_id", "precedence")
+    else:
+        order = ("-active", "label", "id")
+    for template in listed.order_by(*order)[: admin_pages.LIST_LIMIT]:
         latest = _latest(template)
         in_force = (
             ChecklistPublication.objects.filter(
@@ -412,7 +439,15 @@ def _list_page(request, user, *, status=200, errors=None, form=None):
             }
         )
     context = {
-        "title": "Checklist templates",
+        "title": "Vehicle checklists" if per_vehicle else "Checklist templates",
+        "per_vehicle": per_vehicle,
+        "vehicles": (
+            Vehicle.objects.filter(organization_id=org).order_by("display_name", "id")[
+                : admin_pages.LIST_LIMIT
+            ]
+            if per_vehicle
+            else []
+        ),
         "rows": rows,
         "list_limit": admin_pages.LIST_LIMIT,
         "form": form or {},
@@ -441,7 +476,11 @@ def _template_page(
         .first()
     )
     context = {
-        "title": f"Checklist template: {template.label}",
+        "title": (
+            f"Checklist: {template.label} ({template.vehicle.display_name})"
+            if template.vehicle_id
+            else f"Checklist template: {template.label}"
+        ),
         "template": template,
         "in_force": in_force,
         "in_force_rows": _rows(in_force.checklist_version) if in_force else [],
@@ -460,8 +499,15 @@ def _template_page(
         "older": older,
         "paged": request.GET.get("before") is not None,
         "can_publish": _can(user, roles, "publish_template"),
-        "can_duplicate": _can(user, roles, "duplicate_configuration"),
-        "override_vehicles": _override_vehicles(str(user.organization_id), template),
+        # SPEC 5.0.0: a vehicle checklist has no overrides (CHK-6) and is not duplicated on
+        # its own (CFG-3 withdrawn); a legacy template is read-only after the cutover.
+        "vehicle_checklist": template.vehicle_id is not None,
+        "read_only": template.vehicle_id is None and cutover_at(str(template.organization_id)),
+        "can_duplicate": template.vehicle_id is None
+        and _can(user, roles, "duplicate_configuration"),
+        "override_vehicles": []
+        if template.vehicle_id
+        else _override_vehicles(str(user.organization_id), template),
         "impact": impact,
         "when": when,
         "at": at,
@@ -521,11 +567,30 @@ def templates(request):
         return _list_page(request, user)
     if request.POST.get("stage") != "create":
         return _list_page(request, user, status=400, errors=["the request was not valid"])
-    form = {"label": request.POST.get("label", ""), "key": request.POST.get("key", "")}
+    form = {
+        "label": request.POST.get("label", ""),
+        "key": request.POST.get("key", ""),
+        "vehicle_id": request.POST.get("vehicle_id", ""),
+    }
 
     def error_page(status, errors):
         return _list_page(request, user, status=status, errors=errors, form=form)
 
+    if cutover_at(str(user.organization_id)) is not None:
+        # SPEC 5.0.0 CHK-1: a new checklist belongs to the chosen vehicle; it has no key.
+        try:
+            vehicle_id = str(UUID(form["vehicle_id"]))
+        except ValueError:
+            return error_page(400, ["choose the vehicle the checklist belongs to"])
+        result, refused = _run(
+            request,
+            user,
+            lambda ids: create_vehicle_checklist(vehicle_id=vehicle_id, label=form["label"], **ids),
+            error_page,
+        )
+        if refused:
+            return refused
+        return _saved("checklist-template", [result.body["checklist_id"]], "create")
     result, refused = _run(
         request,
         user,
@@ -663,7 +728,7 @@ def _choice_for(spec, choices):
             slot = model.objects.filter(pk=row_id).values_list("stable_slot_id", flat=True).first()
             wanted = (kind, str(slot))
             return next((c["value"] for c in choices if c["slot"] == wanted), "")
-    return ""
+    return NOT_PLACED
 
 
 def _whole(value, what, *, required=True):
@@ -675,16 +740,22 @@ def _whole(value, what, *, required=True):
     return int(value)
 
 
-def _spec_from(post, item_id, specs):
-    """The posted item as a draft spec, naming a new item by label when one was typed."""
+def _spec_from(post, item_id, specs, allow_unplaced=False):
+    """The posted item as a draft spec, naming a new item by label when one was typed.
+
+    allow_unplaced (a vehicle checklist) accepts "Not placed" (SPEC 5.0.0 CHK-9).
+    """
     kind = post.get("kind", "")
     if kind not in KINDS:
         raise PageError("choose what kind of check this item is")
     place = post.get("place", "")
     kind_of_place, _, row_id = place.partition(":")
-    if kind_of_place not in ("COMPARTMENT", "SYSTEM") or not row_id:
+    unplaced = allow_unplaced and place == NOT_PLACED
+    if not unplaced and (kind_of_place not in ("COMPARTMENT", "SYSTEM") or not row_id):
         raise PageError("choose where the item is: a compartment or a system")
     kit_id = post.get("kit_id", "") or None
+    if kit_id and unplaced:
+        raise PageError("a kit is in a compartment; choose a compartment or no kit")
     if kit_id and kind_of_place != "COMPARTMENT":
         raise PageError("a kit is in a compartment; choose a compartment or no kit")
     order = post.get("display_order", "").strip()
@@ -740,16 +811,19 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
             exclude=[s["item_id"] for s in specs],
             form=form,
             errors=errors,
+            vehicle_id=str(template.vehicle_id) if template.vehicle_id else None,
         ),
     }
     return render(request, "operations/admin_template_item.html", context, status=status)
 
 
-def item_form_context(request, org, *, spec, item_id, exclude, form, errors):
+def item_form_context(request, org, *, spec, item_id, exclude, form, errors, vehicle_id=None):
     """The item form's choices and values (shared with the override screens, part 6b).
 
     spec is the definition being edited (None for a new item); exclude lists the items an
     added item may not be; form is what was posted, when redisplaying after a refusal.
+    vehicle_id is a vehicle checklist's owner: only its positions and kits are offered, and
+    "Not placed" is a choice (SPEC 5.0.0 CHK-8, CHK-9).
     """
     place_query = request.GET.get("p", "").strip()[:MAX_QUERY]
     # The item's current place and kit stay on offer whatever the search shows.
@@ -763,14 +837,16 @@ def item_form_context(request, org, *, spec, item_id, exclude, form, errors):
             ("COMPARTMENT", spec["compartment_id"])
             if spec["compartment_id"]
             else ("SYSTEM", spec["system_id"])
+            if spec["system_id"]
+            else None
         )
         keep_kit = spec["kit_id"]
     try:
-        choices, more_places = _slot_choices(org, place_query, keep_place)
-        kits, more_kits = _kit_choices(org, place_query, keep_kit)
+        choices, more_places = _slot_choices(org, place_query, keep_place, vehicle_id)
+        kits, more_kits = _kit_choices(org, place_query, keep_kit, vehicle_id)
     except (ValueError, ValidationError):  # a malformed posted id
-        choices, more_places = _slot_choices(org, place_query)
-        kits, more_kits = _kit_choices(org, place_query)
+        choices, more_places = _slot_choices(org, place_query, vehicle_id=vehicle_id)
+        kits, more_kits = _kit_choices(org, place_query, vehicle_id=vehicle_id)
     if form is None:
         form = _item_form(spec, choices)
     item_label = Item.objects.filter(pk=item_id).values_list("label", flat=True).first()
@@ -783,6 +859,8 @@ def item_form_context(request, org, *, spec, item_id, exclude, form, errors):
         "kinds": KIND_LABELS.items(),
         "optional_outcomes": OPTIONAL_OUTCOMES,
         "places": choices,
+        "allow_unplaced": vehicle_id is not None,
+        "not_placed": NOT_PLACED,
         "kits": kits,
         "more_places": more_places or more_kits,
         "place_query": place_query,
@@ -833,7 +911,7 @@ def template_item(request, template_id, item_id=None):
     _latest_version, specs, placed = _base(template)
     try:
         base_revision = _base_revision(request.POST)
-        posted = _spec_from(request.POST, item_id, specs)
+        posted = _spec_from(request.POST, item_id, specs, template.vehicle_id is not None)
     except PageError as error:
         return error_page(400, [str(error)])
     if item_id is None:

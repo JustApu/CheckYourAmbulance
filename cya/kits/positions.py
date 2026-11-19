@@ -44,6 +44,7 @@ from cya.kits.models import (
     PositionKey,
     VehicleKitListPublication,
     VehicleKitRequirement,
+    VehiclePositionKey,
 )
 
 ACTION = "manage_vehicle_positions"
@@ -318,6 +319,10 @@ def add_position(*, vehicle_id, kind, label, key, display_order=None, **context)
 
     def build(actor):
         vehicle = _locked_vehicle(org, vehicle_id)
+        from cya.checklists.ownership import cutover_at
+
+        if cutover_at(org) is not None:
+            return _add_local(org, vehicle, kind, label, key, order)
         existing = PositionKey.objects.filter(organization_id=org, kind=kind, key=key).first()
         slot = str(existing.stable_slot_id) if existing else new_id()
         if (
@@ -375,6 +380,56 @@ def add_position(*, vehicle_id, kind, label, key, display_order=None, **context)
         "display_order": order,
     }
     return _run(context, ADD_COMMAND, request, build, lock_organization=True)
+
+
+def _add_local(org, vehicle, kind, label, key, order):
+    """add_position after the cutover: a new position of this vehicle only (SPEC 5.0.0 CFG-2).
+
+    The key is unique within the vehicle and names nothing on another vehicle, so the position
+    always gets a new stable slot, never another vehicle's (IMP-6).
+    """
+    if VehiclePositionKey.objects.filter(vehicle=vehicle, kind=kind, key=key).exists():
+        raise PositionError(
+            f"the vehicle already has position {key!r}; revise it instead of adding it"
+        )
+    slot, row_id = new_id(), new_id()
+
+    def apply(receipt, current):
+        SLOT_MODELS[kind].objects.create(
+            id=row_id,
+            organization_id=org,
+            vehicle=vehicle,
+            stable_slot_id=slot,
+            revision=1,
+            label=label,
+            effective_at=receipt.recorded_at,
+            display_order=order,
+        )
+        VehiclePositionKey.objects.create(
+            id=new_id(),
+            organization_id=org,
+            vehicle=vehicle,
+            kind=kind,
+            stable_slot_id=slot,
+            key=key,
+            command=receipt,
+            recorded_at=receipt.recorded_at,
+            actor_user=current.user,
+            actor_roles_at_time=list(current.roles),
+        )
+
+    body = {
+        "code": ADD_COMMAND,
+        "vehicle_id": str(vehicle.pk),
+        "kind": kind,
+        "key": key,
+        "stable_slot_id": slot,
+        "row_id": row_id,
+        "new_position": True,
+        "label": label,
+        "display_order": order,
+    }
+    return _plan(org, body, apply)
 
 
 UNSET = object()
@@ -487,16 +542,12 @@ def positions(organization_id, vehicle_id, kind, at=None):
         .order_by("stable_slot_id", "-revision")
     ):
         latest.setdefault(str(row.stable_slot_id), row)
-    keys = dict(
-        PositionKey.objects.filter(organization_id=organization_id, kind=kind).values_list(
-            "stable_slot_id", "key"
-        )
-    )
+    keys = key_rules.vehicle_position_keys(organization_id, vehicle_id, kind)
     rows = sorted(
         latest.values(),
         key=lambda r: (r.display_order is None, r.display_order or 0, r.label, str(r.pk)),
     )
-    return [(row, keys.get(row.stable_slot_id)) for row in rows]
+    return [(row, keys.get(str(row.stable_slot_id))) for row in rows]
 
 
 def vehicles_bound_now_or_later(organization_id, template_id, now=None, vehicle_ids=None):

@@ -40,6 +40,7 @@
   <p><label for="item-place">Where it is</label><br>
   <select id="item-place" name="place" required{% if field_errors.place %} aria-invalid="true" aria-describedby="place-error"{% endif %}>
     <option value="">(choose)</option>
+    {% if allow_unplaced %}<option value="{{ not_placed }}"{% if form.place == not_placed %} selected{% endif %}>Not placed (still checked; listed under Not placed)</option>{% endif %}
     {% for place in places %}<option value="{{ place.value }}"{% if form.place == place.value %} selected{% endif %}>{{ place.label }}</option>{% endfor %}
   </select>{% if field_errors.place %}<span id="place-error" class="field-error">Error: {{ field_errors.place }}</span>{% endif %}</p>
   <p><label for="item-kit">In a kit (optional)</label><br>

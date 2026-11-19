@@ -301,7 +301,7 @@ def publication_impact(organization_id, version_id, effective_at=None):
     org = str(organization_id)
     version = (
         ChecklistVersion.objects.filter(organization_id=org, pk=version_id)
-        .select_related("template")
+        .select_related("template", "template__vehicle")
         .first()
     )
     if version is None:
@@ -373,8 +373,22 @@ def _retired(refs, vehicle_id):
     return sorted(set(labels))
 
 
+def _owner_impact(impact, version, refs, at):
+    """A vehicle checklist applies to its own vehicle only (SPEC 5.0.0 CHK-8, CFG-9)."""
+    vehicle = version.template.vehicle
+    entry = VehicleImpact(vehicle=vehicle)
+    if missing := _missing(refs, str(vehicle.pk), at):
+        entry.blocking.append(f"it has no position matching {', '.join(missing)}")
+    if retired := _retired(refs, str(vehicle.pk)):
+        entry.blocking.append(f"these positions are retired on it: {', '.join(retired)}")
+    impact.vehicles.append(entry)
+
+
 def _vehicle_impacts(impact, org, version, definitions, at):
     refs = _slot_refs(definitions)
+    if version.template.vehicle_id is not None:
+        _owner_impact(impact, version, refs, at)
+        return
     # SPEC NFR-6: every read here is bounded. The candidates are at most VEHICLE_LIMIT vehicles
     # with a binding of this template and VEHICLE_LIMIT active vehicles; the page says when
     # there are more. The publication itself checks every vehicle under its locks.

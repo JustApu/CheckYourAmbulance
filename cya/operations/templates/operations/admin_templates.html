@@ -6,17 +6,23 @@
 {% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
 
 <div class="kit-library">
+{% if per_vehicle %}
+<p>Each vehicle has its own checklists. Changing one vehicle's checklist never changes another's. Edit a checklist's draft one item at a time, then publish it now or at a later time. Assign a checklist to schedule slots on its vehicle's Checklist assignments page.</p>
+<h2 id="templates-heading">Checklists</h2>
+{% else %}
 <p>Each template is a checklist that vehicles are bound to. Edit a template's draft one item at a time, then publish it now or at a later time.</p>
 <h2 id="templates-heading">Templates</h2>
+{% endif %}
 {% if rows %}
 <div class="table-scroll" role="region" aria-labelledby="templates-heading" tabindex="0">
 <table data-sortable data-filter-label="Filter templates">
-  <thead><tr><th scope="col">Template</th><th scope="col">Key</th><th scope="col">In force</th><th scope="col">Scheduled</th><th scope="col">Draft</th></tr></thead>
+  <thead><tr>{% if per_vehicle %}<th scope="col">Vehicle</th><th scope="col">Checklist</th>{% else %}<th scope="col">Template</th><th scope="col">Key</th>{% endif %}<th scope="col">In force</th><th scope="col">Scheduled</th><th scope="col">Draft</th></tr></thead>
   <tbody>
   {% for row in rows %}
     <tr>
+      {% if per_vehicle %}<td>{{ row.template.vehicle.display_name }}</td>{% endif %}
       <td><a href="{% url 'checklist-template' row.template.pk %}">{{ row.template.label }}</a>{% if not row.template.active %} (inactive){% endif %}</td>
-      <td>{{ row.template.key|default:"Not set" }}</td>
+      {% if not per_vehicle %}<td>{{ row.template.key|default:"Not set" }}</td>{% endif %}
       <td>{% if row.in_force %}Revision {{ row.in_force }}{% else %}None{% endif %}</td>
       <td>{% if row.scheduled %}{{ row.scheduled }}{% else %}None{% endif %}</td>
       <td>{% if row.draft %}Revision {{ row.draft }}{% else %}None{% endif %}</td>
@@ -27,21 +33,35 @@
 </div>
 {% if rows|length == list_limit %}<p>Showing the first {{ list_limit }} templates.</p>{% endif %}
 {% else %}
-{% include "shell/empty_state.html" with message="No checklist templates yet." action_url="#create-heading" action_label="Create the first template" %}
+{% if per_vehicle %}{% include "shell/empty_state.html" with message="No vehicle checklists yet." action_url="#create-heading" action_label="Create the first checklist" %}{% else %}{% include "shell/empty_state.html" with message="No checklist templates yet." action_url="#create-heading" action_label="Create the first template" %}{% endif %}
 {% endif %}
 
+{% if per_vehicle %}
+<h2 id="create-heading">Create a checklist</h2>
+<p>A new checklist belongs to one vehicle for good.</p>
+{% else %}
 <h2 id="create-heading">Create a template</h2>
 <p>The key identifies the template in vehicle files. It is set now and never changes.</p>
+{% endif %}
 <form method="post" action="{% url 'checklist-templates' %}" class="admin-form" aria-labelledby="create-heading">
   {% csrf_token %}
   <input type="hidden" name="stage" value="create">
   <input type="hidden" name="operation_id" value="{{ create_operation_id }}">
+  {% if per_vehicle %}
+  <p><label for="create-vehicle">Vehicle</label><br>
+  <select id="create-vehicle" name="vehicle_id" required>
+    <option value="">(choose)</option>
+    {% for vehicle in vehicles %}<option value="{{ vehicle.pk }}"{% if form.vehicle_id == vehicle.pk|stringformat:"s" %} selected{% endif %}>{{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}</option>{% endfor %}
+  </select></p>
+  {% endif %}
   <p><label for="create-label">Name</label><br>
   <input id="create-label" name="label" value="{{ form.label }}" maxlength="200" required{% if field_errors.label %} aria-invalid="true" aria-describedby="create-label-error"{% endif %}>{% if field_errors.label %}<span id="create-label-error" class="field-error">Error: {{ field_errors.label }}</span>{% endif %}</p>
+  {% if not per_vehicle %}
   <p><label for="create-key">Key</label><br>
   <input id="create-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="create-key-help{% if field_errors.key %} create-key-error{% endif %}"{% if field_errors.key %} aria-invalid="true"{% endif %} autocapitalize="none" spellcheck="false"><br>
   <span id="create-key-help">Lowercase letters, digits, and . _ - ; for example daily-ambulance.</span>{% if field_errors.key %}<span id="create-key-error" class="field-error">Error: {{ field_errors.key }}</span>{% endif %}</p>
-  <p><button type="submit" class="button">Create template</button></p>
+  {% endif %}
+  <p><button type="submit" class="button">{% if per_vehicle %}Create checklist{% else %}Create template{% endif %}</button></p>
 </form>
 </div>
 {% endblock %}

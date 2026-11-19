@@ -535,7 +535,7 @@ references a command receipt with an authorized `command_type`:
 | `schedule_rule` | `cya_schedule_rule_bi` | `'SCHEDULE_PUBLISH'`, `'SCHEDULE_SEED'` |
 | `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'`, `'VEHICLE_DUPLICATE'`, `'CHECKLIST_CUTOVER'` (migrated assignments) |
 | `checklist_cutover`, `legacy_checklist_map`, `legacy_version_map`, `legacy_item_def_map`, `legacy_position_map` | `cya_<table>_bi` | `'CHECKLIST_CUTOVER'` |
-| `vehicle_position_key` | `cya_vehicle_position_key_bi` | `'CHECKLIST_CUTOVER'` |
+| `vehicle_position_key` | `cya_vehicle_position_key_bi` | `'CHECKLIST_CUTOVER'`, `'POSITION_ADD'`, `'POSITION_KEY_SET'`, `'VEHICLE_DUPLICATE'`, `'VEHICLE_IMPORT'` |
 | `requirement_version` | `cya_requirement_version_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by binding origin |
 | `obligation` | `cya_obligation_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by routine flag |
 | `obligation_selection` | `cya_obligation_selection_bi` | `'OBLIGATIONS_RECONCILE'` |
