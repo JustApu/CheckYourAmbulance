@@ -195,8 +195,9 @@ The settings live in `mail_relay`, one row per organization:
   change made since the page was shown.
 - **Send test email** records an audited `MAIL_RELAY_TEST` request, then sends one message through
   the saved relay to every operator and deputy address. The page shows a fixed safe result (`SENT`,
-  `CONNECT_FAILED`, `TLS_FAILED`, `AUTH_FAILED`, `REJECTED`, `TIMEOUT`, `KEY_MISSING`,
-  `UNKNOWN`). No provider reply or exception text is stored or shown.
+  `CONNECT_FAILED`, `TLS_FAILED`, `AUTH_FAILED`, `REJECTED`, `DEFERRED`, `TIMEOUT`, `KEY_MISSING`,
+  `UNKNOWN`). No provider reply or exception text is stored or shown. A refusal with an SMTP 5xx
+  reply is `REJECTED`; a 4xx reply is temporary (RFC 5321) and is `DEFERRED`.
 - **The host copy.** `manage.py export_mail_relay --organization <id> --output <file>` writes the
   settings the host alerts need, including the decrypted password, as JSON. It writes mode 0600
   through a temporary file and an atomic rename. On any failure, such as a missing or wrong key, it
@@ -212,8 +213,8 @@ recipient through the same transport as the test email (TLS required, password o
 with the `X-CYA-Reference` header. An organization with no relay is skipped with a note, and its
 email stays queued; the job still succeeds, so its timer does not fail. Relay outcomes map to
 delivery codes as follows:
-- `REJECTED` is permanent (given up);
-- `CONNECT_FAILED` and `TIMEOUT` are `TRANSIENT`;
+- `REJECTED` (a 5xx refusal) is permanent (given up);
+- `DEFERRED` (a 4xx refusal), `CONNECT_FAILED` and `TIMEOUT` are `TRANSIENT`;
 - `TLS_FAILED`, `AUTH_FAILED` and `KEY_MISSING` are `UNAVAILABLE`, retried until the operator fixes
   the relay or the attempts run out;
 - anything else is `UNKNOWN`.

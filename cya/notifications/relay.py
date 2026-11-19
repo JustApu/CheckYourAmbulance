@@ -12,7 +12,8 @@ export writes for the host alerts.
   root-owned secrets file (DEP-10 exception). It is never rendered back; the audit snapshot
   records only whether one is set.
 - **Errors** from the transport map to a fixed set of safe codes. No exception text, address or
-  provider reply reaches the database or the page.
+  provider reply reaches the database or the page. A refusal with an SMTP 4xx reply is temporary
+  (RFC 5321) and maps to DEFERRED; only a 5xx refusal is REJECTED.
 """
 
 import json
@@ -46,6 +47,7 @@ SEND_CODES = (
     "TLS_FAILED",
     "AUTH_FAILED",
     "REJECTED",
+    "DEFERRED",
     "TIMEOUT",
     "KEY_MISSING",
     "UNKNOWN",
@@ -60,6 +62,14 @@ class SendFailure(Exception):
     def __init__(self, code):
         super().__init__(code)
         self.code = code if code in SEND_CODES else "UNKNOWN"
+
+
+def _refusal(codes):
+    """DEFERRED when every refusal code is a temporary 4xx reply, else REJECTED."""
+    codes = list(codes)
+    if codes and all(isinstance(c, int) and 400 <= c < 500 for c in codes):
+        return "DEFERRED"
+    return "REJECTED"
 
 
 def _fernet():
@@ -225,18 +235,27 @@ class SmtpTransport:
                     client.login(relay.username, password)
                 refused = client.send_message(message)
             if refused:
-                raise SendFailure("REJECTED")
+                raise SendFailure(_refusal(code for code, _text in refused.values()))
         except SendFailure:
             raise
         except smtplib.SMTPAuthenticationError:
             raise SendFailure("AUTH_FAILED") from None
         except (smtplib.SMTPNotSupportedError, ssl.SSLError, ssl.CertificateError):
             raise SendFailure("TLS_FAILED") from None
-        except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError):
-            raise SendFailure("REJECTED") from None
+        except smtplib.SMTPRecipientsRefused as error:
+            raise SendFailure(_refusal(code for code, _text in error.recipients.values())) from None
+        except (smtplib.SMTPSenderRefused, smtplib.SMTPDataError) as error:
+            raise SendFailure(_refusal([error.smtp_code])) from None
         except TimeoutError:
             raise SendFailure("TIMEOUT") from None
-        except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, OSError):
+        except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected):
+            raise SendFailure("CONNECT_FAILED") from None
+        except smtplib.SMTPResponseException as error:
+            # Any other reply (SMTPException is an OSError, so this precedes it): a 4xx, for
+            # example 421 service not available, is temporary.
+            temporary = _refusal([error.smtp_code]) == "DEFERRED"
+            raise SendFailure("DEFERRED" if temporary else "CONNECT_FAILED") from None
+        except OSError:
             raise SendFailure("CONNECT_FAILED") from None
         except Exception:
             raise SendFailure("UNKNOWN") from None

@@ -37,6 +37,8 @@ TEST_RESULTS = {
     "AUTH_FAILED": "The relay refused the username or password.",
     "REJECTED": "The relay refused the message. Check the sender and recipient addresses, and "
     "that the relay allows this server.",
+    "DEFERRED": "The relay refused the message for now (a temporary refusal). Try again in a few "
+    "minutes.",
     "TIMEOUT": "The relay did not answer in time.",
     "KEY_MISSING": "The server cannot read the stored password. Ask the operator to check the "
     "mail relay key in the secrets file.",

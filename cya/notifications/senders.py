@@ -69,11 +69,12 @@ class SmtpSender:
             raise SenderError("UNAVAILABLE") from error
 
 
-# Relay outcomes (relay.SEND_CODES) as delivery error codes: a refused recipient is permanent;
-# connection and timeout problems are transient; TLS, authentication and a missing key need the
+# Relay outcomes (relay.SEND_CODES) as delivery error codes: a 5xx refusal is permanent; a 4xx
+# refusal (DEFERRED), connection and timeout problems are transient; TLS, authentication and a missing key need the
 # operator, and are retried until fixed or the attempts run out.
 RELAY_CODES = {
     "REJECTED": "REJECTED",
+    "DEFERRED": "TRANSIENT",
     "CONNECT_FAILED": "TRANSIENT",
     "TIMEOUT": "TRANSIENT",
     "TLS_FAILED": "UNAVAILABLE",
