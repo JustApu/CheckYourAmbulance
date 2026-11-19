@@ -256,9 +256,22 @@ class InactiveVehicleTests(AssignmentCase):
             {"VEHICLE_INACTIVE"},
         )
         self.assertIsNotNone(self.current(self.partner))  # other vehicles are untouched
+
         with self.assertRaises(AssignmentError) as caught:
             self.assign(self.crew, vehicle)
         self.assertEqual(caught.exception.code, "VEHICLE_INACTIVE")
+
+    def test_deactivating_also_ends_a_deactivated_users_assignment(self):
+        """PR #216 review: hidden from the crew list, but still ended with the vehicle (ASG-3)."""
+        vehicle_id = create_vehicle(
+            vin=VIN, display_name="Synthetic Unit 31", number="31", **self.context(self.supervisor)
+        ).body["vehicle_id"]
+        self.assign(self.crew, Vehicle.objects.get(pk=vehicle_id))
+        User.objects.filter(pk=self.crew.pk).update(active=False)
+        set_vehicle_active(vehicle_id=vehicle_id, active=False, **self.context(self.supervisor))
+        self.assertEqual(chain(self.crew)[-1], ("END", "SUPERVISOR"))
+        self.assertIsNone(self.current(self.crew))
+        self.assertEqual(current_crew(str(self.org.pk), vehicle_id, include_inactive=True), [])
 
 
 class LimitTests(AssignmentCase):

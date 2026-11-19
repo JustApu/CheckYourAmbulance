@@ -96,11 +96,13 @@ def current_assignment(organization_id, person_id, at=None):
     return _as_assignment(event) if _applies(event, at or timezone.now()) else None
 
 
-def current_crew(organization_id, vehicle_id=None, at=None):
+def current_crew(organization_id, vehicle_id=None, at=None, *, include_inactive=False):
     """Current assignments, for one vehicle or all, ordered by vehicle then end time (ASG-8).
 
     Rebuilt on every read from the newest event of each person's chain and the clock, so it
-    can never disagree with the event history (AC-39 (6)).
+    can never disagree with the event history (AC-39 (6)). Deactivated users are left out of
+    what people see; include_inactive keeps them, for rules that must reach every current
+    assignment, such as ending a deactivated vehicle's crew (ASG-3, PR #216 review).
     """
     at = at or timezone.now()
     later = VehicleAssignmentEvent.objects.filter(
@@ -111,8 +113,9 @@ def current_crew(organization_id, vehicle_id=None, at=None):
         ~Q(action="END"),
         organization_id=organization_id,
         ends_at__gt=at,
-        person__active=True,  # a deactivated user is not shown as crew (ASG-8)
     )
+    if not include_inactive:
+        rows = rows.filter(person__active=True)  # a deactivated user is not shown as crew (ASG-8)
     if vehicle_id is not None:
         rows = rows.filter(vehicle_id=vehicle_id)
     return [_as_assignment(e) for e in rows.order_by("vehicle_id", "ends_at", "person_id")]
@@ -477,7 +480,7 @@ def end_assignments_for_deactivation(vehicle_id, receipt, current_actor):
     """
     org = receipt.organization_id
     ended = []
-    for assignment in current_crew(org, vehicle_id, at=receipt.recorded_at):
+    for assignment in current_crew(org, vehicle_id, at=receipt.recorded_at, include_inactive=True):
         prior = _newest(org, assignment.person_id, lock=True)
         actor_id = current_actor.user.pk
         _append(

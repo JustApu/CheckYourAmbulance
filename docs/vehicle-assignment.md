@@ -72,7 +72,7 @@ Anything else is denied and audited, and nothing changes. `view_current_crew` (P
 ## Reads
 
 - `current_assignment(organization_id, person_id, at=None)`: the person's `Assignment` (event, vehicle, `ends_at`), or `None`.
-- `current_crew(organization_id, vehicle_id=None, at=None)`: everyone currently assigned, for one vehicle or all, ordered by vehicle and then end time. Every active user with a role may see it (ASG-8, `view_current_crew`). It lists only active users. It is rebuilt on every read from the newest event of each chain and the clock, so it cannot disagree with the history (AC-39 (6)).
+- `current_crew(organization_id, vehicle_id=None, at=None)`: everyone currently assigned, for one vehicle or all, ordered by vehicle and then end time. Every active user with a role may see it (ASG-8, `view_current_crew`). It lists only active users. `include_inactive=True` keeps deactivated users, for rules that must reach every current assignment: deactivating a vehicle ends all of them. It is rebuilt on every read from the newest event of each chain and the clock, so it cannot disagree with the history (AC-39 (6)).
 - `assignment_history(organization_id, person_id=None, vehicle_id=None)`: events newest first. A vehicle's history includes moves off it. Callers check `view_vehicle_assignment_history`.
 - `assignment_limit_hours(organization_id)`: the current limit.
 
