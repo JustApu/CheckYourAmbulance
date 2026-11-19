@@ -202,11 +202,13 @@ def host_copy(relay, organization_id):
 class SmtpTransport:
     """Send one message through a relay over TLS; map every failure to a safe code."""
 
-    def send(self, relay, password, recipients, subject, body):
+    def send(self, relay, password, recipients, subject, body, headers=None):
         message = EmailMessage()
         message["From"] = relay.sender
         message["To"] = ", ".join(recipients)
         message["Subject"] = subject
+        for name, value in (headers or {}).items():
+            message[name] = value
         message.set_content(body)
         context = ssl.create_default_context()
         try:

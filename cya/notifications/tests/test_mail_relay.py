@@ -37,11 +37,18 @@ class StubTransport:
     sent = []
     fail = None
 
-    def send(self, relay, password, recipients, subject, body):
+    def send(self, relay, password, recipients, subject, body, headers=None):
         if StubTransport.fail:
             raise SendFailure(StubTransport.fail)
         StubTransport.sent.append(
-            {"host": relay.host, "password": password, "to": recipients, "subject": subject}
+            {
+                "host": relay.host,
+                "password": password,
+                "to": recipients,
+                "subject": subject,
+                "body": body,
+                "headers": headers or {},
+            }
         )
 
 

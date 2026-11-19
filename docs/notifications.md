@@ -204,14 +204,25 @@ The settings live in `mail_relay`, one row per organization:
   [deployment runbook](deployment-runbook.md)), so host alerts still send while the app or database
   is down.
 
-Not yet built: email notification delivery through this relay (today it still uses
-`CYA_NOTIFICATION_SENDER`), and the host alert checks themselves (`deploy/monitoring/`).
+**Notification email goes through this relay** (DEP-13: "Email notifications (§13) use the same
+relay"; [issue #224](https://github.com/JustApu/CheckYourAmbulance/issues/224)). `deliver_notifications`
+picks each organization's sender with `senders.sender_for`: the `CYA_NOTIFICATION_SENDER` override
+when set, otherwise a `RelaySender` for that organization's saved relay. It sends one message per
+recipient through the same transport as the test email (TLS required, password or IP authentication),
+with the `X-CYA-Reference` header. An organization with no relay is skipped with a note, and its
+email stays queued; the job still succeeds, so its timer does not fail. Relay outcomes map to
+delivery codes as follows:
+- `REJECTED` is permanent (given up);
+- `CONNECT_FAILED` and `TIMEOUT` are `TRANSIENT`;
+- `TLS_FAILED`, `AUTH_FAILED` and `KEY_MISSING` are `UNAVAILABLE`, retried until the operator fixes
+  the relay or the attempts run out;
+- anything else is `UNKNOWN`.
 
 ## Settings
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CYA_NOTIFICATION_SENDER` | unset | Dotted path to a zero-argument factory returning a sender. Unset leaves email queued; `deliver_notifications` then refuses to run. |
+| `CYA_NOTIFICATION_SENDER` | unset | Optional override: dotted path to a zero-argument factory returning a sender, used instead of each organization's Outgoing-mail relay (for example in tests). Unset: each organization's relay is used, and an organization without one keeps its email queued. |
 | `CYA_PUBLIC_BASE_URL` | unset | Prefix for email deep links, e.g. `https://cya.example`. Unset sends the bare path. |
 | `CYA_NOTIFICATION_MAX_ATTEMPTS` | 5 | Attempts before `GAVE_UP` (1 to 20). |
 | `CYA_NOTIFICATION_RETRY_SECONDS` | 60 | Base retry delay, doubled per attempt (1 to 86400). |
