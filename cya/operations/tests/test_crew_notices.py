@@ -1,6 +1,7 @@
 """Crew notices (SPEC 13 NOT-3, 15.4 ASG-7; owner defaults of 2026-11-18 on issue #202)."""
 
 from datetime import timedelta
+from unittest import mock
 
 from django.utils import timezone
 
@@ -10,6 +11,7 @@ from cya.deficiencies.tests.support import DeficiencyCase
 from cya.notifications.commands import set_recipient_rule
 from cya.notifications.models import NotificationOutbox
 from cya.obligations.models import Obligation
+from cya.operations import check_due
 from cya.operations.assignments import assign_vehicle, end_assignment
 from cya.operations.check_due import notify_check_due
 from cya.operations.commands import set_vehicle_status
@@ -111,6 +113,25 @@ class CheckDueTests(AssignmentCase):
         self.assertEqual(
             CommandReceipt.objects.filter(command_type="VEHICLE_CHECK_DUE_NOTICE").count(), 1
         )
+
+    def test_groups_past_the_first_page_are_reached(self):
+        # Codex review of PR #221: notified groups must not keep later ones off the page.
+        self.bind(vehicle=self.b)
+        self.generate()
+        self.assign(self.crew, self.a, hours=8)
+        self.assign(self.other, self.b, hours=8)
+        self.clock.set(self.opens + timedelta(minutes=5))
+        with mock.patch.object(check_due, "PAGE", 1):
+            first = notify_check_due(str(self.org.pk), limit=1)
+            second = notify_check_due(str(self.org.pk), limit=1)
+            third = notify_check_due(str(self.org.pk), limit=1)
+        self.assertEqual(first.notified, 1)
+        self.assertEqual((second.notified, second.already), (1, 1))
+        self.assertEqual((third.notified, third.already), (0, 2))
+        self.assertEqual(
+            {v for v, _d, _n in first.groups + second.groups}, {str(self.a.pk), str(self.b.pk)}
+        )
+        self.assertEqual(told("vehicle.check_due"), {self.crew.pk, self.other.pk})
 
     def test_stale_windows_and_out_of_service_vehicles_are_not_announced(self):
         self.assign(self.crew, self.a, hours=8)

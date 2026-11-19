@@ -25,7 +25,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from django.db import DatabaseError
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from cya.accounts.models import Organization
@@ -43,7 +43,7 @@ COMMAND = "VEHICLE_CHECK_DUE_NOTICE"
 EVENT = "vehicle.check_due"
 SOURCE = "vehicle_check_due"
 LOOKBACK = timedelta(hours=2)
-PAGE = 500
+PAGE = 500  # groups read per query; a pass pages on until `limit` notices are written
 
 
 @dataclass
@@ -63,8 +63,9 @@ def _operation(organization_id, key):
     return str(worker_operation_id(str(organization_id), SERVICE, COMMAND, key))
 
 
-def groups(organization_id, now):
-    """[(vehicle id, due instant, number of checks)] whose window opened within LOOKBACK."""
+def groups(organization_id, now, after=None):
+    """One page of [(vehicle id, due instant, number of checks)] whose window opened within
+    LOOKBACK, ordered by (due instant, vehicle id) and starting after the `after` group."""
     selected = ObligationProjection.objects.filter(
         organization_id=organization_id, selected=True
     ).values("obligation_id")
@@ -77,6 +78,11 @@ def groups(organization_id, now):
             grace_at__gt=now,
             vehicle__active=True,
             pk__in=selected,
+        )
+        .filter(
+            Q()
+            if after is None
+            else Q(due_at__gt=after[1]) | Q(due_at=after[1], vehicle_id__gt=after[0])
         )
         .values("vehicle_id", "due_at")
         .annotate(checks=Count("pk"))
@@ -130,12 +136,28 @@ def _notify_one(organization_id, vehicle_id, due_at, checks):
 
 
 def notify_check_due(organization_id, *, now=None, limit=50):
-    """One pass: at most `limit` new notices, oldest due instant first; returns a report."""
+    """One pass: at most `limit` new notices, oldest due instant first; returns a report.
+
+    Groups already notified, out of service or failing do not use up the pass: it reads further
+    pages (keyset on due instant and vehicle) until `limit` notices are written or none remain,
+    so a backlog beyond one page is still reached before its window ages out."""
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 500:
         raise ValueError("limit must be an integer from 1 to 500")
     now = now or timezone.now()
     report = CheckDueReport()
-    found = groups(organization_id, now)
+    after = None
+    while report.notified < limit:
+        found = groups(organization_id, now, after)
+        if not found:
+            break
+        after = found[-1][:2]
+        _notify_page(organization_id, found, limit, report)
+        if len(found) < PAGE:
+            break
+    return report
+
+
+def _notify_page(organization_id, found, limit, report):
     operations = {(v, d): _operation(organization_id, _key(v, d)) for v, d, _n in found}
     done = {
         str(op)
@@ -145,7 +167,7 @@ def notify_check_due(organization_id, *, now=None, limit=50):
     }
     for vehicle_id, due_at, checks in found:
         if report.notified >= limit:
-            break
+            return
         if operations[(vehicle_id, due_at)] in done:
             report.already += 1
             continue
@@ -165,4 +187,3 @@ def notify_check_due(organization_id, *, now=None, limit=50):
         else:
             report.notified += 1
             report.groups.append((vehicle_id, due_at.isoformat(), checks))
-    return report
