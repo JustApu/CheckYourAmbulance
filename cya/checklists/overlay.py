@@ -290,6 +290,14 @@ def _requirements(version, override):
     return apply_overlay(template_items, entries)
 
 
+def resolved_requirements(version, override):
+    """The template version's requirements with the override applied (CHK-6 before 5.0.0).
+
+    Used by the SPEC 5.0.0 migration to materialize each vehicle's effective checklist.
+    """
+    return _requirements(version, override)
+
+
 def vehicle_slots(kind, vehicle_id, reference_ids, as_of):
     """Map a referenced slot row id to the vehicle's own latest effective row of that slot.
 
@@ -527,6 +535,7 @@ __all__ = [
     "requirement_from_definition",
     "requirement_from_fields",
     "resolve_checklist",
+    "resolved_requirements",
     "stale_override_vehicle_ids",
     "vehicle_slots",
 ]

@@ -223,9 +223,21 @@ def _action_for(key, tail, resolver, now, exempt):
     common = (item_id, kit_key, str(tail.pk), tail.sequence, str(selected.pk), current)
     if want is None:
         return Action("RETIRE", *common, None, "REQUIREMENT_REMOVED")
-    if want.requirement_id != current:
+    if want.requirement_id != current and not _carried_over(selected, want):
         return Action("REPLACE", *common, want, "REQUIREMENT_CHANGED", cutoff)
     return None
+
+
+def _carried_over(selected, want):
+    """The requirement only moved to the migrated vehicle checklist (SPEC 5.0.0 18.2 step 3).
+
+    An obligation from before the cutover keeps its legacy requirement when the requirement
+    resolved now is that one carried across the migration maps unchanged, so the migration
+    never recomputes it. Any real change made since replaces it as usual.
+    """
+    from cya.obligations.legacy import carried_over, pins_of_desired, pins_of_version
+
+    return carried_over(pins_of_version(selected.requirement_version), pins_of_desired(want))
 
 
 def _refuse_revival(organization_id, vehicle_id, due_at, actions):

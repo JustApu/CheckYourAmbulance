@@ -489,6 +489,123 @@ class ChecklistCutover(models.Model):
         return f"ChecklistCutover {self.pk}"
 
 
+class MigrationRecord(models.Model):
+    """Receipt and actor of a row written by the 5.0.0 migration (its CHECKLIST_CUTOVER command)."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    command = models.ForeignKey(
+        "cya_core.CommandReceipt", on_delete=models.PROTECT, related_name="+"
+    )
+    recorded_at = models.DateTimeField()
+    actor_user = models.ForeignKey("cya_accounts.User", on_delete=models.PROTECT, related_name="+")
+    actor_roles_at_time = models.JSONField(default=list)
+
+    class Meta:
+        abstract = True
+
+
+class LegacyChecklistMap(MigrationRecord):
+    """(vehicle, legacy template) -> the vehicle checklist the migration made of it (SPEC 18.2).
+
+    Append-only and kept for good: a historical record that names a legacy template is read
+    after the cutover through this map (cya.obligations.legacy).
+    """
+
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    legacy_template = models.ForeignKey(
+        ChecklistTemplate, on_delete=models.PROTECT, related_name="+"
+    )
+    checklist = models.OneToOneField(ChecklistTemplate, on_delete=models.PROTECT, related_name="+")
+
+    class Meta:
+        db_table = "legacy_checklist_map"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="legacymap_org_id"),
+            models.UniqueConstraint(
+                fields=["vehicle", "legacy_template"], name="legacymap_vehicle_template"
+            ),
+        ]
+
+    def __str__(self):
+        return f"LegacyChecklistMap {self.pk}"
+
+
+class LegacyVersionMap(MigrationRecord):
+    """A migrated vehicle checklist version and the legacy versions it was resolved from.
+
+    The version is the legacy template version with the vehicle's override, if any, applied
+    (the effective checklist of SPEC 4.4.0 CHK-6), resolved at one boundary instant.
+    """
+
+    checklist_version = models.OneToOneField(
+        ChecklistVersion, on_delete=models.PROTECT, related_name="+"
+    )
+    legacy_template_version = models.ForeignKey(
+        ChecklistVersion, on_delete=models.PROTECT, related_name="+"
+    )
+    legacy_override_version = models.ForeignKey(
+        VehicleOverrideVersion, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        db_table = "legacy_version_map"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="legacyversion_org_id"),
+        ]
+
+    def __str__(self):
+        return f"LegacyVersionMap {self.pk}"
+
+
+class LegacyItemDefMap(MigrationRecord):
+    """A migrated item row and the legacy template or override row it copies."""
+
+    item_def = models.OneToOneField(ChecklistItemDef, on_delete=models.PROTECT, related_name="+")
+    legacy_item_def = models.ForeignKey(
+        ChecklistItemDef, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        db_table = "legacy_item_def_map"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="legacyitem_org_id"),
+        ]
+
+    def __str__(self):
+        return f"LegacyItemDefMap {self.pk}"
+
+
+class LegacyPositionMap(MigrationRecord):
+    """(vehicle, legacy stable slot) -> the vehicle-local position (SPEC 18.2 step 1).
+
+    A position's identity is the pair (vehicle, stable slot): every position row is keyed by
+    its vehicle, so a vehicle's position already never names another vehicle's. The migration
+    keeps each pair as it is, so the new identity's stable slot equals the legacy one; the map
+    records that, for every pair, so no reader has to assume it.
+    """
+
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    kind = models.CharField(max_length=12)
+    legacy_stable_slot_id = IdentityIDField()
+    stable_slot_id = IdentityIDField()
+
+    class Meta:
+        db_table = "legacy_position_map"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="legacypos_org_id"),
+            models.UniqueConstraint(
+                fields=["vehicle", "kind", "legacy_stable_slot_id"], name="legacypos_slot"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(kind__in=("COMPARTMENT", "SYSTEM")), name="legacypos_kind"
+            ),
+        ]
+
+    def __str__(self):
+        return f"LegacyPositionMap {self.pk}"
+
+
 class StockingDeviation(models.Model):
     """One immutable revision of a temporary stocking deviation (SPEC 4.5)."""
 

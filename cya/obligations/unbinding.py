@@ -30,6 +30,13 @@ from cya.obligations.projections import get_vehicle_obligations_as_of
 MAX_PREVIEW_OBLIGATIONS = 2000
 
 
+def legacy_templates_of(vehicle_id, template_id):
+    # Imported late: cya.obligations.legacy imports the requirement resolver.
+    from cya.obligations.legacy import legacy_templates_of as found
+
+    return found(vehicle_id, template_id)
+
+
 class PreviewTooLarge(Exception):
     """More obligations than one preview may list."""
 
@@ -94,7 +101,12 @@ def unbind_preview(organization_id, vehicle_id, template_id, slot, at):
             routine=True,
             due_at__gte=at,
             recorded_at__lte=at,
-            requirement_version__binding__template_id=template_id,
+            # A migrated assignment also stops the obligations still pinned to the legacy
+            # binding it was copied from (SPEC 5.0.0 18.2 step 3, cya.obligations.legacy).
+            requirement_version__binding__template_id__in=[
+                str(template_id),
+                *legacy_templates_of(vehicle_id, template_id),
+            ],
             requirement_version__binding__slot=slot,
         )
         .order_by("due_at", "id")

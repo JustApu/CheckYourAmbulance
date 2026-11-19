@@ -39,6 +39,15 @@ SPEC 5.0.0 replaces shared templates, vehicle overrides and template bindings wi
 
 **Commands.** `create_vehicle_checklist` (`cya/operations/templates.py`, command `VEHICLE_CHECKLIST_CREATE`, policy action `draft_edit_template`) creates an active checklist for one vehicle with the vehicle's next precedence ordinal; it locks the vehicle row so concurrent creations get distinct ordinals. `save_template_draft` and `publish_template_version` serve vehicle checklists too: placements are validated against the owning vehicle, a Not placed item is accepted, and publication checks slots and retirements on the owner only. `bind_requirement` assigns a vehicle checklist to a schedule slot of its own vehicle, or ends that assignment. After the cutover, every legacy writer refuses: `create_template`, `duplicate_template`, `set_template_key`, `save_template_draft` and `publish_template_version` of a legacy template, `save_override_draft`, `publish_override_version`, and `bind_requirement` of a legacy template.
 
+**The migration (SPEC §18.2, issue #220 part 2).** `cya/checklists/cutover.py`; operator command `migrate_vehicle_checklists` (below). `plan_cutover` reads only; `migrate_to_vehicle_checklists` applies the plan as one `CHECKLIST_CUTOVER` command (policy action `import_configuration`, Administrators), all or nothing, at the receipt's instant T:
+
+1. Every (vehicle, stable slot) pair is kept as the vehicle-local position it already is, recorded in `legacy_position_map`. Every vehicle gets its own copy of each organization-wide position key it uses (`vehicle_position_key`). Labels, order, retirement and sealable revisions are untouched.
+2. Each (vehicle, legacy template) pair with a binding or a published override becomes one vehicle checklist (`legacy_checklist_map`). Its precedence follows the template identity order within the vehicle, the order the generator used. Its versions are the vehicle's effective checklist (template version with the vehicle's override applied) at T and at each later published boundary, published with that boundary as effective instant, placements mapped to the vehicle's own rows (`legacy_version_map`, `legacy_item_def_map`). Earlier versions stay in the legacy rows and are read through the maps.
+3. Each binding chain becomes an assignment chain of that checklist on the same slot: bound at T when the legacy binding is in force then, followed by every later revision at its exact instant. A template on several slots stays one checklist with several assignments; templates sharing a slot stay separate checklists.
+4. Before commit, `verify_carry_over` (`cya/obligations/legacy.py`) resolves every due instant from T that already has an obligation, every one in the next 8 days, and the first one after each later published boundary, both as the records stood before T and with the migration's rows, and requires identical requirements across the maps. Any difference, an unresolvable legacy checklist (a stale override, a missing position, an empty result) or an earlier cutover refuses the whole command.
+
+Nothing old changes: templates, overrides, bindings, position keys, obligations, checks, open sessions, kit lists, seals and audit events keep their rows and meaning. After the cutover the planner keeps an existing obligation whose legacy requirement maps unchanged onto the migrated one (`carried_over`), so the migration recomputes nothing. A later real change still replaces it under §5.7. Ending a migrated assignment previews and supersedes the obligations still pinned to its legacy binding too.
+
 **Precedence (CHK-10).** When two checklists governing one due instant require the same item (and kit instance), the generator picks the lowest schedule-slot text (code-point order, as the `utf8mb4_bin` column compares), then the lowest checklist precedence. Legacy templates keep their old order, by `template_id`; the two models never govern the same due instant.
 
 ## Freeze rules
@@ -102,6 +111,15 @@ Reversible choices made so the contract rows can coexist; none changes SPEC beha
 ## Operator notes
 
 Migrations need the schema-owner account and, on a binary-log-enabled server, `log_bin_trust_function_creators=1` (see [CONTRIBUTING.md](../CONTRIBUTING.md#python-and-django)). After migrating, re-run `manage.py audit_runtime_grants` for the runtime account: it now also grants the checklist V and M tables (`SELECT, INSERT`, and `UPDATE` on M tables only).
+
+Moving an organization to vehicle-owned checklists (SPEC 5.0.0 §18.2), once the per-vehicle checklist screens (issue #220 part 3) are deployed, as an active Administrator:
+
+```sh
+local/venv/bin/python manage.py migrate_vehicle_checklists --organization <organization id> --actor-user-id <administrator user id> --dry-run
+local/venv/bin/python manage.py migrate_vehicle_checklists --organization <organization id> --actor-user-id <administrator user id>
+```
+
+`--dry-run` reads only and prints what would be created and every problem that would refuse the run; the equivalence check needs the writes and runs only for real. A real run prints its operation id; pass it as `--operation-id` to retry an interrupted run, which then replays the first result. Any other run after a successful one is refused. A refused run writes nothing.
 
 Seeding a development or demonstration database with the synthetic fleet (never operational checklist data; the data is labeled non-authoritative, SPEC CHK-7):
 

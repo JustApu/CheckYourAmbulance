@@ -421,3 +421,40 @@ class PositionKey(Evidence):
 
     def __str__(self):
         return f"PositionKey {self.pk}"
+
+
+class VehiclePositionKey(Evidence):
+    """A position's key on one vehicle (SPEC 5.0.0 IMP-6, CFG-2).
+
+    Unique only within the vehicle: equal keys on two vehicles name unrelated positions. Set
+    once, then never changed (append-only). The migration of SPEC 18.2 copies each vehicle's
+    organization-wide key (position_key) here; position_key stays as legacy evidence.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    vehicle = models.ForeignKey(
+        "cya_checklists.Vehicle", on_delete=models.PROTECT, related_name="+"
+    )
+    kind = models.CharField(max_length=12)
+    stable_slot_id = IdentityIDField()
+    key = models.CharField(max_length=MAX_KEY, db_collation="ascii_bin")
+
+    class Meta:
+        db_table = "vehicle_position_key"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="vposkey_org_id"),
+            models.UniqueConstraint(
+                fields=["vehicle", "kind", "stable_slot_id"], name="vposkey_slot"
+            ),
+            models.UniqueConstraint(fields=["vehicle", "kind", "key"], name="vposkey_key"),
+            models.CheckConstraint(
+                condition=models.Q(kind__in=POSITION_KINDS), name="vposkey_kind"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(key__regex=r"^[a-z0-9][a-z0-9._-]*$"), name="vposkey_format"
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehiclePositionKey {self.pk}"

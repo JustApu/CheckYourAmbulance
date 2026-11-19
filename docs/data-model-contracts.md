@@ -100,6 +100,11 @@ No deletion frees an identity for a different person (AUTH-2).
 | `checklist_version` | V | template_id ref, revision; unique template/revision; publication is identified by its referencing publication row |
 | `checklist_publication` | A | checklist_version_id ref unique, effective_at, override_version_id? ref; published versions and children frozen |
 | `checklist_cutover` | A | one per organization; command ref (`CHECKLIST_CUTOVER`), recorded_at, actor; the instant the organization moved to vehicle-owned checklists (SPEC 5.0.0 §18.2): legacy templates, overrides and bindings govern only before it and accept no writes after it, vehicle checklists only from it |
+| `legacy_checklist_map` | A | written only by the 5.0.0 migration (`CHECKLIST_CUTOVER` receipt): vehicle_id ref, legacy_template_id ref (a template with no owner), checklist_id ref unique (owned by that vehicle); unique vehicle/legacy template; read whenever a record naming a legacy template is read after the cutover (SPEC §18.2) |
+| `legacy_version_map` | A | migration-only: checklist_version_id ref unique (a migrated vehicle checklist version), legacy_template_version_id ref, legacy_override_version_id? ref: the legacy versions it was resolved from |
+| `legacy_item_def_map` | A | migration-only: item_def_id ref unique (a migrated item row), legacy_item_def_id ref (the template or override row it copies) |
+| `legacy_position_map` | A | migration-only: vehicle_id ref, kind, legacy_stable_slot_id, stable_slot_id; unique vehicle/kind/legacy slot; the position must exist on that vehicle. A vehicle-local position is the pair (vehicle, stable slot), so the migration keeps each pair and the two slot ids are equal |
+| `vehicle_position_key` | A | vehicle_id ref, kind, stable_slot_id, key (lowercase key format); unique vehicle/kind/slot and vehicle/kind/key; set once, then immutable; the position must exist on that vehicle (SPEC 5.0.0 IMP-6, CFG-2). `position_key` stays as legacy evidence |
 | `item` | M | stable logical item/slot identity, label, active; used across versions |
 | `checklist_item_def` | V | checklist_version_id ref, item_id ref, compartment_id? ref, system_id? ref, kit_id? ref, asset_id? ref, display_order, instructions, kind, expected_quantity?, unit?, allowed_outcomes, na_rule_id? ref; unique version/item; bulk_eligible reserved false |
 | `vehicle_override_version` | V | vehicle_id ref, template_version_id ref, revision, publication ref? |
@@ -519,7 +524,7 @@ references a command receipt with an authorized `command_type`:
 | Table | Trigger Name | Authorized `command_receipt.command_type` |
 |---|---|---|
 | `role_grant` | `cya_role_integrity_bi` | `'ROLE_CHANGE'`, `'INITIAL_CREW'`, `'BOOTSTRAP_ADMINISTRATOR'`, `'INITIAL_EMT'` |
-| `checklist_publication` | `cya_checklist_publication_bi` | `'CHECKLIST_PUBLISH'`, `'OVERRIDE_PUBLISH'` |
+| `checklist_publication` | `cya_checklist_publication_bi` | `'CHECKLIST_PUBLISH'`, `'OVERRIDE_PUBLISH'`, `'CHECKLIST_CUTOVER'` (the 5.0.0 migration publishes migrated vehicle checklist versions) |
 | `stocking_deviation` | `cya_stocking_deviation_bi` | `'STOCKING_DEVIATION_RECORD'` |
 | `status_request` | `cya_status_request_bi` | `'STATUS_REQUEST'`, `'STATUS_REQUEST_DECIDE'` |
 | `vehicle_status_event` | `cya_vehicle_status_event_bi` | `'VEHICLE_STATUS_SET'`, `'STATUS_REQUEST_DECIDE'` |
@@ -528,7 +533,9 @@ references a command receipt with an authorized `command_type`:
 | `vehicle_assignment_limit` | `cya_vehicle_assignment_limit_bi` | `'VEHICLE_ASSIGNMENT_LIMIT_SET'` |
 | `notification_requeue` | `cya_notification_requeue_bi` | `'NOTIFICATION_REQUEUE'` |
 | `schedule_rule` | `cya_schedule_rule_bi` | `'SCHEDULE_PUBLISH'`, `'SCHEDULE_SEED'` |
-| `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'`, `'VEHICLE_DUPLICATE'` |
+| `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'`, `'VEHICLE_DUPLICATE'`, `'CHECKLIST_CUTOVER'` (migrated assignments) |
+| `checklist_cutover`, `legacy_checklist_map`, `legacy_version_map`, `legacy_item_def_map`, `legacy_position_map` | `cya_<table>_bi` | `'CHECKLIST_CUTOVER'` |
+| `vehicle_position_key` | `cya_vehicle_position_key_bi` | `'CHECKLIST_CUTOVER'` |
 | `requirement_version` | `cya_requirement_version_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by binding origin |
 | `obligation` | `cya_obligation_bi` | `'OBLIGATIONS_RECONCILE'` or `'AD_HOC_INSPECTION_REQUEST'` by routine flag |
 | `obligation_selection` | `cya_obligation_selection_bi` | `'OBLIGATIONS_RECONCILE'` |
