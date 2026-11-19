@@ -91,11 +91,25 @@ KIT_FIELDS = frozenset({"kit", "compartment", "count"})
 
 
 def parse(data, fmt):
-    """The vehicle in an uploaded file, in normal form, or FileErrors listing every problem."""
+    """The vehicle in an uploaded file, in normal form, or FileErrors listing every problem.
+
+    The normal form carries schema_version: 1 for a file from before SPEC 5.0.0 (one template,
+    its items and a schedule; the legacy path of IMP-7) and 2 for a file with the vehicle's own
+    checklists (cya.kits.vehicle_files_v2).
+    """
     if fmt not in FORMATS:
         raise FileErrors([f"file: format must be one of {list(FORMATS)}"])
     text = _text(data)
-    return _parse_json(text) if fmt == "json" else _parse_csv(text)
+    from cya.kits import vehicle_files_v2
+
+    if fmt == "json":
+        document = load_json(text)
+        if isinstance(document, dict) and document.get("schema_version") == 2:
+            return vehicle_files_v2.parse_json_document(document)
+        return {**_parse_json(text), "schema_version": SCHEMA_VERSION}
+    if vehicle_files_v2.is_v2_csv(text):
+        return vehicle_files_v2.parse_csv(text)
+    return {**_parse_csv(text), "schema_version": SCHEMA_VERSION}
 
 
 # --- JSON ------------------------------------------------------------------------------------
@@ -180,18 +194,18 @@ def _parse_json(text):
 # --- CSV -------------------------------------------------------------------------------------
 
 
-def _csv_rows(text):
+def _csv_rows(text, columns=CSV_COLUMNS):
     reader = csv.reader(io.StringIO(text, newline=""), strict=True)
     try:
         header = next(reader, None)
         if header is None:
             raise FileErrors(["file: the file has no header row"])
-        if len(set(header)) != len(header) or set(header) != set(CSV_COLUMNS):
-            missing = sorted(set(CSV_COLUMNS) - set(header))
-            extra = sorted(set(header) - set(CSV_COLUMNS))
+        if len(set(header)) != len(header) or set(header) != set(columns):
+            missing = sorted(set(columns) - set(header))
+            extra = sorted(set(header) - set(columns))
             raise FileErrors(
                 [
-                    f"row 1: header must be exactly {list(CSV_COLUMNS)} "
+                    f"row 1: header must be exactly {list(columns)} "
                     f"(missing {missing}, unknown {extra}, or repeated)"
                 ]
             )
@@ -349,6 +363,10 @@ def _json_document(vehicle):
 
 def render(vehicle, fmt):
     """A vehicle file for a vehicle in normal form, as UTF-8 bytes."""
+    if vehicle.get("schema_version") == 2:
+        from cya.kits import vehicle_files_v2
+
+        return vehicle_files_v2.render(vehicle, fmt)
     if fmt == "json":
         document = _json_document(vehicle)
         return (json.dumps(document, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
@@ -393,6 +411,7 @@ def render(vehicle, fmt):
 
 
 TEMPLATE_VEHICLE = {
+    "schema_version": SCHEMA_VERSION,
     "vin": "1FDXE4FS8KDC00001",  # synthetic
     "display_name": "Example Unit 1",
     "number": "EX-1",

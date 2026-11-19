@@ -2,6 +2,21 @@
 
 [Issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129) implements the vehicle file type of [SPEC §4.7](../SPEC.md) (IMP-1 to IMP-7, amendments 1.34.0 and 2.1.0). A vehicle file describes one vehicle: its VIN, its compartments and systems, the items it carries outside kits, its kit list and its schedule. It can be JSON or CSV, and the two hold the same information. The other file type is the [kit library](kit-library-files.md). SPEC and the [contracts](data-model-contracts.md) win if they disagree with this page.
 
+## After the cutover: schema 2 (SPEC 5.0.0, [issue #220](https://github.com/JustApu/CheckYourAmbulance/issues/220))
+
+Once an organization has moved to vehicle-owned checklists (`migrate_vehicle_checklists`), vehicle files use **schema 2** (`cya/kits/vehicle_files_v2.py`, `cya/kits/vehicle_import_v2.py`). Everything below about schema 1 describes files before the cutover.
+
+- **What a file holds** (IMP-7): the vehicle (VIN, name, number), its compartments and systems with their keys, its **checklists** in precedence order, each with an id local to the file, a label, the schedule slots it is assigned to, the kit definitions it inspects and its items (an item with neither compartment nor system is **Not placed**, CHK-9), and its kit list. JSON has a `checklists` list in the vehicle object; CSV has `checklist`, `item` (with its checklist id), `inspects` and `assignment` rows and a `checklist` column in place of `template`.
+- **Keys** (IMP-6): position keys and checklist ids are local to the file and to the vehicle. Equal keys on two vehicles name unrelated positions. Schedule slots and kit definition keys still name shared records.
+- **Export** writes each checklist's version in force (else its latest version) and the slots it is assigned to now. Physical kits and history are never exported. An export re-imports unchanged. Item rows that name a kit instance cannot be expressed in a file; an import keeps them.
+- **Import**, as before all or nothing after a preview with no writes:
+  - a new VIN creates the vehicle with new positions (new stable slots) and new checklists, in the file's order after any existing ones;
+  - for an existing vehicle, a position is matched by the vehicle's own key, and a checklist by its label: a different one becomes one **draft** version, publication staying a separate step (IMP-3);
+  - each listed slot the checklist is not assigned to is assigned when the import is recorded;
+  - nothing the file omits is removed, unassigned or deactivated, and no assignment ever makes a retired position required again (CFG-2).
+- **Legacy files** (schema 1): the file holds the vehicle's effective checklist for one template. Its template key is resolved in the importing organization, and a key that does not resolve makes the file ambiguous, so it is refused. The result is one independent checklist labelled like the template, inspecting the kit definitions of the template's version in force, assigned to the file's schedule (or the only schedule). No binding to the legacy template is made.
+- **Before the cutover** a schema 2 file is refused.
+
 ## Where
 
 **Administration → Vehicle files** (`/administration/vehicle-files/`).
