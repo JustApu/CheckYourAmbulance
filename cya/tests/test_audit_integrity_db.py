@@ -213,6 +213,11 @@ class AuditIntegrityTests(TestCase):
             "vehicle_assignment_event",  # issue #202: vehicle crew assignment (SPEC 15.4)
             "vehicle_assignment_limit",  # issue #202: administrator-set maximum assignment length
             "checklist_cutover",  # issue #220: SPEC 5.0.0 move to vehicle-owned checklists
+            "legacy_checklist_map",  # issue #220: SPEC 5.0.0 migration (18.2)
+            "legacy_version_map",  # issue #220: SPEC 5.0.0 migration (18.2)
+            "legacy_item_def_map",  # issue #220: SPEC 5.0.0 migration (18.2)
+            "legacy_position_map",  # issue #220: SPEC 5.0.0 migration (18.2)
+            "vehicle_position_key",  # issue #220: SPEC 5.0.0 migration (18.2)
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_requeue",  # issue #224: an administrator sent given-up notification email again
             "notification_read",  # issue 147 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/147): the recipient's read mark on an in-app item
@@ -326,6 +331,11 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "vehicle_assignment_event",
                         "vehicle_assignment_limit",
                         "checklist_cutover",
+                        "legacy_checklist_map",
+                        "legacy_version_map",
+                        "legacy_item_def_map",
+                        "legacy_position_map",
+                        "vehicle_position_key",
                         "seal_event",
                         "seal_substitution",
                         "seal_substitution_obligation",
@@ -438,6 +448,11 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "vehicle_assignment_event",
                     "vehicle_assignment_limit",
                     "checklist_cutover",
+                    "legacy_checklist_map",
+                    "legacy_version_map",
+                    "legacy_item_def_map",
+                    "legacy_position_map",
+                    "vehicle_position_key",
                     "seal_event",
                     "seal_substitution",
                     "seal_substitution_obligation",
