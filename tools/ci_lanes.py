@@ -42,8 +42,9 @@ DJANGO_SHARDS = 3
 # Issue #158 item 4, option 2. Test classes that reverse or reapply migrations carry this tag
 # (tools/migration_test_tags.py checks that none is missing it).
 MIGRATION_TAG = "migration_rollback"
-# Any file in an app's migrations package.
-MIGRATION_PATH = re.compile(r"^cya/[a-z_]+/migrations/.+")
+# Any file in a migrations package under cya/, whatever the app's package name (any valid Python
+# identifier, digits included) or nesting depth.
+MIGRATION_PATH = re.compile(r"^cya/(?:[A-Za-z_][A-Za-z0-9_]*/)+migrations/.+")
 # Application modules that a migration imports, so that changing them changes what a migration
 # does. tools/tests/test_ci_lanes.py fails if a migration imports a module not listed here.
 MIGRATION_IMPORTS = frozenset(

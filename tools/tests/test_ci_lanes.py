@@ -319,6 +319,10 @@ class MigrationRoutingTests(unittest.TestCase):
         for path in (
             "cya/deficiencies/migrations/0019_example.py",
             "cya/newapp/migrations/0001_initial.py",
+            "cya/billing2/migrations/0001_initial.py",  # digits in the app name (PR #232 review)
+            "cya/_private/migrations/0001_initial.py",
+            "cya/Reports/migrations/0001_initial.py",
+            "cya/fleet/vehicles/migrations/0001_initial.py",  # a nested app
             "cya/obligations/migrations/__init__.py",
             "cya/core/migrations/sql/trigger.sql",  # not Python: also unclassified, all lanes
         ):
@@ -326,6 +330,28 @@ class MigrationRoutingTests(unittest.TestCase):
                 decision = ci_lanes.classify([path, "cya/deficiencies/commands.py"])
                 self.assertEqual(decision["django-mode"], "full")
                 self.assertEqual(decision["django-exclude-tags"], ())
+
+    def test_paths_that_are_not_in_a_migrations_package_do_not_match(self):
+        for path in (
+            "cya/migrations.py",
+            "cya/deficiencies/migration_helpers.py",
+            "cya/deficiencies/tests/test_migrations_note.py",
+            "cya/2bad/migrations/0001_x.py",  # not a Python package name
+            "other/app/migrations/0001_x.py",
+            "cya/deficiencies/migrations/",
+        ):
+            with self.subTest(path):
+                self.assertIsNone(ci_lanes.MIGRATION_PATH.match(path))
+
+    def test_every_migrations_package_in_the_repository_matches(self):
+        packages = sorted(ROOT.glob("cya/**/migrations/__init__.py"))
+        self.assertTrue(packages)
+        for package in packages:
+            for path in package.parent.rglob("*"):
+                if path.is_file() and "__pycache__" not in path.parts:
+                    relative = path.relative_to(ROOT).as_posix()
+                    with self.subTest(relative):
+                        self.assertTrue(ci_lanes.MIGRATION_PATH.match(relative))
 
     def test_migration_imports_tests_and_tooling_run_the_tagged_tests(self):
         paths = sorted(ci_lanes.MIGRATION_IMPORTS | ci_lanes.MIGRATION_TEST_INPUTS) + [
