@@ -1,0 +1,21 @@
+[Unit]
+Description=Check Your Ambulance: notify crews of checks coming due (runtime role)
+After=mariadb.service
+# The command arrives with issue #202 part 3. On an older release the run is skipped, not
+# failed, so this unit can be installed before that release is deployed.
+ConditionPathExists=/srv/cya/current/cya/operations/management/commands/notify_check_due.py
+
+[Service]
+# Oneshot: never two passes at once. A failed pass is logged and the next tick runs again.
+Type=oneshot
+User=cya
+Group=cya
+WorkingDirectory=/srv/cya/current
+EnvironmentFile=/etc/check-your-ambulance/runtime.env
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ExecStart=/srv/cya/current/local/venv/bin/python manage.py notify_check_due --limit 50

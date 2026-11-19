@@ -1,0 +1,10 @@
+[Unit]
+Description=Notification email delivery every minute
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -9,6 +9,9 @@
   "jobs": [
     "cya-obligations.service",
     "cya-sessions.service",
+    "cya-notify-delivery.service",
+    "cya-notify-overdue.service",
+    "cya-notify-check-due.service",
     "cya-backup-full.service",
     "cya-backup-binlog.service",
     "cya-mail-relay-export.service"
