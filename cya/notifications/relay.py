@@ -251,10 +251,12 @@ class SmtpTransport:
         except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected):
             raise SendFailure("CONNECT_FAILED") from None
         except smtplib.SMTPResponseException as error:
-            # Any other reply (SMTPException is an OSError, so this precedes it): a 4xx, for
-            # example 421 service not available, is temporary.
-            temporary = _refusal([error.smtp_code]) == "DEFERRED"
-            raise SendFailure("DEFERRED" if temporary else "CONNECT_FAILED") from None
+            # Any other reply (SMTPException is an OSError, so this precedes it) follows the same
+            # rule: 4xx (for example 421 service not available) is DEFERRED, 5xx is REJECTED. A
+            # reply without a valid SMTP code (smtplib uses -1) is a broken connection.
+            if isinstance(error.smtp_code, int) and 400 <= error.smtp_code < 600:
+                raise SendFailure(_refusal([error.smtp_code])) from None
+            raise SendFailure("CONNECT_FAILED") from None
         except OSError:
             raise SendFailure("CONNECT_FAILED") from None
         except Exception:

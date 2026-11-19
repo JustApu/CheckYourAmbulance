@@ -62,7 +62,8 @@ class SmtpReplyCodeTests(SimpleTestCase):
             (smtplib.SMTPDataError(452, b"insufficient storage"), "DEFERRED"),
             (smtplib.SMTPDataError(554, b"rejected"), "REJECTED"),
             (smtplib.SMTPResponseException(421, b"closing"), "DEFERRED"),
-            (smtplib.SMTPResponseException(502, b"unknown"), "CONNECT_FAILED"),
+            (smtplib.SMTPResponseException(502, b"unknown"), "REJECTED"),
+            (smtplib.SMTPResponseException(-1, b"broken"), "CONNECT_FAILED"),
         ]
         for error, expected in cases:
             with self.subTest(error=type(error).__name__, code=expected):

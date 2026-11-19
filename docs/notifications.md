@@ -196,8 +196,8 @@ The settings live in `mail_relay`, one row per organization:
 - **Send test email** records an audited `MAIL_RELAY_TEST` request, then sends one message through
   the saved relay to every operator and deputy address. The page shows a fixed safe result (`SENT`,
   `CONNECT_FAILED`, `TLS_FAILED`, `AUTH_FAILED`, `REJECTED`, `DEFERRED`, `TIMEOUT`, `KEY_MISSING`,
-  `UNKNOWN`). No provider reply or exception text is stored or shown. A refusal with an SMTP 5xx
-  reply is `REJECTED`; a 4xx reply is temporary (RFC 5321) and is `DEFERRED`.
+  `UNKNOWN`). No provider reply or exception text is stored or shown. A refusal or other reply
+  with an SMTP 5xx code is `REJECTED`; a 4xx code is temporary (RFC 5321) and is `DEFERRED`.
 - **The host copy.** `manage.py export_mail_relay --organization <id> --output <file>` writes the
   settings the host alerts need, including the decrypted password, as JSON. It writes mode 0600
   through a temporary file and an atomic rename. On any failure, such as a missing or wrong key, it

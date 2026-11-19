@@ -137,6 +137,19 @@ class SmtpReplyDeliveryTests(NotificationCase):
         self.assertEqual(code, "TRANSIENT")
         self.assertNotEqual(outcome, "GAVE_UP")
 
+    def test_an_unrecognized_4xx_reply_is_retried(self):
+        # Codex review of PR #225: a 4xx reply of any kind is retried.
+        [(outcome, code)] = self.deliver(smtplib.SMTPResponseException(421, b"closing"))
+        self.assertEqual(code, "TRANSIENT")
+        self.assertNotEqual(outcome, "GAVE_UP")
+
+    def test_an_unrecognized_5xx_reply_is_given_up(self):
+        # Codex review of PR #225: a 5xx reply of any kind is permanent.
+        self.assertEqual(
+            self.deliver(smtplib.SMTPResponseException(502, b"not implemented")),
+            [("GAVE_UP", "REJECTED")],
+        )
+
     def test_a_5xx_refusal_is_given_up(self):
         refused = smtplib.SMTPRecipientsRefused({self.crew.email: (550, b"no such user")})
         self.assertEqual(self.deliver(refused), [("GAVE_UP", "REJECTED")])
