@@ -1,0 +1,75 @@
+{# The crew section of a vehicle's page (SPEC 15.4, issue #202). Plain forms; the command decides. #}
+<section id="crew" class="panel crew" aria-labelledby="crew-heading">
+<h2 id="crew-heading">Crew</h2>
+{% if crew_saved %}<p class="save-state save-state-saved" data-save-state="saved" role="status"><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ crew_saved }}</span></p>{% endif %}
+{% if crew_error %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed. {{ crew_error }}</p></div></div>{% endif %}
+{% if crew %}
+<ul class="crew-list">
+{% for member in crew %}
+<li class="crew-member"><span class="crew-name">{{ member.name }}</span> <span class="muted">until {{ member.until }}</span>
+{% if member.can_change %}
+<form method="post" action="{% url 'vehicle-crew' %}" class="crew-inline">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="extend"><input type="hidden" name="vehicle_id" value="{{ vehicle.pk }}">
+  <input type="hidden" name="person_id" value="{{ member.person_id }}"><input type="hidden" name="operation_id" value="{{ member.extend_operation_id }}">
+  <label for="extend-{{ member.person_id }}">Extend {% if member.is_me %}your time{% else %}{{ member.name }}{% endif %} until</label>
+  <input id="extend-{{ member.person_id }}" name="until" type="time" required>
+  <label for="extend-{{ member.person_id }}-date">End date</label>
+  <input id="extend-{{ member.person_id }}-date" name="until_date" type="date" value="{{ member.end_date }}" required>
+  <button type="submit" class="button">Extend</button>
+</form>
+<form method="post" action="{% url 'vehicle-crew' %}" class="crew-inline">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="end"><input type="hidden" name="vehicle_id" value="{{ vehicle.pk }}">
+  <input type="hidden" name="person_id" value="{{ member.person_id }}"><input type="hidden" name="operation_id" value="{{ member.end_operation_id }}">
+  <button type="submit" class="button">{% if member.is_me %}I'm off this truck{% else %}End {{ member.name }}{% endif %}</button>
+</form>
+{% endif %}
+</li>
+{% endfor %}
+</ul>
+{% else %}
+<p class="muted">Nobody is assigned to this vehicle right now.</p>
+{% endif %}
+
+{% if crew_self_assign %}
+<form method="post" action="{% url 'vehicle-crew' %}" class="crew-form" aria-labelledby="crew-self-heading">
+  {% csrf_token %}
+  <h3 id="crew-self-heading">I'm on this truck</h3>
+  {% if crew_self_moves_from %}<p class="muted">This moves you off {{ crew_self_moves_from }}.</p>{% endif %}
+  <input type="hidden" name="stage" value="assign"><input type="hidden" name="vehicle_id" value="{{ vehicle.pk }}">
+  <input type="hidden" name="operation_id" value="{{ crew_self_operation_id }}">
+  <label for="crew-self-until">Until (station time)</label>
+  <input id="crew-self-until" name="until" type="time" required>
+  <label for="crew-self-until-date">End date</label>
+  <input id="crew-self-until-date" name="until_date" type="date" value="{{ crew_today }}" required>
+  <button type="submit" class="button primary">{% if crew_self_moves_from %}Move me here{% else %}Put me on this truck{% endif %}</button>
+</form>
+{% endif %}
+
+{% if crew_people %}
+<form method="post" action="{% url 'vehicle-crew' %}" class="crew-form" aria-labelledby="crew-add-heading">
+  {% csrf_token %}
+  <h3 id="crew-add-heading">Add someone</h3>
+  <input type="hidden" name="stage" value="assign"><input type="hidden" name="vehicle_id" value="{{ vehicle.pk }}">
+  <input type="hidden" name="operation_id" value="{{ crew_add_operation_id }}">
+  <label for="crew-add-person">Person</label>
+  <select id="crew-add-person" name="person_id" required>
+    <option value="">Choose a person</option>
+    {% for person in crew_people %}<option value="{{ person.id }}">{{ person.name }}{% if person.note %} ({{ person.note }}, moves them){% endif %}</option>{% endfor %}
+  </select>
+  <label for="crew-add-until">Until (station time)</label>
+  <input id="crew-add-until" name="until" type="time" required>
+  <label for="crew-add-until-date">End date</label>
+  <input id="crew-add-until-date" name="until_date" type="date" value="{{ crew_today }}" required>
+  <button type="submit" class="button">Add to crew</button>
+</form>
+{% endif %}
+<p class="muted">Dates and times are station time. An assignment can end at most {{ crew_limit }} hours ahead; for an overnight shift, set tomorrow's date. Anyone can inspect any vehicle, assigned or not.</p>
+
+{% if crew_history %}
+<details class="crew-history"><summary>Crew history</summary>
+<ul>{% for row in crew_history %}<li><time datetime="{{ row.at|date:'c' }}">{{ row.at|date:"M j, H:i" }}</time> {{ row.text }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+</section>

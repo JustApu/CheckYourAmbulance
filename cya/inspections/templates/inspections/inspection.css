@@ -155,6 +155,17 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .jump-button[aria-current="true"] { border-width: 2px; border-color: var(--accent); font-weight: 700; }
 .jump-label { overflow-wrap: anywhere; }
 .jump-count { flex: none; color: var(--muted); }
+/* Vehicle crew (issue #202). */
+.vehicle-crew { display: block; font-size: .95rem; font-weight: 400; margin-top: .15rem; }
+.crew-list { list-style: none; padding: 0; margin: 0 0 1rem; }
+.crew-member { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .75rem 0; border-bottom: 1px solid var(--line-soft); }
+.crew-name { font-weight: 700; }
+.crew-inline { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0; }
+.crew-inline label, .crew-inline input { display: inline-block; margin-top: 0; }
+.crew-form { margin-top: 1rem; }
+.crew-form h3 { margin: 0 0 .25rem; font-size: 1.05rem; }
+.crew-history { margin-top: 1rem; }
+
 .item-target { outline: 3px solid var(--accent); outline-offset: 2px; }
 /* A check mark that pops once when this person's result saves (#194); still under reduced motion. */
 .outcome-mark { display: inline-block; white-space: pre; }

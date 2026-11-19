@@ -89,6 +89,12 @@ ADMINISTRATION_LINKS = (
         "configure_schedules_thresholds_notifications",
     ),
     (
+        "crew-assignment-settings",
+        "Crew assignments",
+        "set the longest a vehicle crew assignment may run.",
+        "configure_schedules_thresholds_notifications",
+    ),
+    (
         "vehicle-files",
         "Vehicle files",
         "export and import one vehicle's VIN, compartments, items and kit list.",
@@ -143,7 +149,12 @@ ADMINISTRATION_GROUPS = (
         "What each kit holds, which kits each vehicle carries, and the shared library.",
         ("kit-definitions", "kit-list-vehicles", "kit-instance-vehicles", "kit-library"),
     ),
-    ("system", "System", "Settings for the whole system.", ("mail-relay",)),
+    (
+        "system",
+        "System",
+        "Settings for the whole system.",
+        ("mail-relay", "crew-assignment-settings"),
+    ),
 )
 
 
@@ -184,10 +195,17 @@ def administration(request):
 def home(request):
     if request.cya_user is None:
         return sign_in_redirect(request)
+    from cya.operations.crew_views import message_for
     from cya.shell import home as home_screen
 
+    crew_saved, crew_error = message_for(request, request.cya_user)
     return render(
         request,
         "shell/home.html",
-        {"title": "Check Your Ambulance", "home": home_screen.build(request.cya_user)},
+        {
+            "title": "Check Your Ambulance",
+            "home": home_screen.build(request.cya_user),
+            "crew_saved": crew_saved,
+            "crew_error": crew_error,
+        },
     )
