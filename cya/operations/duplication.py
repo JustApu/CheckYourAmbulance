@@ -112,6 +112,10 @@ def duplicate_template(*, source_version_id, label, key, **context):
     org = context["organization_id"]
 
     def build(actor):
+        # SPEC 5.0.0 CFG-3 is withdrawn: shared templates are read-only after the cutover.
+        from cya.checklists.ownership import require_legacy_writable
+
+        require_legacy_writable(org, DuplicationError)
         source = (
             ChecklistVersion.objects.filter(organization_id=org, pk=source_version_id)
             .select_related("template")

@@ -47,6 +47,7 @@ from cya.checklists.overlay import (
     resolve_checklist,
     vehicle_slots,
 )
+from cya.checklists.ownership import require_legacy_writable, require_template_writable
 from cya.checklists.signals import announce_publication
 from cya.checklists.validation import (
     MAX_ITEMS,
@@ -226,13 +227,21 @@ def save_template_draft(*, template_id, items, placements=None, base_revision=No
         template = _locked(ChecklistTemplate, org, template_id, "template")
         if not template.active:
             raise ChecklistValidationError("template is inactive")
+        # SPEC 5.0.0: a legacy template is read-only after the cutover; a vehicle checklist
+        # places its items on its own vehicle or leaves them Not placed (CHK-8, CHK-9).
+        require_template_writable(org, template, error=ChecklistValidationError)
         latest = _next_revision(ChecklistVersion.objects.filter(template=template)) - 1
         if base_revision is not None and base_revision != latest:
             raise ChecklistValidationError(
                 "the template was changed since this edit started; reload it and try again"
             )
         specs, new_items = _with_new_items(org, items)
-        definitions = validate_definitions(org, specs, frozenset(new_items))
+        definitions = validate_definitions(
+            org,
+            specs,
+            frozenset(new_items),
+            str(template.vehicle_id) if template.vehicle_id else None,
+        )
         placed = validate_placements(org, placements) if placements is not None else []
         revision = latest + 1
         version_id = new_id()
@@ -384,13 +393,22 @@ def publish_template_version(*, version_id, effective_at=None, **context):
             raise ChecklistValidationError("cannot publish a version without items")
         from cya.kits.positions import vehicles_bound_now_or_later
 
+        owner = (
+            ChecklistTemplate.objects.filter(pk=version.template_id)
+            .values_list("vehicle_id", flat=True)
+            .get()
+        )
         # SPEC 4.8 CFG-2: the version applies to the vehicles bound to its template, now or by a
         # binding recorded for later, active or not. Lock them before the template, as
         # bind_requirement does (vehicle, then template), so a retirement and this
-        # publication serialize on the vehicle row.
-        applies_to = vehicles_bound_now_or_later(org, version.template_id)
+        # publication serialize on the vehicle row. A vehicle checklist applies to its own
+        # vehicle only, assigned or not (SPEC 5.0.0 CHK-8, CFG-9).
+        applies_to = (
+            [str(owner)] if owner else vehicles_bound_now_or_later(org, version.template_id)
+        )
         _lock_vehicles(org, applies_to)
-        _locked(ChecklistTemplate, org, version.template_id, "checklist template")
+        template = _locked(ChecklistTemplate, org, version.template_id, "checklist template")
+        require_template_writable(org, template, error=ChecklistValidationError)
         # Issue #164: a binding committed after that first read added a vehicle we did not
         # lock or check (bind_requirement takes the template lock after the vehicle, so it has
         # finished by now). Locking that vehicle here would invert the vehicle-then-template
@@ -398,7 +416,7 @@ def publish_template_version(*, version_id, effective_at=None, **context):
         added = {str(v) for v in vehicles_bound_now_or_later(org, version.template_id)} - {
             str(v) for v in applies_to
         }
-        if added:
+        if added and not owner:
             raise ChecklistValidationError(
                 "a vehicle was bound to this template while it was being published; publish again"
             )
@@ -413,7 +431,8 @@ def publish_template_version(*, version_id, effective_at=None, **context):
                 final,
             )
             requirements = [requirement_from_definition(d, "TEMPLATE") for d in definitions]
-            _require_slots(requirements, _active_vehicle_ids(org), final)
+            # A shared template must fit every active vehicle; a vehicle checklist its own.
+            _require_slots(requirements, applies_to if owner else _active_vehicle_ids(org), final)
             _refuse_retired(requirements, applies_to)
             ChecklistPublication.objects.create(
                 id=publication_id,
@@ -429,7 +448,7 @@ def publish_template_version(*, version_id, effective_at=None, **context):
 
             ensure_item_locks(
                 org,
-                _active_vehicle_ids(org),
+                applies_to if owner else _active_vehicle_ids(org),
                 [definition.item_id for definition in definitions]
                 + placed_content_item_ids(placements),
             )
@@ -568,8 +587,14 @@ def save_override_draft(*, vehicle_id, template_version_id, entries, base_revisi
     )
 
     def build(actor):
+        # SPEC 5.0.0: overrides are withdrawn (CHK-6); no new one after the cutover.
+        require_legacy_writable(org, ChecklistValidationError)
         vehicle = _locked(Vehicle, org, vehicle_id, "vehicle")
         template_version = _locked(ChecklistVersion, org, template_version_id, "template version")
+        if ChecklistTemplate.objects.filter(
+            pk=template_version.template_id, vehicle__isnull=False
+        ).exists():
+            raise ChecklistValidationError("a vehicle checklist has no overrides")
         if not _is_published(checklist_version=template_version):
             raise ChecklistValidationError("an override must overlay a published template version")
         latest = _next_revision(VehicleOverrideVersion.objects.filter(vehicle=vehicle)) - 1
@@ -682,6 +707,7 @@ def publish_override_version(*, override_version_id, effective_at=None, **contex
     requested = _aware(effective_at, "effective_at")
 
     def build(actor):
+        require_legacy_writable(org, ChecklistValidationError)
         override = _locked(VehicleOverrideVersion, org, override_version_id, "override version")
         if _is_published(override_version=override):
             raise ChecklistValidationError("override version is already published")

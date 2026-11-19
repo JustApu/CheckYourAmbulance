@@ -160,3 +160,85 @@ class ChecklistCase(TransactionTestCase):
             template_id=str(self.template.pk),
             as_of=as_of or timezone.now(),
         )
+
+    # --- SPEC 5.0.0 vehicle checklists -------------------------------------------------------
+
+    def record_cutover(self, actor=None):
+        """Record the organization's cutover the way the migration command does (SPEC 18.2).
+
+        The migration of issue #220 part 2 writes this row inside its own command; tests of the
+        model alone record it directly under a CHECKLIST_CUTOVER receipt.
+        """
+        from cya.authorization.persistence import digest
+        from cya.checklists.models import ChecklistCutover
+        from cya.core.audit_commands import Plan, run_command
+        from cya.kits.definitions import authorizer
+
+        org = str(self.org.pk)
+
+        def prepare(_actor):
+            def apply(receipt, current):
+                ChecklistCutover.objects.create(
+                    organization=self.org,
+                    command=receipt,
+                    recorded_at=receipt.recorded_at,
+                    actor_user=current.user,
+                    actor_roles_at_time=list(current.roles),
+                )
+
+            return Plan(
+                response_body={"code": "CHECKLIST_CUTOVER"},
+                apply=apply,
+                target_type="ORGANIZATION",
+                target_id=org,
+                new_snapshot={"schema_version": 1, "values": {}},
+            )
+
+        run_command(
+            organization_id=org,
+            command_type="CHECKLIST_CUTOVER",
+            request_digest=digest({"organization_id": org}),
+            authorize=authorizer(org, str((actor or self.admin).pk), "draft_edit_template"),
+            prepare=prepare,
+            **ids(),
+        )
+        return ChecklistCutover.objects.get(organization=self.org).recorded_at
+
+    def own_row(self, row, vehicle):
+        """The given vehicle's own row of the same stable slot as `row`."""
+        return (
+            type(row)
+            .objects.filter(vehicle=vehicle, stable_slot_id=row.stable_slot_id)
+            .order_by("-revision")
+            .first()
+        )
+
+    def vehicle_checklist(self, vehicle=None, label="Synthetic own checklist", actor=None):
+        from cya.operations.templates import create_vehicle_checklist
+
+        body = create_vehicle_checklist(
+            vehicle_id=str((vehicle or self.vehicles[0]).pk), label=label, **self.context(actor)
+        ).body
+        return ChecklistTemplate.objects.get(pk=body["checklist_id"])
+
+    def own_items(self, vehicle=None):
+        """The base items placed on `vehicle`'s own rows, plus the siren left Not placed."""
+        vehicle = vehicle or self.vehicles[0]
+        return [
+            self.spec(self.suction, 10, compartment_id=str(self.own_row(self.cabinet, vehicle).pk)),
+            self.spec(
+                self.masks,
+                20,
+                kind="QUANTITY",
+                expected_quantity=6,
+                compartment_id=str(self.own_row(self.cabinet, vehicle).pk),
+            ),
+            self.spec(self.siren, 30, compartment_id=None),
+        ]
+
+    def publish_checklist(self, checklist, items, effective_at=None):
+        version_id = commands.save_template_draft(
+            template_id=str(checklist.pk), items=items, **self.context()
+        ).body["version_id"]
+        self.publish(version_id, effective_at)
+        return version_id

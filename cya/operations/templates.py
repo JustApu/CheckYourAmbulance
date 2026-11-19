@@ -28,6 +28,7 @@ from cya.checklists.models import (
     VehicleSystem,
 )
 from cya.checklists.overlay import effective_template_version, vehicle_slots
+from cya.checklists.ownership import cutover_at, require_legacy_writable
 from cya.kits import keys as key_rules
 from cya.kits import positions as position_rules
 from cya.kits.models import KitDefinition, KitDefinitionPublication
@@ -38,6 +39,7 @@ ACTION = "draft_edit_template"
 VEHICLE_LIMIT = 500  # vehicles the impact preview checks (SPEC NFR-6)
 LATER_OVERRIDES = 5  # scheduled overrides listed per vehicle (SPEC NFR-6)
 CREATE_COMMAND = "TEMPLATE_CREATE"
+CREATE_VEHICLE_CHECKLIST = "VEHICLE_CHECKLIST_CREATE"
 # The definition fields a reader compares between two versions of an item.
 COMPARED = (
     "display_order",
@@ -67,6 +69,8 @@ def create_template(*, label, key, **context):
     org = context["organization_id"]
 
     def build(actor):
+        # SPEC 5.0.0: no shared template is created once checklists belong to each vehicle.
+        require_legacy_writable(org, TemplateError)
         if ChecklistTemplate.objects.filter(organization_id=org, key=key).exists():
             raise TemplateError("another template has that key")
         template_id = new_id()
@@ -86,6 +90,65 @@ def create_template(*, label, key, **context):
         {"label": name, "key": key},
         build,
         lock_organization=True,
+        action=ACTION,
+    )
+
+
+def create_vehicle_checklist(*, vehicle_id, label, **context):
+    """A new, active checklist owned by one vehicle, with no versions yet (SPEC 5.0.0 CHK-1).
+
+    Supervisors and Administrators (draft_edit_template, SPEC 3.3 and CFG-9). It gets the
+    vehicle's next stable precedence ordinal, so it sorts after the vehicle's existing
+    checklists when two require the same routine anchor (CHK-10). It has no key (IMP-6) and
+    belongs to that vehicle for good. The vehicle row is locked first, so two concurrent
+    creations get distinct ordinals. Vehicle checklists exist only once the organization's
+    cutover is recorded (SPEC 18.2).
+    """
+    canonical_id(vehicle_id)
+    name = _label(label)
+    org = context["organization_id"]
+
+    def build(actor):
+        vehicle = (
+            Vehicle.objects.select_for_update().filter(organization_id=org, pk=vehicle_id).first()
+        )
+        if vehicle is None:
+            raise TemplateError("vehicle not found")
+        if cutover_at(org) is None:
+            raise TemplateError("vehicle checklists start at the cutover")
+        top = (
+            ChecklistTemplate.objects.filter(organization_id=org, vehicle=vehicle)
+            .order_by("-precedence")
+            .values_list("precedence", flat=True)
+            .first()
+        )
+        precedence = (top or 0) + 1
+        checklist_id = new_id()
+
+        def apply(receipt, _current):
+            ChecklistTemplate.objects.create(
+                id=checklist_id,
+                organization_id=org,
+                label=name,
+                active=True,
+                vehicle=vehicle,
+                precedence=precedence,
+            )
+
+        body = {
+            "code": CREATE_VEHICLE_CHECKLIST,
+            "checklist_id": checklist_id,
+            "vehicle_id": str(vehicle.pk),
+            "label": name,
+            "precedence": precedence,
+        }
+        return _plan(org, body, apply)
+
+    return _run(
+        context,
+        CREATE_VEHICLE_CHECKLIST,
+        {"vehicle_id": vehicle_id, "label": name},
+        build,
         action=ACTION,
     )
 

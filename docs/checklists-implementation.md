@@ -14,7 +14,32 @@ Implementation notes for the `cya.checklists` app. The product rules are SPEC §
 | Synthetic sample agency seed and `seed_synthetic_fleet` command | `cya/checklists/seed.py`, `tests/fixtures/demo-fleet.json` |
 | Tests | `cya/checklists/tests/` |
 
-Table kinds match `tools/audit_enforcement.py`: `vehicle`, `kit_instance`, `checklist_template`, `item` are mutable (M); `compartment`, `vehicle_system`, `checklist_version`, `checklist_item_def`, `vehicle_override_version`, `vehicle_override_item`, `stocking_deviation` are versioned (V); `checklist_publication` is append-only (A, with the standard `append-only table` triggers the schema inspector requires).
+Table kinds match `tools/audit_enforcement.py`: `vehicle`, `kit_instance`, `checklist_template`, `item` are mutable (M); `compartment`, `vehicle_system`, `checklist_version`, `checklist_item_def`, `vehicle_override_version`, `vehicle_override_item`, `stocking_deviation` are versioned (V); `checklist_publication` and `checklist_cutover` are append-only (A, with the standard `append-only table` triggers the schema inspector requires).
+
+## Vehicle-owned checklists (SPEC 5.0.0, [issue #220](https://github.com/JustApu/CheckYourAmbulance/issues/220))
+
+SPEC 5.0.0 replaces shared templates, vehicle overrides and template bindings with checklists that each vehicle owns (CHK-1 to CHK-10). The physical tables are reused, so sessions, checks, obligations and reports, which already pin these rows, need no change:
+
+| Logical entity (SPEC §18) | Physical rows |
+|---|---|
+| `vehicle_checklist` | a `checklist_template` row whose `vehicle_id` is set, with its `precedence` ordinal (CHK-10) and no key |
+| `vehicle_checklist_version` | `checklist_version` of that row, its `checklist_item_def` rows (a row with neither compartment nor system is **Not placed**, CHK-9) and its `checklist_kit_placement` rows; published by a `checklist_publication` row |
+| `vehicle_checklist_assignment` | `requirement_binding` rows (`BIND` starts an assignment, `UNBIND` ends it) naming the checklist and its own vehicle |
+| legacy `checklist_template`, `checklist_version`, `vehicle_override_version`, `requirement_binding` | the same tables, rows whose template has no vehicle |
+
+**The cutover.** An organization moves to the new model at one recorded instant, its `checklist_cutover` row (written by the migration of SPEC §18.2, issue #220 part 2). `cya/checklists/ownership.py` holds the rule: a legacy template's bindings govern due instants before the cutover only, a vehicle checklist's assignments govern due instants from it on, and a reader bounded "as the records stood" before the cutover (`recorded_before`, as the planner's freeze instant uses) still sees the legacy model. Before the cutover nothing about the legacy model changes.
+
+**Guards** (migrations `0008_vehicle_checklists`, `0009_vehicle_checklist_guards`, and obligations `0017_vehicle_checklist_assignment_guard`), each repeated by the commands:
+
+- a vehicle checklist names its owner through an organization-pair key, has a precedence ≥ 1 that is unique per vehicle and no key, and its owner and precedence never change;
+- vehicle checklists are created and assigned only after the cutover; after it nothing new is written to a legacy template, its versions, its publications, an override or a legacy binding, and a legacy template row cannot be updated;
+- an item row of a vehicle checklist version is placed on that vehicle (compartment, system, or a kit in one of its compartments) or not placed at all; a legacy template or override row keeps a placement;
+- no override overlays a vehicle checklist (CHK-6 withdrawn);
+- an assignment (`requirement_binding`) of a vehicle checklist names that checklist's vehicle.
+
+**Commands.** `create_vehicle_checklist` (`cya/operations/templates.py`, command `VEHICLE_CHECKLIST_CREATE`, policy action `draft_edit_template`) creates an active checklist for one vehicle with the vehicle's next precedence ordinal; it locks the vehicle row so concurrent creations get distinct ordinals. `save_template_draft` and `publish_template_version` serve vehicle checklists too: placements are validated against the owning vehicle, a Not placed item is accepted, and publication checks slots and retirements on the owner only. `bind_requirement` assigns a vehicle checklist to a schedule slot of its own vehicle, or ends that assignment. After the cutover, every legacy writer refuses: `create_template`, `duplicate_template`, `set_template_key`, `save_template_draft` and `publish_template_version` of a legacy template, `save_override_draft`, `publish_override_version`, and `bind_requirement` of a legacy template.
+
+**Precedence (CHK-10).** When two checklists governing one due instant require the same item (and kit instance), the generator picks the lowest schedule-slot text (code-point order, as the `utf8mb4_bin` column compares), then the lowest checklist precedence. Legacy templates keep their old order, by `template_id`; the two models never govern the same due instant.
 
 ## Freeze rules
 
@@ -61,7 +86,7 @@ Reversible choices made so the contract rows can coexist; none changes SPEC beha
 
 1. **Publication targets.** The contract gives `checklist_publication` a unique `checklist_version_id` and an optional `override_version_id`, and gives `vehicle_override_version` a `publication` reference. Several vehicles each need their own override publication over one template version, and the two references would be circular. Built: `checklist_version_id` and `override_version_id` are each nullable and unique, a CHECK requires exactly one, and an override's publication is found through the publication row (as for template versions). `vehicle_override_version` has no `publication` column.
 2. **Override replacement definitions.** `checklist_item_def.checklist_version_id` is nullable beside a nullable `override_version_id` (a CHECK requires exactly one), because a replacement definition cannot share the template version's `(version, item)` key. Composite keys make an override entry's definition belong to the same override and name the same item.
-3. **Slots across vehicles.** A central template cannot reference per-vehicle rows directly. A definition references one `compartment` / `vehicle_system` row; the slot is its `stable_slot_id`, and a vehicle's own placement is that vehicle's latest effective row with the same `stable_slot_id`. Vehicles share slot ids for the same physical position. The seed references the first ambulance's rows.
+3. **Slots across vehicles** (legacy templates; a vehicle checklist references its own vehicle's rows, see above). A central template cannot reference per-vehicle rows directly. A definition references one `compartment` / `vehicle_system` row; the slot is its `stable_slot_id`, and a vehicle's own placement is that vehicle's latest effective row with the same `stable_slot_id`. Vehicles share slot ids for the same physical position. The seed references the first ambulance's rows.
 4. **Deviation revisions.** One chain per vehicle and item (a unique `prior_revision_id` stops forks; a trigger checks the chain). `valid_from` may be omitted to start at the recording instant; an active deviation keeps its start. Termination is a revision ending at the termination instant. A crew member's early-termination *request* (SPEC §4.5) is not built; it belongs with the request workflow.
 5. **`NOT_APPLICABLE`.** Not accepted in `allowed_outcomes` until the administrator-defined `na_rule` exists (SPEC §7.1). `na_rule_id` and `asset_id` are omitted until their tables exist (`equipment_asset` is R3).
 6. **Vehicle to template.** The checklist-specific rows have no vehicle-to-template link; the

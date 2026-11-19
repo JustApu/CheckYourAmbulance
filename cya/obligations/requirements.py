@@ -1,7 +1,9 @@
 """What a vehicle owes at a due instant: bindings, schedule occurrences and pinned requirements.
 
 Everything here reads and nothing writes. A vehicle's routine inspections come from its
-requirement bindings (which checklist template follows which schedule slot, effective-dated),
+requirement bindings (which checklist follows which schedule slot, effective-dated; since SPEC
+5.0.0 a binding of a vehicle checklist is its schedule assignment, and a legacy template's
+bindings govern only before the organization's cutover),
 the schedule rule revision in force at each due instant (cya.schedules) and the checklist
 resolved as of that instant (cya.checklists.overlay). The result for one due instant D is the
 set of requirements that should have an effective obligation, each pinned to the exact rows it
@@ -26,6 +28,7 @@ from uuid import UUID, uuid5
 
 from cya.checklists.models import ChecklistPublication
 from cya.checklists.overlay import NoEffectiveVersionError, resolve_checklist
+from cya.checklists.ownership import cutover_at, governs, owners, precedence_key
 from cya.conditions.models import ConditionalRule
 from cya.kits.history import active_kits, active_kits_on_vehicle, slot_of_reference_kit
 from cya.kits.kit_lists import kit_list_effective_at
@@ -59,6 +62,14 @@ class Occurrence:
     due_at: datetime
     early_at: datetime
     grace_at: datetime
+    # SPEC 5.0.0 CHK-10: a vehicle checklist's stable precedence ordinal; None for a legacy
+    # template, which is ordered by its identity (template_id) as before.
+    precedence: int | None = None
+
+    @property
+    def order(self):
+        """CHK-10: lowest slot text value (code-point order), then checklist precedence."""
+        return (self.slot, precedence_key(self.template_id, self.precedence))
 
 
 @dataclass(frozen=True)
@@ -137,6 +148,27 @@ def _binding_history(organization_id, vehicle_id, recorded_before=None):
     return history
 
 
+class _Governing:
+    """Which bindings may govern a due instant, as the records stood (SPEC 5.0.0 18.2).
+
+    A legacy template's binding governs only before the organization's cutover and a vehicle
+    checklist's assignment only from it on (cya.checklists.ownership.governs). The cutover is
+    read with the same recorded_before bound as the bindings, so a question answered as the
+    records stood before the cutover still gets the legacy answer.
+    """
+
+    def __init__(self, organization_id, template_ids, recorded_before=None):
+        self.cutover = cutover_at(organization_id, recorded_before)
+        self.owners = owners(template_ids)
+
+    def allows(self, template_id, due_at):
+        owner, _precedence = self.owners.get(str(template_id), (None, None))
+        return governs(owner, due_at, self.cutover)
+
+    def precedence(self, template_id):
+        return self.owners.get(str(template_id), (None, None))[1]
+
+
 def _bound_at(revisions, instant):
     """The BIND revision in force at instant, else None (an UNBIND, or none yet effective)."""
     in_force = None
@@ -152,11 +184,17 @@ def bound_template_ids(organization_id, vehicle_id, instant):
     Only bindings recorded at or before instant count, so a past answer never changes when a
     binding is added later (SPEC 19.3). Sorted for a stable order.
     """
-    history = _binding_history(
-        organization_id, vehicle_id, recorded_before=instant + timedelta(microseconds=1)
+    recorded_before = instant + timedelta(microseconds=1)
+    history = _binding_history(organization_id, vehicle_id, recorded_before=recorded_before)
+    governing = _Governing(
+        organization_id, {template for template, _slot in history}, recorded_before
     )
     return sorted(
-        {template for (template, _slot), rows in history.items() if _bound_at(rows, instant)}
+        {
+            template
+            for (template, _slot), rows in history.items()
+            if _bound_at(rows, instant) and governing.allows(template, instant)
+        }
     )
 
 
@@ -174,10 +212,14 @@ def occurrences(organization_id, vehicle_id, start, end, recorded_before=None):
 
     Each schedule revision governs the due instants from its own effective instant up to,
     excluding, the next revision's, so a revision published for the future never reshapes
-    earlier dates. A binding must be in force at the due instant itself.
+    earlier dates. A binding must be in force at the due instant itself, and allowed to govern
+    it on its side of the organization's cutover (SPEC 5.0.0 18.2).
     """
     found = []
     history = _binding_history(organization_id, vehicle_id, recorded_before)
+    governing = _Governing(
+        organization_id, {template for template, _slot in history}, recorded_before
+    )
     for (template_id, slot), revisions in history.items():
         rules = _schedule_revisions(organization_id, slot, recorded_before)
         for index, rule_row in enumerate(rules):
@@ -186,7 +228,7 @@ def occurrences(organization_id, vehicle_id, start, end, recorded_before=None):
                 if successor is not None and window.due_at >= successor:
                     continue
                 binding = _bound_at(revisions, window.due_at)
-                if binding is None:
+                if binding is None or not governing.allows(template_id, window.due_at):
                     continue
                 found.append(
                     Occurrence(
@@ -197,9 +239,10 @@ def occurrences(organization_id, vehicle_id, start, end, recorded_before=None):
                         due_at=window.due_at,
                         early_at=window.early_at,
                         grace_at=window.grace_at,
+                        precedence=governing.precedence(template_id),
                     )
                 )
-    return sorted(found, key=lambda o: (o.due_at, o.slot, o.template_id))
+    return sorted(found, key=lambda o: (o.due_at, o.order))
 
 
 def _conditional_rules(organization_id, due_at, recorded_before=None):
@@ -413,7 +456,9 @@ def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None
 
     An occurrence whose template has no version effective yet contributes nothing: there is
     nothing to inspect. If two occurrences name the same item (and kit instance), the lowest
-    (slot, template) wins, so one anchor never carries two competing requirements. An item
+    (slot, checklist precedence) wins, so one anchor never carries two competing requirements
+    (SPEC 5.0.0 CHK-10: slot text in code-point order, then the vehicle checklist's precedence
+    ordinal, or a legacy template's identity). An item
     inside a kit is owed once per kit instance on the vehicle (SPEC 1.8.0). Whether a template is marked
     active is deliberately not an input: it is a mutable flag with no history, so the answer
     could not be reproduced. The database instead refuses to deactivate a bound template
@@ -422,7 +467,7 @@ def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None
     items = {}
     conditional = None
     slots = {}
-    for occurrence in sorted(at_due, key=lambda o: (o.slot, o.template_id)):
+    for occurrence in sorted(at_due, key=lambda o: o.order):
         try:
             resolved = resolve_checklist(
                 organization_id=organization_id,

@@ -178,7 +178,6 @@ class FreezeTriggerTests(ChecklistCase):
                 kind="PRESENCE_CONDITION", compartment=self.cabinet, expected_quantity=1
             ),
             "measurement without unit": dict(kind="MEASUREMENT", compartment=self.cabinet),
-            "no placement": dict(kind="PRESENCE_CONDITION"),
             "both placements": dict(
                 kind="PRESENCE_CONDITION", compartment=self.cabinet, system=self.system
             ),
@@ -199,6 +198,13 @@ class FreezeTriggerTests(ChecklistCase):
                 self.refused(
                     lambda f=fields: ChecklistItemDef.objects.create(item=newitem, **{**base, **f}),
                     IntegrityError,
+                )
+        # SPEC 5.0.0 CHK-9: no placement is a vehicle checklist's Not placed item, so the CHECK
+        # allows it and the owner trigger (migration 0009) refuses it on a legacy template.
+        with self.subTest("no placement"):
+            with self.assertRaisesRegex(DatabaseError, "may be not placed"), transaction.atomic():
+                ChecklistItemDef.objects.create(
+                    item=newitem, **{**base, "kind": "PRESENCE_CONDITION"}
                 )
 
     def test_publication_must_match_its_receipt_and_have_content(self):

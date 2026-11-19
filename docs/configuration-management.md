@@ -99,6 +99,8 @@ Part 5b opens the Administration section to Supervisors, and part 5c to Supply O
 
 ## Checklist templates (part 6a)
 
+> **SPEC 5.0.0 ([issue #220](https://github.com/JustApu/CheckYourAmbulance/issues/220)).** Checklists now belong to each vehicle. The template screens below describe the legacy shared templates, which stay usable until the organization's cutover and are read-only after it; the commands refuse every legacy write then. `create_vehicle_checklist` creates a vehicle's own checklist; the per-vehicle screens follow in issue #220 part 3. See [vehicle-owned checklists](checklists-implementation.md#vehicle-owned-checklists-spec-500-issue-220).
+
 The screens are in `cya/operations/template_admin_views.py`, behind `draft_edit_template`. Publishing needs `publish_template`, and duplicating needs `duplicate_configuration`. Each command checks its own action.
 
 - **Creating a template.** `create_template` (`cya/operations/templates.py`, command `TEMPLATE_CREATE`) writes an active template with the label and key its creator enters (SPEC 4.0.0 IMP-6), and no version. The template key is unique across the organization, so the command takes the organization lock first. The first version is a draft saved like every other.

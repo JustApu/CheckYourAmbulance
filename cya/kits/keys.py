@@ -131,6 +131,11 @@ def set_template_key(*, template_id, key, **context):
         )
         if template is None:
             raise KeyRuleError(f"template {template_id} does not exist in the organization")
+        if template.vehicle_id is not None:
+            raise KeyRuleError("a vehicle checklist has no key (SPEC 5.0.0 IMP-6)")
+        from cya.checklists.ownership import require_legacy_writable
+
+        require_legacy_writable(org, KeyRuleError)
         if template.key is not None:
             raise KeyRuleError("the template's key is already set and never changes")
         if ChecklistTemplate.objects.filter(organization_id=org, key=key).exists():
