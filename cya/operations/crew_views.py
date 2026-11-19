@@ -78,12 +78,14 @@ def _readings(day, parsed, zone):
     return sorted(found)
 
 
-def until_on(day_text, text, zone, now):
-    """The end at time `text` on station date `day_text` (YYYY-MM-DD), for shifts past a day.
+def until_on(day_text, text, zone, now, after=None):
+    """The end at time `text` on station date `day_text` (YYYY-MM-DD).
 
-    PR #219 review: a time alone can only reach the next 24 hours, but the limit may be up to
-    168. The earliest reading after now on that date is used; a time the clock skips that day
-    raises SkippedTime; a date and time already past, or malformed input, gives None.
+    The earliest reading of that wall time on that date that is after now, and after `after`
+    when given, is used. For an extension `after` is the current end, so in the repeated
+    autumn hour the later reading is chosen when the earlier one would not extend (PR #219
+    review). A time the clock skips that day raises SkippedTime; a date and time already past
+    (or not after `after`), or malformed input, gives None.
     """
     try:
         parsed = time.fromisoformat((text or "").strip())
@@ -95,7 +97,10 @@ def until_on(day_text, text, zone, now):
     readings = _readings(day, parsed, zone)
     if not readings:
         raise SkippedTime(text)
-    ahead = [r for r in readings if r > now.astimezone(UTC)]
+    floor = now.astimezone(UTC)
+    if after is not None:
+        floor = max(floor, after.astimezone(UTC))
+    ahead = [r for r in readings if r > floor]
     return ahead[0].astimezone(zone) if ahead else None
 
 
@@ -300,7 +305,13 @@ def crew(request):
     if stage != "end":
         try:
             day = request.POST.get("until_date", "").strip()
-            until = until_on(day, request.POST.get("until"), zone_of(user), timezone.now())
+            after = None
+            if stage == "extend":
+                current = assignments.current_assignment(str(user.organization_id), person_id)
+                after = current.ends_at if current else None
+            until = until_on(
+                day, request.POST.get("until"), zone_of(user), timezone.now(), after=after
+            )
         except SkippedTime:
             return _back(request, vehicle.pk, error="TIME_SKIPPED")
         if until is None:

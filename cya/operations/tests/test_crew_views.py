@@ -73,6 +73,24 @@ class DaylightSavingTests(SimpleTestCase):
         # A time already past in both readings that day has passed.
         self.assertIsNone(until_on("2026-11-01", "01:10", self.zone, now))
 
+    def test_an_extension_in_the_repeated_hour_picks_the_reading_after_the_current_end(self):
+        """PR #219 review: an end at the first 01:45 can be extended to the second 01:30."""
+        now = datetime(2026, 11, 1, 5, 30, tzinfo=UTC)  # 00:30 CDT
+        current_end = datetime(2026, 11, 1, 6, 45, tzinfo=UTC)  # the first 01:45 (CDT)
+        self.assertEqual(
+            until_on("2026-11-01", "01:30", self.zone, now, after=current_end).astimezone(UTC),
+            datetime(2026, 11, 1, 7, 30, tzinfo=UTC),  # the second 01:30 (CST)
+        )
+        # Without the floor, the first 01:30 (CDT) is chosen, which would not extend.
+        self.assertEqual(
+            until_on("2026-11-01", "01:30", self.zone, now).astimezone(UTC),
+            datetime(2026, 11, 1, 6, 30, tzinfo=UTC),
+        )
+        # No reading of 01:15 that day is after the current end.
+        self.assertIsNone(
+            until_on("2026-11-01", "01:15", self.zone, now, after=current_end + timedelta(hours=1))
+        )
+
     def test_a_time_skipped_by_the_spring_change_is_refused_not_moved(self):
         # 2026-03-08: 02:00-03:00 does not exist. Now is 23:00 the evening before.
         now = datetime(2026, 3, 8, 5, 0, tzinfo=UTC)  # 2026-03-07 23:00 CST
