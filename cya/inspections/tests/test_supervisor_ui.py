@@ -499,7 +499,7 @@ class QueueTests(SupervisorUiCase):
         sup = self.signed_in("sup-ui", "SUPERVISOR")
         response = sup[0].get(self.URL)
         found = self.lists(response)
-        self.assertNotContains(response, "matching active problems; showing")
+        self.assertNotContains(response, "matching active problem")
         self.assertEqual(found["Unassigned"], [unassigned, unassigned_later])
         self.assertEqual(found["Overdue"], [late, late_later])
         self.assertEqual(

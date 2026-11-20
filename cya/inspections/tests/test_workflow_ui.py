@@ -588,7 +588,7 @@ class DeficiencyListTests(CrewUiCase):
         self.assertContains(
             filtered,
             '<p class="deficiency-results-count" tabindex="-1" data-focus-on-load>'
-            "1 matching problems; showing 1 on this page.</p>",
+            "1 matching problem; showing 1 on this page.</p>",
             html=True,
         )
         refused = self.client.get("/problems/", {"severity": "NOT-A-LEVEL"})
@@ -599,6 +599,17 @@ class DeficiencyListTests(CrewUiCase):
             html=True,
         )
         self.assertEqual(refused.content.decode().count('tabindex="-1" data-focus-on-load'), 1)
+
+    def test_counts_use_the_singular_for_one(self):
+        # Found in the issue #235 deployed check: "1 matching problems", "History (1 events)".
+        first, _ = self.create_deficiency(summary="Synthetic count one")
+        detail = self.client.get(f"/problems/{first}/")
+        self.assertContains(detail, "<summary>History (1 event)</summary>", html=True)
+        one = self.client.get("/problems/", {"q": "Synthetic count", "status": "active"})
+        self.assertContains(one, "1 matching problem; showing 1 on this page.")
+        self.create_deficiency(summary="Synthetic count two")
+        two = self.client.get("/problems/", {"q": "Synthetic count", "status": "active"})
+        self.assertContains(two, "2 matching problems; showing 2 on this page.")
 
     def test_default_is_active_and_history_includes_reported_in_error(self):
         deficiency_id, check_id = self.create_deficiency(summary="Synthetic corrected pump")
@@ -652,7 +663,7 @@ class DeficiencyListTests(CrewUiCase):
         self.assertEqual(str(filtered.context["page"]["rows"][0].deficiency_id), str(target))
         self.assertContains(filtered, '<option value="HIGH" selected>High</option>', html=True)
         self.assertContains(filtered, "Applied filters:")
-        self.assertContains(filtered, "1 matching problems; showing 1")
+        self.assertContains(filtered, "1 matching problem; showing 1")
         self.assertNotContains(filtered, "Synthetic pump other")
 
         no_match = self.client.get("/problems/", {"severity": "UNCONFIGURED"})
