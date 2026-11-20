@@ -791,6 +791,12 @@ function generic(kind) {
     assert.equal(run.get("checklist-progress-text").textContent, "4 of 4 checked · all done");
     run.get("next-unchecked").fire("click");
     assert.equal(run.get("checklist-bar-status").textContent, "Every due item is checked.");
+    assert.equal(run.get("checklist-progress").hidden, false, "a finished window still shows its full bar");
+    // Issue #235 C2: with nothing due and nothing checked, no full bar implies finished work.
+    run.context.testUI.setGroups([{...group, checked: 0, due: 0, overdue: 0, not_due: 4}]); run.context.testUI.render();
+    assert.equal(run.get("checklist-progress-text").textContent, "Nothing is due right now.");
+    assert.equal(run.get("checklist-progress").hidden, true);
+    assert.equal(run.get("checklist-progress").value, 0);
   }
   {
     // Needs Attention Only can hide due items; the bar says so instead of claiming all are done.
@@ -842,15 +848,25 @@ function generic(kind) {
     run.context.testUI.setLayout("COMPARTMENTS");
     assert.equal(run.get("area-overview").hidden, false, "the overview lists the areas");
     assert.equal(run.get("checklist-body").className, "checklist-body");
-    run.get("area-cards").children[1].fire("click");
+    // Issue #235 C2: a short line on the card, the rest behind Details beside it.
+    {
+      const first = run.get("area-cards").children[0];
+      assert.equal(findClass(first, "area-card-summary").textContent, "0 of 1 checked · 1 due · 0 overdue · 0 open problems");
+      assert.equal(findClass(first, "area-card-breakdown").textContent, "0 due soon · 0 not due · 0 without an obligation · 0 exceptions");
+      assert.equal(findClass(first, "area-card-details").children[0].textContent, "Details for Driver-side exterior compartment");
+      findClass(first, "area-card-details").open = true;
+      run.context.testUI.render();
+      assert.equal(findClass(run.get("area-cards").children[0], "area-card-details").open, true, "an open Details stays open on re-render");
+    }
+    findClass(run.get("area-cards").children[1], "area-card").fire("click");
     const keys = run.elements.items.children.filter(child => child.dataset.itemKey).map(child => child.dataset.itemKey);
     assert.deepEqual(keys, ["rear-item|"], "the open area shows only its items");
     if (wide) {
       assert.equal(run.get("checklist-body").className, "checklist-body checklist-split");
       assert.equal(run.get("area-overview").hidden, false, "split view keeps the area list beside the items");
       const cards = run.get("area-cards").children;
-      assert.equal(cards[1].getAttribute("aria-current"), "true", "the open area is marked");
-      assert.equal(cards[0].getAttribute("aria-current"), null);
+      assert.equal(findClass(cards[1], "area-card").getAttribute("aria-current"), "true", "the open area is marked");
+      assert.equal(findClass(cards[0], "area-card").getAttribute("aria-current"), null);
       assert.equal(findClass(cards[0], "area-card-short").textContent, "1 still due");
       assert.equal(findClass(cards[1], "area-card-short").textContent, "Nothing due");
     } else {

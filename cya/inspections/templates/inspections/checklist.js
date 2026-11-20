@@ -517,19 +517,34 @@
       return config.verification_for_deficiency_id || row.checklist_version_id === config.checklist_version_id;
     });
   }
+  // Issue #235 C2 (owner decision): a short line with the counts that need action, and the
+  // rest of the breakdown behind a Details disclosure beside the card.
   function progressText(group) {
-    return group.checked + " of " + group.total + " items checked in this window · " + group.due + " due · " +
-      group.due_soon + " due soon · " + group.overdue + " overdue · " + group.not_due + " not due · " +
-      group.no_obligation + " without an obligation · " + group.exceptions + " exceptions · " + group.open_deficiencies + " open problems";
+    return group.checked + " of " + group.total + " checked · " + group.due + " due · " +
+      group.overdue + " overdue · " + group.open_deficiencies + " open problem" +
+      (group.open_deficiencies === 1 ? "" : "s");
+  }
+  function breakdownText(group) {
+    return group.due_soon + " due soon · " + group.not_due + " not due · " +
+      group.no_obligation + " without an obligation · " + group.exceptions + " exception" +
+      (group.exceptions === 1 ? "" : "s");
   }
   function renderAreaCards() {
-    var cards = $("area-cards"), focusedGroup = null;
-    // In split view the list stays on screen through live updates: keep a focused card focused.
+    var cards = $("area-cards"), focusedGroup = null, focusedDetails = false, openDetails = {};
+    // In split view the list stays on screen through live updates: keep a focused card focused,
+    // on the same control, and keep open Details open.
     for (var node = document.activeElement; node && node !== cards; node = node.parentNode) {
+      if (String(node.className || "").indexOf("area-card-details-toggle") !== -1) { focusedDetails = true; }
       if (node.parentNode === cards && node.dataset) { focusedGroup = node.dataset.groupKey; }
     }
+    Array.prototype.forEach.call(cards.children, function (card) {
+      var details = card.dataset && card.dataset.groupKey && card.children && card.children[1];
+      if (details && details.open) { openDetails[card.dataset.groupKey] = true; }
+    });
     while (cards.firstChild) { cards.removeChild(cards.firstChild); }
     groupProgressRows.forEach(function (group) {
+      var card = el("div", "area-card-item");
+      card.dataset.groupKey = group.key;
       var button = el("button", "area-card", "");
       button.type = "button"; button.dataset.groupKey = group.key;
       button.appendChild(el("span", "area-card-title", group.label));
@@ -541,8 +556,17 @@
         layoutMode = "COMPARTMENTS"; selectedGroupKey = group.key; navigationAnchorKey = null;
         saveNavigation(); render(); $("area-heading").focus({preventScroll: true});
       });
-      cards.appendChild(button);
-      if (group.key === focusedGroup) { button.focus({preventScroll: true}); }
+      card.appendChild(button);
+      var details = el("details", "area-card-details");
+      var summary = el("summary", "area-card-details-toggle");
+      summary.appendChild(el("span", "", "Details"));
+      summary.appendChild(el("span", "visually-hidden", " for " + group.label));
+      details.appendChild(summary);
+      details.appendChild(el("p", "area-card-breakdown", breakdownText(group)));
+      if (openDetails[group.key]) { details.open = true; }
+      card.appendChild(details);
+      cards.appendChild(card);
+      if (group.key === focusedGroup) { (focusedDetails ? summary : button).focus({preventScroll: true}); }
     });
   }
   function applySavedNavigation() {
@@ -804,7 +828,8 @@
     bar.hidden = !groupProgressRows.length;
     var counts = progressCounts(), total = counts.done + counts.left;
     var progress = $("checklist-progress");
-    progress.max = total || 1; progress.value = total ? counts.done : 1;
+    progress.max = total || 1; progress.value = total ? counts.done : 0;
+    progress.hidden = !total;  // no bar when nothing is due (issue #235 C2)
     $("checklist-progress-text").textContent = !total ? "Nothing is due right now." :
       counts.done + " of " + total + " checked" + (counts.left ? " · " + counts.left + " still due" : " · all done");
     if (!$("jump-panel").hidden) { renderJumpList(); }
