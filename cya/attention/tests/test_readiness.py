@@ -455,10 +455,8 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "Missed:")
         self.assertContains(page, "Suspensions:")
         self.assertContains(page, "Obligations, problems and suspensions")
-        self.assertContains(
-            page,
-            "These independent signals do not combine into a compliance or operational status.",
-        )
+        self.assertContains(page, "an open Critical / High problem; a suspended check")
+        self.assertNotContains(page, "top two active configured severity ranks")
         self.assertContains(page, f'href="/inspection/vehicles/{self.vehicle.pk}/"')
         self.assertContains(page, f'href="/status/vehicles/{self.vehicle.pk}/"')
         self.assertContains(page, f'href="/problems/{deficiency_id}/"')

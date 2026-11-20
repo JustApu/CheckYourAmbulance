@@ -65,11 +65,12 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.equal(page.sockets.length, 2);
     assert.equal(page.sockets[0].url, "wss://example.invalid/ws/a/");
     assert.equal(page.intervals[0].ms, 60000);  // the clock-only refresh
-    assert.match(page.nodes["readiness-live-state"].textContent, /^Connecting to live updates/);
+    assert.equal(page.nodes["readiness-live-state"].textContent, "Updates every 60 seconds.");
     page.sockets[0].onopen();
-    assert.match(page.nodes["readiness-live-state"].textContent, /^Connecting/);  // one still pending
+    assert.equal(page.nodes["readiness-live-state"].textContent, "Updates every 60 seconds.");  // one still pending
     page.sockets[1].onopen();
-    assert.match(page.nodes["readiness-live-state"].textContent, /^Live for 2 of 4 vehicles/);
+    assert.equal(page.nodes["readiness-live-state"].textContent,
+      "Updates every 60 seconds. Changes on the first 2 vehicles show at once.");
     page.fire();  // the reconcile after (re)connecting
     assert.equal(page.requests.length, 1);
     assert.equal(page.requests[0].url, "/fleet/readiness/panel/");
@@ -90,7 +91,8 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.equal(page.nodes["readiness-panel"].innerHTML, "<p>fresh</p>");
     // A lost socket is reported and retried; the timer keeps refreshing everything.
     page.sockets[0].onclose({code: 1006});
-    assert.match(page.nodes["readiness-live-state"].textContent, /partly lost for 1 of 4/);
+    assert.equal(page.nodes["readiness-live-state"].textContent,
+      "Instant updates paused for some vehicles; the page still updates every 60 seconds.");
     page.fire();
     assert.equal(page.sockets.length, 3);  // reconnecting
     page.intervals[0].fn();
@@ -102,9 +104,15 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.match(page.nodes["readiness-live-state"].textContent, /sign in again/);
   }
   {
+    const page = run({...config, sockets: ["/ws/a/"], vehicle_count: 1});  // every vehicle instant
+    page.sockets[0].onopen();
+    assert.equal(page.nodes["readiness-live-state"].textContent,
+      "Updates every 60 seconds. Changes show at once.");
+  }
+  {
     const page = run({...config, sockets: []});  // nothing live: say so plainly
     assert.equal(page.sockets.length, 0);
-    assert.equal(page.nodes["readiness-live-state"].textContent, "The picture re-reads every 60 seconds.");
+    assert.equal(page.nodes["readiness-live-state"].textContent, "Updates every 60 seconds.");
     page.document.hidden = false; page.listeners.visibilitychange(); page.fire();
     assert.equal(page.requests.length, 1);  // shown again: re-read now
   }
