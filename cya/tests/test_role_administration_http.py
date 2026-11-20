@@ -12,12 +12,14 @@ from zoneinfo import ZoneInfo
 
 from django.core.management import call_command
 from django.test import Client, TransactionTestCase, override_settings
+from django.utils import timezone
 
 from cya.accounts.models import Organization, User
 from cya.accounts.returns import sign_in_location
 from cya.authorization.models import RoleGrant
 from cya.authorization.persistence import current_role_codes
 from cya.core.models import AuditEvent, CommandReceipt
+from cya.shell.templatetags.station_time import station_time
 from cya.testing.role_http import URL, RoleHttpHarness, real_collaborator_settings
 
 
@@ -81,9 +83,9 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertNotContains(users_page, 'class="role-history-scroll"')
 
         history = admin_client.get(f"{URL}{crew.pk}/history/")
-        expected_time = grant.recorded_at.astimezone(ZoneInfo("America/New_York")).strftime(
-            "%Y-%m-%d %H:%M:%S %Z (%z)"
-        )
+        # The page's own filter, so the expectation also holds in the repeated fall-back hour.
+        with timezone.override(ZoneInfo("America/New_York")):
+            expected_time = station_time(grant.recorded_at, "seconds")
         self.assertContains(
             history,
             '<th scope="col">When (station time)</th>',
