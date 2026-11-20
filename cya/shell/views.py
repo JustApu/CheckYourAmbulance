@@ -1,4 +1,4 @@
-"""Placeholder pages for the sections the feature issues will build.
+"""Shell pages: the home page, the Administration landing page and the 403 page.
 
 Each section is enforced on the server: a signed-out visitor is sent to
 sign-in, and a signed-in user without a permitted role gets 403 (SPEC 3.2),
@@ -37,30 +37,6 @@ def deny_section(request, user, roles, action):
     return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
 
 
-def _section_page(request, key, template="shell/placeholder.html"):
-    user = request.cya_user
-    if user is None:
-        return sign_in_redirect(request)
-    section = navigation.section_by_key(key)
-    roles = navigation.roles_for(user)
-    if not section.roles & roles:
-        return deny_section(request, user, roles, "VIEW_" + section.key.upper())
-    return render(request, template, {"title": section.label})
-
-
-def _make_view(key, template="shell/placeholder.html"):
-    @never_cache
-    @require_GET
-    def view(request):
-        return _section_page(request, key, template)
-
-    view.__name__ = f"{key}_view"
-    return view
-
-
-fleet = _make_view("fleet")
-inspection = _make_view("inspection")
-deficiencies = _make_view("deficiencies")
 # The administration pages and the action each needs (SPEC 3.3); the landing page lists only
 # those the user may open, and every page still checks its own action on the server.
 ADMINISTRATION_LINKS = (

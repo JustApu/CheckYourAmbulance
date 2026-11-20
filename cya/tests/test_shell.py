@@ -152,7 +152,7 @@ class NavigationTests(ShellTestCase):
             "/inspection/": "Inspect",
             "/problems/": "Problems",
             "/status/": "Vehicles",
-            "/fleet/": "Vehicles",
+            "/fleet/readiness/": "Vehicles",
         }
         for path, label in cases.items():
             with self.subTest(path=path):
@@ -238,7 +238,14 @@ class NavigationTests(ShellTestCase):
 
     def test_signed_out_visitors_go_to_sign_in_and_see_no_navigation(self):
         client = Client()
-        for path in ("/", "/fleet/", "/inspection/", "/problems/", "/administration/"):
+        for path in (
+            "/",
+            "/status/",
+            "/fleet/readiness/",
+            "/inspection/",
+            "/problems/",
+            "/administration/",
+        ):
             with self.subTest(path=path):
                 response = client.get(path)
                 self.assertEqual(response.status_code, 302)
@@ -246,18 +253,23 @@ class NavigationTests(ShellTestCase):
 
     def test_responses_are_not_cached(self):
         client = self.client_for(self.make_user(roles=["CREW"]))
-        self.assertIn("no-store", client.get("/fleet/")["Cache-Control"])
+        self.assertIn("no-store", client.get("/status/")["Cache-Control"])
 
     def test_only_get_is_allowed(self):
         client = self.client_for(self.make_user(roles=["CREW"]))
-        self.assertEqual(client.post("/fleet/").status_code, 405)
+        self.assertEqual(client.post("/status/").status_code, 405)
+
+    def test_old_fleet_placeholder_is_gone(self):
+        # Fleet was merged into Vehicles (issue #194); readiness stays under /fleet/readiness/.
+        client = self.client_for(self.make_user(roles=["CREW", "SUPERVISOR"]))
+        self.assertEqual(client.get("/fleet/").status_code, 404)
 
 
 class RoleLookupFailClosedTests(ShellTestCase):
     def test_unset_lookup_means_no_sections(self):
         with override_settings(CYA_ROLE_LOOKUP=None):
             client = self.client_for(self.make_user(roles=["ADMINISTRATOR"]))
-            for path in ("/fleet/", "/administration/"):
+            for path in ("/status/", "/administration/"):
                 self.assertEqual(client.get(path).status_code, 403)
             home = client.get("/")
             self.assertNotContains(home, 'class="app-nav"')
@@ -269,7 +281,7 @@ class RoleLookupFailClosedTests(ShellTestCase):
         user = self.make_user(roles=["ADMINISTRATOR"])
         with override_settings(CYA_ROLE_LOOKUP="cya.tests.test_shell.failing_lookup"):
             with self.assertLogs("cya.shell.navigation", "ERROR") as logs:
-                response = self.client_for(user).get("/fleet/")
+                response = self.client_for(user).get("/status/")
         self.assertEqual(response.status_code, 403)
         output = "\n".join(logs.output)
         self.assertIn("RuntimeError", output)
@@ -284,7 +296,7 @@ class RoleLookupFailClosedTests(ShellTestCase):
 @override_settings(CYA_ROLE_LOOKUP=LOOKUP)
 class ShellMarkupTests(ShellTestCase):
     def page(self):
-        return self.client_for(self.make_user(roles=["CREW"])).get("/fleet/").content.decode()
+        return self.client_for(self.make_user(roles=["CREW"])).get("/status/").content.decode()
 
     def test_page_has_responsive_accessible_structure(self):
         html = self.page()
@@ -354,7 +366,7 @@ class ShellMarkupTests(ShellTestCase):
 
     def test_user_text_is_escaped(self):
         user = self.make_user("9", ["CREW"], name="<script>alert(1)</script>")
-        html = self.client_for(user).get("/fleet/").content.decode()
+        html = self.client_for(user).get("/status/").content.decode()
         self.assertNotIn("<script>alert(1)</script>", html)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
 
