@@ -52,6 +52,10 @@
 .area-card:hover { border-color: var(--accent); }
 .area-card-title { display: block; font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
 .area-card-summary { display: block; margin-top: .35rem; color: var(--muted); line-height: 1.4; }
+.area-card-item { display: flex; flex-direction: column; min-width: 0; }
+.area-card-details { padding: 0 1rem; color: var(--muted); }
+.area-card-details > summary { display: flex; align-items: center; min-height: 48px; cursor: pointer; }
+.area-card-breakdown { margin: 0 0 .5rem; line-height: 1.4; }
 .kit-heading { margin: .5rem 0 0; padding: .5rem .75rem; border-bottom: 2px solid var(--line); font-size: 1rem; }
 .area-detail-heading { margin-top: .75rem; }
 @media (min-width: 48rem) { .area-cards { grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); } }
@@ -62,7 +66,7 @@
 .checklist-split { display: grid; grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr); column-gap: 1.25rem; align-items: start; }
 .checklist-split > * { grid-column: 2; }
 .checklist-split > #area-overview { grid-column: 1; grid-row: 1 / span 12; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
-.checklist-split #area-overview > p, .checklist-split .area-card-summary { display: none; }
+.checklist-split #area-overview > p, .checklist-split .area-card-summary, .checklist-split .area-card-details { display: none; }
 .checklist-split .area-cards { grid-template-columns: minmax(0, 1fr); gap: .5rem; }
 .checklist-split .area-card-short { display: block; margin-top: .25rem; color: var(--muted); }
 .checklist-split #area-overview-heading { font-size: 1rem; margin-top: 0; }

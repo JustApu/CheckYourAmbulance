@@ -401,8 +401,11 @@ async function testInspectionNavigation(viewport) {
     assert.equal(await page.locator("#area-overview").isVisible(), true, `${viewport.name}: new session did not open the compartment overview`);
     assert.equal(await page.locator("#items").isVisible(), false, `${viewport.name}: overview also rendered the flat item list`);
     const cab = page.getByRole("button", { name: /^Cab / });
-    assert.match(await cab.innerText(), /1 of 4 items checked in this window/);
-    assert.match(await cab.innerText(), /1 due · 0 due soon · 1 overdue · 0 not due · 0 without an obligation · 1 exceptions · 1 open problems/);
+    assert.match(await cab.innerText(), /1 of 4 checked · 1 due · 1 overdue · 1 open problem$/m);
+    const cabDetails = page.locator(".area-card-item", { has: cab }).locator("details");
+    assert.equal(await cabDetails.locator(".area-card-breakdown").isVisible(), false, `${viewport.name}: Details starts closed`);
+    await cabDetails.locator("summary").click();
+    assert.match(await cabDetails.locator(".area-card-breakdown").innerText(), /0 due soon · 0 not due · 0 without an obligation · 1 exception$/);
     const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth, cardTarget: document.querySelector(".area-card").getBoundingClientRect().height }));
     assert.ok(metrics.document <= viewport.width, `${viewport.name}: inspection overview overflows horizontally ${JSON.stringify(metrics)}`);
     assert.ok(metrics.body <= viewport.width, `${viewport.name}: inspection body overflows horizontally ${JSON.stringify(metrics)}`);
