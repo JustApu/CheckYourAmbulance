@@ -79,7 +79,7 @@ class RoleTransitionIntegrationTests(TransactionTestCase):
 
         # 3. Shell access: user sees crew sections and gets 200
         client = self.client_for(user)
-        fleet_response = client.get("/fleet/")
+        fleet_response = client.get("/status/")
         self.assertEqual(fleet_response.status_code, 200)
         self.assertContains(fleet_response, "Inspect")
         self.assertContains(fleet_response, "Problems")
@@ -164,7 +164,7 @@ class RoleTransitionIntegrationTests(TransactionTestCase):
 
         # Shell client receives CREW access
         client = self.client_for(user)
-        self.assertEqual(client.get("/fleet/").status_code, 200)
+        self.assertEqual(client.get("/status/").status_code, 200)
 
         # Historical audit event with roles_at_time=["EMT"] is valid in MariaDB
         with transaction.atomic():
@@ -245,7 +245,7 @@ class RoleTransitionIntegrationTests(TransactionTestCase):
             )
 
         client = self.client_for(legacy_user)
-        self.assertEqual(client.get("/fleet/").status_code, 200)
+        self.assertEqual(client.get("/status/").status_code, 200)
 
         # 1. Canonical CREW grant on existing EMT history must NOT duplicate grant
         grant_op = str(uuid4())
@@ -328,7 +328,7 @@ class RoleTransitionIntegrationTests(TransactionTestCase):
 
         # Effective permissions removed
         self.assertEqual(current_role_codes(legacy_user), ())
-        self.assertEqual(client.get("/fleet/").status_code, 403)
+        self.assertEqual(client.get("/status/").status_code, 403)
 
         # Re-revoking is an already-satisfied no-op
         res_re_revoke = change_role(
@@ -365,7 +365,7 @@ class RoleTransitionIntegrationTests(TransactionTestCase):
 
         # Effective permissions restored
         self.assertEqual(current_role_codes(legacy_user), ("CREW",))
-        self.assertEqual(client.get("/fleet/").status_code, 200)
+        self.assertEqual(client.get("/status/").status_code, 200)
 
         # Replay with regrant_op returns cached receipt response
         res_replay = change_role(

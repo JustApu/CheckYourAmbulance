@@ -300,6 +300,18 @@ class ReadTests(StatusHttpCase):
         narrowed = self.client.get(f"/api/v1/status-requests?vehicle_id={self.vehicles[1].pk}")
         self.assertEqual(narrowed.json()["requests"], [])
 
+    def test_an_empty_status_history_is_a_sentence_not_a_list_item(self):
+        # Issue #235 C5: "1. No status changes have been recorded." read as one change.
+        html = self.client.get(f"/status/vehicles/{self.vehicle.pk}/panel/").content.decode()
+        history = html[html.index('id="history-heading"') :]
+        self.assertIn("<p>No status changes have been recorded.</p>", history)
+        self.assertNotIn("<ol>", history[: history.index("</section>")])
+        self.set_status("OUT_OF_SERVICE")
+        html = self.client.get(f"/status/vehicles/{self.vehicle.pk}/panel/").content.decode()
+        history = html[html.index('id="history-heading"') :]
+        self.assertIn("<ol>", history)
+        self.assertNotIn("No status changes have been recorded.", history)
+
     def test_reads_refuse_unknown_and_repeated_parameters(self):
         for url in (
             f"/api/v1/vehicles/{self.vehicle.pk}/status?x=1",

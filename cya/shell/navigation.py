@@ -48,7 +48,7 @@ class Section:
 # landing page lists only the pages a user may open, and every page checks its own action,
 # so role administration and import stay Administrator-only.
 SECTIONS = (
-    Section("fleet", "Fleet", "fleet", ALL_ROLES),
+    Section("fleet", "Fleet", "fleet-readiness", ALL_ROLES),
     Section("inspection", "Inspection", "inspection", ALL_ROLES),
     Section("status", "Vehicle status", "status", ALL_ROLES),
     Section("deficiencies", "Problems", "deficiencies", ALL_ROLES),

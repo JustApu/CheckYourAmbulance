@@ -41,7 +41,6 @@ urlpatterns = [
     path("", shell.home, name="home"),
     path("manifest.webmanifest", brand_views.manifest, name="web-manifest"),
     path("icons/<str:name>", brand_views.icon, name="brand-icon"),
-    path("fleet/", shell.fleet, name="fleet"),
     path("fleet/readiness/", readiness_views.screen, name="fleet-readiness"),
     path("fleet/readiness/panel/", readiness_views.panel, name="fleet-readiness-panel"),
     path("inspection/", inspection_views.vehicles, name="inspection"),

@@ -96,6 +96,26 @@ SEARCH_LIMIT = 100
 FILTER_FIELDS = ("q", "vehicle", "severity", "assignee", "status", "overdue")
 
 
+def severity_filter_options(levels):
+    """(code, label) filter choices: the label alone, with the code only where labels repeat.
+
+    The code tells two levels with the same label apart; a retired level says so (issue #235 C4).
+    """
+    levels = list(levels)
+    counts = {}
+    for level in levels:
+        key = level.label.casefold()
+        counts[key] = counts.get(key, 0) + 1
+    options = []
+    for level in levels:
+        notes = [level.code] if counts[level.label.casefold()] > 1 else []
+        if not level.active:
+            notes.append("retired")
+        label = f"{level.label} ({', '.join(notes)})" if notes else level.label
+        options.append((level.code, label))
+    return options
+
+
 def page(view):
     @never_cache
     @require_GET
@@ -294,15 +314,7 @@ def deficiencies(request, user):
         queryset,
         now=now,
         allowed_statuses=STATUSES,
-        severity_options=[
-            (
-                level.code,
-                f"{level.label} ({level.code})"
-                if level.active
-                else f"{level.label} ({level.code}, retired)",
-            )
-            for level in severity_levels
-        ],
+        severity_options=severity_filter_options(severity_levels),
     )
     queryset = queryset.order_by("-deficiency__reported_at", "-deficiency_id")
     page_data = _paginated_page(request, queryset, filter_query=filter_context["filter_query"])
@@ -631,15 +643,7 @@ def queue(request, user):
         active,
         now=now,
         allowed_statuses=ACTIVE_STATUSES,
-        severity_options=[
-            (
-                level.code,
-                f"{level.label} ({level.code})"
-                if level.active
-                else f"{level.label} ({level.code}, retired)",
-            )
-            for level in severity_levels
-        ],
+        severity_options=severity_filter_options(severity_levels),
     )
     active = active.filter(status__in=ACTIVE_STATUSES)
     active = active.order_by("-deficiency__reported_at", "-deficiency_id")

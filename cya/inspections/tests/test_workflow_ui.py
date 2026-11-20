@@ -1,11 +1,12 @@
 """Offline HTTP/markup coverage for the issue 86 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/86) workflow shells and real command paths."""
 
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest import mock
 from uuid import uuid4
 
 from django.db import DatabaseError, connection
-from django.test import Client, override_settings
+from django.test import Client, SimpleTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -30,6 +31,7 @@ from cya.deficiencies.dependency import (
 from cya.deficiencies.extensions import decide_extension, request_extension
 from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
 from cya.inspections.tests.test_crew_ui import CrewUiCase
+from cya.inspections.workflow_views import severity_filter_options
 from cya.inspections.workflows import bounded
 
 
@@ -746,3 +748,31 @@ class DeficiencyListTests(CrewUiCase):
             self.create_deficiency(summary=f"Synthetic query-count case {index}")
         self.assertEqual(captured("/problems/"), list_one)
         self.assertEqual(captured("/problems/queue/", supervisor), queue_five)
+
+
+class SeverityFilterOptionTests(SimpleTestCase):
+    """Issue #235 C4: filter labels show the code only where it tells two levels apart."""
+
+    def level(self, code, label, active=True):
+        return SimpleNamespace(code=code, label=label, active=active)
+
+    def test_labels_drop_the_code_unless_labels_repeat(self):
+        options = severity_filter_options(
+            [
+                self.level("CRITICAL", "Critical"),
+                self.level("HIGH", "High"),
+                self.level("MINOR", "Minor"),
+                self.level("MINOR_OLD", "minor", active=False),
+                self.level("COSMETIC", "Cosmetic", active=False),
+            ]
+        )
+        self.assertEqual(
+            options,
+            [
+                ("CRITICAL", "Critical"),
+                ("HIGH", "High"),
+                ("MINOR", "Minor (MINOR)"),
+                ("MINOR_OLD", "minor (MINOR_OLD, retired)"),
+                ("COSMETIC", "Cosmetic (retired)"),
+            ],
+        )

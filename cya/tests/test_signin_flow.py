@@ -146,11 +146,11 @@ class SignInFlowTests(TestCase):
         return unescape(refresh.group(1)), unescape(link.group(1))
 
     def test_a_page_redirect_names_itself_and_sign_in_returns_there(self):
-        redirect = self.client.get("/fleet/")
+        redirect = self.client.get("/status/")
         self.assertEqual(redirect["Location"], "/auth/login/?next=%2Ffleet%2F")
-        response = self.sign_in(next_path="/fleet/")
+        response = self.sign_in(next_path="/status/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.landing(response), ("/fleet/", "/fleet/"))
+        self.assertEqual(self.landing(response), ("/status/", "/status/"))
         page = "/problems/?status=OPEN&vehicle=a%20b"
         self.assertEqual(self.landing(self.sign_in(next_path=page)), (page, page))
 
@@ -177,7 +177,7 @@ class SignInFlowTests(TestCase):
 
     def test_a_forged_stored_return_path_is_checked_again(self):
         # Even a correctly signed cookie carrying an unsafe path cannot redirect elsewhere.
-        _, stored = self.start(next_path="/fleet/")
+        _, stored = self.start(next_path="/status/")
         forged = HttpResponse()
         forged.set_signed_cookie(
             SIGNIN_COOKIE,
@@ -192,7 +192,7 @@ class SignInFlowTests(TestCase):
     def test_a_later_sign_in_never_sends_an_earlier_tab_to_its_page(self):
         # One transaction at a time: a second tab's sign-in replaces the first, whose callback
         # is then refused instead of landing on the second tab's page.
-        _, first = self.start(next_path="/fleet/")
+        _, first = self.start(next_path="/status/")
         _, second = self.start(next_path="/problems/")
         stale = self.google.issue_code(self.google.id_token(sub="1001", nonce=first["nonce"]))
         refused = self.client.get("/auth/callback/", {"state": first["state"], "code": stale})

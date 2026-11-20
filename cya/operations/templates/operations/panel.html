@@ -64,13 +64,13 @@
 
 <section aria-labelledby="history-heading">
 <h2 id="history-heading">History</h2>
-<ol>
+{% if history %}<ol>
 {% for e in history %}
 <li>{{ e.recorded_at|station_time }} · {{ e.actor }} · {{ e.status_label }}{% if e.restrictions %} — {{ e.restrictions }}{% endif %}
 <p>{{ e.explanation }}</p></li>
-{% empty %}
-<li>No status changes have been recorded.</li>
 {% endfor %}
-</ol>
+</ol>{% else %}
+<p>No status changes have been recorded.</p>
+{% endif %}
 {% if history_truncated %}<p class="muted">Only the newest changes are shown.</p>{% endif %}
 </section>
