@@ -1,11 +1,13 @@
 """Organization-scoped role management and audited role-history detail.
 
-Administrators see active users and current roles; changes still pass through
-an explicit review and confirmation. The separate history page reads immutable
-role events. POST changes one role through commands.change_role, which owns
-authorization, receipt, effect and audit in a single transaction. The handler
-only parses and validates input; the actor and organization always come from
-the authenticated request, never the form (SPEC 3.2).
+Administrators see active users and current roles. A user's row stages any
+number of role changes; its Save button is the explicit confirmation and posts
+them to commands.change_roles, which applies all of them or none in one audited
+command (issue #236). The separate history page reads immutable role events.
+The single-change form contract (commands.change_role) remains for trusted
+internal clients. Handlers only parse and validate input; the actor and
+organization always come from the authenticated request, never the form
+(SPEC 3.2).
 """
 
 import logging
@@ -25,7 +27,14 @@ from django.views.decorators.http import require_http_methods
 from cya.accounts.models import User
 from cya.accounts.returns import sign_in_redirect
 from cya.authorization.backend import AuthorizationUnavailable, canonical_id
-from cya.authorization.commands import change_role
+from cya.authorization.commands import (
+    SELECTABLE_ROLES,
+    NoRoleChange,
+    RolesChanged,
+    TargetInactive,
+    change_role,
+    change_roles,
+)
 from cya.authorization.lifecycle import (
     InvalidRoleHistory,
     LastAdministrator,
@@ -33,9 +42,9 @@ from cya.authorization.lifecycle import (
     current_roles,
 )
 from cya.authorization.models import RoleGrant
-from cya.authorization.policy import Role
 from cya.core.audit_commands import CommandDenied, OperationConflict, OutcomeUnknown, RetryLater
 from cya.core.audit_transactions import AuditPersistenceFailure
+from cya.core.models import CommandReceipt
 from cya.shell import navigation
 from cya.shell.views import deny_section
 
@@ -46,7 +55,6 @@ TARGET_LIMIT = 50
 ROLE_EVENT_LIMIT = 500
 SEARCH_LIMIT = 100
 ACTIONS = ("GRANT", "REVOKE")
-SELECTABLE_ROLES = tuple(role.value for role in Role if role != Role.EMT)  # EMT is a legacy alias
 ROLE_LABELS = {
     "CREW": "Crew",
     "SUPERVISOR": "Supervisor",
@@ -58,7 +66,6 @@ ROLE_LABELS = {
 # Sanitized messages keyed by outcome; no exception text reaches the page.
 MESSAGES = {
     "INVALID": "The request was not valid. Check the user, role and action and try again.",
-    "ONE_ROLE": "Review one role change at a time. Select one role to add or remove.",
     "HISTORY_UNAVAILABLE": "Current roles could not be verified. Reload the page before trying again.",
     "NOT_FOUND": "That user is not available.",
     "LAST_ADMINISTRATOR": "The last active administrator must keep the Administrator role.",
@@ -67,6 +74,19 @@ MESSAGES = {
         "The earlier change is unchanged and this one was not applied."
     ),
     "UNAVAILABLE": "The change could not be confirmed. Do not assume it was saved; reload to check.",
+}
+
+# Issue #236: refusals of a Save, shown in that user's row. Nothing was applied.
+ROW_MESSAGES = {
+    "NO_CHANGE": "Nothing to save: the selected roles match the current roles.",
+    "ROLES_CHANGED": (
+        "Not saved: this user's roles changed since the page loaded. The current roles "
+        "are shown now; make the change again if it is still needed."
+    ),
+    "LAST_ADMINISTRATOR": (
+        "Not saved: removing the Administrator role was refused, because the last "
+        "active administrator must keep it. No other change was applied."
+    ),
 }
 
 
@@ -153,12 +173,15 @@ def _render_roles(
     *,
     status=200,
     error=None,
-    saved=False,
     search_query="",
     search_error=None,
     form_values=None,
-    preview=None,
+    row_message=None,
 ):
+    """row_message is {"target": id, "kind": "saved" | "error", "text": ...}.
+
+    It is shown in that user's row, or as a page banner when the row is not listed.
+    """
     # Only an Administrator is shown users and the form; any other caller
     # who reaches an error page sees the message alone.
     show = _is_administrator(user)
@@ -169,7 +192,7 @@ def _render_roles(
         )
     target_query = target_query.order_by("email", "id") if show and not search_error else []
     target_total = target_query.count() if show and not search_error else 0
-    targets = list(target_query[:TARGET_LIMIT]) if show and not search_error and not preview else []
+    targets = list(target_query[:TARGET_LIMIT]) if show and not search_error else []
     role_list_error = None
     if targets:
         try:
@@ -191,6 +214,13 @@ def _render_roles(
                 target.role_operation_id = (
                     None if target.role_history_unavailable else str(uuid.uuid4())
                 )
+                target.is_self = target.pk == user.pk
+                target.row_message = (
+                    row_message if row_message and row_message["target"] == str(target.pk) else None
+                )
+    page_message = None
+    if row_message and not any(target.row_message for target in targets):
+        page_message = row_message
     # Issue #235 A4/D5: a search reload says what it found, in the title and in focus.
     searched = request.method == "GET" and "q" in request.GET and show
     title = "Role administration"
@@ -208,9 +238,9 @@ def _render_roles(
         "role_list_error": role_list_error,
         "role_options": tuple((role, ROLE_LABELS.get(role, role)) for role in SELECTABLE_ROLES),
         "error": error,
-        "saved": saved,
+        "page_message": page_message,
+        "row_message_shown": bool(row_message),
         "form_values": form_values or {},
-        "preview": preview,
     }
     return render(request, "authorization/roles.html", context, status=status)
 
@@ -242,111 +272,6 @@ def _form_values(values):
         "role": values.get("role", ""),
         "action": values.get("action", ""),
     }
-
-
-def _preview(request, user):
-    if not _is_administrator(user):
-        return deny_section(request, user, navigation.roles_for(user), "VIEW_ADMINISTRATION")
-    query, search_error = _search_query(request.POST)
-    values = _form_values(request.POST)
-    matrix_selection = request.POST.getlist("role_selection_present") == ["1"]
-    selected_roles = None
-    try:
-        if matrix_selection:
-            target_id = canonical_id(request.POST.get("target", ""))
-            operation_id = canonical_id(request.POST.get("operation_id", ""))
-            if uuid.UUID(operation_id).version != 4:
-                raise ValueError("operation id must be a UUID4")
-            selected_values = request.POST.getlist("roles")
-            selected_roles = set(selected_values)
-            if len(selected_values) != len(selected_roles) or not selected_roles.issubset(
-                SELECTABLE_ROLES
-            ):
-                raise ValueError("role selection is invalid")
-        else:
-            # Keep the existing single-role form contract for trusted internal clients while
-            # the administration page uses the staged role matrix.
-            target_id, role, action, operation_id = _parse(request.POST)
-    except ValueError:
-        return _failure(
-            request,
-            user,
-            "INVALID",
-            400,
-            search_query=query,
-            form_values=values,
-        )
-    if search_error:
-        return _render_roles(
-            request,
-            user,
-            status=400,
-            search_query=query,
-            search_error=search_error,
-            form_values=values,
-        )
-    target = User.objects.filter(
-        organization_id=user.organization_id, active=True, pk=target_id
-    ).first()
-    if target is None:
-        return _failure(
-            request,
-            user,
-            "NOT_FOUND",
-            404,
-            search_query=query,
-            form_values=values,
-        )
-    if matrix_selection:
-        try:
-            current_by_user = _current_roles_by_user(user.organization_id, [target])
-        except DatabaseError:
-            logger.error("role list unavailable during preview")
-            return _failure(
-                request,
-                user,
-                "HISTORY_UNAVAILABLE",
-                503,
-                search_query=query,
-                form_values=values,
-            )
-        current_roles_for_user = current_by_user[str(target.pk)]
-        if current_roles_for_user is None:
-            return _failure(
-                request,
-                user,
-                "HISTORY_UNAVAILABLE",
-                503,
-                search_query=query,
-                form_values=values,
-            )
-        changed_roles = set(current_roles_for_user).symmetric_difference(selected_roles)
-        if len(changed_roles) != 1:
-            return _failure(
-                request,
-                user,
-                "ONE_ROLE",
-                400,
-                search_query=query,
-                form_values=values,
-            )
-        role = changed_roles.pop()
-        action = "GRANT" if role in selected_roles else "REVOKE"
-    preview = {
-        "target": target,
-        "role": role,
-        "role_label": ROLE_LABELS[role],
-        "action": action,
-        "action_label": action.title(),
-        "operation_id": operation_id,
-    }
-    return _render_roles(
-        request,
-        user,
-        search_query=query,
-        preview=preview,
-        form_values=values,
-    )
 
 
 def _change(request, user):
@@ -406,6 +331,123 @@ def _change(request, user):
     return HttpResponseRedirect(reverse("administration-roles") + query_string)
 
 
+def _role_list(codes):
+    return ", ".join(ROLE_LABELS[code] for code in codes)
+
+
+def _saved_message(user, value):
+    """The D2 summary for a Save this Administrator made, read from its receipt."""
+    try:
+        operation_id = canonical_id(value)
+    except ValueError:
+        return None
+    receipt = CommandReceipt.objects.filter(
+        organization_id=user.organization_id,
+        operation_id=operation_id,
+        actor_user_id=user.pk,
+        command_type="ROLE_CHANGES",
+    ).first()
+    if receipt is None or receipt.response_body.get("code") != "SAVED":
+        return None
+    body = receipt.response_body
+    target = User.objects.filter(organization_id=user.organization_id, pk=body["user_id"]).first()
+    if target is None:
+        return None
+    parts = []
+    if body.get("added"):
+        parts.append("added " + _role_list(body["added"]))
+    if body.get("removed"):
+        parts.append("removed " + _role_list(body["removed"]))
+    return {
+        "target": str(target.pk),
+        "kind": "saved",
+        "text": f"Saved for {target.display_name or target.email}: {'; '.join(parts)}.",
+    }
+
+
+def _parse_save(post):
+    """Return (target, operation_id, current roles, selected roles) or raise ValueError."""
+    target = canonical_id(post.get("target", ""))
+    operation_id = canonical_id(post.get("operation_id", ""))
+    if uuid.UUID(operation_id).version != 4:
+        raise ValueError("operation id must be a UUID4")
+    if post.getlist("role_selection_present") != ["1"]:
+        raise ValueError("role selection is missing")
+    return target, operation_id, post.getlist("current_roles"), post.getlist("roles")
+
+
+def _save(request, user):
+    """Issue #236: apply every staged change for one user, or none of them."""
+    query, _search_error = _search_query(request.POST)
+    values = _form_values(request.POST)
+
+    def refused(kind, status, target_id):
+        return _render_roles(
+            request,
+            user,
+            status=status,
+            search_query=query,
+            form_values=values,
+            row_message={"target": target_id, "kind": "error", "text": ROW_MESSAGES[kind]},
+        )
+
+    try:
+        target, operation_id, current, selected = _parse_save(request.POST)
+    except ValueError:
+        return _failure(request, user, "INVALID", 400, search_query=query, form_values=values)
+    try:
+        result = change_roles(
+            organization_id=str(user.organization_id),
+            actor_id=str(user.pk),
+            target_id=target,
+            operation_id=operation_id,
+            correlation_id=str(uuid.uuid4()),
+            request_attempt_id=str(uuid.uuid4()),
+            expected_roles=current,
+            selected_roles=selected,
+        )
+    except CommandDenied:
+        # run_command already committed the denial audit after the rollback.
+        return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
+    except OperationConflict:
+        return _failure(
+            request, user, "OPERATION_CONFLICT", 409, search_query=query, form_values=values
+        )
+    except NoRoleChange:
+        return refused("NO_CHANGE", 400, target)
+    except RolesChanged:
+        return refused("ROLES_CHANGED", 409, target)
+    except LastAdministrator:
+        return refused("LAST_ADMINISTRATOR", 409, target)
+    except (TargetInactive, User.DoesNotExist):
+        # As for single changes, a non-administrator learns nothing about user ids.
+        if not _is_administrator(user):
+            return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
+        return _failure(request, user, "NOT_FOUND", 404, search_query=query, form_values=values)
+    except (
+        RetryLater,
+        OutcomeUnknown,
+        AuditPersistenceFailure,
+        AuthorizationUnavailable,
+        DatabaseError,
+    ):
+        logger.error("role change unavailable")
+        return _failure(request, user, "UNAVAILABLE", 503, search_query=query, form_values=values)
+    except ValueError:
+        # Invalid role lists and invalid history evidence; nothing was applied.
+        return _failure(request, user, "INVALID", 400, search_query=query, form_values=values)
+    if result.operation_reused:
+        return _failure(
+            request, user, "OPERATION_CONFLICT", 409, search_query=query, form_values=values
+        )
+    if target == str(user.pk) and "ADMINISTRATOR" in result.body.get("removed", ()):
+        # D1: the warning said access ends on save; the role page would now be refused.
+        return HttpResponseRedirect(reverse("home"))
+    # Post/redirect/get: the saved page names the changes and never resubmits them.
+    query_string = "?" + urlencode({"saved": operation_id, **({"q": query} if query else {})})
+    return HttpResponseRedirect(reverse("administration-roles") + query_string)
+
+
 @never_cache
 @require_http_methods(["GET", "POST"])
 def roles(request):
@@ -414,27 +456,10 @@ def roles(request):
         return sign_in_redirect(request)
     if request.method == "POST":
         stage = request.POST.get("stage")
+        if stage == "save":
+            return _save(request, user)
         if stage == "confirm":
             return _change(request, user)
-        if stage == "preview":
-            return _preview(request, user)
-        if stage == "edit":
-            if not _is_administrator(user):
-                return deny_section(
-                    request, user, navigation.roles_for(user), "VIEW_ADMINISTRATION"
-                )
-            query, search_error = _search_query(request.POST)
-            values = _form_values(request.POST)
-            if search_error:
-                return _render_roles(
-                    request,
-                    user,
-                    status=400,
-                    search_query=query,
-                    search_error=search_error,
-                    form_values=values,
-                )
-            return _render_roles(request, user, search_query=query, form_values=values)
         if not _is_administrator(user):
             return deny_section(request, user, navigation.roles_for(user), "VIEW_ADMINISTRATION")
         return _failure(request, user, "INVALID", 400)
@@ -442,12 +467,17 @@ def roles(request):
     if navigation.ADMINISTRATOR not in current:
         return deny_section(request, user, current, "VIEW_ADMINISTRATION")
     query, search_error = _search_query(request.GET)
+    saved = request.GET.get("saved")
+    row_message = _saved_message(user, saved) if saved and saved != "1" else None
+    if saved == "1":
+        # The single-change contract still redirects with a plain saved flag.
+        row_message = {"target": None, "kind": "saved", "text": "Saved"}
     return _render_roles(
         request,
         user,
-        saved=request.GET.get("saved") == "1",
         search_query=query,
         search_error=search_error,
+        row_message=row_message,
     )
 
 

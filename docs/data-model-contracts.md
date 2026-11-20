@@ -523,7 +523,7 @@ references a command receipt with an authorized `command_type`:
 
 | Table | Trigger Name | Authorized `command_receipt.command_type` |
 |---|---|---|
-| `role_grant` | `cya_role_integrity_bi` | `'ROLE_CHANGE'`, `'INITIAL_CREW'`, `'BOOTSTRAP_ADMINISTRATOR'`, `'INITIAL_EMT'` |
+| `role_grant` | `cya_role_integrity_bi` | `'ROLE_CHANGE'`, `'ROLE_CHANGES'` (one role-page Save, issue #236), `'INITIAL_CREW'`, `'BOOTSTRAP_ADMINISTRATOR'`, `'INITIAL_EMT'` |
 | `checklist_publication` | `cya_checklist_publication_bi` | `'CHECKLIST_PUBLISH'`, `'OVERRIDE_PUBLISH'`, `'CHECKLIST_CUTOVER'` (the 5.0.0 migration publishes migrated vehicle checklist versions) |
 | `stocking_deviation` | `cya_stocking_deviation_bi` | `'STOCKING_DEVIATION_RECORD'` |
 | `status_request` | `cya_status_request_bi` | `'STATUS_REQUEST'`, `'STATUS_REQUEST_DECIDE'` |

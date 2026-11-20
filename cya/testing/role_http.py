@@ -10,6 +10,7 @@ scenario) because audited commands refuse to run inside a wrapping transaction.
 import io
 import json
 import re
+from uuid import uuid4
 
 from django.core.management import call_command
 from django.test import Client, RequestFactory
@@ -17,6 +18,7 @@ from django.test import Client, RequestFactory
 from cya.accounts.models import Organization, User
 from cya.accounts.views import SIGNIN_COOKIE, SIGNIN_COOKIE_SALT
 from cya.authorization.models import RoleGrant
+from cya.authorization.persistence import current_role_codes
 from cya.core.models import AuditEvent, CommandReceipt
 from cya.testing.stubs import activate_stub_google, stub_google_settings
 
@@ -91,6 +93,23 @@ class RoleHttpHarness:
 
     def change(self, client, target, **kwargs):
         return client.post(URL, self.data(client, target, **kwargs))
+
+    def save_data(self, client, target, roles, *, current=None, operation_id=None, **extra):
+        """Issue #236: one row's Save, staging roles against the roles shown (current)."""
+        token, _ = self.form(client)
+        return {
+            "csrfmiddlewaretoken": token,
+            "stage": "save",
+            "role_selection_present": "1",
+            "operation_id": operation_id or str(uuid4()),
+            "target": str(target.pk),
+            "current_roles": list(current_role_codes(target) if current is None else current),
+            "roles": list(roles),
+            **extra,
+        }
+
+    def save(self, client, target, roles, **kwargs):
+        return client.post(URL, self.save_data(client, target, roles, **kwargs))
 
     @staticmethod
     def counts():

@@ -12,12 +12,12 @@
     "an administrator and a Crew user signed in through the stub identity provider"
   ],
   "when": [
-    "the administrator grants Supervisor to the Crew user through the web interface",
+    "the administrator adds Supervisor and Supply Officer for the Crew user with one Save on the web interface",
     "the same request is sent again with the same operation id",
     "the Crew user submits a role change directly"
   ],
   "then": [
-    "the grant is persisted, shown in history and audited with its actor",
+    "both grants are persisted under one receipt, each as its own role event and audit row with its actor, and shown in history",
     "the replay adds no role, receipt or audit row",
     "the Crew user is refused with a committed denial audit and nothing changes"
   ],
