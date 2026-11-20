@@ -531,6 +531,48 @@ function generic(kind) {
     assert(!text.includes("Ask a supervisor"), text);
   }
   {
+    // Issue #235 A2: a refused or unconfirmed action moves focus to its result, not to <body>.
+    for (const outcome of ["refused", "lost"]) {
+      const run = generic("start-work"); run.form.dataset.expectedEvent = "event-seen";
+      const message = run.form.querySelector(".workflow-result"); let focused = 0;
+      message.focus = () => { focused += 1; };
+      run.form.fire("submit");
+      if (outcome === "refused") { response(run.posts()[0], 409, {status: "REJECTED", code: "DEFICIENCY_CHANGED"}); }
+      else { run.posts()[0].reject(new Error("synthetic lost response")); }
+      await tick();
+      assert.equal(focused, 1, `${outcome}: the result is focused`);
+      assert.equal(message.getAttribute("tabindex"), "-1");
+    }
+  }
+  {
+    // Issue #235 A1: on the problem page a save reloads it, naming the action, so the status,
+    // next action and expected event come from the server.
+    const form = new Element(); form.dataset.kind = "start-work"; form.dataset.url = "/write";
+    const button = form.querySelector('button[type="submit"]'); button.type = "submit"; button.textContent = "Start work";
+    field(form, "csrfmiddlewaretoken", "synthetic-csrf", "hidden");
+    const config = {page_url: "/problems/synthetic/", reload_after_save: true};
+    const run = environment(config, [form]); run.get("workflow-config").textContent = JSON.stringify(config);
+    const assigned = []; run.window.location = {assign(url) { assigned.push(url); }};
+    run.run("cya/inspections/templates/inspections/workflows.js");
+    form.fire("submit");
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {}}); await tick();
+    assert.deepEqual(assigned, ["/problems/synthetic/?saved=start-work"]);
+    assert.equal(form.querySelector(".workflow-result").textContent, "Saved. Updating the page…");
+    assert.equal(run.window.cyaShell.toasts.length, 0, "the reloaded page announces the save");
+    form.fire("submit"); assert.equal(run.posts().length, 1, "no second submit while the page reloads");
+  }
+  {
+    // Issue #235 A1: after the reload the saved notice takes focus and the marker leaves the URL.
+    const notice = new Element("saved-notice"); let focused = 0; notice.focus = () => { focused += 1; };
+    const config = {page_url: "/problems/synthetic/", reload_after_save: true};
+    const run = environment(config, []); run.get("workflow-config").textContent = JSON.stringify(config);
+    run.document.querySelector = selector => (selector === "[data-focus-on-load]" ? notice : {value: "synthetic-csrf"});
+    const replaced = []; run.window.history = {replaceState(_state, _title, url) { replaced.push(url); }};
+    run.run("cya/inspections/templates/inspections/workflows.js");
+    assert.equal(focused, 1);
+    assert.deepEqual(replaced, ["/problems/synthetic/"]);
+  }
+  {
     // Issue 21: the empty-scope close needs an explanation, sends the page's event, and a lost
     // response is retried with the identical request and operation id.
     const run = generic("empty-scope-close"); run.form.dataset.expectedEvent = "event-seen";

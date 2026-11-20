@@ -4,6 +4,7 @@
 <p>
 <a href="{% url 'deficiencies' %}">All problems</a> · <a href="{% url 'inspection-check-history' deficiency.vehicle_id %}">Check history</a>
 </p>
+{% if saved_notice %}<p id="saved-notice" class="notice" role="status" tabindex="-1" data-focus-on-load>Saved: {{ saved_notice }}. Current status: {{ status }}.</p>{% endif %}
 <section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title">
 <h2 id="deficiency-overview-title">{{ deficiency.summary }}</h2>
 <p class="deficiency-state"><strong>{{ status }}</strong> · {{ severity.label }} · {{ deficiency.category_version.label }}</p>
@@ -52,8 +53,8 @@
 <p>Review the current status and history below for the next update.</p>
 {% endif %}
 </section>
-{% if can_close_empty_scope %}
-<details class="panel deficiency-details" id="empty-scope-closure"{% if empty_scope_available %} open{% endif %}>
+{% if empty_scope_available %}{# issue #235 A3: only when nothing is left to verify #}
+<details class="panel deficiency-details" id="empty-scope-closure" open>
 <summary>Closure exception — no current verification items</summary>
 <form class="panel workflow-write" data-kind="empty-scope-close" data-url="{% url 'api-deficiency-empty-scope-closures' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Close: no current verification items</h2>

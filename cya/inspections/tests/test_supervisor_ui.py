@@ -127,6 +127,33 @@ class SupervisorActionTests(SupervisorUiCase):
         self.sup = self.signed_in("sup-ui", "SUPERVISOR")
         self.crew = (self.client, self.user, self.token)
 
+    def test_a_save_reloads_the_page_with_the_new_state_and_a_focused_notice(self):
+        # Issue #235 A1/A2: after Start work the page shows the saved state and next action.
+        pk = self.report()
+        page = self.page(self.sup, pk)
+        self.assertEqual(page.context["config"]["page_url"], f"/problems/{pk}/")
+        self.assertIs(page.context["config"]["reload_after_save"], True)
+        self.assertNotContains(page, 'id="saved-notice"')
+        started = self.act(self.sup, pk, "work-starts")
+        self.assertEqual(started.status_code, 201, started.content)
+        reloaded = self.sup[0].get(f"/problems/{pk}/", {"saved": "start-work"})
+        self.assertContains(
+            reloaded,
+            '<p id="saved-notice" class="notice" role="status" tabindex="-1" data-focus-on-load>'
+            "Saved: Work started. Current status: In Progress.</p>",
+            html=True,
+        )
+        self.assertNotContains(reloaded, "Move this problem from Open to In Progress.")
+        self.assertNotContains(reloaded, 'data-kind="start-work"')
+
+    def test_an_unknown_saved_marker_shows_nothing(self):
+        pk = self.report()
+        for marker in ("", "unknown", "<script>alert(1)</script>"):
+            with self.subTest(marker=marker):
+                page = self.sup[0].get(f"/problems/{pk}/", {"saved": marker})
+                self.assertNotContains(page, 'id="saved-notice"')
+                self.assertNotContains(page, "<script>alert(1)</script>")
+
     def test_assignment_deadline_and_extension_decision_round_trip(self):
         pk = self.report()
         page = self.page(self.sup, pk)
@@ -408,6 +435,20 @@ class SupervisorActionTests(SupervisorUiCase):
 class QueueTests(SupervisorUiCase):
     URL = "/problems/queue/"
 
+    def test_a_filtered_queue_names_each_list_count_and_focuses_it(self):
+        # Issue #235 A4: the lists overlap, so each keeps its own count.
+        client = self.signed_in("sup-queue-focus", "SUPERVISOR")[0]
+        self.report()
+        plain = client.get(self.URL)
+        self.assertEqual(plain.context["title"], "Supervisor queue")
+        self.assertNotContains(plain, "data-focus-on-load")
+        filtered = client.get(self.URL, {"status": "active"})
+        self.assertEqual(filtered.context["title"], "Supervisor queue (filtered)")
+        page = filtered.content.decode()
+        self.assertEqual(page.count("data-focus-on-load"), 1)
+        self.assertIn("Filtered results: Extension requests waiting for a decision: 0", page)
+        self.assertIn("Unassigned: 1", page)
+
     def lists(self, response):
         return {
             group["heading"]: [str(row.deficiency_id) for row in group["page"]["rows"]]
@@ -627,8 +668,13 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
             page = self.detail(pk).content.decode()
         return self.FORM in page, 'data-can-close-empty="1"' in page
 
+    def empty_scope(self):
+        """Publish a checklist without the suction item, so its problems have nothing to verify."""
+        self.published_version([s for s in self.items if s["item_id"] != str(self.suction.pk)])
+
     def test_only_supervisors_and_administrators_see_it(self):
         pk = self.report()
+        self.empty_scope()
         for roles, expected in [
             ({"CREW"}, False),
             ({"SUPPLY_OFFICER"}, False),
@@ -642,23 +688,30 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
 
     def test_it_is_offered_only_in_open_in_progress_and_awaiting_dependency(self):
         sup = {"SUPERVISOR"}
+        pending = self.pending()
         pk = self.report()
-        self.assertEqual(self.shown(pk, sup), (True, False))  # Open: no repair form yet
+        # Issue #235 A3: while the item is still on the checklist the close cannot apply.
+        self.assertEqual(self.shown(pk, sup), (False, False))  # Open, scope present
         start_work(deficiency_id=pk, expected_event_id=self.latest(pk), **self.context(self.admin))
-        # In Progress: the repair form says the close control is on the page.
-        self.assertEqual(self.shown(pk, sup), (True, True))
+        # In Progress with scope: the repair form is offered and knows this user may close.
+        self.assertEqual(self.shown(pk, sup), (False, True))
+        self.empty_scope()
+        # Nothing left to verify: the close replaces the repair form.
+        self.assertEqual(self.shown(pk, sup), (True, False))
         self.assertEqual(self.shown(pk, {"CREW"}), (False, False))
         entered = self.change(pk, "dependencies", explanation="Synthetic vendor")
         self.assertEqual(entered.status_code, 201, entered.content)
         self.assertEqual(self.shown(pk, sup)[0], True)  # Awaiting External Dependency
-        self.assertEqual(self.shown(self.pending(), sup)[0], False)  # Pending Verification
+        self.assertEqual(self.shown(pending, sup)[0], False)  # Pending Verification
         admin = self.signed_in("admin-esc", "ADMINISTRATOR")
         closed = self.act(admin, pk, "administrator-closures", explanation="Synthetic close.")
         self.assertEqual(closed.status_code, 201, closed.content)
         self.assertEqual(self.shown(pk, sup)[0], False)  # closed
 
     def test_the_form_states_the_outcome_and_requires_an_explanation(self):
-        page = self.page(self.sup, self.report()).content.decode()
+        pk = self.report()
+        self.empty_scope()
+        page = self.page(self.sup, pk).content.decode()
         form = re.search(rf"<form [^>]*{self.FORM}.*?</form>", page, re.S).group(0)
         self.assertIn("Close: no current verification items", form)
         self.assertIn("only an Administrator can reopen it", form)
@@ -701,18 +754,21 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
             expected = re.search(r'data-expected-event="([^"]+)"', form).group(1)
             return url, expected
 
-        url, expected = from_page()
-        self.assertEqual(url, f"/api/v1/deficiencies/{pk}/empty-scope-closures")
+        # Issue #235 A3: the page does not offer the close while the item is on the checklist,
+        # and the server still refuses it if posted anyway.
+        self.assertNotIn(self.FORM, client.get(f"/problems/{pk}/").content.decode())
         body = {
             "operation_id": str(uuid4()),
-            "expected_event_id": expected,
+            "expected_event_id": self.latest(pk),
             "explanation": "Synthetic: still on the checklist.",
         }
+        url = f"/api/v1/deficiencies/{pk}/empty-scope-closures"
         refused = self.post(url, body, client, token)
         self.assertEqual((refused.status_code, refused.json()["code"]), (422, "SCOPE_AVAILABLE"))
 
-        self.published_version([s for s in self.items if s["item_id"] != str(self.suction.pk)])
+        self.empty_scope()
         url, expected = from_page()
+        self.assertEqual(url, f"/api/v1/deficiencies/{pk}/empty-scope-closures")
         body = {
             "operation_id": str(uuid4()),
             "expected_event_id": expected,
