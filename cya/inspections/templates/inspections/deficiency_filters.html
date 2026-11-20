@@ -33,5 +33,5 @@
 </form>
 {% for error in filter_errors %}<p class="notice" role="alert"{% if forloop.first and filter_submitted %} tabindex="-1" data-focus-on-load{% endif %}>{{ error }}</p>{% endfor %}
 {% if applied_filters %}<p class="deficiency-applied-filters"><strong>Applied filters:</strong> {% for label, value in applied_filters %}{{ label }}: {{ value }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-{% if page %}<p class="deficiency-results-count"{% if filter_submitted and not filter_errors %} tabindex="-1" data-focus-on-load{% endif %}>{{ page.total }} {{ filter_total_label }}; showing {{ page.rows|length }} on this page.</p>{% endif %}
+{% if page %}<p class="deficiency-results-count"{% if filter_submitted and not filter_errors %} tabindex="-1" data-focus-on-load{% endif %}>{{ page.total }} {{ filter_total_label }}{{ page.total|pluralize }}; showing {{ page.rows|length }} on this page.</p>{% endif %}
 {% if queue_summary %}<p class="deficiency-results-count"{% if not filter_errors %} tabindex="-1" data-focus-on-load{% endif %}>Filtered results: {{ queue_summary }}.</p>{% endif %}

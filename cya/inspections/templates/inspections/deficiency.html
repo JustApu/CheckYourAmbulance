@@ -234,7 +234,7 @@
 </details>
 {% endif %}
 <details class="panel deficiency-details">
-<summary>History ({{ events|length }} events)</summary>
+<summary>History ({{ events|length }} event{{ events|length|pluralize }})</summary>
 <p>Correct entry fixes an accidental check entry. It is never a repair or verification.</p>
 <ol>
 {% for event in events %}
