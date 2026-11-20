@@ -34,6 +34,15 @@
 {% else %}{% include "shell/empty_state.html" with message="No active kits on this vehicle." action_url="#add-heading" action_label="Add a kit" %}{% endif %}
 
 <h2 id="add-heading">Add a kit</h2>
+{% if not definitions or not compartments %}
+<div class="banner" id="add-unavailable">
+  <p>A kit can't be added to this vehicle yet.</p>
+  <ul>
+    {% if not definitions %}<li>There are no kit types. A Supervisor or Administrator adds them in {% if can_manage_definitions %}<a href="{% url 'kit-definitions' %}">Kit definitions</a>{% else %}Kit definitions{% endif %}.</li>{% endif %}
+    {% if not compartments %}<li>This vehicle has no compartments. A Supervisor or Administrator adds them in {% if can_manage_positions %}<a href="{% url 'vehicle-positions' vehicle.pk %}">Compartments and systems</a>{% else %}Compartments and systems{% endif %}.</li>{% endif %}
+  </ul>
+</div>
+{% else %}
 <form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}" aria-labelledby="add-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="add">
@@ -51,5 +60,6 @@
   <p><label for="add-label">Label</label><br><input id="add-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
   <p><button type="submit" class="button">Add kit</button></p>
 </form>
+{% endif %}
 </div>
 {% endblock %}

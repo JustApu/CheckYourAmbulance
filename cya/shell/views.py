@@ -134,6 +134,19 @@ ADMINISTRATION_GROUPS = (
 )
 
 
+def administration_link_names(user, roles):
+    """The administration pages the user may open, by URL name."""
+    return {
+        name
+        for name, _label, _description, action in ADMINISTRATION_LINKS
+        if (
+            navigation.ADMINISTRATOR in roles
+            if action is None
+            else permitted(action, str(user.pk), roles)
+        )
+    }
+
+
 @never_cache
 @require_GET
 def administration(request):
@@ -144,14 +157,11 @@ def administration(request):
     roles = navigation.roles_for(user)
     if not section.roles & roles:
         return deny_section(request, user, roles, "VIEW_ADMINISTRATION")
+    allowed = administration_link_names(user, roles)
     links = {
         name: {"url_name": name, "label": label, "description": description}
-        for name, label, description, action in ADMINISTRATION_LINKS
-        if (
-            navigation.ADMINISTRATOR in roles
-            if action is None
-            else permitted(action, str(user.pk), roles)
-        )
+        for name, label, description, _action in ADMINISTRATION_LINKS
+        if name in allowed
     }
     groups = [
         {

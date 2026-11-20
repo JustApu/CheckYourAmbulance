@@ -126,6 +126,18 @@ SHORTCUTS = {
 }
 
 
+def _administration_beyond_kits(user, roles):
+    """Issue #235 E2: whether Administration offers a page that Kits does not lead to.
+
+    For a Supply Officer every administration page is a kit page, so a separate Administration
+    entry would only repeat Kits. The landing page itself stays open to them.
+    """
+    from cya.shell.views import administration_link_names  # the views import this module
+
+    kit_names = {name for name, _prefix, _action in KIT_PAGES}
+    return bool(administration_link_names(user, roles) - kit_names)
+
+
 def app_navigation(user, path):
     """Tabs and More entries for the user, with the current one marked; None if no roles."""
     roles = roles_for(user)
@@ -150,7 +162,7 @@ def app_navigation(user, path):
                 "current": _owns(kit_paths, path),
             }
         )
-    if section_by_key("administration").roles & roles:
+    if section_by_key("administration").roles & roles and _administration_beyond_kits(user, roles):
         more.append(
             {
                 "key": "administration",
