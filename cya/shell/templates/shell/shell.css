@@ -141,6 +141,8 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
 /* In a scrolling table a full-width field would shrink to its cell; keep it readable and let the table scroll. */
 .table-scroll .admin-form input:not([size]):not([type="checkbox"]):not([type="radio"]), .table-scroll .admin-form select { min-width: 10rem; }
 .admin-form input[type="checkbox"], .admin-form input[type="radio"] { width: 1.5rem; height: 1.5rem; margin: .25rem .5rem .25rem 0; vertical-align: middle; }
+/* Issue #235 D7: a choice's whole label is its target, at least 48 px tall like every control. */
+.admin-form label:has(> input[type="radio"]), .admin-form label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center; min-height: 48px; }
 .role-user-list { display: grid; list-style: none; margin: 1rem 0; padding: 0; }
 .role-user-row { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr); align-items: center; gap: .5rem 1rem; min-width: 0; padding: .75rem 0; border-bottom: 1px solid var(--line-soft); }
 .role-user-details { min-width: 0; }
@@ -217,7 +219,7 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
   .home > .home-wide, .home > .home-start, .home > .notice, .home > .home-last { grid-column: 1 / -1; }
 }
 /* Sortable, filterable tables (#194): the header is a button; the arrow is decorative. */
-.sort-button { display: inline-flex; align-items: center; gap: .375rem; min-height: 48px; padding: 0; color: inherit; background: none; border: 0; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.sort-button { display: inline-flex; align-items: center; gap: .375rem; min-height: 48px; min-width: 48px; padding: 0; color: inherit; background: none; border: 0; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
 .sort-button::after { content: "\2195" / ""; color: var(--muted); font-weight: 400; }
 th[aria-sort="ascending"] .sort-button::after { content: "\25B2" / ""; color: var(--accent); }
 th[aria-sort="descending"] .sort-button::after { content: "\25BC" / ""; color: var(--accent); }

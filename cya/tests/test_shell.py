@@ -424,7 +424,25 @@ class SortableTableTemplateTests(TestCase):
         for name, label in self.TABLES.items():
             with self.subTest(template=name):
                 source = pathlib.Path(get_template(name).origin.name).read_text(encoding="utf-8")
-                self.assertIn(f'<table data-sortable data-filter-label="{label}">', source)
+                self.assertRegex(
+                    source, rf'<table [^>]*data-sortable data-filter-label="{re.escape(label)}">'
+                )
+
+    def test_every_screen_table_has_a_name(self):
+        # Issue #235 D6: a table found by table navigation is named like its scroll region.
+        # The printed outage sheet is paper; its tables sit in labelled sections.
+        templates = pathlib.Path(__file__).resolve().parents[1]
+        for path in sorted(templates.rglob("templates/**/*.html")):
+            if path.name == "vehicle_print.html":
+                continue
+            source = path.read_text(encoding="utf-8")
+            for match in re.finditer(r"<table\b[^>]*>(\s*<caption)?", source):
+                with self.subTest(template=path.name, at=match.start()):
+                    tag = match.group(0)
+                    self.assertTrue(
+                        "aria-label" in tag or match.group(1),
+                        f"{path.name}: unnamed table {tag[:80]}",
+                    )
 
     def test_action_columns_are_not_sortable(self):
         from django.template.loader import get_template

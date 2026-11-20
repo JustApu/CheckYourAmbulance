@@ -15,7 +15,7 @@
 {% endif %}
 {% if rows %}
 <div class="table-scroll" role="region" aria-labelledby="templates-heading" tabindex="0">
-<table data-sortable data-filter-label="Filter templates">
+<table aria-labelledby="templates-heading" data-sortable data-filter-label="Filter templates">
   <thead><tr>{% if per_vehicle %}<th scope="col">Vehicle</th><th scope="col">Checklist</th>{% else %}<th scope="col">Template</th><th scope="col">Key</th>{% endif %}<th scope="col">In force</th><th scope="col">Scheduled</th><th scope="col">Draft</th></tr></thead>
   <tbody>
   {% for row in rows %}

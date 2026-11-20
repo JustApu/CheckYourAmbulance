@@ -33,7 +33,7 @@
 <h2 id="heading-{{ section.kind|lower }}">{{ section.heading }}</h2>
 {% if section.rows %}
 <div class="table-scroll" role="region" aria-labelledby="heading-{{ section.kind|lower }}" tabindex="0">
-<table>
+<table aria-labelledby="heading-{{ section.kind|lower }}">
   <thead><tr><th scope="col">Name and order</th><th scope="col">Key</th><th scope="col">Status</th><th scope="col">Retire</th></tr></thead>
   <tbody>
   {% for row in section.rows %}

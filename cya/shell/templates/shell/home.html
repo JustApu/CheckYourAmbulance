@@ -62,7 +62,7 @@
   <h2 id="home-vehicles">Vehicles</h2>
   {% if sup.vehicles %}
   <div class="table-scroll" tabindex="0" role="region" aria-labelledby="home-vehicles">
-  <table>
+  <table aria-labelledby="home-vehicles">
     <thead><tr><th scope="col">Vehicle</th><th scope="col">Status</th><th scope="col">Checks done</th><th scope="col">Overdue</th><th scope="col">Problems</th></tr></thead>
     <tbody>
     {% for row in sup.vehicles %}

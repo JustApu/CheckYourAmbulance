@@ -17,7 +17,7 @@
 {% if preview.result.superseded %}
 <p>These inspections have not opened yet. They will be superseded: not owed, and not counted as overdue or missed.</p>
 <div class="table-scroll" role="region" aria-labelledby="superseded-heading" tabindex="0">
-<table id="superseded">
+<table aria-labelledby="superseded-heading" id="superseded">
   <thead><tr><th scope="col">Due</th><th scope="col">Window opens</th><th scope="col">Items</th></tr></thead>
   <tbody>{% for o in preview.result.superseded %}<tr><td>{{ o.due_at|date:"Y-m-d H:i" }}</td><td>{{ o.early_at|date:"Y-m-d H:i" }}</td><td>{{ o.count }}</td></tr>{% endfor %}</tbody>
 </table>
@@ -27,7 +27,7 @@
 {% if preview.continuing %}
 <p>These inspections are already open. They stay owed and keep their state.</p>
 <div class="table-scroll" role="region" aria-labelledby="continuing-heading" tabindex="0">
-<table id="continuing">
+<table aria-labelledby="continuing-heading" id="continuing">
   <thead><tr><th scope="col">Due</th><th scope="col">Window opened</th><th scope="col">Items</th></tr></thead>
   <tbody>{% for o in preview.continuing %}<tr><td>{{ o.due_at|date:"Y-m-d H:i" }}</td><td>{{ o.early_at|date:"Y-m-d H:i" }}</td><td>{{ o.states }}</td></tr>{% endfor %}</tbody>
 </table>
@@ -50,7 +50,7 @@
 <h2 id="bindings-heading">Bindings</h2>
 {% if rows %}
 <div class="table-scroll" role="region" aria-labelledby="bindings-heading" tabindex="0">
-<table id="bindings">
+<table aria-labelledby="bindings-heading" id="bindings">
   <thead><tr><th scope="col">Template</th><th scope="col">Slot</th><th scope="col">State</th><th scope="col">Change</th></tr></thead>
   <tbody>
   {% for row in rows %}

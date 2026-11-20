@@ -191,8 +191,14 @@ def _render_roles(
                 target.role_operation_id = (
                     None if target.role_history_unavailable else str(uuid.uuid4())
                 )
+    # Issue #235 A4/D5: a search reload says what it found, in the title and in focus.
+    searched = request.method == "GET" and "q" in request.GET and show
+    title = "Role administration"
+    if searched and search_query and not search_error:
+        title = f"Role administration ({target_total} matching)"
     context = {
-        "title": "Role administration",
+        "title": title,
+        "searched": searched,
         "show": show,
         "targets": targets,
         "target_total": target_total,

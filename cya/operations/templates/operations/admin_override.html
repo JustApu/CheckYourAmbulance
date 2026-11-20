@@ -68,7 +68,7 @@
 <h2 id="checklist-heading">{{ vehicle.display_name }}'s checklist{% if draft %} (draft){% endif %}</h2>
 <p><a class="button" href="{% url 'checklist-override-item-new' template.pk vehicle.pk %}">Add an item for this vehicle</a></p>
 <div class="table-scroll" role="region" aria-labelledby="checklist-heading" tabindex="0">
-<table>
+<table aria-labelledby="checklist-heading">
   <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Where</th><th scope="col">Check</th><th scope="col">From</th><th scope="col">Change</th></tr></thead>
   <tbody>
   {% for row in rows %}

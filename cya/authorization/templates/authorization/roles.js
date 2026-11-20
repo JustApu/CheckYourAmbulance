@@ -1,4 +1,8 @@
 (() => {
+  // Issue #235 D5: after a search reload, focus the result line (or the search error), so the
+  // person continues from what was found rather than from the top of the page.
+  const found = document.querySelector("[data-focus-on-load]");
+  if (found) { found.focus(); }
   document.querySelectorAll("[data-role-change-form]").forEach((form) => {
     const choices = Array.from(form.querySelectorAll("[data-role-choice]"));
     const review = form.querySelector("[data-role-review-button]");

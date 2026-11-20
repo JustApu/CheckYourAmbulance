@@ -4,7 +4,7 @@
 <p>{{ intro }}</p>
 {% if vehicles %}
 <div class="table-scroll" role="region" aria-label="Vehicles" tabindex="0">
-<table>
+<table aria-label="Vehicles">
   <thead><tr><th scope="col">Vehicle</th><th scope="col">Number</th><th scope="col">VIN</th><th scope="col">Status</th></tr></thead>
   <tbody>
   {% for v in vehicles %}

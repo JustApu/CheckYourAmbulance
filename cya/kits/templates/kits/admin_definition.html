@@ -57,7 +57,7 @@
 {% if in_force %}
 <p>Revision {{ in_force.version.revision }}, in force since {{ in_force.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</p>
 <div class="table-scroll" role="region" aria-labelledby="in-force-heading" tabindex="0">
-<table>
+<table aria-labelledby="in-force-heading">
   <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th></tr></thead>
   <tbody>{% for row in in_force_rows %}<tr><td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.kind_label }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes_text }}</td></tr>{% endfor %}</tbody>
 </table>
@@ -78,7 +78,7 @@
 <p><a class="button" href="{% url 'kit-definition-content-new' definition.pk %}">Add a content item</a></p>
 {% if edit_rows %}
 <div class="table-scroll" role="region" aria-labelledby="edit-heading" tabindex="0">
-<table>
+<table aria-labelledby="edit-heading">
   <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th><th scope="col">Change</th></tr></thead>
   <tbody>
   {% for row in edit_rows %}
@@ -134,7 +134,7 @@
 <h2 id="history-heading">Versions</h2>
 {% if versions %}
 <div class="table-scroll" role="region" aria-labelledby="history-heading" tabindex="0">
-<table>
+<table aria-labelledby="history-heading">
   <thead><tr><th scope="col">Revision</th><th scope="col">Saved</th><th scope="col">Published</th><th scope="col">Takes effect</th></tr></thead>
   <tbody>
   {% for v in versions %}
