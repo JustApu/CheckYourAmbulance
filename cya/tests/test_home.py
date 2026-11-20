@@ -83,6 +83,28 @@ class HomeScreenTests(CrewUiCase):
         self.assertIn(">Vehicles</h2>", html)
         self.assertIn(self.vehicle.display_name, html)
 
+    def test_each_summary_tile_links_to_its_detail_view(self):
+        # Issue #238: the four figures open the page they summarize.
+        client, user = self.harness.sign_in("home-tiles")
+        self.grant(user, "SUPERVISOR")
+        html = self.page(client)
+        tiles = re.findall(r'<li class="home-tile"><a class="home-tile-link" href="([^"]+)">', html)
+        self.assertEqual(
+            tiles, ["/fleet/readiness/", "/inspection/", "/problems/", "#home-needs-you"]
+        )
+        self.assertIn('<h2 id="home-needs-you">Needs you</h2>', html, "the in-page target exists")
+        css = render_to_string("shell/shell.css")
+        rule = re.search(r"\.home-tile-link \{[^}]*\}", css).group(0)
+        self.assertIn("min-height: 48px", rule)
+
+    def test_needs_you_is_a_compact_grid_of_48_px_links(self):
+        # Issue #238: no row padding or dividers; the links keep their 48 px targets.
+        css = render_to_string("shell/shell.css")
+        grid = re.search(r"\.home-needs-list \{[^}]*\}", css).group(0)
+        self.assertIn("display: grid", grid)
+        self.assertIn("minmax(min(100%, 16rem), 1fr)", grid, "one column on narrow screens")
+        self.assertIn("padding: 0", re.search(r"\.home-needs-list > li \{[^}]*\}", css).group(0))
+
     def test_a_failing_section_says_so_and_the_page_still_renders(self):
         with mock.patch.object(home, "problems", side_effect=DatabaseError("synthetic")):
             with self.assertLogs("cya.shell.home", "ERROR") as logs:

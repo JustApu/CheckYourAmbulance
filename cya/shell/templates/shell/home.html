@@ -20,10 +20,11 @@
 <section class="home-section home-wide" aria-labelledby="home-glance">
   <h2 id="home-glance" class="visually-hidden">At a glance</h2>
   <ul class="home-tiles">
-    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.ready }} of {{ sup.tiles.listed }}</span> <span class="home-tile-label">vehicles ready{% if sup.tiles.partial %}, counting the first {{ sup.tiles.listed }} of {{ sup.tiles.fleet }}{% endif %}</span></li>
-    <li class="home-tile">{% if sup.tiles.owed %}<span class="home-tile-value tabular">{{ sup.tiles.checked }} of {{ sup.tiles.owed }}</span> <span class="home-tile-label">checks done{% if sup.tiles.partial %} on those vehicles{% endif %}</span>{% else %}<span class="home-tile-value tabular">0</span> <span class="home-tile-label">checks due right now{% if sup.tiles.partial %} on those vehicles{% endif %}</span>{% endif %}</li>
-    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.open_problems }}</span> <span class="home-tile-label">open problem{{ sup.tiles.open_problems|pluralize }}</span></li>
-    <li class="home-tile"><span class="home-tile-value tabular">{{ sup.tiles.for_you }}</span> <span class="home-tile-label">waiting for you</span></li>
+    {# Each figure opens where it comes from (issue #238). #}
+    <li class="home-tile"><a class="home-tile-link" href="{% url 'fleet-readiness' %}"><span class="home-tile-value tabular">{{ sup.tiles.ready }} of {{ sup.tiles.listed }}</span> <span class="home-tile-label">vehicles ready{% if sup.tiles.partial %}, counting the first {{ sup.tiles.listed }} of {{ sup.tiles.fleet }}{% endif %}</span></a></li>
+    <li class="home-tile"><a class="home-tile-link" href="{% url 'inspection' %}">{% if sup.tiles.owed %}<span class="home-tile-value tabular">{{ sup.tiles.checked }} of {{ sup.tiles.owed }}</span> <span class="home-tile-label">checks done{% if sup.tiles.partial %} on those vehicles{% endif %}</span>{% else %}<span class="home-tile-value tabular">0</span> <span class="home-tile-label">checks due right now{% if sup.tiles.partial %} on those vehicles{% endif %}</span>{% endif %}</a></li>
+    <li class="home-tile"><a class="home-tile-link" href="{% url 'deficiencies' %}"><span class="home-tile-value tabular">{{ sup.tiles.open_problems }}</span> <span class="home-tile-label">open problem{{ sup.tiles.open_problems|pluralize }}</span></a></li>
+    <li class="home-tile"><a class="home-tile-link" href="#home-needs-you"><span class="home-tile-value tabular">{{ sup.tiles.for_you }}</span> <span class="home-tile-label">waiting for you</span></a></li>
   </ul>
 </section>
 {% endif %}{% endwith %}{% endif %}
@@ -47,10 +48,10 @@
 {% endif %}
 
 {% if home.supervisor and not home.supervisor.unavailable %}{% with sup=home.supervisor %}
-<section class="home-section panel home-wide" aria-labelledby="home-needs-you">
+<section class="home-section panel home-wide home-needs" aria-labelledby="home-needs-you">
   <h2 id="home-needs-you">Needs you</h2>
   {% if sup.requests or sup.verifying or sup.unassigned %}
-  <ul class="home-list">
+  <ul class="home-list home-needs-list">
     {% for row in sup.requests %}<li><a href="{{ row.url }}">Review the request to set {{ row.vehicle }} {{ row.requested }}</a></li>{% endfor %}
     {% if sup.requests_total > sup.requests|length %}<li><a href="{% url 'status' %}">{{ sup.requests_total }} status requests in all</a></li>{% endif %}
     {% if sup.verifying %}<li><a href="{% url 'deficiency-queue' %}">Verify {{ sup.verifying }} fix{{ sup.verifying|pluralize:"es" }}</a></li>{% endif %}
