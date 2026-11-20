@@ -147,7 +147,7 @@ class SignInFlowTests(TestCase):
 
     def test_a_page_redirect_names_itself_and_sign_in_returns_there(self):
         redirect = self.client.get("/status/")
-        self.assertEqual(redirect["Location"], "/auth/login/?next=%2Ffleet%2F")
+        self.assertEqual(redirect["Location"], "/auth/login/?next=%2Fstatus%2F")
         response = self.sign_in(next_path="/status/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.landing(response), ("/status/", "/status/"))
@@ -163,7 +163,7 @@ class SignInFlowTests(TestCase):
             "javascript:alert(1)",
             "fleet/",
             "/auth/status/",
-            "/auth/login/?next=%2Ffleet%2F",
+            "/auth/login/?next=%2Fstatus%2F",
             "/api/v1/deficiencies",
             "/ws/v1/vehicles/x/live/",
             "/" + "a" * 600,
@@ -204,8 +204,8 @@ class SignInFlowTests(TestCase):
     def test_only_a_get_page_is_returned_to(self):
         factory = RequestFactory()
         self.assertEqual(
-            returns.sign_in_redirect(factory.get("/fleet/?as_of=x"))["Location"],
-            "/auth/login/?next=%2Ffleet%2F%3Fas_of%3Dx",
+            returns.sign_in_redirect(factory.get("/status/?as_of=x"))["Location"],
+            "/auth/login/?next=%2Fstatus%2F%3Fas_of%3Dx",
         )
         self.assertEqual(
             returns.sign_in_redirect(factory.post("/administration/roles/"))["Location"],
