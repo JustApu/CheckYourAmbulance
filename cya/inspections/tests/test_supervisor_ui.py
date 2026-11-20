@@ -441,11 +441,11 @@ class QueueTests(SupervisorUiCase):
         self.report()
         plain = client.get(self.URL)
         self.assertEqual(plain.context["title"], "Supervisor queue")
-        self.assertNotContains(plain, "data-focus-on-load")
+        self.assertNotContains(plain, 'tabindex="-1" data-focus-on-load')
         filtered = client.get(self.URL, {"status": "active"})
         self.assertEqual(filtered.context["title"], "Supervisor queue (filtered)")
         page = filtered.content.decode()
-        self.assertEqual(page.count("data-focus-on-load"), 1)
+        self.assertEqual(page.count('tabindex="-1" data-focus-on-load'), 1)
         self.assertIn("Filtered results: Extension requests waiting for a decision: 0", page)
         self.assertIn("Unassigned: 1", page)
 

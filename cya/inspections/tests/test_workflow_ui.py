@@ -581,7 +581,7 @@ class DeficiencyListTests(CrewUiCase):
         self.create_deficiency(summary="Synthetic focus pump")
         plain = self.client.get("/problems/")
         self.assertEqual(plain.context["title"], "Problems")
-        self.assertNotContains(plain, "data-focus-on-load")
+        self.assertNotContains(plain, 'tabindex="-1" data-focus-on-load')
         filtered = self.client.get("/problems/", {"q": "focus pump", "status": "active"})
         self.assertContains(filtered, "<title>Problems (1 matching) - Check Your Ambulance</title>")
         self.assertContains(
@@ -597,7 +597,7 @@ class DeficiencyListTests(CrewUiCase):
             "Choose a configured severity.</p>",
             html=True,
         )
-        self.assertEqual(refused.content.decode().count("data-focus-on-load"), 1)
+        self.assertEqual(refused.content.decode().count('tabindex="-1" data-focus-on-load'), 1)
 
     def test_default_is_active_and_history_includes_reported_in_error(self):
         deficiency_id, check_id = self.create_deficiency(summary="Synthetic corrected pump")
