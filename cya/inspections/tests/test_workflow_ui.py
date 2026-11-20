@@ -577,6 +577,29 @@ class DeficiencyListTests(CrewUiCase):
             DeficiencyEvent.objects.filter(deficiency_id=deficiency_id).latest("sequence").pk
         )
 
+    def test_a_filtered_list_names_its_results_and_focuses_them(self):
+        # Issue #235 A4: the reload after Apply says what it found, in the title and in focus.
+        self.create_deficiency(summary="Synthetic focus pump")
+        plain = self.client.get("/problems/")
+        self.assertEqual(plain.context["title"], "Problems")
+        self.assertNotContains(plain, 'tabindex="-1" data-focus-on-load')
+        filtered = self.client.get("/problems/", {"q": "focus pump", "status": "active"})
+        self.assertContains(filtered, "<title>Problems (1 matching) - Check Your Ambulance</title>")
+        self.assertContains(
+            filtered,
+            '<p class="deficiency-results-count" tabindex="-1" data-focus-on-load>'
+            "1 matching problems; showing 1 on this page.</p>",
+            html=True,
+        )
+        refused = self.client.get("/problems/", {"severity": "NOT-A-LEVEL"})
+        self.assertContains(
+            refused,
+            '<p class="notice" role="alert" tabindex="-1" data-focus-on-load>'
+            "Choose a configured severity.</p>",
+            html=True,
+        )
+        self.assertEqual(refused.content.decode().count('tabindex="-1" data-focus-on-load'), 1)
+
     def test_default_is_active_and_history_includes_reported_in_error(self):
         deficiency_id, check_id = self.create_deficiency(summary="Synthetic corrected pump")
         self.assertContains(self.client.get("/problems/"), "Synthetic corrected pump")

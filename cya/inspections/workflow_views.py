@@ -116,6 +116,31 @@ def severity_filter_options(levels):
     return options
 
 
+# Issue #235 A1: what the problem page says after it reloads from a save (?saved=<form kind>).
+# Only these fixed words are shown; any other value shows nothing.
+SAVED_NOTICES = {
+    "acknowledge": "Acknowledged",
+    "admin-close": "Problem closed",
+    "admin-reopen": "Problem reopened",
+    "add-verification": "Verification added",
+    "assign": "Assignment saved",
+    "deadline": "Deadline set",
+    "dependency": "Dependency saved",
+    "dependency-exit": "Dependency ended",
+    "empty-scope-close": "Problem closed",
+    "end-suspension": "Suspension ended",
+    "expand": "Verification scope expanded",
+    "extension": "Extension requested",
+    "extension-decision": "Extension decision saved",
+    "link": "Related reports saved",
+    "note": "Progress note added",
+    "regrade": "Severity changed",
+    "repair": "Repair recorded",
+    "start-work": "Work started",
+    "suspend": "Checks suspended",
+}
+
+
 def page(view):
     @never_cache
     @require_GET
@@ -248,6 +273,9 @@ def _deficiency_filters(
         "filter_severity_options": severity_options,
         "applied_filters": applied,
         "filter_query": urlencode(query_values),
+        # Issue #235 A4: a filtered page (Apply, Clear keeps none) names its results in the title
+        # and moves focus to them, so the reload does not leave the user at the top of the page.
+        "filter_submitted": any(field in request.GET for field in FILTER_FIELDS),
     }
 
 
@@ -323,11 +351,14 @@ def deficiencies(request, user):
     vehicles = Vehicle.objects.filter(organization_id=user.organization_id, active=True).order_by(
         "display_name", "id"
     )[:200]
+    title = "Problems"  # the on-screen word for deficiencies (issue #194)
+    if filter_context["filter_submitted"]:
+        title = f"Problems ({page_data['total']} matching)"
     return render(
         request,
         "inspections/deficiencies.html",
         {
-            "title": "Problems",  # the on-screen word for deficiencies (issue #194)
+            "title": title,
             "can_view_queue": permitted("decide_extension", str(user.pk), roles_for(user)),
             "page": page_data,
             "filter_action": reverse("deficiencies"),
@@ -605,9 +636,12 @@ def deficiency(request, user, deficiency_id):
                 deadline,
                 request.GET.get("assignee_search", "").strip()[:100],
             ),
+            "saved_notice": SAVED_NOTICES.get(request.GET.get("saved", "")),
             "config": {
                 "correction_url": reverse("api-deficiency-corrections", args=[found.pk]),
                 "expected_event_id": str(status.last_applied_event_id),
+                "page_url": reverse("deficiencies-detail", args=[found.pk]),
+                "reload_after_save": True,
             },
         },
     )
@@ -733,11 +767,16 @@ def queue(request, user):
         }
         for key, heading, rows in groups
     ]
+    # The lists overlap (a problem can be overdue and unassigned), so each keeps its own count.
+    queue_summary = " · ".join(f"{group['heading']}: {group['page']['total']}" for group in lists)
     return render(
         request,
         "inspections/deficiency_queue.html",
         {
-            "title": "Supervisor queue",
+            "title": "Supervisor queue (filtered)"
+            if filter_context["filter_submitted"]
+            else "Supervisor queue",
+            "queue_summary": queue_summary if filter_context["filter_submitted"] else "",
             "lists": lists,
             "filter_action": reverse("deficiency-queue"),
             "filter_all_statuses_label": "All active statuses",

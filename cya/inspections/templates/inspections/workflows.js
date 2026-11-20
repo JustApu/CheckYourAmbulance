@@ -4,6 +4,22 @@
   function toast(text, options) { if (window.cyaShell && window.cyaShell.toast) { window.cyaShell.toast(text, options); } }
   var configNode = document.getElementById("workflow-config");
   var config = configNode ? JSON.parse(configNode.textContent) : {};
+  // Issue #235 A2: after an in-page action, focus lands on the result, never on <body>.
+  function focusMessage(message) {
+    if (!message || typeof message.focus !== "function") { return; }
+    message.setAttribute("tabindex", "-1"); message.focus();
+  }
+  // Issue #235 A1: the problem page reloads after a save, so its status, next action, forms and
+  // expected event all come from the server. The page names what was saved (?saved=<kind>) and
+  // focuses that notice; the marker is then removed so a later reload does not repeat it.
+  (function () {
+    var notice = document.querySelector("[data-focus-on-load]");
+    if (!notice || typeof notice.focus !== "function") { return; }
+    notice.focus();
+    if (window.history && typeof window.history.replaceState === "function" && config.page_url) {
+      window.history.replaceState(null, "", config.page_url);
+    }
+  })();
   function uuid4() {
     var bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
     bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
@@ -66,8 +82,10 @@
   // left to verify, which the report form's wording does not fit.
   var kindErrors = {
     repair: {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Ask a supervisor or administrator to close it."},
-    // The repair form carries data-can-close-empty when this page offers the empty-scope close (issue 21).
-    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Use \u201cClose: no current verification items\u201d below."},
+    // The repair form carries data-can-close-empty when this user may use the empty-scope close
+    // (issue 21). The close is offered only once nothing is left to verify (issue #235 A3), so a
+    // scope that emptied after the page loaded needs a refresh to show it.
+    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Refresh this page, then use \u201cClose: no current verification items\u201d."},
     "empty-scope-close": {
       SCOPE_AVAILABLE: "Current verification items exist; record the repair instead.",
       INVALID_TRANSITION: "This problem is no longer Open, In Progress or Awaiting External Dependency. Refresh history."
@@ -232,15 +250,24 @@
       post(form.dataset.url, request, csrf).then(function (answer) {
         busy = false;
         if (answer.kind === "saved") {
-          finished = true; message.textContent = "Saved. View or refresh history for the current state.";
+          finished = true; button.textContent = "Saved";
+          if (config.reload_after_save && config.page_url) {
+            message.textContent = "Saved. Updating the page…";
+            window.location.assign(config.page_url + "?saved=" + encodeURIComponent(form.dataset.kind));
+            return;
+          }
+          message.textContent = "Saved. View or refresh history for the current state.";
           toast("Saved.", {announce: false});
-          button.textContent = "Saved"; form.querySelector(".workflow-refresh").hidden = false;
+          form.querySelector(".workflow-refresh").hidden = false;
+          focusMessage(message);
         } else if (answer.kind === "failed") {
           request = null; controls(form, false, false); button.textContent = original;
           message.textContent = "Not saved. " + errorText(form, answer.code);
+          focusMessage(message);
         } else {
           controls(form, false, true); button.textContent = "Retry same request";
           message.textContent = "Unconfirmed: this may have been recorded. Retry sends the identical request and operation id; resolve it before editing.";
+          focusMessage(message);
         }
       });
     });

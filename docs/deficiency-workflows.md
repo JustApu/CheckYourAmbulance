@@ -131,13 +131,14 @@ Dependency entry is offered in Open/In Progress; while waiting, revision and exi
 Exit can name Open/In Progress or return to the status before waiting. Progress notes require
 nonblank text. Date controls are explicitly labelled UTC and sent as UTC instants. Follow-up
 never schedules an automatic reminder. Each lifecycle form sends the event seen at page load;
-a concurrent change or another successful form on the same page requires refreshing before a
-new decision (`DEFICIENCY_CHANGED`). The backend's refusal is shown, including empty repair
+a concurrent change requires refreshing before a new decision (`DEFICIENCY_CHANGED`). A
+successful form reloads the page (issue #235 A1), so the next form always carries the new event. The backend's refusal is shown, including empty repair
 scope, absent deadline, invalid dates, transition changes and permission denial. An empty scope
 on the repair form says there are no current items left to verify and to ask a supervisor or
-administrator to close the deficiency; for a Supervisor or Administrator, who see the
-"Close: no current verification items" form directly below it (issue #21), it points to that form
-instead. That form requires an explanation and answers `SCOPE_AVAILABLE` ("record the repair
+administrator to close the deficiency; for a Supervisor or Administrator it says to refresh the
+page and use "Close: no current verification items" (issue #21). That form is offered only when
+nothing is left to verify (issue #235 A3), in place of the repair form; while an item is still on
+the checklist it is not shown, and the server still refuses it (`SCOPE_AVAILABLE`). That form requires an explanation and answers `SCOPE_AVAILABLE` ("record the repair
 instead"), `DEFICIENCY_CHANGED` and `INVALID_TRANSITION` with their own messages. Other forms
 keep the shared `EMPTY_SCOPE` text.
 
@@ -223,8 +224,18 @@ new form's payload, UTC conversion, required fields and refusal messages.
 Workflow forms send same-origin JSON with CSRF headers. Each form permits one request at a
 time. Only a `COMMITTED` response shows Saved. Definite refusals show a reason; ambiguous
 transport/5xx/invalid JSON is Unconfirmed. Unconfirmed forms lock their fields and offer Retry
-with the identical request and operation id. After acknowledgement the form is single-use;
-a link reloads current history, avoiding stale-tip resubmissions.
+with the identical request and operation id. After acknowledgement the form is single-use.
+On the problem page a save reloads the page with `?saved=<form kind>` (issue #235 A1, A2): the
+server shows the new status, next action and forms, and a notice naming the action ("Saved: Work
+started. Current status: In Progress.") takes focus. Only a fixed list of kinds produces words;
+anything else shows nothing. The script then removes the marker from the address. On the report
+and check-history pages a link reloads current history instead. A refusal or an unconfirmed
+answer moves focus to the form's message, so focus never falls back to the page body.
+
+On the problem list and the supervisor queue, a submitted filter (any filter field in the address)
+names its results in the page title ("Problems (12 matching)", "Supervisor queue (filtered)") and
+moves focus to the result count, or to the first filter error. The queue lists overlap, so its
+line gives each list's count (issue #235 A4).
 
 `cya/inspections/tests/test_deficiency_actions_ui.py` covers the new crew forms, role/context
 visibility, stale requests, extension replay, kit scope, routine-pass isolation, verification
