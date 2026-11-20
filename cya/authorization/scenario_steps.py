@@ -1,9 +1,9 @@
 """Step bindings for scenario EX-role-change-end-to-end (issue 25 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/25)).
 
 The walking skeleton's exit scenario: sign in through the offline Google stub,
-change a role through the web interface, and show it persisted, in history and
-audited; refuse the same action for a Crew user with a committed denial; and
-replay one operation id into a single record. Runs with real commits on the
+save two role changes with one Save on the web interface (issue #236), and show
+them persisted, in history and audited; refuse the same action for a Crew user
+with a committed denial; and replay one operation id into a single record. Runs with real commits on the
 MariaDB test database (the scenario sets "database": "commit").
 """
 
@@ -33,7 +33,12 @@ def administrator_changes_role(ctx):
     harness = ctx["harness"]
     ctx["before"] = harness.counts()
     ctx["operation_id"] = str(uuid4())
-    ctx["data"] = harness.data(ctx["admin_client"], ctx["crew"], operation_id=ctx["operation_id"])
+    ctx["data"] = harness.save_data(
+        ctx["admin_client"],
+        ctx["crew"],
+        ["CREW", "SUPERVISOR", "SUPPLY_OFFICER"],
+        operation_id=ctx["operation_id"],
+    )
     ctx["first"] = ctx["admin_client"].post(URL, ctx["data"])
 
 
@@ -53,11 +58,12 @@ def crew_attempts_role_change(ctx):
         URL,
         {
             "csrfmiddlewaretoken": crew_client.cookies["csrftoken"].value,
-            "stage": "confirm",
+            "stage": "save",
+            "role_selection_present": "1",
             "operation_id": str(uuid4()),
             "target": str(crew.pk),
-            "role": "ADMINISTRATOR",
-            "action": "GRANT",
+            "current_roles": ["CREW", "SUPERVISOR", "SUPPLY_OFFICER"],
+            "roles": ["CREW", "SUPERVISOR", "SUPPLY_OFFICER", "ADMINISTRATOR"],
         },
     )
 
@@ -66,13 +72,25 @@ def crew_attempts_role_change(ctx):
 def change_persisted_visible_audited(ctx):
     crew, admin = ctx["crew"], ctx["admin"]
     expect(ctx["first"].status_code, 302, "authorized change response")
-    expect(current_role_codes(crew), ("CREW", "SUPERVISOR"), "persisted roles")
-    grant = RoleGrant.objects.get(user=crew, role="SUPERVISOR")
-    expect(grant.actor_user_id, admin.pk, "role history actor")
-    audit = AuditEvent.objects.get(action="ROLE_CHANGE", outcome="SUCCEEDED")
-    expect((audit.actor_user_id, audit.command_id), (admin.pk, grant.command_id), "audit link")
-    history = ctx["admin_client"].get(URL).content.decode()
-    expect(crew.email in history and "SUPERVISOR" in history, True, "change shown in history")
+    expect(current_role_codes(crew), ("CREW", "SUPERVISOR", "SUPPLY_OFFICER"), "persisted roles")
+    receipt = CommandReceipt.objects.get(command_type="ROLE_CHANGES")
+    grants = RoleGrant.objects.filter(user=crew, command=receipt).order_by("sequence")
+    expect([g.role for g in grants], ["SUPERVISOR", "SUPPLY_OFFICER"], "one event per change")
+    expect({g.actor_user_id for g in grants}, {admin.pk}, "role history actor")
+    audits = AuditEvent.objects.filter(action="ROLE_CHANGES", outcome="SUCCEEDED")
+    expect(
+        sorted(
+            (a.actor_user_id, a.command_id, a.new_snapshot["values"]["role"])
+            for a in audits
+            if "role" in a.new_snapshot["values"]
+        ),
+        [(admin.pk, receipt.pk, "SUPERVISOR"), (admin.pk, receipt.pk, "SUPPLY_OFFICER")],
+        "one audit row per change, linked to the Save's receipt",
+    )
+    saved = ctx["admin_client"].get(ctx["first"]["Location"]).content.decode()
+    expect("added Supervisor, Supply Officer." in saved, True, "the saved row names the changes")
+    history = ctx["admin_client"].get(f"{URL}{crew.pk}/history/").content.decode()
+    expect(crew.email in history and "Supervisor" in history, True, "change shown in history")
 
 
 @STEPS.register("replay_yields_one_record")
@@ -80,6 +98,7 @@ def replay_yields_one_record(ctx):
     expect(ctx["replay"].status_code, 302, "replay response")
     expect(ctx["after_replay"], ctx["after_first"], "row counts after replay")
     expect(RoleGrant.objects.filter(user=ctx["crew"], role="SUPERVISOR").count(), 1, "grants")
+    expect(CommandReceipt.objects.filter(command_type="ROLE_CHANGES").count(), 1, "receipts")
 
 
 @STEPS.register("denial_audited_nothing_changed")
@@ -87,7 +106,9 @@ def denial_audited_nothing_changed(ctx):
     crew = ctx["crew"]
     expect(ctx["denied"].status_code, 403, "unauthorized response")
     expect(RoleGrant.objects.count(), ctx["grants_before_denial"], "role rows after denial")
-    expect(current_role_codes(crew), ("CREW", "SUPERVISOR"), "crew roles unchanged")
-    denial = AuditEvent.objects.get(action="ROLE_CHANGE", outcome="DENIED")
+    expect(
+        current_role_codes(crew), ("CREW", "SUPERVISOR", "SUPPLY_OFFICER"), "crew roles unchanged"
+    )
+    denial = AuditEvent.objects.get(action="ROLE_CHANGES", outcome="DENIED")
     expect((denial.actor_user_id, denial.reason_code), (crew.pk, "FORBIDDEN"), "denial audit")
-    expect(CommandReceipt.objects.filter(command_type="ROLE_CHANGE").count(), 1, "receipts")
+    expect(CommandReceipt.objects.filter(command_type="ROLE_CHANGES").count(), 1, "receipts")

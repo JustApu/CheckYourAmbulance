@@ -1,53 +1,29 @@
 {% extends "shell/base.html" %}
 {% block main_class %} class="main-wide"{% endblock %}
 {% block content %}
-{% if saved %}{% include "shell/save_state.html" with state="saved" %}{% endif %}
+{% if page_message %}{% if page_message.kind == "saved" %}<p class="save-state save-state-saved" role="status" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ page_message.text }}</span></p>{% else %}<p class="banner banner-error" role="alert" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ page_message.text }}</p>{% endif %}{% endif %}
 {% if error %}<p class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ error }}</p>{% endif %}
 
 {% if show %}
 <div class="role-administration">
-{% if preview %}
-<h2>Review role change</h2>
-<p id="role-change-summary">{% if preview.action == "GRANT" %}Add the {{ preview.role_label }} role for{% else %}Remove the {{ preview.role_label }} role from{% endif %} {{ preview.target.display_name|default:preview.target.email }} ({{ preview.target.email }}).</p>
-<form method="post" action="{% url 'administration-roles' %}">
-  {% csrf_token %}
-  <input type="hidden" name="stage" value="confirm">
-  <input type="hidden" name="operation_id" value="{{ preview.operation_id }}">
-  <input type="hidden" name="target" value="{{ preview.target.pk }}">
-  <input type="hidden" name="role" value="{{ preview.role }}">
-  <input type="hidden" name="action" value="{{ preview.action }}">
-  {% if target_search_query %}<input type="hidden" name="q" value="{{ target_search_query }}">{% endif %}
-  <p><button type="submit" class="button">Confirm {{ preview.action_label|lower }} of {{ preview.role_label }} role</button></p>
-</form>
-<form method="post" action="{% url 'administration-roles' %}">
-  {% csrf_token %}
-  <input type="hidden" name="stage" value="edit">
-  <input type="hidden" name="target" value="{{ preview.target.pk }}">
-  <input type="hidden" name="role" value="{{ preview.role }}">
-  <input type="hidden" name="action" value="{{ preview.action }}">
-  {% if target_search_query %}<input type="hidden" name="q" value="{{ target_search_query }}">{% endif %}
-  <p><button type="submit" class="button">Change selection</button></p>
-</form>
-{% else %}
 <h2>Organization users</h2>
-<form method="get" action="{% url 'administration-roles' %}" role="search">
+<form method="get" action="{% url 'administration-roles' %}" role="search" data-role-search-form>
   <p><label for="role-user-search">Find an active user by name or email</label></p>
-  <p><input id="role-user-search" name="q" type="search" maxlength="100" value="{{ target_search_query }}" autocomplete="off">
-    <button type="submit" class="button">Search users</button></p>
+  <p><input id="role-user-search" name="q" type="search" maxlength="100" value="{{ target_search_query }}" autocomplete="off" aria-describedby="role-search-result" data-role-search>
+    <button type="submit" class="button" data-role-search-button>Search users</button></p>
 </form>
+<div data-role-results>
 {% if target_search_error %}<p class="banner banner-error" role="alert"{% if searched %} tabindex="-1" data-focus-on-load{% endif %}>{{ target_search_error }}</p>{% endif %}
 {% if role_list_error %}<p class="banner banner-error" role="alert">{{ role_list_error }}</p>{% endif %}
 {% if target_search_error %}
   <p>The user list is hidden until you correct the search.</p>
-{% elif target_search_query %}
-  <p class="role-search-result"{% if searched %} tabindex="-1" data-focus-on-load{% endif %}>{{ target_total }} matching active user{{ target_total|pluralize }}{% if target_total > target_limit %}; showing the first {{ target_limit }}{% endif %}.</p>
 {% else %}
-  <p class="role-search-result"{% if searched %} tabindex="-1" data-focus-on-load{% endif %}>Showing the first {{ target_limit }} active users. Search to find someone else.</p>
+  <p id="role-search-result" class="role-search-result" aria-live="polite" data-role-search-result{% if searched and not row_message_shown %} tabindex="-1" data-focus-on-load{% endif %}>{% if target_search_query %}{{ target_total }} matching active user{{ target_total|pluralize }}{% if target_total > target_limit %}; showing the first {{ target_limit }}{% endif %}.{% else %}Showing the first {{ target_limit }} active users. Search to find someone else.{% endif %}</p>
 {% endif %}
 {% if targets %}
-<ul class="role-user-list" aria-label="Organization users and roles">
+<ul class="role-user-list" aria-label="Organization users and roles" data-role-user-list>
   {% for target in targets %}
-  <li class="role-user-row">
+  <li class="role-user-row" data-role-user-row="{{ target.pk }}" data-role-search-text="{{ target.display_name|lower }} {{ target.email|lower }}">
     <div class="role-user-details">
       <h3>{{ target.display_name|default:target.email }}</h3>
       {% if target.display_name %}<p class="role-user-email">{{ target.email }}</p>{% endif %}
@@ -56,12 +32,13 @@
     {% if target.role_history_unavailable %}
     <p class="banner banner-error">Current roles could not be verified. Role changes for this user are unavailable. View role history or contact support.</p>
     {% else %}
-    <form method="post" action="{% url 'administration-roles' %}" class="role-change-form admin-form" data-role-change-form>
+    <form method="post" action="{% url 'administration-roles' %}" class="role-change-form admin-form" data-role-change-form{% if target.is_self %} data-role-self{% endif %}>
       {% csrf_token %}
-      <input type="hidden" name="stage" value="preview">
+      <input type="hidden" name="stage" value="save">
       <input type="hidden" name="role_selection_present" value="1">
       <input type="hidden" name="operation_id" value="{{ target.role_operation_id }}">
       <input type="hidden" name="target" value="{{ target.pk }}">
+      {% for code in target.current_role_codes %}<input type="hidden" name="current_roles" value="{{ code }}">{% endfor %}
       {% if target_search_query %}<input type="hidden" name="q" value="{{ target_search_query }}">{% endif %}
       <fieldset class="role-options">
         <legend>Roles</legend>
@@ -72,23 +49,25 @@
         </label>
         {% endfor %}
       </fieldset>
+      {% if target.is_self %}<p class="banner banner-error role-self-warning" data-role-self-warning hidden><span class="indicator-icon" aria-hidden="true">&#9888;</span> You are removing your own Administrator role. You will lose access to Administration as soon as you save.</p>{% endif %}
       <div class="role-change-actions">
         <p class="role-change-status" role="status" aria-live="polite" data-role-change-status hidden></p>
-        <button type="submit" class="button" data-role-review-button>Review changes</button>
+        <button type="submit" class="button primary" data-role-save-button>Save</button>
         <button type="reset" class="button" data-role-reset-button>Reset</button>
       </div>
     </form>
     {% endif %}
+    {% if target.row_message %}{% if target.row_message.kind == "saved" %}<p class="save-state save-state-saved role-row-message" role="status" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ target.row_message.text }}</span></p>{% else %}<p class="banner banner-error role-row-message" role="alert" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ target.row_message.text }}</p>{% endif %}{% endif %}
   </li>
   {% endfor %}
 </ul>
 {% elif not target_search_error and not role_list_error %}
   {% if target_search_query %}<p>No active users match that search.</p>{% else %}<p>No active users are listed yet.</p>{% endif %}
 {% endif %}
-{% endif %}
+</div>
 </div>
 {% endif %}
 {% endblock %}
 {% block scripts %}
-<script>{% include "authorization/roles.js" %}</script>
+{% if show %}<script>{% include "authorization/roles.js" %}</script>{% endif %}
 {% endblock %}

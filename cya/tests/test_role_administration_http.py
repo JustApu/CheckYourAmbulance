@@ -33,6 +33,8 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.form = harness.form
         self.data = harness.data
         self.change = harness.change
+        self.save_data = harness.save_data
+        self.save = harness.save
         self.counts = harness.counts
 
     def tearDown(self):
@@ -51,7 +53,8 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(found.context["title"], "Role administration (1 matching)")
         self.assertContains(
             found,
-            '<p class="role-search-result" tabindex="-1" data-focus-on-load>'
+            '<p id="role-search-result" class="role-search-result" aria-live="polite" '
+            'data-role-search-result tabindex="-1" data-focus-on-load>'
             "1 matching active user.</p>",
             html=True,
         )
@@ -90,7 +93,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertContains(users_page, "Saved")
         self.assertContains(users_page, "Crew")
         self.assertContains(users_page, "Supervisor")
-        self.assertContains(users_page, "Review changes")
+        self.assertContains(users_page, "data-role-save-button")
         self.assertContains(users_page, "<legend>Roles</legend>", html=True)
         self.assertContains(users_page, 'name="roles" value="CREW"')
         self.assertContains(
@@ -237,7 +240,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertFalse(targets[str(admin.pk)].role_history_unavailable)
         self.assertContains(response, "Current roles could not be verified.")
         self.assertNotContains(response, 'role="alert">Current roles could not be verified.')
-        self.assertContains(response, "Review changes")
+        self.assertContains(response, "data-role-save-button")
 
     def test_unauthorized_user_is_refused_and_a_denial_is_recorded(self):
         _, admin = self.make_administrator("admin-1")
@@ -331,90 +334,217 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertRegex(html, r'<button id="app-nav-more"[^>]*aria-current="true"')
         self.assertContains(page, "Organization users")
 
-    def test_role_matrix_shows_current_assignments_and_reviews_one_staged_change(self):
-        admin_client, _ = self.make_administrator("admin-1")
+    def test_one_save_applies_several_role_changes_with_one_receipt(self):
+        # Issue #236: any number of staged changes, one Save, no separate review page.
+        admin_client, admin = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
 
         page = admin_client.get(URL)
-
-        self.assertEqual(page.status_code, 200)
         self.assertContains(page, 'class="role-user-row"')
         self.assertContains(page, 'name="roles" value="CREW"')
-        self.assertContains(page, "Supervisor")
-        self.assertContains(page, "Supply Officer")
-        self.assertContains(page, "Administrator")
-        self.assertContains(page, "View role history")
-        self.assertContains(page, "Review changes")
-        self.assertNotContains(page, "Role to change")
+        self.assertContains(page, 'name="current_roles" value="CREW"')
+        self.assertContains(page, 'name="stage" value="save"')
+        self.assertContains(page, ">Save</button>")
+        self.assertNotContains(page, "Review changes")
 
         before = self.counts()
-        staged = self.data(
-            admin_client,
-            crew,
-            q=crew.email,
-            stage="preview",
-            role_selection_present="1",
-            roles=["CREW", "SUPERVISOR"],
+        data = self.save_data(admin_client, crew, ["SUPERVISOR", "SUPPLY_OFFICER"], q=crew.email)
+        response = admin_client.post(URL, data)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            URL + "?" + urlencode({"saved": data["operation_id"], "q": crew.email}),
         )
-        preview = admin_client.post(URL, staged)
-
-        self.assertEqual(preview.status_code, 200)
-        self.assertContains(preview, f"Add the Supervisor role for {crew.display_name}")
-        self.assertEqual(self.counts(), before)
-        self.assertEqual(current_role_codes(crew), ("CREW",))
-
-        confirmation = admin_client.post(
-            URL,
+        self.assertEqual(current_role_codes(crew), ("SUPERVISOR", "SUPPLY_OFFICER"))
+        self.assertEqual(self.counts(), (before[0] + 3, before[1] + 1, before[2] + 4))
+        receipt = CommandReceipt.objects.get(operation_id=data["operation_id"])
+        self.assertEqual(receipt.command_type, "ROLE_CHANGES")
+        self.assertEqual(
+            receipt.response_body,
             {
-                **staged,
-                "stage": "confirm",
-                "role": "SUPERVISOR",
-                "action": "GRANT",
+                "code": "SAVED",
+                "user_id": str(crew.pk),
+                "roles": ["SUPERVISOR", "SUPPLY_OFFICER"],
+                "added": ["SUPERVISOR", "SUPPLY_OFFICER"],
+                "removed": ["CREW"],
             },
         )
-        self.assertEqual(confirmation.status_code, 302)
-        self.assertEqual(current_role_codes(crew), ("CREW", "SUPERVISOR"))
+        events = RoleGrant.objects.filter(command=receipt).order_by("sequence")
+        self.assertEqual(
+            [(event.sequence, event.role, event.action) for event in events],
+            [(2, "SUPERVISOR", "GRANT"), (3, "SUPPLY_OFFICER", "GRANT"), (4, "CREW", "REVOKE")],
+        )
+        self.assertEqual({event.actor_user_id for event in events}, {admin.pk})
+        audits = AuditEvent.objects.filter(command=receipt, action="ROLE_CHANGES")
+        per_change = [audit for audit in audits if "role" in audit.new_snapshot["values"]]
+        self.assertEqual(
+            sorted(
+                (audit.new_snapshot["values"]["role"], audit.new_snapshot["values"]["action"])
+                for audit in per_change
+            ),
+            [("CREW", "REVOKE"), ("SUPERVISOR", "GRANT"), ("SUPPLY_OFFICER", "GRANT")],
+        )
+        self.assertEqual({audit.actor_user_id for audit in per_change}, {admin.pk})
+        (summary,) = [audit for audit in audits if "roles" in audit.new_snapshot["values"]]
+        self.assertEqual(summary.prior_snapshot["values"], {"roles": ["CREW"]})
+        self.assertEqual(
+            summary.new_snapshot["values"], {"roles": ["SUPERVISOR", "SUPPLY_OFFICER"]}
+        )
 
-    def test_role_matrix_rejects_more_than_one_staged_change(self):
+        # D2: the row says what changed for whom, and that message takes focus.
+        saved = admin_client.get(response["Location"])
+        name = crew.display_name or crew.email
+        self.assertContains(
+            saved,
+            f"Saved for {name}: added Supervisor, Supply Officer; removed Crew.",
+        )
+        html = saved.content.decode()
+        self.assertEqual(html.count('tabindex="-1" data-focus-on-load'), 1)
+        self.assertIn('role-row-message" role="status" tabindex="-1" data-focus-on-load', html)
+
+    def test_saved_summary_is_only_read_from_this_administrators_own_save(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        data = self.save_data(admin_client, crew, ["CREW", "SUPERVISOR"])
+        self.assertEqual(admin_client.post(URL, data).status_code, 302)
+        other_client, other_admin = self.sign_in("admin-2")
+        self.assertEqual(
+            self.save(admin_client, other_admin, ["CREW", "ADMINISTRATOR"]).status_code, 302
+        )
+        other_client.get("/")  # current roles are read per request
+
+        for value in (data["operation_id"], str(uuid4()), "not-a-uuid"):
+            with self.subTest(saved=value):
+                page = other_client.get(URL, {"saved": value})
+                self.assertEqual(page.status_code, 200)
+                self.assertNotContains(page, "Saved for")
+
+    def test_a_stale_selection_is_refused_and_nothing_is_applied(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        # The page showed Crew only; meanwhile another change granted Supervisor.
+        data = self.save_data(admin_client, crew, ["SUPPLY_OFFICER"], current=["CREW"])
+        self.assertEqual(self.change(admin_client, crew).status_code, 302)
+        before = self.counts()
+
+        response = admin_client.post(URL, data)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "roles changed since the page loaded", status_code=409)
+        self.assertContains(
+            response,
+            'role-row-message" role="alert" tabindex="-1" data-focus-on-load',
+            status_code=409,
+        )
+        self.assertEqual(current_role_codes(crew), ("CREW", "SUPERVISOR"))
+        self.assertEqual(self.counts()[:2], before[:2])
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="ROLE_CHANGES", outcome="FAILED", reason_code="COMMAND_FAILED"
+            ).exists()
+        )
+
+    def test_a_refused_change_refuses_the_whole_save(self):
+        admin_client, admin = self.make_administrator("admin-1")
+        before = self.counts()
+        # The only administrator adds Supervisor and removes their own Administrator role.
+        response = self.save(admin_client, admin, ["CREW", "SUPERVISOR"])
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(
+            response, "removing the Administrator role was refused", status_code=409
+        )
+        self.assertContains(response, "No other change was applied", status_code=409)
+        self.assertEqual(current_role_codes(admin), ("ADMINISTRATOR", "CREW"))
+        self.assertEqual(self.counts()[:2], before[:2])
+
+    def test_nothing_to_save_is_refused_without_a_change(self):
         admin_client, _ = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
         before = self.counts()
-        staged = self.data(
+        response = self.save(admin_client, crew, ["CREW"])
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "Nothing to save", status_code=400)
+        self.assertEqual(self.counts()[:2], before[:2])
+
+    def test_removing_your_own_administrator_role_warns_and_ends_access_on_save(self):
+        # D1: the warning is in the signed-in Administrator's own row only.
+        admin_client, admin = self.make_administrator("admin-1")
+        other_client, other = self.sign_in("admin-2")
+        self.assertEqual(self.save(admin_client, other, ["CREW", "ADMINISTRATOR"]).status_code, 302)
+        page = admin_client.get(URL)
+        html = page.content.decode()
+        self.assertEqual(html.count("data-role-self-warning hidden>"), 1)
+        self.assertEqual(html.count("data-role-change-form data-role-self>"), 1)
+        self.assertContains(page, "You will lose access to Administration as soon as you save.")
+
+        response = self.save(admin_client, admin, ["CREW"])
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/")
+        self.assertEqual(current_role_codes(admin), ("CREW",))
+        self.assertEqual(admin_client.get(URL).status_code, 403)
+        self.assertEqual(other_client.get(URL).status_code, 200)
+
+    def test_replaying_a_save_yields_one_set_of_records(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        data = self.save_data(admin_client, crew, ["SUPERVISOR"])
+        first = admin_client.post(URL, data)
+        after_first = self.counts()
+        second = admin_client.post(URL, data)
+
+        self.assertEqual((first.status_code, second.status_code), (302, 302))
+        self.assertEqual(first["Location"], second["Location"])
+        self.assertEqual(self.counts(), after_first)
+        self.assertEqual(current_role_codes(crew), ("SUPERVISOR",))
+        self.assertEqual(CommandReceipt.objects.filter(command_type="ROLE_CHANGES").count(), 1)
+
+    def test_reusing_a_save_operation_id_for_a_different_selection_is_not_saved(self):
+        admin_client, _ = self.make_administrator("admin-1")
+        _, crew = self.sign_in("crew-1")
+        operation_id = str(uuid4())
+        first = self.save(admin_client, crew, ["CREW", "SUPERVISOR"], operation_id=operation_id)
+        self.assertEqual(first.status_code, 302)
+        after_first = self.counts()
+
+        response = self.save(
             admin_client,
             crew,
-            stage="preview",
-            role_selection_present="1",
-            roles=["SUPERVISOR", "ADMINISTRATOR"],
+            ["CREW", "SUPERVISOR", "SUPPLY_OFFICER"],
+            operation_id=operation_id,
         )
 
-        response = admin_client.post(URL, staged)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertContains(response, "Review one role change at a time", status_code=400)
-        self.assertEqual(self.counts(), before)
-        self.assertEqual(current_role_codes(crew), ("CREW",))
-
-    def test_preview_is_clear_and_does_not_change_roles_until_confirmation(self):
-        admin_client, _ = self.make_administrator("admin-1")
-        _, crew = self.sign_in("crew-1")
-        data = self.data(admin_client, crew, q=crew.email, stage="preview")
-        before = self.counts()
-
-        preview = admin_client.post(URL, data)
-
-        self.assertEqual(preview.status_code, 200)
-        self.assertContains(preview, f"Add the Supervisor role for {crew.display_name}")
-        self.assertContains(preview, crew.email)
-        self.assertContains(preview, 'name="stage" value="confirm"')
-        self.assertEqual(self.counts(), before)
-        self.assertEqual(current_role_codes(crew), ("CREW",))
-
-        confirmation = admin_client.post(URL, {**data, "stage": "confirm"})
-        self.assertEqual(confirmation.status_code, 302)
-        self.assertEqual(
-            confirmation["Location"], URL + "?" + urlencode({"saved": "1", "q": crew.email})
-        )
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "was not applied", status_code=409)
+        self.assertEqual(self.counts(), after_first)
         self.assertEqual(current_role_codes(crew), ("CREW", "SUPERVISOR"))
+
+    def test_a_non_administrator_save_is_denied_and_audited(self):
+        admin_client, admin = self.make_administrator("admin-1")
+        client, crew = self.sign_in("crew-1")
+        client.get("/")
+        grants = RoleGrant.objects.count()
+        response = client.post(
+            URL,
+            {
+                "csrfmiddlewaretoken": client.cookies["csrftoken"].value,
+                "stage": "save",
+                "role_selection_present": "1",
+                "operation_id": str(uuid4()),
+                "target": str(crew.pk),
+                "current_roles": ["CREW"],
+                "roles": ["CREW", "ADMINISTRATOR"],
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        for private in (admin.email, "Organization users"):
+            self.assertNotContains(response, private, status_code=403)
+        self.assertEqual(RoleGrant.objects.count(), grants)
+        self.assertEqual(current_role_codes(crew), ("CREW",))
+        denial = AuditEvent.objects.get(action="ROLE_CHANGES", outcome="DENIED")
+        self.assertEqual((denial.actor_user_id, denial.reason_code), (crew.pk, "FORBIDDEN"))
 
     def test_user_search_finds_matches_beyond_the_default_first_page(self):
         admin_client, _ = self.make_administrator("admin-1")
@@ -444,7 +574,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(by_email.context["target_total"], 1)
         self.assertContains(by_email, target.email)
 
-    def test_non_administrators_cannot_preview_edit_or_submit_unknown_stages(self):
+    def test_non_administrators_cannot_submit_retired_or_unknown_stages(self):
         admin_client, admin = self.make_administrator("admin-1")
         client, crew = self.sign_in("crew-1")
         client.get("/")
@@ -484,7 +614,8 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         _, crew = self.sign_in("crew-1")
         before = self.counts()
 
-        for stage in (None, "unexpected"):
+        # The review page's preview and edit stages are retired with issue #236.
+        for stage in (None, "unexpected", "preview", "edit"):
             with self.subTest(stage=stage):
                 data = self.data(admin_client, crew)
                 if stage is None:
@@ -499,14 +630,16 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         self.assertEqual(self.counts(), before)
         self.assertEqual(current_role_codes(crew), ("CREW",))
 
-    def test_malformed_preview_is_rejected_without_a_change(self):
+    def test_malformed_save_is_rejected_without_a_change(self):
         admin_client, _ = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
         before = self.counts()
         cases = {
-            "unknown role": {"role": "ROOT"},
-            "legacy EMT alias": {"role": "EMT"},
-            "unknown action": {"action": "DELETE"},
+            "unknown role": {"roles": ["CREW", "ROOT"]},
+            "legacy EMT alias": {"roles": ["EMT", "SUPERVISOR"]},
+            "duplicate role": {"roles": ["SUPERVISOR", "SUPERVISOR"]},
+            "unknown current role": {"current_roles": ["ROOT"]},
+            "selection marker missing": {"role_selection_present": ""},
             "target not a UUID": {"target": "not-a-uuid"},
             "target not canonical": {"target": str(crew.pk).upper()},
             "operation id not a UUID": {"operation_id": "not-a-uuid"},
@@ -514,45 +647,44 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         }
         for name, change in cases.items():
             with self.subTest(name=name):
-                data = self.data(admin_client, crew, stage="preview")
+                data = self.save_data(admin_client, crew, ["CREW", "SUPERVISOR"])
                 data.update(change)
                 response = admin_client.post(URL, data)
                 self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.counts(), before)
+        self.assertEqual(self.counts()[:2], before[:2])
         self.assertEqual(current_role_codes(crew), ("CREW",))
 
-    def test_preview_rejects_inactive_and_cross_organization_targets(self):
+    def test_save_rejects_inactive_and_cross_organization_targets(self):
         admin_client, _ = self.make_administrator("admin-1")
         other_org = Organization.objects.create(name="Other Agency", station_zone="UTC")
         outside = User.objects.create(
             organization=other_org,
             idp_issuer="https://accounts.google.com",
-            idp_subject="outside-preview",
-            email="outside-preview@example.test",
-            display_name="Outside Preview",
+            idp_subject="outside-save",
+            email="outside-save@example.test",
+            display_name="Outside Save",
         )
         inactive = User.objects.create(
             organization=self.org,
             idp_issuer="https://accounts.google.com",
-            idp_subject="inactive-preview",
-            email="inactive-preview@example.test",
-            display_name="Inactive Preview",
+            idp_subject="inactive-save",
+            email="inactive-save@example.test",
+            display_name="Inactive Save",
             active=False,
         )
         before = self.counts()
 
         for target in (outside, inactive):
             with self.subTest(target=target.idp_subject):
-                data = self.data(admin_client, target, stage="preview")
+                data = self.save_data(admin_client, target, ["SUPERVISOR"], current=[])
                 response = admin_client.post(URL, data)
                 self.assertEqual(response.status_code, 404)
                 self.assertNotContains(response, target.email, status_code=404)
-                self.assertNotContains(response, "Review role change", status_code=404)
 
-        self.assertEqual(self.counts(), before)
+        self.assertEqual(self.counts()[:2], before[:2])
         self.assertEqual(RoleGrant.objects.filter(user__in=(outside, inactive)).count(), 0)
 
-    def test_search_errors_hide_users_and_reject_preview_or_edit_posts(self):
+    def test_search_errors_hide_users(self):
         admin_client, _ = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
         before = self.counts()
@@ -570,17 +702,6 @@ class RoleAdministrationHttpTests(TransactionTestCase):
                 self.assertEqual(response.context["targets"], [])
                 self.assertEqual(response.context["target_total"], 0)
                 self.assertNotContains(response, 'id="role-target"')
-
-            for stage in ("preview", "edit"):
-                with self.subTest(search=name, stage=stage):
-                    data = self.data(admin_client, crew, stage=stage, q=query)
-                    response = admin_client.post(URL, data)
-                    self.assertEqual(response.status_code, 400)
-                    self.assertContains(response, message, status_code=400)
-                    self.assertContains(response, "The user list is hidden", status_code=400)
-                    self.assertEqual(response.context["targets"], [])
-                    self.assertEqual(response.context["target_total"], 0)
-                    self.assertNotContains(response, 'id="role-target"', status_code=400)
 
         self.assertEqual(self.counts(), before)
         self.assertEqual(current_role_codes(crew), ("CREW",))
