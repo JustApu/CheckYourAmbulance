@@ -155,7 +155,9 @@ class NavigationTests(ShellTestCase):
         cases = {
             "CREW": [],
             "SUPERVISOR": ["Kits", "Administration"],
-            "SUPPLY_OFFICER": ["Kits", "Administration"],
+            # Issue #235 E2: every administration page a Supply Officer may open is a kit page,
+            # so Administration would only repeat Kits.
+            "SUPPLY_OFFICER": ["Kits"],
             "ADMINISTRATOR": ["Kits", "Administration"],
         }
         for index, (role, more) in enumerate(cases.items()):

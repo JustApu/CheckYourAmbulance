@@ -8,7 +8,7 @@ from unittest import mock
 from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
-from cya.checklists.models import KitInstance
+from cya.checklists.models import KitInstance, Vehicle
 from cya.core.models import AuditEvent
 from cya.kits import kit_list_views
 from cya.kits.definitions import (
@@ -278,6 +278,41 @@ class KitInstancePageTests(KitAdminCase):
             label="No type",
         )
         self.assertContains(missing, "choose the kit type", status_code=400)
+
+    def test_with_no_kit_type_the_page_says_who_adds_one(self):
+        # Issue #235 E1: no empty "(choose)" list; the page says what is missing and who adds it.
+        set_kit_definition_active(
+            definition_id=self.definition, active=False, **self.context(self.supervisor)
+        )
+        page = self.client_.get(self.url)
+        self.assertContains(page, "A kit can't be added to this vehicle yet.")
+        self.assertContains(
+            page,
+            "<li>There are no kit types. A Supervisor or Administrator adds them in "
+            "Kit definitions.</li>",
+            html=True,
+        )
+        self.assertNotContains(page, 'name="stage" value="add"')
+        self.assertNotContains(page, 'href="/administration/kit-definitions/"')
+        supervisor, _ = self.harness.sign_in("supervisor")
+        self.assertContains(
+            supervisor.get(self.url),
+            '<a href="/administration/kit-definitions/">Kit definitions</a>',
+        )
+
+    def test_with_no_compartment_the_page_says_who_adds_one(self):
+        bare = Vehicle.objects.create(organization=self.org, display_name="Synthetic bare")
+        url = f"/administration/kit-instances/{bare.pk}/"
+        page = self.client_.get(url)
+        self.assertContains(page, "This vehicle has no compartments.")
+        self.assertNotContains(page, "There are no kit types.")
+        self.assertNotContains(page, 'name="stage" value="add"')
+        self.assertNotContains(page, f'href="/administration/positions/{bare.pk}/"')
+        supervisor, _ = self.harness.sign_in("supervisor")
+        self.assertContains(
+            supervisor.get(url),
+            f'<a href="/administration/positions/{bare.pk}/">Compartments and systems</a>',
+        )
 
     def test_only_a_canonical_uuid_v4_operation_id_is_accepted(self):
         # A v1 or non-canonical id is refused rather than rewritten into some other

@@ -17,6 +17,7 @@ from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods
 
+from cya.authorization.policy import permitted
 from cya.checklists.models import KitInstance, Vehicle
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
@@ -24,6 +25,7 @@ from cya.kits import positions as position_rules
 from cya.kits.commands import KitError, add_kit_instance
 from cya.kits.models import KitDefinition, KitInstanceDefinition
 from cya.kits.views import UNAVAILABLE, _context_ids
+from cya.shell import navigation
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +82,13 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None):
         "definition_id": request.GET.get("definition", ""),
         "label": request.GET.get("label", "")[:200],
     }
+    # Issue #235 E1: when no kit type or compartment can be chosen, the page says so and links
+    # to the page that adds one, if this person may open it.
+    roles = navigation.roles_for(user)
     context = {
         "title": f"Kits: {vehicle.display_name}",
+        "can_manage_definitions": permitted("manage_kit_definitions", str(user.pk), roles),
+        "can_manage_positions": permitted("manage_vehicle_positions", str(user.pk), roles),
         "vehicle": vehicle,
         "kits": _kits(org, vehicle),
         "definitions": list(
