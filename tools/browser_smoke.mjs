@@ -938,7 +938,8 @@ async function testAdministratorRoleChange(viewport) {
     assert.equal(await save.evaluate((element) => element === document.activeElement), true, viewport.name + ": keyboard skips Save");
     await Promise.all([page.waitForNavigation(), page.keyboard.press("Enter")]);
     const savedMessage = page.locator(".role-row-message");
-    assert.equal(await savedMessage.innerText(), "✓ Saved for Sam Example: added Supervisor, Supply Officer.", viewport.name + ": the saved row does not say what changed");
+    // The icon and text are separate flex items, so read the text span alone.
+    assert.equal(await savedMessage.locator(".save-state-text").innerText(), "Saved for Sam Example: added Supervisor, Supply Officer.", viewport.name + ": the saved row does not say what changed");
     assert.equal(await savedMessage.evaluate((element) => element === document.activeElement), true, viewport.name + ": focus did not move to the saved message");
     assert.equal(saved, true, viewport.name + ": the Save request was not submitted");
     assert.equal(await page.getByRole("region", { name: "Role history for sam@example.test" }).count(), 0, viewport.name + ": history belongs on its separate detail page");
