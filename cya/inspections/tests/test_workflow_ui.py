@@ -626,9 +626,7 @@ class DeficiencyListTests(CrewUiCase):
         self.assertEqual(filtered.status_code, 200)
         self.assertEqual(filtered.context["page"]["total"], 1)
         self.assertEqual(str(filtered.context["page"]["rows"][0].deficiency_id), str(target))
-        self.assertContains(
-            filtered, '<option value="HIGH" selected>High</option>', html=True
-        )
+        self.assertContains(filtered, '<option value="HIGH" selected>High</option>', html=True)
         self.assertContains(filtered, "Applied filters:")
         self.assertContains(filtered, "1 matching problems; showing 1")
         self.assertNotContains(filtered, "Synthetic pump other")
