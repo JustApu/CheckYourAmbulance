@@ -36,12 +36,12 @@ function markup({ active = false, participant = false, incomplete = false } = {}
       : '<button type="button" class="button primary join-session" data-template="template-night">Join Night Shift Vehicle Safety Checklist inspection</button>'
     : '<button type="button" class="button primary start-session" data-template="template-night">Start Night Shift Vehicle Safety Checklist inspection</button>';
   const openSummary = active
-    ? '<p><strong>Open inspection:</strong> Night Shift Vehicle Safety Checklist · started <time datetime="2026-11-12T20:00:00Z">2026-11-12 15:00 EST (-0500)</time></p>'
+    ? '<p><strong>Open inspection:</strong> Night Shift Vehicle Safety Checklist · started <time datetime="2026-11-12T20:00:00Z">2026-11-12 15:00</time></p>'
     : "";
   const primary = active
     ? `<div class="active-inspection">${openSummary}${action}</div>`
     : incomplete
-      ? `<div class="active-inspection"><p><strong>Incomplete inspection:</strong> Night Shift Vehicle Safety Checklist · opened <time datetime="2026-11-11T20:00:00Z">2026-11-11 15:00 EST (-0500)</time></p><a class="button primary" href="/inspection/sessions/incomplete-session/">Resume incomplete Night Shift Vehicle Safety Checklist inspection</a></div><details class="separate-inspection"><summary>Start a new inspection</summary><p>This starts a new inspection. Your incomplete inspection stays available in the list below.</p><ul class="plain inspection-options"><li>${action}</li></ul></details>`
+      ? `<div class="active-inspection"><p><strong>Incomplete inspection:</strong> Night Shift Vehicle Safety Checklist · opened <time datetime="2026-11-11T20:00:00Z">2026-11-11 15:00</time></p><a class="button primary" href="/inspection/sessions/incomplete-session/">Resume incomplete Night Shift Vehicle Safety Checklist inspection</a></div><details class="separate-inspection"><summary>Start a new inspection</summary><p>This starts a new inspection. Your incomplete inspection stays available in the list below.</p><ul class="plain inspection-options"><li>${action}</li></ul></details>`
       : action;
   const separate = active
     ? `<details class="separate-inspection"><summary>Start a separate inspection</summary>
@@ -49,9 +49,9 @@ function markup({ active = false, participant = false, incomplete = false } = {}
       <ul class="plain inspection-options"><li><button type="button" class="button start-separate" data-template="template-night" data-template-label="Night Shift Vehicle Safety Checklist">Start separate Night Shift Vehicle Safety Checklist inspection</button></li></ul></details>`
     : "";
   const sessionRow = incomplete
-    ? '<li class="session-row"><span class="session-row-status"><strong>Night Shift Vehicle Safety Checklist</strong> · Incomplete · opened <time datetime="2026-11-11T20:00:00Z">2026-11-11 15:00 EST (-0500)</time></span></li>'
+    ? '<li class="session-row"><span class="session-row-status"><strong>Night Shift Vehicle Safety Checklist</strong> · Incomplete · opened <time datetime="2026-11-11T20:00:00Z">2026-11-11 15:00</time></span></li>'
     : active
-    ? `<li class="session-row"><span class="session-row-status"><strong>Night Shift Vehicle Safety Checklist</strong> · Open · opened <time datetime="2026-11-12T20:00:00Z">2026-11-12 15:00 EST (-0500)</time></span>${participant ? '' : '<span class="muted">Join using the primary action above.</span>'}</li>`
+    ? `<li class="session-row"><span class="session-row-status"><strong>Night Shift Vehicle Safety Checklist</strong> · Open · opened <time datetime="2026-11-12T20:00:00Z">2026-11-12 15:00</time></span>${participant ? '' : '<span class="muted">Join using the primary action above.</span>'}</li>`
     : "<li>No inspection sessions yet.</li>";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">

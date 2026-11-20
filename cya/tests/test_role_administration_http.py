@@ -86,7 +86,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         )
         self.assertContains(
             history,
-            '<th scope="col">When (agency local time, America/New_York)</th>',
+            '<th scope="col">When (station time)</th>',
             html=True,
         )
         self.assertContains(history, expected_time)

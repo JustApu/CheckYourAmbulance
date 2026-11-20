@@ -105,6 +105,35 @@
     throw new Error("That agency-local time could not be resolved. Check the date and time zone.");
   }
 
+  function offsetMinutes(stamp, zone) {
+    var name = "";
+    new Intl.DateTimeFormat("en-US", {timeZone: zone, timeZoneName: "longOffset"})
+      .formatToParts(new Date(stamp)).forEach(function (part) {
+        if (part.type === "timeZoneName") { name = part.value; }
+      });
+    var match = /GMT([+-])(\d{2}):(\d{2})/.exec(name);
+    return match ? (match[1] === "-" ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3])) : 0;
+  }
+
+  function wallText(stamp, zone) {
+    return new Intl.DateTimeFormat("en-CA-u-ca-gregory-nu-latn", {
+      timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+    }).format(new Date(stamp));
+  }
+
+  // True when the wall time at this instant also occurs at another instant: the repeated hour
+  // of a fall-back transition. An overlap lasts at most the offset change, so comparing the
+  // offsets three hours either side finds every transition that could make this instant repeat.
+  function repeatedWallTime(stamp, zone) {
+    var hour = 3600000, before = offsetMinutes(stamp - 3 * hour, zone);
+    var after = offsetMinutes(stamp + 3 * hour, zone);
+    if (before <= after) { return false; }
+    var shift = (before - after) * 60000;
+    var other = offsetMinutes(stamp, zone) === before ? stamp + shift : stamp - shift;
+    return wallText(other, zone) === wallText(stamp, zone);
+  }
+
   function formatUtc(iso, zone, precision) {
     var date = new Date(iso);
     if (isNaN(date.getTime())) { return ""; }
@@ -122,14 +151,11 @@
       new Intl.DateTimeFormat("en-CA-u-ca-gregory-nu-latn", formatOptions).formatToParts(date).forEach(function (part) {
         if (part.type !== "literal") { fields[part.type] = part.value; }
       });
-      var offset = {};
-      new Intl.DateTimeFormat("en-US", {timeZone: zone, timeZoneName: "shortOffset"})
-        .formatToParts(date).forEach(function (part) {
-          if (part.type === "timeZoneName") { offset.name = part.value; }
-        });
+      // Station time without a zone (issue #235 C1), except in the repeated fall-back hour,
+      // where the same wall time names two instants and the abbreviation tells them apart.
       return fields.year + "-" + fields.month + "-" + fields.day + " " +
-        fields.hour + ":" + fields.minute + (showSeconds ? ":" + fields.second : "") + " " +
-        fields.timeZoneName + " (" + offset.name + ")";
+        fields.hour + ":" + fields.minute + (showSeconds ? ":" + fields.second : "") +
+        (repeatedWallTime(date.getTime(), zone) ? " " + fields.timeZoneName : "");
     } catch (_error) {
       throw new Error("The agency time zone is unavailable. Contact an administrator.");
     }

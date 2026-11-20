@@ -200,16 +200,16 @@ class PrintPageTests(CrewUiCase):
         self.assertIn(self.siren.label, text)  # a vehicle-system item is not in the cabinet
         self.assertEqual(text.count("Inside a sealed cabinet"), 2)  # both kits are in it
 
-    def test_the_printed_instant_uses_the_station_zone_with_its_offset(self):
+    def test_the_printed_instant_is_in_station_time(self):
         self.org.station_zone = "America/New_York"
         self.org.save(update_fields=["station_zone"])
         for url in (self.url(), "/inspection/kit-reference/"):
             with self.subTest(url=url):
                 text = strip_tags(self.client.get(url).content.decode())
-                self.assertRegex(
-                    text, r"in force at \d{4}-\d{2}-\d{2} \d{2}:\d{2} E[SD]T \(-0[45]00\)"
-                )
-                self.assertNotIn(" UTC", text.split("in force at", 1)[1][:40])
+                self.assertRegex(text, r"in force at \d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+                after = text.split("in force at", 1)[1][:40]
+                self.assertNotIn(" UTC", after)
+                self.assertNotIn("(-0", after)  # station time, no offset (issue #235 C1)
 
     def test_the_sheet_carries_no_personal_data_or_results(self):
         self.open()  # a session and participant exist; neither may appear on paper

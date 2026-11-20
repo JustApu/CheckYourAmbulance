@@ -71,7 +71,7 @@
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="extension" data-url="{% url 'api-deficiency-extension-requests' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Request deadline extension</h2>
 <label>Reason <textarea name="reason" required maxlength="4000"></textarea></label>
-<label>Proposed date and time (agency local time, {{ cya_user.organization.station_zone }}) <input name="proposed_deadline" type="datetime-local" required></label>
+<label>Proposed date and time (station time) <input name="proposed_deadline" type="datetime-local" required></label>
 <button type="submit" class="button primary">Request extension</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
@@ -90,7 +90,7 @@
 {% csrf_token %}<h2>Update dependency</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
 {% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
-<label>Follow-up date and time (agency local time, {{ cya_user.organization.station_zone }}, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
+<label>Follow-up date and time (station time, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
 <button type="submit" class="button primary">Update dependency</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
@@ -105,7 +105,7 @@
 {% csrf_token %}<h2>Awaiting External Dependency</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
 {% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
-<label>Follow-up date and time (agency local time, {{ cya_user.organization.station_zone }}, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
+<label>Follow-up date and time (station time, optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
 <button type="submit" class="button primary">Record dependency</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
@@ -148,7 +148,7 @@
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="deadline" data-url="{% url 'api-deficiency-deadlines' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Set deadline</h2>
 <p>A new deadline replaces any extension decided under the old one; earlier deadlines stay in the history.</p>
-<label>Deadline (agency local time, {{ cya_user.organization.station_zone }}) <input name="deadline" type="datetime-local" required></label>
+<label>Deadline (station time) <input name="deadline" type="datetime-local" required></label>
 <button type="submit" class="button primary">Set deadline</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
@@ -159,7 +159,7 @@
 <p>Requested {{ request.requested_at|station_time }} for {{ request.proposed_deadline|station_time }}: {{ request.reason }}</p>
 <input type="hidden" name="request_event_id" value="{{ request.request_event_id }}">
 <label>Decision <select name="decision" required><option value="">Choose a decision</option><option value="APPROVED">Approve the proposed date</option><option value="DIFFERENT_DATE">Approve a different date</option><option value="DENIED">Deny</option></select></label>
-<label>Different date (agency local time, {{ cya_user.organization.station_zone }}, only for a different date) <input name="deadline" type="datetime-local"></label>
+<label>Different date (station time, only for a different date) <input name="deadline" type="datetime-local"></label>
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
 <button type="submit" class="button primary">Record decision</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
@@ -196,7 +196,7 @@
 {% csrf_token %}<h2>{% if supervisor.expanding %}Expand verification scope{% else %}Add verification after closure{% endif %}</h2>
 <p>{% if supervisor.expanding %}Each item and physical kit you add needs its own verification Pass.{% else %}This reopens the problem; each item and physical kit you add needs a verification Pass by the deadline.{% endif %}</p>
 <fieldset><legend>Items</legend>{% for value, label in supervisor.verification_items %}<label><input type="checkbox" name="items" value="{{ value }}"> {{ label }}</label>{% empty %}<p>No current checklist items.</p>{% endfor %}</fieldset>
-{% if not supervisor.expanding %}<label>Verification deadline (agency local time, {{ cya_user.organization.station_zone }}) <input name="deadline" type="datetime-local" required></label>{% endif %}
+{% if not supervisor.expanding %}<label>Verification deadline (station time) <input name="deadline" type="datetime-local" required></label>{% endif %}
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
 <button type="submit" class="button primary">{% if supervisor.expanding %}Expand scope{% else %}Add verification{% endif %}</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
