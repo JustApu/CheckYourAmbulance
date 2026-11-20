@@ -24,11 +24,18 @@
   function describe() {
     if (signedOut) { return; }
     if (ended) { state.textContent = "Live updates stopped: sign in again to resume."; return; }
-    var total = config.vehicle_count, every = "The picture re-reads every " + config.refresh_seconds + " seconds.";
-    if (!config.sockets.length) { state.textContent = every; return; }
-    if (tried < config.sockets.length) { state.textContent = "Connecting to live updates… " + every; return; }
-    state.textContent = (open === config.sockets.length ? "Live" : "Live updates partly lost") +
-      " for " + open + " of " + total + " vehicles. " + every;
+    // Plain words (issue #235 C3): every vehicle re-reads on the timer; at most a few also get
+    // instant updates, because each browser may hold only a few sockets.
+    var total = config.vehicle_count, n = config.sockets.length;
+    var every = "Updates every " + config.refresh_seconds + " seconds.";
+    if (!n || tried < n) { state.textContent = every; return; }
+    if (open < n) {
+      state.textContent = "Instant updates paused for some vehicles; the page still updates every " +
+        config.refresh_seconds + " seconds.";
+      return;
+    }
+    state.textContent = every + (n >= total ? " Changes show at once." :
+      " Changes on the first " + n + " vehicles show at once.");
   }
   function refresh() {
     if (signedOut) { return; }

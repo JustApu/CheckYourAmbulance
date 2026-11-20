@@ -199,6 +199,8 @@ def _screen(request, template, background=False):
         {
             "title": "Fleet readiness",
             "picture": picture,
+            # The filter help names the levels it counts (issue #235 C3); empty means any.
+            "attention_levels": " / ".join(attention_severity_labels),
             "live": live,
             "config": {
                 "panel_url": reverse("fleet-readiness-panel"),
