@@ -615,6 +615,9 @@ async function testAgencyTimezoneConversion() {
           return a !== b && a.indexOf("2026-04-05 01:45 ") === 0 && b.indexOf("2026-04-05 01:45 ") === 0;
         })(),
         utc: window.CyaTimezones.formatUtc("2026-11-01T05:30:00Z", "UTC"),
+        longFoldFirst: window.CyaTimezones.formatUtc("1969-09-30T01:00:00Z", "Pacific/Kwajalein"),
+        longFoldSecond: window.CyaTimezones.formatUtc("1969-10-01T00:00:00Z", "Pacific/Kwajalein"),
+        afterLongFold: window.CyaTimezones.formatUtc("1969-10-02T00:00:00Z", "Pacific/Kwajalein"),
       }));
       assert.deepEqual(actual, {
         regular: "2026-06-01T16:00:00.000Z",
@@ -629,6 +632,9 @@ async function testAgencyTimezoneConversion() {
         afterFold: "2026-11-01 02:00",
         southernFoldDistinct: true,
         utc: "2026-11-01 05:30",
+        longFoldFirst: "1969-09-30 12:00 +11",
+        longFoldSecond: "1969-09-30 12:00 -12",
+        afterLongFold: "1969-10-01 12:00",
       }, `device timezone ${deviceZone}: agency-zone conversion changed`);
       const invalid = await page.evaluate(() => {
         const errors = [];

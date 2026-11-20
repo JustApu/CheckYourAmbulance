@@ -122,16 +122,31 @@
     }).format(new Date(stamp));
   }
 
-  // True when the wall time at this instant also occurs at another instant: the repeated hour
-  // of a fall-back transition. An overlap lasts at most the offset change, so comparing the
-  // offsets three hours either side finds every transition that could make this instant repeat.
+  // True when the wall time at this instant also occurs at another instant: a fall-back
+  // transition repeats a span as long as its offset change. The other occurrence lies that change
+  // away, so each difference between the offsets here and two days either side is tried in both
+  // directions and confirmed by comparing wall times. Two days covers every backward shift in the
+  // time zone database (the longest is about a day, e.g. Pacific/Kwajalein in 1969; review of
+  // PR #241), and the comparison means a sampled offset can never invent a repeat.
   function repeatedWallTime(stamp, zone) {
-    var hour = 3600000, before = offsetMinutes(stamp - 3 * hour, zone);
-    var after = offsetMinutes(stamp + 3 * hour, zone);
-    if (before <= after) { return false; }
-    var shift = (before - after) * 60000;
-    var other = offsetMinutes(stamp, zone) === before ? stamp + shift : stamp - shift;
-    return wallText(other, zone) === wallText(stamp, zone);
+    var day = 86400000, wall = wallText(stamp, zone);
+    var offsets = [offsetMinutes(stamp - 2 * day, zone), offsetMinutes(stamp, zone), offsetMinutes(stamp + 2 * day, zone)];
+    for (var i = 0; i < offsets.length; i += 1) {
+      for (var j = i + 1; j < offsets.length; j += 1) {
+        var shift = Math.abs(offsets[i] - offsets[j]) * 60000;
+        if (shift && (wallText(stamp + shift, zone) === wall || wallText(stamp - shift, zone) === wall)) { return true; }
+      }
+    }
+    return false;
+  }
+
+  // The zone name as the server writes it (Python's %Z): "EDT" stays; a numeric name such as
+  // "GMT+11" or "GMT+10:30" becomes "+11" or "+1030", so browser and server text agree.
+  function zoneName(name) {
+    var match = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(name || "");
+    if (!match) { return name; }
+    var hours = ("0" + match[2]).slice(-2), minutes = match[3] && match[3] !== "00" ? match[3] : "";
+    return match[1] + hours + minutes;
   }
 
   function formatUtc(iso, zone, precision) {
@@ -155,7 +170,7 @@
       // where the same wall time names two instants and the abbreviation tells them apart.
       return fields.year + "-" + fields.month + "-" + fields.day + " " +
         fields.hour + ":" + fields.minute + (showSeconds ? ":" + fields.second : "") +
-        (repeatedWallTime(date.getTime(), zone) ? " " + fields.timeZoneName : "");
+        (repeatedWallTime(date.getTime(), zone) ? " " + zoneName(fields.timeZoneName) : "");
     } catch (_error) {
       throw new Error("The agency time zone is unavailable. Contact an administrator.");
     }

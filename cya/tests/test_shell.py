@@ -65,6 +65,18 @@ class StationTimeFilterTests(SimpleTestCase):
             self.assertEqual(self.render(second), "2025-11-02 01:30 EST")
             self.assertEqual(self.render(first, "seconds"), "2025-11-02 01:30:00 EDT")
 
+    def test_a_day_long_fall_back_keeps_both_occurrences_distinct(self):
+        # Pacific/Kwajalein moved from UTC+11 to UTC-12 in 1969, repeating 23 hours of wall time
+        # (review of PR #241); the browser formatter is checked against the same instants.
+        with timezone.override(ZoneInfo("Pacific/Kwajalein")):
+            first = datetime(1969, 9, 30, 1, 0, tzinfo=UTC)
+            second = datetime(1969, 10, 1, 0, 0, tzinfo=UTC)
+            self.assertEqual(self.render(first), "1969-09-30 12:00 +11")
+            self.assertEqual(self.render(second), "1969-09-30 12:00 -12")
+            self.assertEqual(
+                self.render(datetime(1969, 10, 2, 0, 0, tzinfo=UTC)), "1969-10-01 12:00"
+            )
+
     def test_utc_never_shows_a_zone(self):
         with timezone.override(ZoneInfo("UTC")):
             self.assertEqual(
