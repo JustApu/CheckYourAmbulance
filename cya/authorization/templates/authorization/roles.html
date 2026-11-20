@@ -35,14 +35,14 @@
   <p><input id="role-user-search" name="q" type="search" maxlength="100" value="{{ target_search_query }}" autocomplete="off">
     <button type="submit" class="button">Search users</button></p>
 </form>
-{% if target_search_error %}<p class="banner banner-error" role="alert">{{ target_search_error }}</p>{% endif %}
+{% if target_search_error %}<p class="banner banner-error" role="alert"{% if searched %} tabindex="-1" data-focus-on-load{% endif %}>{{ target_search_error }}</p>{% endif %}
 {% if role_list_error %}<p class="banner banner-error" role="alert">{{ role_list_error }}</p>{% endif %}
 {% if target_search_error %}
   <p>The user list is hidden until you correct the search.</p>
 {% elif target_search_query %}
-  <p>{{ target_total }} matching active user{{ target_total|pluralize }}{% if target_total > target_limit %}; showing the first {{ target_limit }}{% endif %}.</p>
+  <p class="role-search-result"{% if searched %} tabindex="-1" data-focus-on-load{% endif %}>{{ target_total }} matching active user{{ target_total|pluralize }}{% if target_total > target_limit %}; showing the first {{ target_limit }}{% endif %}.</p>
 {% else %}
-  <p>Showing the first {{ target_limit }} active users. Search to find someone else.</p>
+  <p class="role-search-result"{% if searched %} tabindex="-1" data-focus-on-load{% endif %}>Showing the first {{ target_limit }} active users. Search to find someone else.</p>
 {% endif %}
 {% if targets %}
 <ul class="role-user-list" aria-label="Organization users and roles">

@@ -10,7 +10,7 @@
 <p>Showing changes {{ history_page.start_index }} to {{ history_page.end_index }} of {{ history_total }}.</p>
 {% if history %}
 <div class="role-history-scroll" role="region" aria-label="Role history for {{ target.email }}" tabindex="0">
-<table class="role-history-table">
+<table aria-label="Role history for {{ target.email }}" class="role-history-table">
   <thead><tr><th scope="col">When (station time)</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead>
   <tbody>
   {% for event in history %}
@@ -18,7 +18,7 @@
       <td>{{ event.recorded_at|station_time:"seconds" }}</td>
       <td>{{ event.action_label }}</td>
       <td>{{ event.role_label }}</td>
-      <td>{% if event.actor_user %}{{ event.actor_user.email }}{% else %}System{% endif %}</td>
+      <td>{% if event.actor_user %}{{ event.actor_user.display_name|default:event.actor_user.email }}{% else %}System{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

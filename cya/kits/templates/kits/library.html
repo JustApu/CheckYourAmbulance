@@ -20,7 +20,7 @@
 <h2>Review import</h2>
 <p id="import-summary">{{ plan.summary.created }} kit{{ plan.summary.created|pluralize }} to create, {{ plan.summary.changed }} to change (as a new draft), {{ plan.summary.unchanged }} unchanged; {{ plan.summary.new_items }} new item{{ plan.summary.new_items|pluralize }}.</p>
 <div class="table-scroll" role="region" aria-label="Import preview" tabindex="0">
-<table>
+<table aria-label="Import preview">
   <thead><tr><th scope="col">Kit key</th><th scope="col">Label</th><th scope="col">Result</th><th scope="col">Contents</th></tr></thead>
   <tbody>
   {% for kit in plan.kits %}
@@ -56,7 +56,7 @@
 <h2>Kit definitions</h2>
 {% if definitions %}
 <div class="table-scroll" role="region" aria-label="Kit definitions" tabindex="0">
-<table>
+<table aria-label="Kit definitions">
   <thead><tr><th scope="col">Key</th><th scope="col">Label</th><th scope="col">Latest revision</th><th scope="col">In force (station time)</th><th scope="col">Status</th></tr></thead>
   <tbody>
   {% for d in definitions %}

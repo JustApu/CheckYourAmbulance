@@ -12,7 +12,7 @@
 {% if in_force %}
 <p>Revision {{ in_force.revision }}.</p>
 <div class="table-scroll" role="region" aria-labelledby="in-force-heading" tabindex="0">
-<table>
+<table aria-labelledby="in-force-heading">
   <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required</th></tr></thead>
   <tbody>{% for line in in_force_lines %}<tr><td>{{ line.definition }}</td><td>{{ line.compartment }}</td><td>{{ line.required_count }}</td></tr>{% endfor %}</tbody>
 </table>
@@ -52,7 +52,7 @@
   <input type="hidden" name="operation_id" value="{{ draft_operation_id }}">
   <input type="hidden" name="rows" value="{{ rows|length }}">
   <div class="table-scroll" role="region" aria-label="Kit list lines" tabindex="0">
-  <table>
+  <table aria-label="Kit list lines">
     <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required</th><th scope="col">Order</th><th scope="col">Remove</th></tr></thead>
     <tbody>
     {% for row in rows %}

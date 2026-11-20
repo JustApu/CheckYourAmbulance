@@ -40,6 +40,34 @@ class RoleAdministrationHttpTests(TransactionTestCase):
 
     # Acceptance criteria -----------------------------------------------------
 
+    def test_a_search_reload_names_and_focuses_its_result(self):
+        # Issue #235 D5: the title and focus say what the search found.
+        admin_client, _admin = self.make_administrator("admin-search")
+        self.sign_in("crew-search")
+        plain = admin_client.get(URL)
+        self.assertEqual(plain.context["title"], "Role administration")
+        self.assertNotContains(plain, 'tabindex="-1" data-focus-on-load')
+        found = admin_client.get(URL, {"q": "crew-search"})
+        self.assertEqual(found.context["title"], "Role administration (1 matching)")
+        self.assertContains(
+            found,
+            '<p class="role-search-result" tabindex="-1" data-focus-on-load>'
+            "1 matching active user.</p>",
+            html=True,
+        )
+        self.assertEqual(found.content.decode().count('tabindex="-1" data-focus-on-load'), 1)
+
+    def test_role_history_names_who_made_the_change(self):
+        # Issue #235 D8: "Changed by" shows the person's name, as the user list does.
+        admin_client, admin = self.make_administrator("admin-named")
+        admin.display_name = "Synthetic Admin Name"
+        admin.save(update_fields=["display_name"])
+        _, crew = self.sign_in("crew-named")
+        self.change(admin_client, crew)
+        history = admin_client.get(f"{URL}{crew.pk}/history/")
+        self.assertContains(history, "<td>Synthetic Admin Name</td>", html=True)
+        self.assertNotContains(history, f"<td>{admin.email}</td>", html=True)
+
     def test_authorized_change_is_persisted_in_history_and_audited(self):
         admin_client, admin = self.make_administrator("admin-1")
         _, crew = self.sign_in("crew-1")
