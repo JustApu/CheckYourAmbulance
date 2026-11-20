@@ -46,7 +46,8 @@ class WorkflowUiTests(CrewUiCase):
         page = self.history()
         self.assertEqual(page.status_code, 200)
         shown = strip_tags(page.content.decode())
-        self.assertRegex(shown, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:EDT|EST) \(-0[45]00\)")
+        self.assertRegex(shown, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+        self.assertNotRegex(shown, r"\(-0[45]00\)")  # station time, no offset (issue #235 C1)
         self.assertNotRegex(shown, r"\b\d{2}:\d{2}:\d{2}\b")
 
     def test_check_history_is_compact_filterable_and_detail_returns_to_the_chain(self):

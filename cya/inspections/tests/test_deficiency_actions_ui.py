@@ -392,9 +392,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         page = self.detail(pk)
         self.assertNotContains(page, prefilled)
         self.assertContains(page, 'name="follow_up_at" type="datetime-local" value=""')
-        self.assertContains(
-            page, f"The follow-up set for {follow_up:%Y-%m-%d %H:%M} UTC (+0000) has passed"
-        )
+        self.assertContains(page, f"The follow-up set for {follow_up:%Y-%m-%d %H:%M} has passed")
         # What the form now sends: the new explanation and an empty follow-up.
         revised = self.change(
             pk, "dependency-revisions", explanation="Synthetic revised", follow_up_at=None
@@ -424,7 +422,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
             **self.context(self.admin),
         )
         page = self.detail(pk).content.decode()
-        self.assertIn("<dt>Deadline</dt><dd>2026-06-02 20:00 EDT (-0400)</dd>", page)
+        self.assertIn("<dt>Deadline</dt><dd>2026-06-02 20:00</dd>", page)
         self.assertNotIn("Not set", page.split("<dt>Age since")[0].split("<dt>Deadline</dt>")[1])
 
     def test_removed_current_checklist_rows_remain_outstanding(self):

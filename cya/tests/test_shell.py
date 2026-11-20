@@ -29,21 +29,58 @@ LOOKUP = "cya.tests.test_shell.lookup"
 
 
 class StationTimeFilterTests(SimpleTestCase):
-    def test_both_fall_back_instants_keep_distinct_zone_and_offset(self):
-        first = datetime(2025, 11, 2, 5, 30, tzinfo=UTC)
-        second = datetime(2025, 11, 2, 6, 30, tzinfo=UTC)
-        template = Template("{% load station_time %}{{ instant|station_time }}")
-        seconds_template = Template('{% load station_time %}{{ instant|station_time:"seconds" }}')
+    """Issue #235 C1: station time without a zone, except in the repeated fall-back hour."""
+
+    def render(self, instant, precision=None):
+        arg = f':"{precision}"' if precision else ""
+        template = Template("{% load station_time %}{{ instant|station_time" + arg + " }}")
+        return template.render(Context({"instant": instant}))
+
+    def test_ordinary_times_show_no_zone(self):
         with timezone.override(ZoneInfo("America/New_York")):
             self.assertEqual(
-                template.render(Context({"instant": first})), "2025-11-02 01:30 EDT (-0400)"
+                self.render(datetime(2026, 6, 1, 16, 0, tzinfo=UTC)), "2026-06-01 12:00"
             )
             self.assertEqual(
-                template.render(Context({"instant": second})), "2025-11-02 01:30 EST (-0500)"
+                self.render(datetime(2026, 6, 1, 16, 0, 5, tzinfo=UTC), "seconds"),
+                "2026-06-01 12:00:05",
+            )
+            # The hour after a spring-forward gap exists once, so it needs no zone either.
+            self.assertEqual(
+                self.render(datetime(2025, 3, 9, 7, 0, tzinfo=UTC)), "2025-03-09 03:00"
+            )
+            # Just outside the repeated hour on fall-back day.
+            self.assertEqual(
+                self.render(datetime(2025, 11, 2, 4, 59, tzinfo=UTC)), "2025-11-02 00:59"
             )
             self.assertEqual(
-                seconds_template.render(Context({"instant": first})),
-                "2025-11-02 01:30:00 EDT (-0400)",
+                self.render(datetime(2025, 11, 2, 7, 0, tzinfo=UTC)), "2025-11-02 02:00"
+            )
+
+    def test_both_fall_back_instants_keep_distinct_zones(self):
+        first = datetime(2025, 11, 2, 5, 30, tzinfo=UTC)
+        second = datetime(2025, 11, 2, 6, 30, tzinfo=UTC)
+        with timezone.override(ZoneInfo("America/New_York")):
+            self.assertEqual(self.render(first), "2025-11-02 01:30 EDT")
+            self.assertEqual(self.render(second), "2025-11-02 01:30 EST")
+            self.assertEqual(self.render(first, "seconds"), "2025-11-02 01:30:00 EDT")
+
+    def test_a_day_long_fall_back_keeps_both_occurrences_distinct(self):
+        # Pacific/Kwajalein moved from UTC+11 to UTC-12 in 1969, repeating 23 hours of wall time
+        # (review of PR #241); the browser formatter is checked against the same instants.
+        with timezone.override(ZoneInfo("Pacific/Kwajalein")):
+            first = datetime(1969, 9, 30, 1, 0, tzinfo=UTC)
+            second = datetime(1969, 10, 1, 0, 0, tzinfo=UTC)
+            self.assertEqual(self.render(first), "1969-09-30 12:00 +11")
+            self.assertEqual(self.render(second), "1969-09-30 12:00 -12")
+            self.assertEqual(
+                self.render(datetime(1969, 10, 2, 0, 0, tzinfo=UTC)), "1969-10-01 12:00"
+            )
+
+    def test_utc_never_shows_a_zone(self):
+        with timezone.override(ZoneInfo("UTC")):
+            self.assertEqual(
+                self.render(datetime(2025, 11, 2, 5, 30, tzinfo=UTC)), "2025-11-02 05:30"
             )
 
 

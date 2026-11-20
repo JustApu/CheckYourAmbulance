@@ -609,6 +609,18 @@ async function testAgencyTimezoneConversion() {
         southernGap: window.CyaTimezones.toUtc("2026-10-04T02:15", "Australia/Lord_Howe"),
         savedCheck: window.CyaTimezones.formatUtc("2026-06-01T16:00:00Z", "America/New_York"),
         auditCheck: window.CyaTimezones.formatUtc("2026-06-01T16:00:00Z", "America/New_York", "seconds"),
+        foldFirst: window.CyaTimezones.formatUtc("2026-11-01T05:30:00Z", "America/New_York"),
+        foldSecond: window.CyaTimezones.formatUtc("2026-11-01T06:30:00Z", "America/New_York"),
+        afterFold: window.CyaTimezones.formatUtc("2026-11-01T07:00:00Z", "America/New_York"),
+        southernFoldDistinct: (function () {
+          var a = window.CyaTimezones.formatUtc("2026-04-04T14:45:00Z", "Australia/Lord_Howe");
+          var b = window.CyaTimezones.formatUtc("2026-04-04T15:15:00Z", "Australia/Lord_Howe");
+          return a !== b && a.indexOf("2026-04-05 01:45 ") === 0 && b.indexOf("2026-04-05 01:45 ") === 0;
+        })(),
+        utc: window.CyaTimezones.formatUtc("2026-11-01T05:30:00Z", "UTC"),
+        longFoldFirst: window.CyaTimezones.formatUtc("1969-09-30T01:00:00Z", "Pacific/Kwajalein"),
+        longFoldSecond: window.CyaTimezones.formatUtc("1969-10-01T00:00:00Z", "Pacific/Kwajalein"),
+        afterLongFold: window.CyaTimezones.formatUtc("1969-10-02T00:00:00Z", "Pacific/Kwajalein"),
       }));
       assert.deepEqual(actual, {
         regular: "2026-06-01T16:00:00.000Z",
@@ -616,8 +628,16 @@ async function testAgencyTimezoneConversion() {
         gap: "2026-03-08T07:00:00.000Z",
         southernFold: "2026-04-04T14:45:00.000Z",
         southernGap: "2026-10-03T15:30:00.000Z",
-        savedCheck: "2026-06-01 12:00 EDT (GMT-4)",
-        auditCheck: "2026-06-01 12:00:00 EDT (GMT-4)",
+        savedCheck: "2026-06-01 12:00",
+        auditCheck: "2026-06-01 12:00:00",
+        foldFirst: "2026-11-01 01:30 EDT",
+        foldSecond: "2026-11-01 01:30 EST",
+        afterFold: "2026-11-01 02:00",
+        southernFoldDistinct: true,
+        utc: "2026-11-01 05:30",
+        longFoldFirst: "1969-09-30 12:00 +11",
+        longFoldSecond: "1969-09-30 12:00 -12",
+        afterLongFold: "1969-10-01 12:00",
       }, `device timezone ${deviceZone}: agency-zone conversion changed`);
       const invalid = await page.evaluate(() => {
         const errors = [];
