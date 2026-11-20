@@ -7,7 +7,7 @@ from django.test import override_settings
 
 from cya.checklists.models import Compartment
 from cya.core.models import AuditEvent
-from cya.kits.models import PositionKey
+from cya.kits.models import PositionKey, VehiclePositionKey
 from cya.kits.tests.support import KitCase
 from cya.testing.role_http import RoleHttpHarness, real_collaborator_settings
 
@@ -91,7 +91,54 @@ class PositionPagesTests(KitCase):
         self.assertEqual(self.rows(slot), [(1, "Synthetic drawer", 3, False)])
         self.assertEqual(self.post(**fields).status_code, 302)
         self.assertEqual(len(self.rows(slot)), 1)
-        self.assertContains(self.client_.get(first["Location"]), "Position added.")
+        self.assertContains(self.client_.get(first["Location"]), "Compartment or system added.")
+
+    def test_the_page_explains_each_kind_and_what_a_key_is_for(self):
+        # Issue #238 F1, F1a, F1b, F1c.
+        page = self.client_.get(self.url)
+        self.assertContains(page, "Driver-side exterior compartment 1")
+        self.assertContains(page, "Lights and sirens")
+        self.assertContains(page, '<fieldset aria-describedby="add-kind-help">')
+        self.assertContains(page, "Add a compartment or system")
+        self.assertNotContains(page, "Add a position")
+        self.assertContains(page, "the vehicle can't be exported until")
+        # Before the cutover a key is still shared between vehicles (pre-5.0.0 behaviour).
+        self.assertContains(page, "already used on another vehicle")
+        self.assertContains(page, "An Administrator can set a missing key.")
+        self.record_cutover()
+        page = self.client_.get(self.url)
+        self.assertNotContains(page, "already used on another vehicle")
+        self.assertContains(page, "the same key on another vehicle names an unrelated place")
+        self.assertContains(page, "An Administrator can set a missing key on this page.")
+        self.assertNotContains(page, 'value="set-key"')
+
+    def test_an_administrator_sets_a_missing_key_once_after_the_cutover(self):
+        self.record_cutover()
+        admin_client, _ = self.harness.sign_in("admin")
+        page = admin_client.get(self.url)
+        self.assertContains(page, "You can set a missing key below.")
+        self.assertContains(page, 'value="set-key"')
+        self.assertContains(page, f'<label for="key-{self.slot}">Key for')
+
+        response = self.post(
+            admin_client, stage="set-key", kind="COMPARTMENT", slot=self.slot, key="cabinet-a"
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertContains(admin_client.get(response["Location"]), "Key set.")
+        key = VehiclePositionKey.objects.get(vehicle=self.vehicle, stable_slot_id=self.slot)
+        self.assertEqual(key.key, "cabinet-a")
+        again = self.post(
+            admin_client, stage="set-key", kind="COMPARTMENT", slot=self.slot, key="other"
+        )
+        self.assertEqual(again.status_code, 400)
+        self.assertContains(again, "never changes", status_code=400)
+
+    def test_a_supervisor_cannot_set_a_key(self):
+        self.record_cutover()
+        response = self.post(stage="set-key", kind="COMPARTMENT", slot=self.slot, key="cabinet-a")
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(VehiclePositionKey.objects.filter(vehicle=self.vehicle).exists())
 
     def test_bad_input_is_shown_with_the_form_kept(self):
         response = self.post(

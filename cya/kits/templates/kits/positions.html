@@ -7,16 +7,21 @@
 
 <div class="kit-library">
 <p><a href="{% url 'position-vehicles' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} · Inactive{% endif %}</p>
+{# Issue #238 F1: what each kind is (SPEC 4.2), with an example of each. #}
+<div id="position-kinds-help" class="position-kinds-help">
+<p><strong>Compartments</strong> are physical storage places on the vehicle, such as &ldquo;Driver-side exterior compartment 1&rdquo;. A compartment holds checklist items and kits.</p>
+<p><strong>Systems</strong> are parts of the ambulance as a whole, such as &ldquo;Lights and sirens&rdquo;. A system holds checklist items only; a kit is always placed in a compartment.</p>
+</div>
 
 {% if retiring %}
 <section aria-labelledby="retire-heading">
 <h2 id="retire-heading">Retire {{ retiring.row.label }}</h2>
 {% if retiring.blockers %}
-<p>This position cannot be retired while these still use it:</p>
+<p>This compartment or system cannot be retired while these still use it:</p>
 <ul id="retire-blockers">{% for reason in retiring.blockers %}<li>{{ reason }}</li>{% endfor %}</ul>
 <p><a class="button" href="{% url 'vehicle-positions' vehicle.pk %}">Back</a></p>
 {% else %}
-<p>Nothing published uses this position. Retiring it keeps its history, removes it from this vehicle's lists and stops anything from being placed there. It cannot be undone here.</p>
+<p>Nothing published uses it. Retiring it keeps its history, removes it from this vehicle's lists and stops anything from being placed there. It cannot be undone here.</p>
 <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}">
   {% csrf_token %}
   <input type="hidden" name="stage" value="retire">
@@ -28,6 +33,9 @@
 {% endif %}
 </section>
 {% endif %}
+
+{# F1c: what a key is for, and what "Not set" means. #}
+<p id="position-key-help">The <strong>key</strong> names a compartment or system in this vehicle's files, which export and import its setup{% if local_keys %}. It is this vehicle's own: the same key on another vehicle names an unrelated place{% endif %}. A key is set once and never changes. &ldquo;Not set&rdquo; matters only for vehicle files: the vehicle can't be exported until every compartment and system in use has a key. {% if can_set_keys and local_keys %}You can set a missing key below.{% elif local_keys %}An Administrator can set a missing key on this page.{% else %}An Administrator can set a missing key.{% endif %}</p>
 
 {% for section in sections %}
 <h2 id="heading-{{ section.kind|lower }}">{{ section.heading }}</h2>
@@ -51,7 +59,18 @@
           <input id="order-{{ row.slot }}" name="display_order" value="{{ row.display_order|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*" size="4">
           <button type="submit" class="button">Save</button>
         </form>{% endif %}</td>
-      <td>{{ row.key|default:"Not set" }}</td>
+      <td>{% if row.key %}{{ row.key }}{% elif can_set_keys and local_keys and not row.retired %}
+        <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}" class="admin-form position-key-form">
+          {% csrf_token %}
+          <input type="hidden" name="stage" value="set-key">
+          <input type="hidden" name="kind" value="{{ section.kind }}">
+          <input type="hidden" name="slot" value="{{ row.slot }}">
+          <input type="hidden" name="operation_id" value="{{ row.key_operation_id }}">
+          <span>Not set</span>
+          <label for="key-{{ row.slot }}">Key for {{ row.label }}</label>
+          <input id="key-{{ row.slot }}" name="key" maxlength="100" required aria-describedby="position-key-help key-format-help">
+          <button type="submit" class="button">Set key</button>
+        </form>{% else %}Not set{% endif %}</td>
       <td>{% if row.retired %}Retired{% else %}In use{% if row.sealable %} · Sealable{% endif %}{% endif %}</td>
       <td>{% if not row.retired %}
         <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}">
@@ -71,17 +90,19 @@
 {% endif %}
 {% endfor %}
 
-<h2 id="add-heading">Add a position</h2>
+<h2 id="add-heading">Add a compartment or system</h2>
 <form method="post" action="{% url 'vehicle-positions' vehicle.pk %}" aria-labelledby="add-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="add">
   <input type="hidden" name="operation_id" value="{{ add_operation_id }}">
-  <fieldset><legend>Kind</legend>
+  <fieldset aria-describedby="add-kind-help"><legend>Kind</legend>
+  <p id="add-kind-help" class="field-help">A compartment is a storage place on the vehicle that holds items and kits. A system is part of the ambulance as a whole, such as lights and sirens, and holds items only.</p>
   {% for kind, heading in kinds %}<label><input type="radio" name="kind" value="{{ kind }}"{% if form.kind == kind or not form.kind and forloop.first %} checked{% endif %}> {{ heading|slice:":-1" }}</label> {% endfor %}
   </fieldset>
   <p><label for="add-label">Name</label><br><input id="add-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
-  <p><label for="add-key">Key</label><br><input id="add-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="add-key-help">
-  <br><span id="add-key-help">Lowercase letters, digits, dots, dashes and underscores. A key already used on another vehicle adds this vehicle's place in that position. A key can't be changed later.</span></p>
+  <p><label for="add-key">Key</label><br><input id="add-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="add-key-help key-format-help">
+  <br><span id="add-key-help">{% if local_keys %}Names it in this vehicle's files. It must differ from this vehicle's other keys of the same kind; the same key on another vehicle names an unrelated place.{% else %}Names it in vehicle files. A key already used on another vehicle adds this vehicle's place in that position.{% endif %} A key can't be changed later.</span>
+  <span id="key-format-help">Use lowercase letters, digits, dots, dashes and underscores, starting with a letter or digit.</span></p>
   <p><label for="add-order">Order (optional)</label><br><input id="add-order" name="display_order" value="{{ form.display_order }}" inputmode="numeric" pattern="[0-9]*" size="4"></p>
   <p><button type="submit" class="button">Add</button></p>
 </form>
