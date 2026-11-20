@@ -17,6 +17,7 @@
   var layoutMode = pendingNavigation ? pendingNavigation.mode : "COMPARTMENTS";
   var selectedGroupKey = pendingNavigation && pendingNavigation.mode === "COMPARTMENTS" ? pendingNavigation.groupKey : null;
   var navigationRestored = false, navigationAnchorKey = null, navigationSaveTimer = null;
+  var focusOnRestore = false;  // issue #235 B2: a resumed position also restores focus
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false, loadedOnce = false;
   // Split view (issue #194): at 64rem and wider an open area keeps the area list beside its items.
   var wideQuery = window.matchMedia ? window.matchMedia("(min-width: 64rem)") : null;
@@ -363,6 +364,10 @@
   // so the satisfying outcome is shown. A supervisor completion is not a check result: no mark.
   var unmarkedStates = {SUSPENDED: true, EXEMPT: true, WAIVED: true};
   function recordedOutcome(row, entry) {
+    // Issue #235 B3: with no current window ("No current requirement", or "Not due" before the
+    // window opens) there is no window result to show, even right after this person's tap.
+    if (!config.verification_for_deficiency_id &&
+        (!row.obligation_state || row.obligation_state === "UPCOMING")) { return null; }
     // These states have no check result to show, even right after this person's tap.
     if (unmarkedStates[row.obligation_state] ||
         (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED")) { return null; }
@@ -573,6 +578,7 @@
     if (navigationRestored) { return; }
     navigationRestored = true;
     if (pendingNavigation) {
+      focusOnRestore = true;
       layoutMode = pendingNavigation.mode;
       if (layoutMode === "COMPARTMENTS" && pendingNavigation.groupKey &&
           groupProgressRows.some(function (group) { return group.key === pendingNavigation.groupKey; })) {
@@ -588,12 +594,21 @@
     pendingNavigation = null;
   }
   function restoreNavigationAnchor() {
-    if (!navigationAnchorKey) { return; }
-    var anchor = itemForKey(navigationAnchorKey);
+    var focusIt = focusOnRestore;
+    focusOnRestore = false;
+    var anchor = navigationAnchorKey ? itemForKey(navigationAnchorKey) : null;
     navigationAnchorKey = null;
     if (anchor && typeof anchor.scrollIntoView === "function") {
-      window.requestAnimationFrame(function () { anchor.scrollIntoView({block: "start"}); });
+      var scroll = function () { anchor.scrollIntoView({block: "start"}); };
+      if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(scroll); } else { scroll(); }
     }
+    // Issue #235 B2: Tab continues from the restored place, not from the skip link. Focus the
+    // saved item, else the open area's heading; never take focus the person already moved.
+    if (!focusIt) { return; }
+    var active = document.activeElement;
+    if (active && active !== document.body) { return; }
+    var target = anchor || (layoutMode === "COMPARTMENTS" && selectedGroupKey ? $("area-heading") : null);
+    if (target && typeof target.focus === "function") { target.focus({preventScroll: true}); }
   }
   function kitBuckets(itemRows) {
     var buckets = [], kits = Object.create(null);

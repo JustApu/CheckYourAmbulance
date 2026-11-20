@@ -83,7 +83,7 @@ function inspectionMarkup(userId, sessionId, timeZone = "America/New_York") {
   <section><h2 id="checklist-heading" tabindex="-1">Checklist</h2><div class="view-controls"><button id="view-normal" class="button" type="button">Normal</button><button id="view-priority" class="button" type="button">Priority</button><label><input id="only-attention" type="checkbox"> Needs Attention Only</label></div><p id="pref-state" role="status"></p>
   <div id="layout-controls" class="view-controls" role="group" aria-label="Inspection layout"><button id="layout-compartments" class="button" type="button">Compartments</button><button id="layout-flat" class="button" type="button">All items</button></div>
   <div id="checklist-body" class="checklist-body"><section id="area-overview"><h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3><p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p><div id="area-cards" class="area-cards"></div></section>
-  <section id="area-detail" hidden><button id="area-overview-button" class="button" type="button">All areas and compartments</button><h3 id="area-heading" tabindex="-1"></h3></section><p id="screen-notice" hidden></p><ol id="items" class="items" aria-live="polite"></ol></div></section>
+  <section id="area-detail" hidden><button id="area-overview-button" class="button" type="button">All areas and compartments</button><h3 id="area-heading" tabindex="-1"></h3></section><p id="screen-notice" hidden></p><ol id="items" class="items"></ol></div></section>
   <dialog id="conflict-dialog"><p id="conflict-text"></p><button id="conflict-cancel" type="button">Cancel</button><button id="conflict-proceed" type="button">Proceed</button></dialog>
   <dialog id="outcome-dialog"><h2 id="outcome-title"></h2><form id="outcome-form"><textarea name="outcome_explanation"></textarea><select id="outcome-existing"></select><p id="outcome-matches"></p><p id="outcome-error"></p><fieldset id="outcome-create-fields"></fieldset><button id="outcome-cancel" type="button">Cancel</button></form></dialog>
   </main><script id="cya-config" type="application/json">${JSON.stringify(config)}</script>
@@ -277,7 +277,7 @@ async function testChecklistAids(viewport) {
   const markup = inspectionMarkup("emt-aids", `session-aids-${viewport.name}`)
     .replace('<html lang="en">', '<html lang="en" class="js">')
     .replace("<body>", '<body class="has-app-nav"><nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">Home</a></li><li><a class="app-nav-link" href="#inspect" aria-current="page">Inspect</a></li><li><a class="app-nav-link" href="#problems">Problems</a></li><li><a class="app-nav-link" href="#vehicles">Vehicles</a></li></ul></nav>')
-    .replace('<ol id="items" class="items" aria-live="polite"></ol>', `<ol id="items" class="items" aria-live="polite"></ol>${bar}`);
+    .replace('<ol id="items" class="items"></ol>', `<ol id="items" class="items"></ol>${bar}`);
   await page.route("http://aids.test/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.startsWith("/api/")) {

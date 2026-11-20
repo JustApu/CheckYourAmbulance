@@ -73,7 +73,7 @@ function environment(config, forms = []) {
       formatUtc(text) { const date = new Date(text); return isNaN(date) ? "" : date.toISOString(); },
     },
     cyaShell: {toasts: [], toast(text, options) { this.toasts.push({text, announce: !(options && options.announce === false)}); }},
-    localStorage: {getItem(key) { return key.endsWith(":user:session") ? JSON.stringify({version: 1, mode: "FLAT"}) : null; }, setItem() {}},
+    localStorage: {getItem(key) { return key.endsWith(":user:session") ? JSON.stringify(config.saved_navigation || {version: 1, mode: "FLAT"}) : null; }, setItem() {}},
     scrollBy(_x, y) { this.scrollY += y; }};
   const document = {
     defaultView: window,
@@ -295,6 +295,40 @@ function generic(kind) {
     fresh.context.testUI.setRows([{...passed, obligation_outcome: "NOT_APPLICABLE", obligation_completed_at: "2026-06-01T05:00:00Z",
       latest_check_id: "na", latest_check_outcome: "NOT_APPLICABLE", latest_check_at: "2026-06-01T05:00:00Z"}]); fresh.context.testUI.render();
     assert.deepEqual(marked(freshItem()), [], "Not applicable has no outcome button, so nothing is marked");
+  }
+  {
+    // Issue #235 B3: a row with no current window marks nothing, even right after this person's tap.
+    for (const state of [null, "UPCOMING"]) {
+      const run = checklist(), item = () => run.elements.items.children[0];
+      run.context.testUI.setRows([{...row, obligation_state: state, latest_check_id: null, latest_check_outcome: null}]); run.context.testUI.render();
+      findAction(item(), "pass").fire("click");
+      response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+      assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Pass."), `${state}: the save is still reported`);
+      assert.deepEqual(marked(item()), [], `${state}: no window, so no recorded mark`);
+    }
+  }
+  {
+    // Issue #235 B1: the item list is not a live region; the toast is the one announcement.
+    const session = fs.readFileSync(path.join(root, "cya/inspections/templates/inspections/session.html"), "utf8");
+    assert.match(session, /<ol id="items" class="items"><\/ol>/);
+  }
+  {
+    // Issue #235 B2: resuming a saved compartment position focuses the saved item.
+    const saved = {version: 1, mode: "COMPARTMENTS", groupKey: "compartment:compartment-a", anchorKey: "item|kit-a"};
+    const run = checklist("OPEN", {saved_navigation: saved});
+    const group = {key: "compartment:compartment-a", label: "Driver-side exterior compartment", total: 1, checked: 0, due: 1, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0};
+    run.context.testUI.setRows([{...row, obligation_state: "DUE"}]); run.context.testUI.setGroups([group]); run.context.testUI.render();
+    assert.equal(run.document.activeElement && run.document.activeElement.dataset.itemKey, "item|kit-a", "the restored item has focus");
+    run.context.testUI.render();
+    assert.equal(run.document.activeElement.dataset.itemKey, "item|kit-a", "a later render does not move focus again");
+  }
+  {
+    // Issue #235 B2: with no saved item, the restored area's heading takes focus.
+    const saved = {version: 1, mode: "COMPARTMENTS", groupKey: "compartment:compartment-a", anchorKey: null};
+    const run = checklist("OPEN", {saved_navigation: saved});
+    const group = {key: "compartment:compartment-a", label: "Driver-side exterior compartment", total: 1, checked: 0, due: 1, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0};
+    run.context.testUI.setRows([{...row, obligation_state: "DUE"}]); run.context.testUI.setGroups([group]); run.context.testUI.render();
+    assert.equal(run.document.activeElement, run.get("area-heading"), "the restored area heading has focus");
   }
   {
     // The server's outcome is shown, not the tap's guess: a count that does not match is a saved Fail.
