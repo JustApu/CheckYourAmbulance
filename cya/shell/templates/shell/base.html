@@ -50,8 +50,11 @@
     {% endif %}
     <div class="app-nav-settings">
       {% include "shell/theme_control.html" %}
-      <form method="post" action="{% url 'sign-out' %}">{% csrf_token %}<button type="submit" class="button">Sign out</button></form>
-      <button type="button" id="shortcuts-open" class="button shortcuts-open" aria-keyshortcuts="?">Keyboard shortcuts</button>
+      <button type="button" id="shortcuts-open" class="nav-quiet shortcuts-open" aria-keyshortcuts="?">Keyboard shortcuts<kbd class="shortcut-hint" aria-hidden="true">?</kbd></button>
+      <div class="nav-account">
+        {% if cya_user %}<span class="nav-account-name">{{ cya_user.display_name|default:cya_user.email }}</span>{% endif %}
+        <form method="post" action="{% url 'sign-out' %}">{% csrf_token %}<button type="submit" class="link-button">Sign out</button></form>
+      </div>
     </div>
   </div>
 </nav>

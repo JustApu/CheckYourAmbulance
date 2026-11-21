@@ -313,7 +313,7 @@ class RoleLookupFailClosedTests(ShellTestCase):
             home = client.get("/")
             self.assertNotContains(home, 'class="app-nav"')
             self.assertContains(home, 'action="/auth/logout/"')
-            self.assertContains(home, 'id="theme-select"')
+            self.assertContains(home, '<input type="radio" name="theme" value="auto" checked>')
             self.assertContains(home, "No sections are available")
 
     def test_failing_lookup_means_no_sections_and_logs_only_the_class(self):
@@ -367,10 +367,19 @@ class ShellMarkupTests(ShellTestCase):
 
     def test_theme_control_offers_auto_light_and_dark(self):
         html = self.page()
-        self.assertIn('<label class="theme-control" for="theme-select">Theme', html)
+        # Issue #238: one compact radio group; each choice is named by its own label.
+        self.assertIn('<fieldset class="theme-control">\n  <legend>Theme</legend>', html)
         for theme in ("auto", "light", "dark"):
             with self.subTest(theme=theme):
-                self.assertIn(f'<option value="{theme}">{theme.title()}</option>', html)
+                self.assertRegex(
+                    html,
+                    rf'<label class="theme-choice"><input type="radio" name="theme" value="{theme}"'
+                    rf"(?: checked)?><span>{theme.title()}</span></label>",
+                )
+        self.assertEqual(html.count('type="radio" name="theme"'), 3, "one theme group per page")
+        css = render_to_string("shell/shell.css")
+        rule = re.search(r"\.theme-choice \{[^}]*\}", css).group(0)
+        self.assertIn("min-height: 48px", rule)
         self.assertLess(
             html.index('localStorage.getItem("cya-theme")'),
             html.index("<style>"),
@@ -395,13 +404,28 @@ class ShellMarkupTests(ShellTestCase):
         self.assertIn("prefers-color-scheme: dark", css)
         self.assertIn(":focus-visible", css)
 
+    def test_tablet_rail_lifts_its_more_panel_above_page_content(self):
+        # PR #253 CI: without a z-index on the sticky rail, a positioned vehicle card painted over
+        # the pop-out More panel at tablet width and took the theme and Sign out taps.
+        css = render_to_string("shell/shell.css")
+        rail = re.search(r"\.has-app-nav > \.app-nav \{[^}]*position: sticky[^}]*\}", css).group(0)
+        self.assertIn("z-index: 20", rail)
+
     def test_signed_in_header_has_csrf_protected_sign_out(self):
         html = self.page()
         self.assertEqual(html.count('action="/auth/logout/"'), 1, "Sign out is in More, once")
         panel = html[html.index('id="app-nav-more-panel"') :]
         self.assertRegex(panel, r'<form method="post" action="/auth/logout/">')
-        self.assertIn('id="theme-select"', panel)
+        self.assertIn('name="theme"', panel)
         self.assertIn("csrfmiddlewaretoken", html)
+        # Issue #238: the sidebar ends with who is signed in and a small Sign out link.
+        account = panel[panel.index('<div class="nav-account">') :]
+        self.assertRegex(account, r'<span class="nav-account-name">[^<]+</span>')
+        self.assertIn('<button type="submit" class="link-button">Sign out</button>', account)
+        self.assertLess(panel.index('id="shortcuts-open"'), panel.index('class="nav-account"'))
+        self.assertIn('class="nav-quiet shortcuts-open"', panel)
+        css = render_to_string("shell/shell.css")
+        self.assertIn("min-height: 48px", re.search(r"\.link-button \{[^}]*\}", css).group(0))
 
     def test_user_text_is_escaped(self):
         user = self.make_user("9", ["CREW"], name="<script>alert(1)</script>")

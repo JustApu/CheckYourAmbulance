@@ -1,7 +1,9 @@
-<label class="theme-control" for="theme-select">Theme
-  <select id="theme-select" name="theme">
-    <option value="auto">Auto</option>
-    <option value="light">Light</option>
-    <option value="dark">Dark</option>
-  </select>
-</label>
+{# Theme (issue #238): three compact choices in one group; each radio keeps its own name. #}
+<fieldset class="theme-control">
+  <legend>Theme</legend>
+  <div class="theme-choices">
+    <label class="theme-choice"><input type="radio" name="theme" value="auto" checked><span>Auto</span></label>
+    <label class="theme-choice"><input type="radio" name="theme" value="light"><span>Light</span></label>
+    <label class="theme-choice"><input type="radio" name="theme" value="dark"><span>Dark</span></label>
+  </div>
+</fieldset>
