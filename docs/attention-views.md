@@ -182,6 +182,10 @@ view, so the check names the two roles the issue gives.
   from stored current facts or, for a past instant or a stale row, by replay at the instant.
 - The screen and the API also give **fleet totals**: each count summed over the vehicles shown
   (`totals` in the API).
+- **Screen wording** (owner-approved, issue #238, 2026-11-20): the screen says "required checks", never
+  "obligations": "Required checks due ... to ...", "N of M required checks recorded", "Required checks by
+  state". Fleet-wide labels say "fleet" ("Only the first N vehicles in the fleet are shown", "Fleet totals for
+  the vehicles shown"). The API keeps its field names.
 - No report output contains readiness counts yet (OQ-61). `readiness.REPORT_OUTPUTS` lists any that
   do, and scenario AC-36 checks that each shows the Missed count.
 
