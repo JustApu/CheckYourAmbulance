@@ -810,10 +810,13 @@ async function testDeficiencyFilters(viewport) {
     const text = await page.getByLabel("Problem text").boundingBox();
     const vehicle = await page.getByLabel("Vehicle name or number").boundingBox();
     const severity = await page.getByLabel("Severity").boundingBox();
-    assert.ok(text.width > vehicle.width, `${viewport.name}: Problem text is not wider than the vehicle filter`);
+    // Codex review of PR #252: below 40rem every filter is full width, so Problem text only
+    // matches the vehicle filter there; from 40rem it spans both columns and is wider.
     if (viewport.width >= 640) {
+      assert.ok(text.width > vehicle.width, `${viewport.name}: Problem text does not span both columns`);
       assert.ok(Math.abs(vehicle.y - severity.y) < 2, `${viewport.name}: vehicle and severity are not on one row`);
     } else {
+      assert.ok(Math.abs(text.width - vehicle.width) < 2, `${viewport.name}: narrow filters are not all full width`);
       assert.ok(severity.y > vehicle.y + vehicle.height - 1, `${viewport.name}: narrow filters do not stack`);
     }
     const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
