@@ -269,7 +269,9 @@ th[aria-sort="descending"] .sort-button::after { content: "\25BC" / ""; color: v
   /* Tablet rail: the header spans the top; the rail sits left of the banner and page. */
   .has-app-nav { display: grid; grid-template-columns: 6rem minmax(0, 1fr); grid-template-rows: auto auto 1fr; min-height: 100vh; }
   .has-app-nav > .site-header { grid-column: 1 / -1; }
-  .has-app-nav > .app-nav { grid-column: 1; grid-row: 2 / span 2; align-self: start; position: sticky; top: 0; border-bottom: 0; border-right: 1px solid var(--line-soft); min-height: 100%; }
+  .has-app-nav > .app-nav { grid-column: 1; grid-row: 2 / span 2; align-self: start; position: sticky; top: 0; z-index: 20; border-bottom: 0; border-right: 1px solid var(--line-soft); min-height: 100%; }
+  /* PR #253 CI: the rail's own z-index lifts its pop-out More panel above positioned page content
+     (such as a vehicle card), which otherwise painted over the panel and took its taps. */
   .has-app-nav > .banner { grid-column: 2; grid-row: 2; }
   .has-app-nav > main { grid-column: 2; grid-row: 3; width: 100%; }
   .app-nav-tabs { grid-auto-flow: row; grid-auto-columns: auto; padding: .5rem 0; }

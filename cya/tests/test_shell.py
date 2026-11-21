@@ -404,6 +404,13 @@ class ShellMarkupTests(ShellTestCase):
         self.assertIn("prefers-color-scheme: dark", css)
         self.assertIn(":focus-visible", css)
 
+    def test_tablet_rail_lifts_its_more_panel_above_page_content(self):
+        # PR #253 CI: without a z-index on the sticky rail, a positioned vehicle card painted over
+        # the pop-out More panel at tablet width and took the theme and Sign out taps.
+        css = render_to_string("shell/shell.css")
+        rail = re.search(r"\.has-app-nav > \.app-nav \{[^}]*position: sticky[^}]*\}", css).group(0)
+        self.assertIn("z-index: 20", rail)
+
     def test_signed_in_header_has_csrf_protected_sign_out(self):
         html = self.page()
         self.assertEqual(html.count('action="/auth/logout/"'), 1, "Sign out is in More, once")
