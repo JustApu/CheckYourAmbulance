@@ -40,7 +40,7 @@ Files name records by stable keys, never by database ids (IMP-6):
 
 Every key is set once and never changed. A remount is a new vehicle with the new VIN: export the old vehicle's file, replace the VIN, and import it. Then move the physical kits and deactivate the old vehicle, which keeps its history.
 
-An import sets the VIN of the vehicle it creates and the keys of positions it creates. Records made before SPEC 2.1.0 have no key until an Administrator sets it once (`set_configuration_keys`, PERM-45). The commands are in `cya/kits/keys.py`; there is no screen for them yet (issue #130 adds the management screens). A vehicle without a VIN cannot be exported, and a position without a key cannot be named in a file.
+An import sets the VIN of the vehicle it creates and the keys of positions it creates. Records made before SPEC 2.1.0 have no key until an Administrator sets it once (`set_configuration_keys`, PERM-45). The commands are in `cya/kits/keys.py`. After the cutover an Administrator sets a missing compartment or system key on the vehicle's Compartments and systems page (issue #238 F1c); other keys have no screen yet. A vehicle without a VIN cannot be exported, and a position without a key cannot be named in a file.
 
 ## Import
 
