@@ -48,8 +48,8 @@ These tables are marked: vehicle administration, checklist templates, kit defini
   - **Last check by you**, in station time.
 - **Every vehicle:** Home always covers the whole active fleet (owner decision, 2026-11-17); there is no per-person vehicle list.
 - **Supervisors and Administrators also get:**
-  - four tiles: vehicles ready (In Service), checks done of those owed, open problems, and items waiting for them;
-  - **Needs you:** status-change requests to review, fixes to verify, problems to assign;
+  - four tiles: vehicles ready (In Service), checks done of those owed, open problems, and items waiting for them. Each tile is a link: to Fleet readiness, Inspect, Problems, and the Needs you panel (issue #238);
+  - **Needs you:** status-change requests to review, fixes to verify, problems to assign. The links sit in a compact grid, two or more across when there is room and one column on narrow screens, each still a 48 px target (issue #238);
   - a **Vehicles** table: status, checks done, overdue, problems.
 - **Progress means task completion only.** There are no scores, rankings or comparisons between people.
 

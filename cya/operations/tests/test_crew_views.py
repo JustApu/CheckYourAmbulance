@@ -144,6 +144,12 @@ class VehicleCrewPageTests(CrewScreenCase):
         page = self.client.get(self.page(self.a))
         self.assertContains(page, "Nobody is assigned to this vehicle right now.")
         self.assertContains(page, "Put me on this truck")
+        # Issue #238: the time, date and button share one row that wraps on narrow screens.
+        self.assertRegex(
+            page.content.decode(),
+            r'<div class="crew-fields">\s*<div class="crew-field"><label for="crew-self-until">'
+            r'[\s\S]*?id="crew-self-until-date"[^>]*></div>\s*<button type="submit"',
+        )
         # The status form names its truck, and Crew comes after it (owner, 2026-11-18).
         self.assertContains(page, f"Request a status change for {self.a.display_name}")
         body = page.content.decode()

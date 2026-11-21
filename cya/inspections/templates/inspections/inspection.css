@@ -168,6 +168,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .crew-inline label, .crew-inline input { display: inline-block; margin-top: 0; }
 .crew-form { margin-top: 1rem; }
 .crew-form h3 { margin: 0 0 .25rem; font-size: 1.05rem; }
+/* The fields and the button share a row when there is room, and stack when not (issue #238). */
+.crew-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem 1rem; }
+.crew-field { display: flex; flex-direction: column; gap: .25rem; max-width: 100%; }
+.crew-field label, .crew-field select, .crew-field input { margin-top: 0; max-width: 100%; }
 .crew-history { margin-top: 1rem; }
 
 .item-target { outline: 3px solid var(--accent); outline-offset: 2px; }
