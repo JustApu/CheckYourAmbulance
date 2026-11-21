@@ -440,7 +440,7 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertEqual(set(vehicle["obligations"]), {c for c, _l in readiness.CATEGORIES})
         page = sup.get("/fleet/readiness/")
         self.assertContains(page, "readiness-config")
-        self.assertContains(page, "Obligations by state")
+        self.assertContains(page, "Required checks by state")
         self.assertNotContains(page, 'compliant" flag:')
 
     def test_vehicle_summaries_keep_attention_signals_separate_and_link_workflows(self):
@@ -454,7 +454,7 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "Overdue:")
         self.assertContains(page, "Missed:")
         self.assertContains(page, "Suspensions:")
-        self.assertContains(page, "Obligations, problems and suspensions")
+        self.assertContains(page, "Required checks, problems and suspensions")
         self.assertContains(page, "an open Critical / High problem; a suspended check")
         self.assertNotContains(page, "top two active configured severity ranks")
         self.assertContains(page, f'href="/inspection/vehicles/{self.vehicle.pk}/"')
