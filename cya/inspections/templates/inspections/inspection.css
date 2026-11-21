@@ -131,7 +131,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
   .deficiency-facts dd { margin-bottom: .35rem; }
 }
 
-.deficiency-filter-form > .deficiency-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); align-items: end; gap: .5rem .75rem; }
+/* Issue #238: Problem text spans the row; the other filters go two per row when there is room. */
+.deficiency-filter-form > .deficiency-filter-grid { display: grid; grid-template-columns: minmax(0, 1fr); align-items: end; gap: .5rem .75rem; }
+@media (min-width: 40rem) { .deficiency-filter-form > .deficiency-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.deficiency-filter-grid > .deficiency-filter-wide { grid-column: 1 / -1; }
 .deficiency-filter-grid > label { min-width: 0; overflow-wrap: anywhere; }
 .deficiency-filter-grid input, .deficiency-filter-grid select { width: 100%; }
 .deficiency-filter-grid .check { display: flex; align-items: center; gap: .5rem; min-height: 48px; margin-top: .5rem; }

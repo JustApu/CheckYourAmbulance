@@ -45,6 +45,13 @@ are first, with deterministic 25-row pages and filtered totals. Malformed or dup
 numbers return a notice and show the first page; page numbers beyond the result range show a notice
 and clamp to the last page.
 
+The text field is labelled **Problem text** and spans the form; the other filters go two per row
+from 40rem wide and stack below that (issue #238). The vehicle and assignee fields suggest names
+(an HTML `datalist`, at most 100 each) drawn only from the problems that page could list: every
+status it offers, in the user's organization, before the submitted filters apply. A suggestion
+never names a vehicle or person absent from those problems, and suggestions do not change what a
+filter matches.
+
 `GET /problems/queue/` remains Supervisor/Administrator-only. Its bounded, searchable active
 case groups put extension requests waiting for a decision first, then overdue deficiencies, cases
 at the threshold of the organization's two highest active severity ranks, and unassigned cases.

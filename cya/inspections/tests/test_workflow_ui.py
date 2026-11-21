@@ -682,6 +682,47 @@ class DeficiencyListTests(CrewUiCase):
         self.assertEqual(late.context["page"]["total"], 1)
         self.assertEqual(str(late.context["page"]["rows"][0].deficiency_id), str(other))
 
+    def test_filter_suggestions_name_only_vehicles_and_assignees_on_visible_problems(self):
+        # Issue #238: Problem text label, and suggestions drawn from this page's problems only.
+        self.bind(vehicle=self.vehicles[1], reconcile=False)
+        target, _check = self.create_deficiency(vehicle=self.vehicles[1], summary="Synthetic pump")
+        assign_deficiency(
+            deficiency_id=target,
+            assignee_id=str(self.supervisor.pk),
+            expected_event_id=self.latest_event(target),
+            **self.context(self.admin),
+        )
+        page = self.client.get("/problems/")
+        self.assertContains(
+            page, '<label class="deficiency-filter-wide" for="deficiency-search">Problem text'
+        )
+        self.assertNotContains(page, "Search problem text")
+        context = page.context
+        expected_vehicles = sorted(
+            set(
+                DeficiencyProjection.objects.filter(organization=self.org).values_list(
+                    "deficiency__vehicle__display_name", flat=True
+                )
+            )
+        )
+        self.assertEqual(context["filter_vehicle_suggestions"], expected_vehicles)
+        self.assertIn(self.vehicles[1].display_name, expected_vehicles)
+        self.assertEqual(context["filter_assignee_suggestions"], [self.supervisor.display_name])
+        idle = [v.display_name for v in self.vehicles if v.display_name not in expected_vehicles]
+        for name in idle:
+            self.assertNotContains(
+                page, f'<option value="{name}">', msg_prefix="no problems, no suggestion"
+            )
+        self.assertContains(page, 'list="deficiency-vehicle-suggestions"')
+        self.assertContains(page, 'list="deficiency-assignee-suggestions"')
+        self.assertContains(
+            page, f'<option value="{self.supervisor.display_name}"></option>', html=False
+        )
+
+        # Applying a filter does not narrow the suggestions to the current results.
+        narrowed = self.client.get("/problems/", {"q": "no such problem text"})
+        self.assertEqual(narrowed.context["filter_vehicle_suggestions"], expected_vehicles)
+
     def test_overdue_filter_and_supervisor_queue_use_approved_governing_extension(self):
         extended, _check = self.create_deficiency(summary="Synthetic extended deadline case")
         overdue_id, _check = self.create_deficiency(summary="Synthetic overdue deadline case")

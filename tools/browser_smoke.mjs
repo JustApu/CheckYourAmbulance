@@ -780,7 +780,7 @@ async function testDeficiencyFilters(viewport) {
     <style>${css}</style></head><body><main id="main"><h1>Problems</h1>
     <form class="panel deficiency-filter-form" method="get" action="/problems/">
       <div class="deficiency-filter-grid">
-        <label for="deficiency-search">Search problem text<input id="deficiency-search" type="search" name="q" value="brake" maxlength="100"></label>
+        <label class="deficiency-filter-wide" for="deficiency-search">Problem text<input id="deficiency-search" type="search" name="q" value="brake" maxlength="100"></label>
         <label for="deficiency-vehicle">Vehicle name or number<input id="deficiency-vehicle" type="search" name="vehicle" value="Medic 6" maxlength="100"></label>
         <label for="deficiency-severity">Severity<select id="deficiency-severity" name="severity"><option value="">Any severity</option><option value="URGENT" selected>Urgent (URGENT)</option><option value="RETIRED">Legacy (RETIRED, retired)</option></select></label>
         <label for="deficiency-assignee">Assigned to<input id="deficiency-assignee" type="search" name="assignee" value="Sam Example" maxlength="100"></label>
@@ -796,15 +796,25 @@ async function testDeficiencyFilters(viewport) {
     await page.route("http://deficiencies.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: listing }));
     await page.goto("http://deficiencies.test/", { waitUntil: "load" });
     assert.equal(await page.getByRole("heading", { name: "Problems" }).count(), 1);
-    assert.equal(await page.getByRole("searchbox", { name: "Search problem text" }).inputValue(), "brake");
+    assert.equal(await page.getByRole("searchbox", { name: "Problem text" }).inputValue(), "brake");
     assert.equal(await page.getByLabel("Lifecycle status").locator('option[value="REPORTED_IN_ERROR"]').textContent(), "Reported in Error");
     assert.equal(await page.getByLabel("Severity").inputValue(), "URGENT");
     assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/problems/?q=brake&results_page=2");
     assert.match(await page.getByText("42 matching problems").innerText(), /showing 25/);
-    for (const label of ["Search problem text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
+    for (const label of ["Problem text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
       const control = page.getByLabel(label);
       const box = await control.boundingBox();
       assert.ok(box && box.height >= 48, `${viewport.name}: ${label} target is shorter than 48 CSS pixels`);
+    }
+    // Issue #238: Problem text spans the row; two filters per row from 40rem, one below.
+    const text = await page.getByLabel("Problem text").boundingBox();
+    const vehicle = await page.getByLabel("Vehicle name or number").boundingBox();
+    const severity = await page.getByLabel("Severity").boundingBox();
+    assert.ok(text.width > vehicle.width, `${viewport.name}: Problem text is not wider than the vehicle filter`);
+    if (viewport.width >= 640) {
+      assert.ok(Math.abs(vehicle.y - severity.y) < 2, `${viewport.name}: vehicle and severity are not on one row`);
+    } else {
+      assert.ok(severity.y > vehicle.y + vehicle.height - 1, `${viewport.name}: narrow filters do not stack`);
     }
     const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
     assert.ok(metrics.document <= viewport.width, `${viewport.name}: deficiency list overflows horizontally ${JSON.stringify(metrics)}`);
