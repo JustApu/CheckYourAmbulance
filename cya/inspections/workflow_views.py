@@ -93,6 +93,8 @@ STATUS_LABELS = {
 }
 DEFICIENCY_PAGE_SIZE = 25
 SEARCH_LIMIT = 100
+# Issue #238: at most this many vehicle and assignee suggestions each.
+SUGGESTION_LIMIT = 100
 FILTER_FIELDS = ("q", "vehicle", "severity", "assignee", "status", "overdue")
 
 
@@ -192,6 +194,24 @@ def _severity_levels(organization_id, now):
     )
 
 
+def _filter_suggestions(queryset):
+    """Distinct vehicle and assignee names on the given problems, sorted, bounded."""
+
+    def names(field):
+        return list(
+            queryset.exclude(**{f"{field}__isnull": True})
+            .exclude(**{field: ""})
+            .order_by(field)
+            .values_list(field, flat=True)
+            .distinct()[:SUGGESTION_LIMIT]
+        )
+
+    return {
+        "vehicles": names("deficiency__vehicle__display_name"),
+        "assignees": names("assignee__display_name"),
+    }
+
+
 def _deficiency_filters(
     request, organization_id, queryset, *, now, allowed_statuses=STATUSES, severity_options=()
 ):
@@ -209,6 +229,10 @@ def _deficiency_filters(
             values[field] = ""
         else:
             values[field] = value
+
+    # Issue #238: suggestions come only from the problems this page could list, so they name
+    # nothing the user cannot already see in its results.
+    suggestions = _filter_suggestions(queryset.filter(status__in=allowed_statuses))
 
     status = values["status"] or "active"
     valid_statuses = {*allowed_statuses, "active", "all"}
@@ -273,6 +297,8 @@ def _deficiency_filters(
         "filter_severity_options": severity_options,
         "applied_filters": applied,
         "filter_query": urlencode(query_values),
+        "filter_vehicle_suggestions": suggestions["vehicles"],
+        "filter_assignee_suggestions": suggestions["assignees"],
         # Issue #235 A4: a filtered page (Apply, Clear keeps none) names its results in the title
         # and moves focus to them, so the reload does not leave the user at the top of the page.
         "filter_submitted": any(field in request.GET for field in FILTER_FIELDS),
