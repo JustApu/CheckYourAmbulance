@@ -1256,7 +1256,9 @@ try {
       // The page save line plus the shell toast region (issue #194), which stays empty until a save.
       assert.equal(await page.getByRole("status").count(), 2);
       assert.equal(await page.locator(".toast").textContent(), "");
-      assert.equal(await page.getByRole("radio", { name: "Auto", exact: true }).isChecked(), true);
+      // The theme radios sit in the closed More panel below 1024 px, so read the input's state
+      // directly rather than by role, which skips hidden elements (PR #253 CI).
+      assert.equal(await page.locator('input[name="theme"][value="auto"]').isChecked(), true);
       assert.equal(await page.getByText("2 pending requests").count(), 1);
       assert.equal(await page.locator('.pending-pill[data-count="2"]').isVisible(), true);
       assert.equal(await page.getByRole("heading", { name: "Next action" }).isVisible(), true);
@@ -1355,7 +1357,7 @@ try {
       await themeChoice("Dark").check();
       assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: Dark override did not apply`);
       await page.reload({ waitUntil: "load" });
-      assert.equal(await themeChoice("Dark").isChecked(), true, `${viewport.name}: saved theme was not restored`);
+      assert.equal(await page.locator('input[name="theme"][value="dark"]').isChecked(), true, `${viewport.name}: saved theme was not restored`);
       assert.equal(await page.evaluate(() => window.__themeBeforeStyles), "dark", `${viewport.name}: saved theme was not applied before the page stylesheet`);
       assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: restored Dark theme did not apply`);
       await openMore(page);
