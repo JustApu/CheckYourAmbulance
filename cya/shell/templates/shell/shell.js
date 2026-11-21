@@ -29,7 +29,7 @@
       more.setAttribute("aria-expanded", "false");
       morePanel.hidden = false;
       if (buttonHadFocus) {
-        var first = morePanel.querySelector('[aria-current="page"]') || morePanel.querySelector("a, select, button");
+        var first = morePanel.querySelector('[aria-current="page"]') || morePanel.querySelector("a, input, button");
         if (first) { first.focus(); }
       }
     } else {
@@ -127,7 +127,7 @@
       status.textContent = query ? "Showing " + shown + " of " + rows.length + "." : "Showing all " + rows.length + ".";
     });
   });
-  var themeSelect = document.getElementById("theme-select");
+  var themeChoices = document.querySelectorAll('input[name="theme"]');
   var themeKey = "cya-theme";
   function applyTheme(theme, persist) {
     if (["auto", "light", "dark"].indexOf(theme) === -1) { theme = "auto"; }
@@ -136,16 +136,18 @@
     } else {
       document.documentElement.setAttribute("data-theme", theme);
     }
-    if (themeSelect) { themeSelect.value = theme; }
+    Array.prototype.forEach.call(themeChoices, function (choice) { choice.checked = choice.value === theme; });
     if (persist) {
       try { window.localStorage.setItem(themeKey, theme); } catch (_error) { /* storage is optional */ }
     }
   }
-  if (themeSelect) {
+  if (themeChoices.length) {
     var savedTheme = "auto";
     try { savedTheme = window.localStorage.getItem(themeKey) || "auto"; } catch (_error) { /* storage is optional */ }
     applyTheme(savedTheme, false);
-    themeSelect.addEventListener("change", function () { applyTheme(themeSelect.value, true); });
+    Array.prototype.forEach.call(themeChoices, function (choice) {
+      choice.addEventListener("change", function () { if (choice.checked) { applyTheme(choice.value, true); } });
+    });
   }
   // Saved toast (issue #194). One role="status" region, created at load so that screen readers
   // announce later changes. It never takes focus and never blocks a tap (pointer-events: none),

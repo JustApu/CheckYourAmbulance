@@ -43,7 +43,7 @@ const html = `<!doctype html>
 <body class="has-app-nav">
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header"><a class="brand" href="#main">Check Your Ambulance</a><div class="header-tools"><div class="account"><span class="account-name">Sam Example</span></div></div></header>
-<nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">${navIcon}<span class="app-nav-label">Home</span></a></li><li><a class="app-nav-link" href="#main" aria-current="page">${navIcon}<span class="app-nav-label">Inspect</span></a></li><li><a class="app-nav-link" href="#deficiency" aria-label="Problems, 57 open">${navIcon}<span class="app-nav-label">Problems</span><span class="app-nav-badge" aria-hidden="true">57</span></a></li><li><a class="app-nav-link" href="#status">${navIcon}<span class="app-nav-label">Vehicles</span></a></li><li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false" hidden>${navIcon}<span class="app-nav-label">More</span></button></li></ul><div id="app-nav-more-panel" class="app-nav-more-panel"><ul class="app-nav-more-list"><li><a href="#kits">${navIcon}<span>Kits</span></a></li><li><a href="#administration">${navIcon}<span>Administration</span></a></li></ul><div class="app-nav-settings"><label class="theme-control" for="theme-select">Theme<select id="theme-select"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><form><button class="button" type="button">Sign out</button></form></div></div></nav>
+<nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs"><li><a class="app-nav-link" href="#home">${navIcon}<span class="app-nav-label">Home</span></a></li><li><a class="app-nav-link" href="#main" aria-current="page">${navIcon}<span class="app-nav-label">Inspect</span></a></li><li><a class="app-nav-link" href="#deficiency" aria-label="Problems, 57 open">${navIcon}<span class="app-nav-label">Problems</span><span class="app-nav-badge" aria-hidden="true">57</span></a></li><li><a class="app-nav-link" href="#status">${navIcon}<span class="app-nav-label">Vehicles</span></a></li><li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false" hidden>${navIcon}<span class="app-nav-label">More</span></button></li></ul><div id="app-nav-more-panel" class="app-nav-more-panel"><ul class="app-nav-more-list"><li><a href="#kits">${navIcon}<span>Kits</span></a></li><li><a href="#administration">${navIcon}<span>Administration</span></a></li></ul><div class="app-nav-settings"><fieldset class="theme-control"><legend>Theme</legend><div class="theme-choices"><label class="theme-choice"><input type="radio" name="theme" value="auto" checked><span>Auto</span></label><label class="theme-choice"><input type="radio" name="theme" value="light"><span>Light</span></label><label class="theme-choice"><input type="radio" name="theme" value="dark"><span>Dark</span></label></div></fieldset><div class="nav-account"><span class="nav-account-name">Sam Example</span><form><button class="link-button" type="button">Sign out</button></form></div></div></div></nav>
 <div id="connection-banner" class="banner banner-error" role="alert" hidden><span class="indicator-icon" aria-hidden="true">&#9888;</span><strong>Connection lost.</strong> Changes are not being saved. An item marked Unconfirmed may have been recorded.</div>
 <main id="main" tabindex="-1"><h1>Unit 12 inspection</h1>
 <section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open problem</span></section>
@@ -148,7 +148,7 @@ async function testKeyboardShortcuts(viewport) {
   const markup = `<!doctype html><html lang="en" class="js"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shortcuts</title><style>${css}</style></head>
     <body class="has-app-nav"><header class="site-header"><a class="brand" href="#">Check Your Ambulance</a></header>
     <nav class="app-nav" aria-label="Main"><ul class="app-nav-tabs">${link("h", "Home")}${link("p", "Problems")}<li class="app-nav-more-tab"><button id="app-nav-more" class="app-nav-link app-nav-more" type="button" aria-label="More menu" aria-controls="app-nav-more-panel" aria-expanded="false" hidden>${navIcon}<span class="app-nav-label">More</span></button></li></ul>
-    <div id="app-nav-more-panel" class="app-nav-more-panel"><div class="app-nav-settings"><button type="button" id="shortcuts-open" class="button shortcuts-open" aria-keyshortcuts="?">Keyboard shortcuts</button></div></div></nav>
+    <div id="app-nav-more-panel" class="app-nav-more-panel"><div class="app-nav-settings"><button type="button" id="shortcuts-open" class="nav-quiet shortcuts-open" aria-keyshortcuts="?">Keyboard shortcuts</button></div></div></nav>
     <dialog id="shortcuts-dialog" class="shortcuts-dialog" aria-labelledby="shortcuts-title"><h2 id="shortcuts-title">Keyboard shortcuts</h2><dl class="shortcuts-list"><dt><kbd>?</kbd></dt><dd>Show this list</dd></dl>
     <p><label class="check"><input type="checkbox" id="shortcuts-enabled" checked> Use keyboard shortcuts</label></p><p><button type="button" id="shortcuts-close" class="button">Close</button></p></dialog>
     <main id="main"><h1>Shortcuts</h1><label for="q">Search</label><input id="q" type="search">
@@ -1256,7 +1256,7 @@ try {
       // The page save line plus the shell toast region (issue #194), which stays empty until a save.
       assert.equal(await page.getByRole("status").count(), 2);
       assert.equal(await page.locator(".toast").textContent(), "");
-      assert.equal(await page.getByLabel("Theme").inputValue(), "auto");
+      assert.equal(await page.getByRole("radio", { name: "Auto", exact: true }).isChecked(), true);
       assert.equal(await page.getByText("2 pending requests").count(), 1);
       assert.equal(await page.locator('.pending-pill[data-count="2"]').isVisible(), true);
       assert.equal(await page.getByRole("heading", { name: "Next action" }).isVisible(), true);
@@ -1341,20 +1341,25 @@ try {
           assert.notEqual(marks.currentColor, marks.moreColor, `${viewport.name}: the page tab still looks selected while More is open ${JSON.stringify(marks)}`);
         }
       }
-      const theme = page.getByLabel("Theme");
+      const themeChoice = (name) => page.getByRole("radio", { name, exact: true });
+      // Issue #238: each theme choice is a 48 px target inside one named group.
+      assert.equal(await page.getByRole("group", { name: "Theme" }).count(), 1, `${viewport.name}: theme choices are not one named group`);
+      for (const name of ["Auto", "Light", "Dark"]) {
+        const segment = await page.locator(".theme-choice", { hasText: name }).boundingBox();
+        assert.ok(segment && segment.height >= 48, `${viewport.name}: theme choice ${name} is shorter than 48 CSS pixels`);
+      }
       const darkBackground = await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
       assert.equal(darkBackground, "rgb(11, 20, 38)", `${viewport.name}: Auto did not follow dark system preference`);
-      await theme.selectOption("light");
+      await themeChoice("Light").check();
       assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 247, 250)", `${viewport.name}: Light override did not apply`);
-      await theme.selectOption("dark");
+      await themeChoice("Dark").check();
       assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: Dark override did not apply`);
       await page.reload({ waitUntil: "load" });
-      assert.equal(await page.getByLabel("Theme").inputValue(), "dark", `${viewport.name}: saved theme was not restored`);
+      assert.equal(await themeChoice("Dark").isChecked(), true, `${viewport.name}: saved theme was not restored`);
       assert.equal(await page.evaluate(() => window.__themeBeforeStyles), "dark", `${viewport.name}: saved theme was not applied before the page stylesheet`);
       assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(11, 20, 38)", `${viewport.name}: restored Dark theme did not apply`);
       await openMore(page);
-      const restoredTheme = page.getByLabel("Theme");
-      await restoredTheme.selectOption("auto");
+      await themeChoice("Auto").check();
       await page.emulateMedia({ colorScheme: "light" });
       assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 247, 250)", `${viewport.name}: Auto did not follow light system preference`);
 
