@@ -10,6 +10,8 @@ The issue #10 production-like 1× shift-change target, tracked in [issue #70](ht
 The sample and its limitations are recorded below; no 4×/10× run is claimed.
 A later measurement on the current `main` after issues #73 to #75 and the worker-count test of 2026-11-09 are recorded in
 [their own section](#net-benchmark-and-worker-count-test-after-issues-73-to-75-2026-11-09); the targets are still **not met**.
+The 2026-11-22 Rocky rehearsal run, with direct per-operation measurements, is recorded in
+[its own section](#rocky-rehearsal-1-run-with-direct-measurements-2026-11-22); the targets are still **not met**.
 The local synthetic measurements below do not establish the owner targets.
 
 After review, the rehearsal operator should deploy the reviewed head with traffic
@@ -21,6 +23,98 @@ readiness. Record request counts, failures, p50/p90/p95, proportions below one
 and two seconds, single-process CPU and MariaDB CPU. Retain the owner's p90 >3 s
 cutoff before trying higher load steps. Record any remaining bottleneck instead
 of treating a faster isolated query as a passing shift-change result.
+
+## Rocky rehearsal 1× run with direct measurements (2026-11-22)
+
+Claude ran the issue #10 1× scenario on the Rocky rehearsal host after it was resized to 4 cores and 8 GB, at 1, 2 and 3
+uvicorn workers in A/B/B/A order. The release was `main` at `cb45f27` plus this branch's load-client and history-extension
+commits; the application code under test is `main`'s. Synthetic data only; two runs per worker count, one host,
+directional. It does **not** satisfy issue #70's 1× acceptance; it records that the targets are **not met** on this host.
+
+**Setup.** MariaDB 10.11 with `innodb_flush_log_at_trx_commit=1` and binary logging on (the host's durable settings). The
+synthetic history was extended from its last day to 2026-11-22 with the new `extend` step, then cleaned and verified (see
+the deviations below). At each arm's start the database held 161,250 obligations and projection rows for five vehicles
+(1,350 per vehicle in the readiness window). Each arm restored the same cold snapshot of the whole data directory, waited for
+the buffer pool to load, started the application with a test-only drop-in setting the worker count, prepared a fresh 1× step
+(five vehicles × 150 items, 15 crew, two supervisors) and ran the push-driven client: think time 3 to 8 s, arrivals over
+30 s, the shipped page's reload after a committed save, a 600 s limit and seed 10. The channel layer is the shipped
+in-memory layer, so as in the 2026-11-09 W3m arms the 2- and 3-worker arms do not deliver live updates across workers and
+are not a deployable configuration.
+
+**Results** (seconds, client-side wall time):
+
+| Arm | Workers | Saves in window | Pages and saves p50 / p95 | Under 1 s / under 2 s | Live reload p50 / p95 | Supervisor readiness p50 (errors of 2) | App / DB cores | App memory peak |
+|---|---:|---|---|---|---|---|---|---|
+| W1a | 1 | 349 of 750 (600 s, stopped at the limit) | 8.8 / 17.9 | 1.8% / 2.0% | 13.7 / 35.5 | 60.0 (2) | 1.03 / 0.42 | 587 MB |
+| W2a | 2 | 675 of 750 (600 s, stopped at the limit) | 6.5 / 11.0 | 2.6% / 5.5% | 11.6 / 17.8 | 56.0 (1) | 1.87 / 0.87 | 726 MB |
+| W3a | 3 | 750 (575 s) | 4.2 / 8.9 | 5.3% / 12.3% | 8.9 / 16.1 | 28.7 (0) | 2.29 / 1.09 | 888 MB |
+| W3b | 3 | 750 (555 s) | 4.3 / 8.1 | 4.0% / 13.2% | 9.0 / 16.8 | 46.3 (0) | 2.37 / 1.10 | 938 MB |
+| W2b | 2 | 710 of 750 (600 s, stopped at the limit) | 5.8 / 10.0 | 1.3% / 3.7% | 10.6 / 16.2 | 60.0 (2) | 1.88 / 0.78 | 728 MB |
+| W1b | 1 | 362 of 750 (600 s, stopped at the limit) | 15.4 / 22.7 | 1.0% / 2.2% | 21.7 / 34.2 | 60.0 (2) | 1.05 / 0.39 | 550 MB |
+
+The supervisor readiness errors are the client's 60 s timeout; a supervisor whose first readiness page timed out did not
+start. The client recorded no save errors in any arm. Swap stayed at 268 to 524 KB and the highest 5-second I/O-wait sample
+was 11%.
+
+**Direct measurements.** After the arms, the snapshot was restored and the service stopped. One process then called the
+real functions directly with no other load, through `manage.py shell` under the runtime account. SQL query counts are from
+Django's query capture:
+
+| Operation | Wall time | SQL queries |
+|---|---|---:|
+| Fleet readiness, five vehicles (`_picture`) | 7.94 to 8.37 s (3 reads), 8.21 s after the saves | 43 to 44 |
+| Vehicle checklist, 150 rows | 0.53 to 0.71 s (3 reads) | 52 to 53 |
+| One routine check save (`record_check`, no session) | 0.60 s first, then 0.24 to 0.30 s (5 saves) | 51 |
+| Six crew saving at the same instant on one vehicle (threads) | 0.91 to 0.98 s each, 0.99 s wall, no errors | — |
+| Six crew saving at the same instant across five vehicles | 0.88 to 0.95 s each, 0.96 s wall, no errors | — |
+| Vehicle status change (`set_vehicle_status`) | 0.27 s and 0.18 s | 56 |
+
+**Reading the results.**
+- **The targets are not met.** The target is at least 95% of page loads and saves under 1 s and at least 98% under 2 s,
+  with a stop before higher steps if p90 exceeds 3 s. The best arm had 5.3% under 1 s and 13.2% under 2 s, and p90 above 7 s.
+- **The A/B/B/A pairs agree.** Pages-and-saves p50 differed by 0.1 s between the two 3-worker arms and by 0.7 s between
+  the 2-worker arms. The 1-worker arms varied more (8.8 against 15.4 s), as expected when a single worker is saturated.
+- **The application CPU is the limit.** Application cores rose with the workers (about 1.0, 1.9 and 2.3 to 2.4), while
+  the database used 0.4 to 1.1 cores and the disk was not busy. At 3 workers the run finished all 750 saves in 555 to 575 s, about
+  1.3 to 1.35 saves per second.
+- **The live reload multiplies the checklist cost.** Each save makes every crew member on that vehicle reload the
+  150-row checklist (about 0.5 s of CPU each): 836 to 874 checklist reloads per 750 saves at 3 workers. With the save
+  itself (about 0.25 s) that is roughly 1.7 CPU-seconds per save, which matches the measured cores.
+- **Fleet readiness is the slowest read.** It takes about 8 s with only 43 queries, so the time is spent in Python
+  rather than in SQL. This is much slower than the 0.18 s measured locally on nine generated days; the difference
+  (the 149-day history, the overdue and missed state this cleaned copy has, or the host) has not been isolated. The
+  2026-11-09 run's readiness p50 was 33 to 106 s under load, so the issue predates this data.
+- **Saves and status changes are not the bottleneck.** A single save takes 0.25 s. Six simultaneous saves on one vehicle
+  took the same time as six spread over five vehicles. This contradicts the hypothesis of same-vehicle lock contention; the
+  extra time is shared CPU in one process. A status change takes 0.2 to 0.3 s.
+
+**Deviations, recorded so the run can be judged.**
+- *Leftover load schedules.* Earlier load steps (2026-11-03 to 11-11) left seven daily slots bound. Projected forward,
+  they gave each vehicle about 10,800 rows in the readiness window, over the 10,000-row per-vehicle bound. Readiness and
+  the checklist then returned 503 and the first arm was invalid. On the throwaway copy, the 35 load bindings were unbound
+  through the audited `bind_requirement` unbind. Their 63,000 obligations due from 2026-11-12 were then deleted, with
+  their selections, projection rows and 7,286 check links, with the three append-only delete guards dropped and
+  recreated with their original definer and SQL mode. No seal rows referred to them. Orphan checks all returned 0, and
+  `rebuild_obligation_projection` and `--verify` both reported 0 differences over 161,250 rows. The 7,286 checks since
+  2026-11-12 that had been linked to those slots are now unlinked, so readiness in this copy shows every obligation in
+  the window as overdue, missed, due or upcoming, with none passed. Production data was not touched.
+- *The 10,000-row bound itself.* Any vehicle with roughly eight or more 150-item checklists due per day reaches the bound
+  in the nine-day readiness window, and readiness and the checklist then refuse service. Issue #10's scenario does not reach
+  it, but a real fleet could.
+- *Partial history day.* The first extension attempt hit the manage wrapper's 900 s limit, leaving 2026-11-12 with 536 of
+  750 checks; the remaining days are complete.
+- *Database cache.* `innodb_buffer_pool_size` was raised from 1 GB to 3 GB for this test (owner's choice), with the buffer
+  pool dumped and reloaded in full so each arm started warm.
+- *Settle gate.* The gate required six quiet samples with no swap. 268 KB of swap stayed in use from before the test, so
+  every arm waited the gate's full 10 minutes instead; the arms are consistent with each other.
+- *Client placement and limits.* The load client ran on the application host itself, over HTTPS to the public name, and
+  shares its four cores. `MemoryMax` was raised from 1 GB to 5 GB for the arms so three workers could not be killed; peak
+  memory stayed under 1 GB.
+- *Load steps leave a slot bound.* `load_prepare` binds a daily slot for its step and does not unbind it, so repeated steps on
+  one database accumulate schedules (the cause of the first deviation). Per-arm snapshot restores make it harmless here.
+
+**Not claimed:** a worker count, a hosting layout or a channel layer (SPEC DEP-2 and section 17.7 item 7 remain owner
+decisions), any 4×/10× step, or any statistical statement.
 
 ## Net benchmark and worker-count test after issues #73 to #75 (2026-11-09)
 
