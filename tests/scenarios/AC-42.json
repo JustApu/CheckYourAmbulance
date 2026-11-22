@@ -15,21 +15,24 @@
   "given": [
     "checklists A and B on one vehicle inspecting the same item in the same place",
     "an item kept in cabinets 1 and 4",
-    "older checklist versions that disagree about one item-place, and a deficiency whose place is unclear"
+    "older checklist versions that disagree about one item-place, and a deficiency whose place is unclear",
+    "an item requirement moved from cabinet 1 to cabinet 4 while an obligation pinned to cabinet 1 is in its window, and another requirement for the same item still kept in cabinet 1"
   ],
   "when": [
     "a Supervisor publishes a checklist giving the shared item-place a different quantity",
     "a crew member passes the shared item in the A session while someone has the B session open",
     "the item passes and then fails in cabinet 1",
     "a Supervisor changes the quantity of the item requirement",
-    "the migration runs as a dry-run, for real and again"
+    "the migration runs as a dry-run, for real and again",
+    "a crew member checks the moved item at cabinet 4"
   ],
   "then": [
     "the conflicting publication is refused",
     "the B session shows the item as done within the live-update targets",
     "cabinet 4 stays due and clear, and only cabinet 1 needs attention with a deficiency naming its place",
     "both checklists use the new quantity from its effective instant and earlier obligations keep their pins",
-    "the migration refuses until the conflict and the deficiency's place are resolved, then splits places, is idempotent and reads history the same"
+    "the migration refuses until the conflict and the deficiency's place are resolved, then splits places, is idempotent and reads history the same",
+    "the open obligation is completed, it keeps cabinet 1 and the check records cabinet 4, and the other cabinet-1 requirement is not completed"
   ],
   "status": "contract",
   "notes": "Language-neutral contract for draft SPEC amendment 6.0.0 (PR #254). The scenario is not yet bound to application commands.",

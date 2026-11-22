@@ -977,14 +977,16 @@
         "checklists_a_and_b_share_item_requirement",
         "item_in_cabinets_1_and_4",
         "conflicting_legacy_checklists",
-        "deficiency_with_ambiguous_place"
+        "deficiency_with_ambiguous_place",
+        "item_moved_during_open_window"
       ],
       "actions": [
         "publish_conflicting_requirement",
         "pass_in_a_session",
         "pass_and_fail_in_cabinet_1",
         "change_item_requirement_quantity",
-        "run_migration_dry_run_and_replay"
+        "run_migration_dry_run_and_replay",
+        "check_moved_item_at_new_place"
       ],
       "assert": [
         "conflicting_publication_refused",
@@ -995,7 +997,8 @@
         "earlier_obligations_keep_pins",
         "migration_refuses_conflicts_and_ambiguous_deficiency",
         "migration_splits_places_and_is_idempotent",
-        "history_reads_same_through_map"
+        "history_reads_same_through_map",
+        "moved_item_obligation_completed_at_new_place_history_keeps_both_places"
       ],
       "requirements": [
         "AUD-1",
