@@ -147,7 +147,25 @@ def record_later_obligation_check_between_grace_and_late_limit(ctx):
     ctx["case9"] = {
         "after": _counts(ctx, case.at(days=7, hours=8, minutes=10)),
         "limit": {d: _counts(ctx, limit + d * US) for d in (-1, 0, 1)},
+        "late_states": {
+            d: _states_of(case, {o for t, o in ctx["case9_links"] if t == "LATE"}, limit + d * US)
+            for d in (-1, 0, 1)
+        },
     }
+
+
+def _states_of(case, obligation_ids, at):
+    """States of the given obligations at an instant, from event replay."""
+    from cya.obligations.projections import get_vehicle_obligations_as_of
+
+    states = get_vehicle_obligations_as_of(
+        str(case.vehicle.pk),
+        at,
+        organization_id=str(case.org.pk),
+        start=at - readiness.WINDOW_BACK,
+        end=at + readiness.WINDOW_AHEAD,
+    )
+    return sorted(str(s.state) for s in states if s.obligation.id in obligation_ids)
 
 
 def _overdue_rows(case, item, kit, at):
@@ -275,8 +293,10 @@ def overdue_cleared_after_grace_missed_only_after_late_limit(ctx):
     _check(case9["after"]["OVERDUE"] == before["OVERDUE"] - rows, f"case 9 Overdue {case9}")
     limit = case9["limit"]
     _check(limit[-1]["MISSED"] == limit[0]["MISSED"], "not missed at exactly L")
-    _check(limit[1]["MISSED"] == limit[0]["MISSED"], "completed late, so not missed after L")
     _check(limit[1]["OVERDUE"] == limit[0]["OVERDUE"], "still cleared from Overdue after L")
+    # Other obligations sharing that L become Missed after it; the one completed late does not.
+    for d, states in case9["late_states"].items():
+        _check(states == ["SATISFIED"], f"completed late at L{d:+d} us: {states}")
 
 
 @STEPS.register("stored_summary_equals_recomputation")
