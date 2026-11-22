@@ -53,11 +53,9 @@ The owner asked what would be required for "one session per truck per checklist"
 | Should one check also complete the same checklist's earlier late obligation? | "Yes." | Uniform rule within `L` |
 | Can any crew member end a checklist's open inspection? Should duplicate sessions open at deploy finish on their own? Fixed limit or setting? | "Yes, yes, and configurable" | Kept, kept, organization setting |
 | If gloves are missing in cabinet 1, does only that place turn red and carry the problem, or the item on the whole truck? | "Only that place" | Attention and deficiencies are per item-place (§5.1) |
+| Should an inspection still in use end when it reaches the resume limit? | "Yes, end it" | An Open session ends at `R` even if it is active, so an inspection lasts at most the limit (SES-8) |
 
-These are decisions of direction, not approval of the SPEC text in §6, which §25.4(e) requires separately. Two readings need confirming (§9):
-
-- whether a session still in use at the limit also ends then;
-- how a place-specific requirement is modelled.
+These are decisions of direction, not approval of the SPEC text in §6, which §25.4(e) requires separately. The model for place-specific requirements (§5.1) is Claude's reading of the owner's answer and is confirmed with the text.
 
 ## 2. How sessions and checklists work today (SPEC 5.0.0, main `cb45f27`)
 
@@ -318,7 +316,7 @@ SES-1, SES-4, SES-5 and SES-6 are unchanged.
 
 **New SES-8:**
 
-> **SES-8 [C: owner decisions 2026-11-21, amendment 6.0.0] Resume limit.** Each organization has a resume limit that an Administrator sets in whole hours from 1 to 24 (default 6). The current value is captured on each session when it opens, so a later change never moves an existing session's deadline. The session's resume deadline is `R = opened_at + captured limit`. Joins, activity and reopens never move it. From `R` on, the session cannot be reopened, joined or recorded into by anyone. If it is still Open, it ends as Incomplete, stamped under SES-9. Its records are kept permanently and stay readable (AUD-1, AUD-5). Work continues in a new session, which pins the current version (CHK-4) and shows earlier checks through current obligations (SES-4, SES-5, PRN-1). There is no override.
+> **SES-8 [C: owner decisions 2026-11-21, amendment 6.0.0; range [P]] Resume limit.** Each organization has a resume limit that an Administrator sets in whole hours from 1 to 24 (default 6). The current value is captured on each session when it opens, so a later change never moves an existing session's deadline. The session's resume deadline is `R = opened_at + captured limit`. Joins, activity and reopens never move it. From `R` on, the session cannot be reopened, joined or recorded into by anyone. If it is still Open, it ends as Incomplete at `R` even if it is in active use, stamped under SES-9. Its records are kept permanently and stay readable (AUD-1, AUD-5). Work continues in a new session, which pins the current version (CHK-4) and shows earlier checks through current obligations (SES-4, SES-5, PRN-1). There is no override.
 
 **New SES-9:**
 
@@ -544,12 +542,12 @@ Record both dry-runs and the quiet-time recommendation in the runbook. Rehearse 
 - there is no override;
 - any participant may end a session;
 - duplicates open at deploy finish on their own;
-- attention and problems are per place.
+- attention and problems are per place;
+- a session still in use ends at the limit.
 
 **Still open:**
 
-1. **Hard cap while active.** At the resume limit, should a session still in use also end, so that an inspection lasts at most the limit? This proposal assumes yes (SES-8).
-2. **Setting range.** Is 1 to 24 hours, in whole hours, right?
+1. **Setting range.** Is 1 to 24 hours, in whole hours, right?
 
 ## 10. Not changed
 
