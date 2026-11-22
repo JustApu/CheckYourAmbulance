@@ -1,103 +1,208 @@
-# Proposal: one inspection in progress per vehicle, and a resume deadline
+# Proposal: one inspection in progress per vehicle checklist, shared item completion, and a resume deadline
 
 **Status:** Draft proposal for owner and Codex review. It has no authority. It changes no behaviour, and it does not authorize implementation or deployment.
 **Author:** Claude, 2026-11-21.
-**Proposed SPEC change:** amendment 6.0.0. It is major under §25.4(b), because it reverses approved session rules (§6.2 concurrent sessions, SES-3 "a nonparticipant starts a new session", and the 1.9.0 decision on [issue #78](https://github.com/JustApu/CheckYourAmbulance-archive/issues/78)).
+**Revision 2 (2026-11-21):** the owner answered three questions about a per-checklist variant (§1.2). This revision changes the proposal in four ways:
 
-## 1. Policy direction to confirm
+- the limit is one session in progress **per vehicle checklist**;
+- a check of an item completes it in every checklist that is due;
+- an item has one set of requirements on a vehicle;
+- it records a display gap with shared items (§2.4).
 
-Codex relayed the following on 2026-11-21 as the owner's decision, after the owner compared screenshots of Medic 1. The owner should confirm it in writing before anything here is treated as approved:
+The resume deadline, enforcement and migration design from revision 1 are unchanged.
+
+**Proposed SPEC change:** amendment 6.0.0. It is major under §25.4(b), because it reverses approved rules:
+
+- the §6.2 concurrent sessions rule;
+- SES-3 "a nonparticipant starts a new session";
+- the 1.9.0 decision on [issue #78](https://github.com/JustApu/CheckYourAmbulance-archive/issues/78);
+- the SCH-5 default that a check has exactly one link;
+- CHK-5 per-version item requirements.
+
+## 1. Direction
+
+### 1.1 Policy relayed by Codex
+
+Codex relayed the following on 2026-11-21 as the owner's decision, after the owner compared screenshots of Medic 1:
 
 1. An incomplete inspection session cannot be resumed indefinitely.
 2. Only one inspection session can be in progress per truck. Crew join that session; they cannot open a parallel or separate one.
 3. Historical checks and session records are always kept.
 
-No duration was given. Section 4 recommends one.
+### 1.2 Owner's answers in the Claude session (2026-11-21)
 
-## 2. How sessions work today (SPEC 5.0.0, main `cb45f27`)
+The owner asked what would be required for "one session per truck per checklist", with the condition that an item appearing in more than one active checklist at the same time, once completed in any checklist, is completed in all of them. The owner then answered three questions:
 
-### 2.1 Rules in SPEC
+| Question | Owner's answer |
+|---|---|
+| Does "active" mean a requirement currently open on the vehicle, not a checklist with a session in progress? | "I agree" |
+| What if two checklists require different things of the same item (4 against 6)? | "The requirements should be for an item. It should not be possible for one checklist to require 4 and a different checklist for the same item to require 6." |
+| Should the check also complete another checklist's overdue requirement within its late limit? | "Complete both, within time limits" |
+
+These are decisions of direction. They are not approval of the SPEC text in §6, which §25.4(e) requires separately. Q1 in §9 asks the owner to confirm that the per-checklist limit replaces the per-truck wording in §1.1.
+
+## 2. How sessions and checklists work today (SPEC 5.0.0, main `cb45f27`)
+
+### 2.1 Session rules in the SPEC
 
 - **§3.3:** all four roles may open or join a session. Only a recorded participant may reopen an ended session or end an open one.
-- **§6.2:** the states are Open, Incomplete and Closed. "Multiple sessions on the same vehicle may be open concurrently [C]". Starting a separate session "is allowed even when another session is open". A nonparticipant may start a new session instead of reopening.
-- **§6.3 SES-1, SES-2:** after 6 hours with no persisted activity, a session closes as Incomplete. Reopening starts a new 6-hour window.
+- **§6.2:** "Multiple sessions on the same vehicle may be open concurrently [C]". Starting a separate session "is allowed even when another session is open". A nonparticipant may start a new session instead of reopening.
+- **SES-1, SES-2:** after 6 hours with no persisted activity, a session closes as Incomplete. Reopening starts a new 6-hour window.
 - **SES-3:** a participant may reopen a Closed or Incomplete session at any time, without approval. There is no age limit.
-- **SES-4, SES-5, PRN-1, AC-2:** sessions never decide compliance. Item checks satisfy obligations, and another crew member can resume work without repeating valid checks.
+- **SES-4, SES-5, PRN-1, AC-2:** sessions never decide compliance; item checks satisfy obligations.
 - **SES-6:** the auto-close is stamped at last activity plus 6 h, not at the time the job runs.
-- **CHK-4:** a session keeps the checklist version it opened with, including after a reopen.
+- **CHK-4:** a session keeps the checklist version it opened with.
 
-### 2.2 Code
+### 2.2 Session code
 
 | Action | Where | What happens |
 |---|---|---|
-| Start or join | `POST /api/v1/inspection-sessions` → `open_or_join_session` ([cya/inspections/commands.py:162](../../cya/inspections/commands.py)) | Takes the vehicle row lock. With `separate: false` (the default), it joins the newest session on the vehicle that is Open and not idle, **whatever checklist was requested**. A repeat join is a no-op. JOIN adds a participant and a JOIN event, and does not reset the activity clock. If nothing is open, it opens a new session pinned to the checklist version resolved at that moment. |
+| Start or join | `POST /api/v1/inspection-sessions` → `open_or_join_session` ([cya/inspections/commands.py:162](../../cya/inspections/commands.py)) | Takes the vehicle row lock. With `separate: false` (the default), it joins the newest session on the vehicle that is Open and not idle, **whatever checklist was requested**. If nothing is open, it opens a new session pinned to the checklist version current at that moment. JOIN does not reset the activity clock. |
 | Separate | same, `separate: true` | Always opens another session, even while one is open. |
 | Activity | `fold_session` ([projections.py:30](../../cya/inspections/projections.py)) | OPEN, REOPEN and checks recorded in the session count as activity. JOIN, END, viewing and failed saves do not. |
-| Idle | `is_expired` (projections.py:74); `_settle_idle` (commands.py:461) | At last activity plus 6 h, an Open session is treated as ended at once, when it is read and when anything is written to it. A default join skips it. Reopen and end write the close first. |
-| Auto-close job | `close_inactive_sessions` → `auto_close_session` (commands.py:388); `deploy/rocky9/cya-sessions.timer` every 30 min, `Persistent=true` | A service-identity command appends `AUTO_INCOMPLETE` stamped at last activity plus 6 h. It is idempotent, keyed on the latest event. A projection that is out of date can only delay a close. |
+| Idle | `is_expired` (projections.py:74); `_settle_idle` (commands.py:461) | At last activity plus 6 h, an Open session is treated as ended at once, on read and on write. |
+| Auto-close job | `close_inactive_sessions` → `auto_close_session` (commands.py:388); `deploy/rocky9/cya-sessions.timer` every 30 min, `Persistent=true` | A service-identity command appends `AUTO_INCOMPLETE` at last activity plus 6 h. It is idempotent, keyed on the latest event. |
 | End | `POST …/{id}/end` → `end_session` (commands.py:342) | A participant appends `END_CLOSED` or `END_INCOMPLETE`. |
-| Reopen | `POST …/{id}/reopen` → `reopen_session` (commands.py:283) | A participant appends REOPEN, with **no age limit and no check for other open sessions**. It notifies the other participants (NOT-3). The original version pin is kept. |
-| Checks in a session | `_session_for_check` ([cya/checks/commands.py:502](../../cya/checks/commands.py)); trigger in `cya/checks/migrations/0003_check_session.py` | The session must be on this vehicle and pinned version, the user must be a participant, and the session must be Open and not idle. The database repeats these checks. |
-| DB guards | `cya/inspections/migrations/0003`, `0005` | Header, participant and event rows are append-only. The event chain is gapless. `AUTO_INCOMPLETE` has no actor and its instant must equal last activity plus 6 h. |
-| Vehicle page | `vehicle` view and `_session_rows` ([views.py:129–193](../../cya/inspections/views.py)); `vehicle.html`; `vehicle.js` | Shows the newest Open session with Join or Continue. A "Start a separate inspection" disclosure asks for confirmation and then sends `separate: true`. The participant's newest Incomplete session is the primary **Resume** button, however old it is. Up to 20 recent sessions are listed. |
-| Session page | `session` view (views.py:275); `session.html`; `checklist.js` | An ended session shows "Reopen session". `checklist.js` maps `SESSION_NOT_OPEN` to "Reopen it to continue". |
+| Reopen | `POST …/{id}/reopen` → `reopen_session` (commands.py:283) | A participant appends REOPEN. There is **no age limit and no check for other open sessions**. It notifies the other participants. |
+| Checks in a session | `_session_for_check` ([cya/checks/commands.py:502](../../cya/checks/commands.py)); trigger in `cya/checks/migrations/0003_check_session.py` | The session must be on this vehicle and pinned version (otherwise `SESSION_MISMATCH`), the user must be a participant, and the session must be Open and not idle. |
+| Vehicle page | `vehicle`, `_session_rows` ([views.py:129–193](../../cya/inspections/views.py)); `vehicle.html`; `vehicle.js` | Shows the newest Open session with Join or Continue, a "Start a separate inspection" disclosure, and the participant's newest Incomplete session as the primary **Resume** button, however old it is. |
+| Session page | `session` (views.py:275); `session.html`; `checklist.js` | An ended session shows "Reopen session". |
 | Home | `in_progress` ([cya/shell/home.py:58](../../cya/shell/home.py)) | Lists the user's Open sessions that are not idle. |
 
-API refusals for sessions all map to `409 SESSION_UNAVAILABLE` (api.py:57).
+All session refusals map to `409 SESSION_UNAVAILABLE` (api.py:57).
 
-### 2.3 What this allows
+### 2.3 Items, checklists and obligations
 
-- Two or more sessions open on one vehicle at once, each with its own participants. On a vehicle that has several checklists, they can be pinned to different checklists.
-- A session from days or weeks ago can be reopened and recorded into. It still uses its original checklist version, which may have been superseded since, and each reopen gives it another 6 hours. A participant's oldest unfinished session stays the primary Resume button indefinitely.
+- **CHK-1, CHK-2:** a vehicle owns one or more checklists, and one schedule slot can have several of them.
+- **CHK-5:** each checklist version records its own requirements for every item (expected quantity, kind, allowed outcomes, Not-Applicable rules and so on). Two checklists on one vehicle can therefore ask different things of the same item today.
+- **CHK-10, §5.7.1:** when two checklists require the same item, kit instance and due instant, only one obligation is created. A precedence order picks whose requirement it pins.
+- **SCH-5, SCH-6:** for different due instants with overlapping windows, a check links only to the earliest-due obligation. A further link is allowed only through an Administrator-defined `shared_satisfaction_rule` that names exact requirement-version pairs. The model and the linker implement this (`choose_links`, [cya/checks/linking.py:172](../../cya/checks/linking.py)), but nothing in the application calls `configure_shared_satisfaction_rule`, so no rule can be created today. The database rejects a second link that has no rule (§18.1 item 2).
+- **SCH-2:** a late completion links only when no obligation of the item has an on-time window containing the check.
+- **Linking ignores the checklist.** `_eligible` (linking.py:39) selects obligations by vehicle, item, kit instance and time only. A check made under one checklist can already satisfy an obligation that another checklist created.
 
-Compliance is still correct in both cases, because checks satisfy obligations and sessions do not. The problems are confusion for crew, split participation, and recording against an outdated checklist version.
+### 2.4 Gap: a shared item shows under only one checklist
 
-The proposal relies on a fact the code already guarantees: **starting a new session loses nothing.** Obligation status is per vehicle (the checklist API is per vehicle). Checks recorded in an earlier session keep satisfying current obligations under SES-4, so a new session shows them as already done.
+The crew checklist builds one row per item. When two checklists list the same item, "the first template by id wins" (`_resolved_items`, [cya/attention/checklist.py:130–157](../../cya/attention/checklist.py)), and the row carries only that checklist's version. The session page shows only rows of its own checklist (`checklistRows()` in `checklist.js`).
+
+So a session on the other checklist does not show the item at all, and the server would refuse a check from it (`SESSION_MISMATCH`). This applies today. It would also block either session rule: under "one per truck", shared items of the losing checklist cannot be reached from any session. This finding comes from reading the code, not from a test; the step 2 tests in §8 confirm it first.
+
+### 2.5 What the current rules allow
+
+- Several sessions open on one vehicle, including duplicates of the same checklist.
+- A session from days ago can be reopened and recorded into against an outdated checklist version.
+- One physical item checked once can leave another checklist's overlapping obligation unsatisfied, or, under §2.4, not even visible.
+
+Compliance is still derived correctly from checks. The problems are confusion for crew, split participation, outdated version pins and duplicated work.
 
 ## 3. Proposed behaviour in short
 
 - **In progress** means the session is Open, has not gone idle (SES-1) and has not reached its resume deadline.
-- A vehicle has at most one session in progress. Starting an inspection while one is in progress always joins it. No one can start a separate one, and no one can reopen another session on that vehicle while one is in progress.
-- Every session has a **resume deadline** of 12 hours after it opened. The deadline is fixed when the session opens. When it passes, the session ends if it was still Open. It can no longer be reopened, joined or recorded into, and it stays readable permanently.
-- Nothing is deleted or rewritten. Every ending is a new append-only event.
+- **One session in progress per vehicle checklist.** Starting checklist B while a B session is in progress joins it. A second B session cannot be started, and an ended B session cannot be reopened while one is in progress. Sessions on different checklists can be in progress at the same time.
+- **One check completes the item everywhere it is due.** A check of an item, or of one kit instance's item, on a vehicle counts toward every unsatisfied obligation of that item that the check's time can complete, whichever checklist created it: on time (`E ≤ t ≤ G`) or late within its limit (`G < t ≤ L`). "Active" is decided by those obligations, never by which sessions are open.
+- **One set of requirements per item on a vehicle.** Every checklist on the vehicle uses the same expected quantity, kind, allowed outcomes and other requirements for an item. A checklist decides which items it covers, on which schedule and in what order.
+- **A shared item appears in every checklist that lists it.** Its status is shared, so a Pass recorded in one session shows as done in the others, live.
+- **Resume deadline of 12 h from the session's open instant.** After it, the session is ended and read-only, cannot be reopened, joined or recorded into, and is kept permanently.
+- Nothing is deleted or rewritten.
 
-## 4. Recommended resume window: 12 hours from the session's open instant
+## 4. Resume window: 12 hours from the session's open instant
 
-**When it starts:** at the session's `opened_at`, the server instant of its OPEN event. Joins, checks and reopens never move it.
+This section is unchanged from revision 1.
 
-**Why from the open instant:** under SES-2 a reopen counts as activity. A window measured from the last check, the last activity or the last reopen would therefore restart with every reopen, and the session could still be resumed indefinitely. Only a fixed anchor gives a real limit.
+**When it starts:** at `opened_at`, the server instant of the session's OPEN event. Joins, checks and reopens never move it.
+
+**Why from the open instant:** a reopen counts as activity (SES-2), so a window measured from activity would restart with every reopen and could be extended indefinitely.
 
 **Why 12 hours:**
 
-- A routine check takes well under an hour, and calls interrupt it. SES-1 already covers gaps of up to 6 hours, so with a 12-hour deadline a session that went idle during a long call can still be reopened for at least 6 more hours.
-- 12 hours covers a day shift or a night shift. The next shift, or the next day's check on a 24-hour shift, starts a fresh session pinned to the checklist version current at that time.
-- A short window costs very little: a new session shows the earlier checks as done (§2.3), so expiry costs one tap. This is also why no override is proposed.
-- After a checklist is published, crew can record against the superseded version for at most 12 hours.
-- A fixed UTC duration avoids shift-time and DST rules. Shift patterns are not modelled until Humanity is connected.
+- A routine check takes well under an hour, and SES-1 already tolerates gaps of up to 6 hours.
+- 12 hours covers a day or night shift. The next shift starts a fresh session pinned to the current version.
+- A new session loses nothing, because checks satisfy obligations. This is why no override is proposed.
+- It limits recording against a superseded checklist version to 12 hours.
+- A fixed UTC duration needs no shift-time or DST rules.
 
-**What happens when it expires:**
+**On expiry:**
 
-- An Open session ends as **Incomplete**. The job writes a new `DEADLINE_INCOMPLETE` event (see §6). Until the job runs, every read and write already treats the session as ended.
-- From then on nobody can reopen, join or record a check into it. The session page shows it as read-only, with its checks, participants and history, and points to the vehicle page to start or join the current inspection.
-- The session, its participants, events and checks are kept permanently (AUD-1, AUD-5).
+- An Open session ends as Incomplete; the job writes `DEADLINE_INCOMPLETE`.
+- Before the job runs, every read and write already treats the session as ended.
+- Nobody can reopen, join or record into it afterwards.
+- Its page is read-only and points to the vehicle page.
+- Its records are kept permanently (AUD-1, AUD-5).
 
-**Who can override:** nobody. A Supervisor or Administrator override would add a permission, an audit path and UI to recover something a new session already gives for free. Open question Q4 lists the alternative.
+**Override:** none (Q4).
 
 **Alternatives considered:**
 
 | Window | For | Against |
 |---|---|---|
-| 6 h from open | Simplest; matches SES-1 | A session idle-closed during a long call usually could not be reopened at all |
-| **12 h from open (recommended)** | Covers a shift; leaves at least 6 h to resume after an idle close | A 24-hour crew starts a second session in the evening (nothing is lost) |
-| 24 h from open | Matches the OQ-79 assignment maximum | Spans a full shift change; the next crew joins or resumes yesterday's session and its version pin |
-| End of station day | Matches daily windows | Depends on station time zone and DST; a check started at 23:30 could only be resumed for 30 minutes |
-| Measured from last activity or last reopen | — | Can be extended indefinitely, so it does not meet policy point 1 |
+| 6 h from open | Simplest | A session idle-closed during a long call usually could not be reopened |
+| **12 h from open (recommended)** | Covers a shift | A 24-hour crew starts a second session in the evening, losing nothing |
+| 24 h from open | Matches OQ-79 | Spans a shift change and keeps yesterday's version pin |
+| End of station day | Matches daily windows | Depends on time zone and DST; a check started at 23:30 could be resumed for only 30 minutes |
+| From last activity or reopen | — | Can be extended indefinitely |
 
-## 5. Proposed SPEC text (amendment 6.0.0)
+## 5. Item requirements and shared completion
 
-Section IDs refer to SPEC 5.0.0. Text marked *unchanged* is quoted only for position.
+### 5.1 One set of requirements per item on a vehicle (owner answer 2)
 
-### 5.1 §3.3 permission table
+The owner's words, "the requirements should be for an item", point to moving the requirements out of each checklist version and onto the item on that vehicle.
+
+**Recommended: a vehicle item requirement.** Each vehicle has one effective requirement per item. It is versioned, effective-dated and published like a checklist (CHK-3), and holds:
+
+- kind;
+- expected quantity and unit;
+- allowed outcomes;
+- bulk-pass eligibility;
+- Not-Applicable rules;
+- conditional rules;
+- instructions;
+- placement (subject to Q6).
+
+A checklist version then records only which items it covers, their schedule rules and display order, and refers to the vehicle's item requirements for everything else. Editing an item requirement once changes it for every checklist on that vehicle, from its effective instant.
+
+**Alternative: publish-time validation.** Requirements stay in each checklist version, and the system refuses to publish a version that disagrees with another checklist on the same vehicle effective at any overlapping instant. This is smaller, but changing a value (4 to 6) then needs all affected checklists republished together in one action, or the first publish is refused. It also leaves the owner's "requirements for an item" as a check rather than as the structure.
+
+**Scope:** per vehicle, because SPEC 5.0.0 made checklists vehicle-owned so that trucks can differ. Q5 asks whether the owner meant organization-wide instead.
+
+**Placement:** obligations are keyed by vehicle, item, kit instance and due instant, with no placement. If two checklists placed the same item in different compartments, one check would complete both even though they are two physical stocks. I recommend placement belongs to the item requirement (one place per item per vehicle); an item stocked in two places becomes two items (Q6).
+
+**Unchanged:**
+
+- kit contents come from the shared kit definition (KDEF-1 to KDEF-12), which already has one requirement;
+- kit presence obligations stay per kit-list line (KDEF-12).
+
+**Migration:**
+
+- Published checklist versions are immutable (CHK-5) and keep their recorded values for history.
+- Existing obligations keep their pinned requirement versions.
+- The cutover creates each vehicle's item requirements from its checklists in force. Where two checklists on a vehicle disagree about an item, the cutover refuses and lists the conflicts, following §18.2. A Supervisor first publishes matching versions.
+- The seed data is synthetic (CHK-7), so few or no conflicts are expected.
+- The cutover is idempotent and validates before it commits.
+
+### 5.2 One check completes every eligible obligation (owner answers 1 and 3)
+
+A check of item X on vehicle V, for kit instance K if X is a kit item, recorded at server time `t`, links to **every** unsatisfied obligation of (V, X, K) for which `E ≤ t ≤ G` (on time) or `G < t ≤ L` (late, within its pinned limit). This applies whichever checklist created the obligation. The constraints on this rule:
+
+- **Same due instant:** CHK-10 still creates only one obligation, so there is one link.
+- **Outcome:** each linked obligation follows §5.4 for that outcome. A Pass or Fail satisfies all of them. Unable to Inspect satisfies none until a supervisor completes it (5.4.1). A Fail raises one deficiency for the item, as today.
+- **Kit limits:**
+  - a check never links to another kit instance's obligation (owner decision 1.8.0);
+  - a kit presence check links only to obligations of its own kit-list line (KDEF-12).
+- **Corrections and invalidation:** these re-derive all of a check's links together (§19.1, INV-2), as they do now for shared links.
+- **Concurrency:** the conflict warning (CON-3) compares against the newest effective check for the vehicle, item and kit instance across all its obligations. Two crews checking the same item from different checklist sessions therefore get the warning.
+- **Seal substitutions:** unchanged.
+- **Shared-satisfaction rules (SCH-5):** these are no longer needed. The tables stay for history; no new rule can be created, and none exists today.
+
+**Same checklist, earlier overdue obligation (Q7).** The rule also applies when the earlier late obligation belongs to the same checklist. For example, yesterday's 18:00 daily is unsatisfied and its late limit is 07:00 today; a check at 06:30 completes it late and today's 06:00 daily on time. Today SCH-2 links only today's. I recommend the uniform rule, because the owner's answer was "complete both, within time limits" and one rule is simpler, but this changes late-completion reporting, so Q7 asks.
+
+### 5.3 Display
+
+The checklist API returns one row per (checklist, item), and per kit instance for kit items. Each row shows the item's shared obligation state and attention state. A session shows the rows of its own checklist, so a shared item appears in every checklist that lists it. Recording it from any of those sessions is allowed, because the check names the session's own pinned version. Live updates are already per vehicle (§17.3), so every open session sees the result within the freshness targets.
+
+## 6. Proposed SPEC text (amendment 6.0.0)
+
+Section IDs refer to SPEC 5.0.0.
+
+### 6.1 §3.3 permission table
 
 **Before:**
 
@@ -106,12 +211,54 @@ Section IDs refer to SPEC 5.0.0. Text marked *unchanged* is quoted only for posi
 
 **After:**
 
-> | Open/join an inspection session | Yes | Yes | Yes | Yes | [C: owner decision 2026-10-24, issue #78] any active user with an organization role may begin or join inspection work; [C: owner decision 2026-11-21, amendment 6.0.0] while a session is in progress on the vehicle, starting always joins it (SES-7) |
-> | Rejoin (reopen) an ended inspection session | Yes | Yes | Yes | Yes | [C: owner decision 2026-10-24, issue #78] only a recorded participant may reopen; preserves original session and checklist version; [amendment 6.0.0] only before its resume deadline and while no other session is in progress on the vehicle (SES-3, SES-7, SES-8) |
+> | Open/join an inspection session | Yes | Yes | Yes | Yes | [C: owner decision 2026-10-24, issue #78] any active user with an organization role may begin or join inspection work; [C: owner decision 2026-11-21, amendment 6.0.0] while a session of the chosen vehicle checklist is in progress, starting always joins it (SES-7) |
+> | Rejoin (reopen) an ended inspection session | Yes | Yes | Yes | Yes | [C: owner decision 2026-10-24, issue #78] only a recorded participant may reopen; preserves original session and checklist version; [amendment 6.0.0] only before its resume deadline and while no other session of the same vehicle checklist is in progress (SES-3, SES-7, SES-8) |
 
-The "Manually end" row is unchanged.
+### 6.2 §4.3 checklists
 
-### 5.2 §6.2 States
+**CHK-5 before:**
+
+> **CHK-5 [C] Checklist version contents.** A published vehicle checklist version retains its item set; each item's compartment, kit, equipment or system placement; display order; instructions; expected quantity; kind; bulk-pass eligibility; allowed outcomes; schedule rules; conditional rules; and Not-Applicable rules. …
+
+**CHK-5 after:**
+
+> **CHK-5 [C] Checklist version contents.** A published vehicle checklist version retains its item set, display order and schedule rules. Each item's other requirements come from the vehicle's item requirement (CHK-11) in force at the obligation's due instant. A version published before amendment 6.0.0 keeps the values it recorded, for history and for the obligations that pin it. …
+
+The rest of CHK-5 is unchanged.
+
+**New CHK-11:**
+
+> **CHK-11 [C: owner decision 2026-11-21, amendment 6.0.0; scope and contents [P] pending OQ-83, OQ-84] One requirement per item on a vehicle.** Each vehicle has one effective requirement for each item it inspects. The requirement covers kind, expected quantity and unit, allowed outcomes, bulk-pass eligibility, Not-Applicable rules, conditional rules, instructions and placement. It is versioned, effective-dated and published under CHK-3 by the roles that publish that vehicle's checklists. Every checklist on the vehicle uses it, so two checklists can never require different things of one item. Kit contents keep their kit definition's requirements (KDEF-1 to KDEF-12). Vehicle files (IMP-7) carry item requirements alongside the checklists.
+
+### 6.3 §5.3 and §5.5 linking
+
+**SCH-2 before:**
+
+> … It may be linked to an obligation that is still unsatisfied and past `G` only when no unsatisfied obligation of the same vehicle+item has an on-time window containing `t_c` (SCH-6 ordering applies among overdue ones: earliest-due first). …
+
+**SCH-2 after:**
+
+> … It is linked to every obligation of the same vehicle+item that is still unsatisfied, past `G` and not past its `L`, together with every on-time one (SCH-6). …
+
+**SCH-5 before:**
+
+> **SCH-5 [P]** Link cardinality: `check_obligation_link` rows are unique per `(check_id, obligation_id)`. By default a check has **exactly one** link. A check may have more than one only when each additional link carries the `shared_rule_id` of an administrator-defined, audited rule that explicitly declares the sharing (SCH-6); a link without a `shared_rule_id` is rejected if the check already has a link. One check never silently counts toward more than one obligation.
+
+**SCH-5 after:**
+
+> **SCH-5 [C: owner decision 2026-11-21, amendment 6.0.0] Link cardinality.** `check_obligation_link` rows are unique per `(check_id, obligation_id)`. A check links to every obligation SCH-6 makes eligible, and each link records why it was made (on time or late). Shared-satisfaction rules recorded before 6.0.0 remain in history; no new rule can be created.
+
+**SCH-6 before:**
+
+> **SCH-6 [P]** When a check is recorded and several unsatisfied obligations for the same vehicle+item are eligible (windows containing `t_c`, possible only with overlapping schedules; or late-linkable ones under SCH-2), the check links to the earliest-due one. A shared-satisfaction rule (e.g. a shared-parent item) may additionally link it to the others it names. Invalidating or correcting the check re-derives all its links together (§19.1). For an item inside a kit only the obligations of the kit instance the check names are eligible; a check never links to another instance's obligation, not even through a shared-satisfaction rule. …
+
+**SCH-6 after:**
+
+> **SCH-6 [C: owner decisions 2026-11-21, amendment 6.0.0] One check completes the item wherever it is due.** A check links to every unsatisfied obligation of the same vehicle+item for which `E ≤ t_c ≤ G` or `G < t_c ≤ L`, whichever vehicle checklist created it. Whether an obligation is eligible depends only on obligations and time, never on which sessions are open (§6.1). Invalidating or correcting the check re-derives all its links together (§19.1). For an item inside a kit only the obligations of the kit instance the check names are eligible. A kit presence check is eligible only for obligations of its own kit-list line (KDEF-12). …
+
+The required tests are amended to: overlapping windows across two checklists (AC-30), two identical kit instances with one checked, on-time plus late links from one check, and invalidation removing all links.
+
+### 6.4 §6.2 States
 
 **Before:**
 
@@ -123,265 +270,276 @@ The "Manually end" row is unchanged.
 
 > | **Incomplete** | Auto-closed by inactivity (§6.3), ended at its resume deadline (SES-8), or manually ended with unmet items. Progress preserved. |
 >
-> A session is **in progress** while it is Open and has reached neither its inactivity limit (SES-1) nor its resume deadline (SES-8). Reopening moves Incomplete (or Closed) → Open, within the limits of SES-3, SES-7 and SES-8, and is an audited event [C]. **[C: owner decision 2026-11-21, amendment 6.0.0]** A vehicle has at most one session in progress (SES-7). Concurrent crew members work in that one session; checking items concurrently is unchanged (§7.4). **[C: owner decision 2026-10-24, issue #78]** Only a participant may reopen that same ended session or manually end it. A nonparticipant joins the session in progress, or starts a new session when none is in progress.
+> A session is **in progress** while it is Open and has reached neither its inactivity limit (SES-1) nor its resume deadline (SES-8). Reopening moves Incomplete (or Closed) → Open, within SES-3, SES-7 and SES-8, and is an audited event [C]. **[C: owner decisions 2026-11-21, amendment 6.0.0]** Each vehicle checklist has at most one session in progress on its vehicle (SES-7). Sessions of different checklists may be in progress together, and an item they share is completed by one check (SCH-6). **[C: owner decision 2026-10-24, issue #78]** Only a participant may reopen that same ended session or manually end it. A nonparticipant joins the session in progress for that checklist, or starts a new one when none is in progress.
 
-### 5.3 §6.3 (retitled "Inactivity auto-close, resume deadline and one session per vehicle")
+### 6.5 §6.3 (retitled "Inactivity auto-close, resume deadline and one session per checklist")
 
-SES-1, SES-4, SES-5 and SES-6 are *unchanged*.
+SES-1, SES-4, SES-5 and SES-6 are unchanged.
 
-**SES-2 before:**
-
-> … Reopening starts a new 6-hour window from the reopen instant.
-
-**SES-2 after:**
-
-> … Reopening starts a new 6-hour window from the reopen instant; that window never extends past the session's resume deadline (SES-8).
-
-**SES-3 before:**
-
-> **SES-3 [C: owner decision 2026-10-24, issue #78]** A participant may reopen a Closed or Incomplete session without supervisor approval. The reopen is audit-logged (actor, instant, session); a nonparticipant starts a new session instead.
+**SES-2 after** (appended): "…; that window never extends past the session's resume deadline (SES-8)."
 
 **SES-3 after:**
 
-> **SES-3 [C: owner decisions 2026-10-24, issue #78, and 2026-11-21, amendment 6.0.0]** A participant may reopen a Closed or Incomplete session without supervisor approval, before its resume deadline (SES-8) and only while no other session is in progress on the vehicle (SES-7). The reopen is audit-logged (actor, instant, session). A refused reopen changes nothing and is audited as a refused command. A nonparticipant joins the session in progress, or starts a new session when none is in progress.
+> **SES-3 [C: owner decisions 2026-10-24, issue #78, and 2026-11-21, amendment 6.0.0]** A participant may reopen a Closed or Incomplete session without supervisor approval, before its resume deadline (SES-8) and only while no other session of the same vehicle checklist is in progress (SES-7). The reopen is audit-logged (actor, instant, session). A refused reopen changes nothing and is audited as a refused command. A nonparticipant joins the session in progress for that checklist, or starts a new session when none is in progress.
 
 **New SES-7:**
 
-> **SES-7 [C: owner decision 2026-11-21, amendment 6.0.0] One session in progress per vehicle.** A vehicle has at most one session in progress (§6.2). While one is in progress, a request to start an inspection on that vehicle joins it, whichever checklist the requester chose. Nobody can start a separate or parallel session, and nobody can reopen another session on that vehicle. When none is in progress, starting opens a new session pinned under CHK-4. Session commands for one vehicle are serialized, so two simultaneous starts produce one session, and a start racing a reopen leaves exactly one session in progress.
+> **SES-7 [C: owner decision 2026-11-21, amendment 6.0.0] One session in progress per vehicle checklist.** For each vehicle checklist (its identity, not a version), at most one session is in progress. A request to start that checklist while one is in progress joins it, even when it pins an earlier version (CHK-4). Nobody can start a second session of that checklist, and nobody can reopen another session of it. Starting a different checklist on the same vehicle is unaffected. Session commands for one vehicle are serialized, so two simultaneous starts of one checklist produce one session, and a start racing a reopen leaves exactly one in progress.
 
 **New SES-8:**
 
-> **SES-8 [C: owner decision 2026-11-21 (no indefinite resumption); duration [P] pending OQ-81] Resume deadline.** Every session has a resume deadline `R = opened_at + 12 h`, fixed when it opens. Joins, activity and reopens never move it. From `R` on, the session cannot be reopened, joined or recorded into by anyone. If it is still Open, it ends as Incomplete, stamped at `R` (SES-9). The session, its participants, events and checks are kept permanently and stay readable (AUD-1, AUD-5). Work continues in a new session, which pins the checklist version then current (CHK-4) and shows earlier checks through current obligations (SES-4, SES-5, PRN-1). There is no override.
+> **SES-8 [C: owner decision 2026-11-21 (no indefinite resumption); duration [P] pending OQ-81] Resume deadline.** Every session has a resume deadline `R = opened_at + 12 h`, fixed when it opens. Joins, activity and reopens never move it. From `R` on, the session cannot be reopened, joined or recorded into by anyone. If it is still Open, it ends as Incomplete, stamped under SES-9. Its records are kept permanently and stay readable (AUD-1, AUD-5). Work continues in a new session, which pins the current version (CHK-4) and shows earlier checks through current obligations (SES-4, SES-5, PRN-1). There is no override.
 
 **New SES-9:**
 
-> **SES-9 [P] Enforcement and recording.** Both time limits are enforced whenever a session is read or written, computed from its event history and its checks, whether or not the job has run. Once a limit has passed, the session reads as ended and joins, reopens and checks are refused. The idempotent, restart-safe job (ARC-4) then appends the ending event, stamped by rule rather than at the time the job runs:
+> **SES-9 [P] Enforcement and recording.** Both time limits are enforced whenever a session is read or written, computed from its event history and its checks, whether or not the job has run. The idempotent, restart-safe job (ARC-4) then appends the ending event, stamped by rule:
 >
-> - if last activity + 6 h ≤ max(R, last activity), it writes `AUTO_INCOMPLETE` at last activity + 6 h (SES-6);
-> - otherwise, it writes `DEADLINE_INCOMPLETE` at max(R, last activity).
+> - if last activity + 6 h ≤ max(R, last activity), `AUTO_INCOMPLETE` at last activity + 6 h (SES-6);
+> - otherwise `DEADLINE_INCOMPLETE` at max(R, last activity).
 >
-> For a session opened under amendment 6.0.0, last activity is always earlier than `R`, so the deadline stamp is `R`. The max() applies only to sessions from before 6.0.0 that have activity after their `R`.
+> For a session opened under 6.0.0, last activity is always before `R`, so the deadline stamp is `R`. The max() applies only to older sessions with activity after their `R`.
 
-### 5.4 §17.2 ARC-4
+### 6.6 §6.5 Views
 
-**Before:** `| ARC-4 | Scheduled/background job execution that is idempotent and restart-safe | TIME-1, SES-6 |`
-**After:** `| ARC-4 | Scheduled/background job execution that is idempotent and restart-safe | TIME-1, SES-6, SES-9 |`
+**New VW-5:**
 
-### 5.5 §18 logical data model
+> **VW-5 [C: owner decision 2026-11-21, amendment 6.0.0]** An item appears in every vehicle checklist that lists it, in that checklist's order. Its obligation and attention state are the vehicle's, shared by all of those checklists, so a check recorded in one session shows in the others without a refresh (§17.3).
 
-**Before:** `| | session_event | A | open, reopen, close(auto/manual), roster confirm |`
-**After:** `| | session_event | A | open, join, reopen, close(auto inactivity / resume deadline / manual), roster confirm |`
+### 6.7 Other sections
 
-### 5.6 §23 acceptance criteria
+- **§17.2 ARC-4:** cite SES-9.
+- **§18:**
+  - `session_event` lists "close (auto inactivity / resume deadline / manual)";
+  - add `vehicle_item_requirement` (versioned, A);
+  - mark `shared_satisfaction_rule` as history only.
+- **§18.1 item 2 before:** "`check_obligation_link` unique per `(check_id, obligation_id)`; a second link for one `check_id` requires a non-null `shared_rule_id` (SCH-5)."
+- **§18.1 item 2 after:** "`check_obligation_link` unique per `(check_id, obligation_id)`; every link of one check is to an obligation of the same vehicle, item and kit instance (SCH-6)."
+- **AC-6:** add "before its resume deadline and while no other session of the same checklist is in progress".
+- **AC-30 before:** "**Link cardinality [P].** With two overlapping-window obligations for one item, one check links to the earliest-due only; a second link without a shared-rule id is rejected; invalidating the check voids all its links."
+- **AC-30 after:** "**Shared completion [C].** With two overlapping-window obligations for one item from two checklists, one Pass links to both; with one of them past `G` but not past `L`, it links to both (one late); an obligation past its `L` is not linked; a check of kit instance K never links to instance K2; invalidating the check voids all its links."
+- **New AC-41 (sessions and deadline):**
+  1. With session S of checklist A in progress on V, a start of A by any role joins S, while a start of checklist B opens or joins a B session.
+  2. Two simultaneous starts of A produce one session.
+  3. A participant's reopen of an ended A session is refused while S is in progress, and succeeds after S ends, before its own deadline.
+  4. At `opened_at + 12 h`, S reads as Incomplete without the job. Reopen, join and check into S are refused. The job later records `DEADLINE_INCOMPLETE` at the deadline, once.
+  5. After the deadline, a new session shows S's checks through current obligations, and S's records are unchanged.
+  6. A session idle-closed can be reopened before its deadline, and its window ends by the deadline.
+- **New AC-42 (one requirement, shared display):**
+  1. Publishing a checklist cannot give an item a requirement different from the vehicle's item requirement.
+  2. An item listed by checklists A and B appears in both sessions with one shared state.
+  3. A Pass recorded in the A session shows as done in the B session within §17.3's targets.
+- **§24.3:**
 
-**AC-6 before:**
+  > | OQ-81 | How long may an incomplete inspection session be resumed? | **Owner** | 6.3 (SES-8) | 12 h from the session's open instant; fixed constant; no override | Proposed |
+  > | OQ-82 | Is "one session in progress" per vehicle or per vehicle checklist? | **Decided** (owner, 2026-11-21) | 6.2, 6.3 (SES-7) | Per vehicle checklist, with shared completion (SCH-6) | Pending text approval |
+  > | OQ-83 | Is an item's requirement per vehicle or organization-wide? | **Owner** | 4.3 (CHK-11) | Per vehicle | Proposed |
+  > | OQ-84 | Does placement belong to the item requirement? | **Owner** | 4.3 (CHK-11) | Yes; an item stocked in two places is two items | Proposed |
+  > | OQ-85 | Does one check also complete the same checklist's earlier late obligation? | **Owner** | 5.3, 5.5 (SCH-2, SCH-6) | Yes, uniformly within `L` | Proposed |
 
-> **Inactivity close [C].** A session with no persisted business activity for 6 h becomes Incomplete with all checks intact; viewing/heartbeat does not reset the timer; the crew member reopens without approval, and the reopen is audit-logged with the original checklist version unchanged.
+- **§26.3, §27, §25.6 and the header:** as for any amendment. The OQ-03 register row cites SCH-6 as revised.
+- **§15.3, OQ-44:** unchanged. Several sessions can still exist on one vehicle.
 
-**AC-6 after:**
+## 7. Enforcement, scheduler, audit and migration
 
-> **Inactivity close [C].** A session with no persisted business activity for 6 h becomes Incomplete with all checks intact; viewing/heartbeat does not reset the timer; before its resume deadline and while no other session on the vehicle is in progress, the crew member reopens without approval, and the reopen is audit-logged with the original checklist version unchanged.
+**Sessions.** Enforcement of both time limits is unchanged from revision 1:
 
-**New AC-41:**
+- **Read and write time:** a pure function computes from history whether a session is in progress and, if not, which limit ended it.
+- **Callers:** joins, reopen and end (which write the ending event first), `_session_for_check`, the vehicle and session pages, and home.
+- **Database backstops:**
+  - the check trigger refuses session checks at or after `R`;
+  - the `session_event` trigger refuses JOIN and REOPEN at or after `R`, and fixes the `DEADLINE_INCOMPLETE` instant and service receipt;
+  - the `session_event` trigger refuses OPEN or REOPEN while another session **of the same vehicle checklist** is in progress, computed from history.
+- **Scheduler:** `close_inactive_sessions` on the existing 30-minute timer adds deadline closes, an `expired=` count and `--dry-run`. Enforcement never waits for it, so a missed run or a restart only delays the audit event.
+- **Audit:** `DEADLINE_INCOMPLETE` is written by `worker.session_auto_close` under command type `SESSION_DEADLINE_CLOSE`. Refusals are audited by `run_command`.
+- **API codes:**
+  - `409 SESSION_IN_PROGRESS`, with the session ID so the page can offer Join;
+  - `409 SESSION_RESUME_EXPIRED`;
+  - `409 SESSION_NOT_OPEN`.
+- **Notifications:** none on expiry.
 
-> **AC-41 | One session per vehicle and resume deadline [C/P].**
-> (1) With session S in progress on vehicle V, a start request on V by any role, for any checklist, joins S; no second session is created.
-> (2) Two simultaneous starts on V produce one session.
-> (3) A participant's reopen of an ended session T on V is refused while S is in progress, and succeeds after S ends, if it is still before T's deadline.
-> (4) At `opened_at + 12 h`, S reads as Incomplete without waiting for the job. Reopen, join and check into S are refused. The job later records `DEADLINE_INCOMPLETE` stamped at the deadline, once, even if it runs late or repeatedly.
-> (5) After S's deadline, a new session on V shows S's checks as satisfying current obligations, and S's records are unchanged and readable.
-> (6) A session that is Incomplete through inactivity can be reopened before its deadline, and its new 6-hour window ends no later than the deadline.
+**Linking.** Linking already runs under the vehicle and item lock (CON-5), so adding links does not add locking. The database constraint that requires `shared_rule_id` on a second link is replaced: every link of one check must be to the same vehicle, item and kit instance, enforced by a trigger. Each link records `ON_TIME` or `LATE`, as `timing` does now. Existing links and checks are not re-linked: SCH-2 never re-links past checks, and the new rule applies to checks recorded after the cutover. The readiness and report projections already count per obligation, so an obligation satisfied by a shared link reads as satisfied with no projection change. AC-36 and RPT-5a tests are rerun to confirm this.
 
-### 5.7 §24.3 decision register (new rows)
+**Migration of existing data.** No row is edited or deleted.
 
-> | OQ-81 | How long may an incomplete inspection session be resumed? | **Owner** | 6.3 (SES-8) | 12 h from the session's open instant; fixed constant; no override | Proposed 2026-11-21 |
-> | OQ-82 | Is "one session in progress" per vehicle, or per vehicle checklist? | **Owner** | 6.2, 6.3 (SES-7) | Per vehicle, as directed | Proposed 2026-11-21 |
+- **Sessions:**
+  - ended sessions older than 12 h become non-reopenable by rule;
+  - Open sessions older than 12 h read as ended, and the first job run stamps them at `max(R, last activity)`;
+  - where several sessions of the **same** checklist are open on a vehicle, they finish on their own within 12 h. Meanwhile a start joins the newest, `separate: true` is refused, and reopening another one is refused;
+  - sessions of different checklists need no handling;
+  - reversing the migration stops if any `DEADLINE_INCOMPLETE` event exists.
+- **Item requirements:** the cutover in §5.1 refuses if any vehicle's checklists disagree about an item, lists the conflicts, and is idempotent.
+- **Before deploy:** run `close_inactive_sessions --dry-run` and the item-requirement cutover in its dry-run mode, and deploy at a quiet time.
 
-### 5.8 Other edits made with the amendment
+**API compatibility.** `separate: false` stays accepted for one release, because tabs left open from before the deploy still send it. `separate: true` is refused with `SESSION_IN_PROGRESS` while the chosen checklist has a session in progress, and otherwise opens normally. A later PR removes the field.
 
-- **§26.3:** the "6 h inactivity, crew reopen, refresh, no summary" row also cites SES-7 to SES-9.
-- **§27:** add a 6.0.0 change-log row.
-- **§25.6:** add the approval record, quoting the owner's approval.
-- **Header:** update the version and status line.
-- **§15.3 / OQ-44:** no text change. Several sessions can still exist on one vehicle, either in history or ended. The "latest correction wins" rule still applies to them.
+## 8. Implementation plan
 
-## 6. Enforcement, scheduler, audit and migration
-
-**Where expiry is enforced.** Expiry is enforced both when sessions are read and when they are written, as idle sessions are today. One pure function, generalizing `is_expired`, computes from a session's events, checks and `opened_at` whether it is in progress and, if not, which limit ended it and when. These callers use it:
-
-- the join search;
-- reopen and end, which first write the ending event as `_settle_idle` does today;
-- `_session_for_check`;
-- the vehicle and session pages;
-- the home page "In progress" list.
-
-Correctness therefore never waits for the job.
-
-**Database backstops**, following the 0003 and 0005 pattern, so a writer that bypasses the commands is still refused:
-
-- the check insert trigger refuses a session check at or after `opened_at + 12 h`;
-- the `session_event` insert trigger refuses JOIN and REOPEN at or after `R`, and requires `DEADLINE_INCOMPLETE` to have no actor, a service receipt, and an instant equal to `GREATEST(R, last activity)`;
-- the `session_event` insert trigger refuses an OPEN or REOPEN while another session on the same vehicle is in progress, computed from history and not from the projection. The vehicle row lock already serializes the commands; this trigger is the backstop. Codex should judge whether its per-insert cost is acceptable.
-
-**Scheduler.** `close_inactive_sessions` and the existing `cya-sessions.timer` (every 30 minutes, `Persistent=true`) also select Open sessions whose `opened_at ≤ now − 12 h`. The output gains `expired=`, and a `--dry-run` reports what would close without writing. The design is restart-safe for these reasons:
-
-- state comes from timestamps and immutable history;
-- each close is keyed on the session's latest event, so a replay returns the original result;
-- a refused close rolls back with no receipt;
-- a missed run (worker restart, host down) only delays the audit event, never the enforcement.
-
-No new timer or service is needed.
-
-**Audit.**
-
-- `DEADLINE_INCOMPLETE` is a `session_event` with no actor. It is written by `worker.session_auto_close` under command type `SESSION_DEADLINE_CLOSE`, with a receipt and audit row as for `AUTO_INCOMPLETE`.
-- Refused starts, joins, reopens and checks are audited as refused commands by the existing `run_command` path.
-- The API returns distinct codes instead of the blanket `SESSION_UNAVAILABLE`:
-  - `409 SESSION_IN_PROGRESS`, with the in-progress `session_id` so the page can offer Join. All roles may join, so revealing the ID exposes nothing new.
-  - `409 SESSION_RESUME_EXPIRED`.
-  - `409 SESSION_NOT_OPEN`, which already exists for checks.
-- No notification is sent when a session expires. Reopen notifications are unchanged.
-
-**Migration of existing sessions.** No rows are edited or deleted.
-
-- **Ended sessions older than 12 h** become non-reopenable on deploy. The rule is computed, so no data change is needed.
-- **Open sessions opened more than 12 h ago** (including reopened old ones) read as ended from deploy. The first job run writes their ending event at `max(R, last activity)` (§5.3 SES-9). A crew member using one starts or joins the in-progress session and loses no checks. A later reopen is refused.
-- **Several sessions open on one vehicle at deploy (earlier "separate" sessions)** are left to finish on their own. Participants can keep recording in them until each one goes idle, is ended, or reaches its deadline, which is at most 12 h after deploy. Meanwhile:
-  - a default start joins the newest one, as today;
-  - `separate: true` is refused;
-  - reopening any other session on that vehicle is refused.
-
-  Ending all but the newest at deploy would cut off crew mid-inspection, for no compliance benefit.
-- **Before deploy:** run `close_inactive_sessions --dry-run` to report how many sessions will end and which vehicles have more than one in progress. Deploy at a quiet time.
-- **Reversing the migration** stops if any `DEADLINE_INCOMPLETE` event exists, as reversing 0004 does today. A recorded close is never discarded.
-
-**API compatibility.** Browser tabs open from before the deploy still send `separate: false` on every start, so the field stays accepted for one release:
-
-- `separate: false` behaves as before;
-- `separate: true` is refused with `SESSION_IN_PROGRESS` while a session is in progress, and otherwise opens normally.
-
-A later PR removes the field.
-
-## 7. Implementation plan
-
-Each step is a separate PR, opened as a draft under `docs/review.md` and reviewed by Codex. Steps 2 and 3 are high-risk (concurrency, migrations, data integrity), so they need cross-family review. They touch the same files and run one after the other. Implementation starts only after the owner approves the SPEC text and an issue is opened for it.
+Each step is a separate draft PR, reviewed by Codex under `docs/review.md`. Steps 3 to 6 change migrations, concurrency or data integrity, so they need cross-family review. Implementation starts only after the owner approves the SPEC text and an issue is opened for it.
 
 ### Step 1: SPEC amendment 6.0.0 (Markdown only)
 
-Apply §5 of this proposal as approved, including the §25.6 record and the §27 row.
+Apply §6 as approved, with the §25.6 record and §27 row, and add AC-41 and AC-42 to `tests/TRACEABILITY.md`.
 
-Verification: the documentation-only gate in `docs/review.md`:
+Verification: the documentation-only gate in `docs/review.md`.
 
-- `git diff --check`
-- `tools/tests`
-- `check_markdown_links.py`
-- `validate_scenarios.py` (reads SPEC and `tests/TRACEABILITY.md`; add AC-41 there)
-- `check_normative_registry.py`
-- gitleaks
-
-### Step 2: one session in progress per vehicle (SES-7)
+### Step 2: shared items appear in every checklist (VW-5)
 
 **Code:**
 
-- `commands.py`:
-  - add a shared `in_progress_session(org, vehicle_id, now)` helper, used under the vehicle lock;
-  - in `open_or_join_session`, refuse `separate: true` while a session is in progress;
-  - in `reopen_session`, refuse while another session is in progress.
-- `api.py`: distinct refusal codes.
-- New migration: the OPEN/REOPEN trigger backstop.
-- `views.py`, `vehicle.html`, `vehicle.js`:
-  - remove the "Start a separate inspection" disclosure and its confirm;
-  - offer Resume only when nothing is in progress.
-- `checklist.js`: a refused reopen with `SESSION_IN_PROGRESS` links to Join.
-- Docs: `inspection-sessions.md`, `crew-inspection-ui.md`.
+- `cya/attention/checklist.py` builds rows per (checklist, item), and per kit instance; `_resolved_items` and `_placed_content` no longer drop an item a later checklist also lists.
+- The row key used by `checklist.js` for local state and announcements includes the checklist version.
+- Docs: `attention-views.md`, `crew-inspection-ui.md`.
 
 **Tests:**
 
-- Remove or rewrite: `test_open_join_and_explicit_parallel_session`, `test_new_session_can_start_while_another_is_open_closed_or_incomplete`, `test_separate_always_opens_another`, `test_an_open_inspection_is_explicitly_joinable_and_separate_start_is_explained`.
-- `separate: true` while a session is in progress gets 409 `SESSION_IN_PROGRESS`, with no session rows and an audited refusal.
-- `separate: true` with nothing in progress opens a session.
-- Start with a different checklist joins the session in progress; the pin is unchanged.
-- Reopen by a participant is refused while another session is in progress, and succeeds once that session ends.
-- Threaded races (as in `test_simultaneous_default_opens_share_one_session`): start against start, and start against reopen. Each leaves exactly one session in progress.
-- Legacy: with two Open sessions on a vehicle, a default start joins the newest; both still accept their own participants' checks; no third session can open.
-- The trigger refuses a raw second OPEN or REOPEN.
-- The vehicle page has no separate control for any role.
-- Browser smoke: start and join still work at every viewport.
+- First, a test showing the current gap: item X in checklists A and B, and the B session lacks X.
+- After the fix, X shows in both sessions with the same obligation and attention state.
+- A check of X in the B session is accepted and shows as done in the A view.
+- Normal and Priority order stay within each checklist.
+- Kit and presence rows are unchanged.
+- The query count is bounded with two checklists (`assertNumQueries`).
 
-### Step 3: resume deadline (SES-8, SES-9)
+### Step 3: one check completes every eligible obligation (SCH-2, SCH-5, SCH-6)
 
 **Code:**
 
-- `models.py`: `RESUME_HOURS = 12`; add `DEADLINE_INCOMPLETE` to the event type, activity-shape and actor-shape constraints.
-- `projections.py`:
-  - `fold_session` accepts the new event;
-  - one `time_limit(state, opened_at, now)` function replaces `is_expired`.
-- `commands.py`:
-  - reopen and join check the deadline;
-  - add `deadline_close_session`;
-  - extend `_settle_idle` and `close_inactive_sessions` (deadline candidates, `expired=` count, `--dry-run`).
-- `checks/commands.py`: `_session_for_check` refuses after `R`.
-- Migrations:
-  - session event trigger branch, in the `cya_inspections` app;
-  - check trigger condition, in the `cya_checks` app;
-  - both reverse only when no `DEADLINE_INCOMPLETE` event exists.
-- Pages:
-  - the session page shows an expired session read-only, with no Reopen, plus a link to the vehicle page;
-  - the vehicle page offers Resume only before `R`;
-  - the home "In progress" filter adds `opened_at > now − 12 h`.
-- `checklist.js` maps `SESSION_RESUME_EXPIRED`.
-- Docs: `inspection-sessions.md`, and the session cleanup paragraph of `deployment-runbook.md` (also run `test_asgi_server`, as `docs/review.md` requires when the runbook changes).
+- `choose_links` links every on-time and late-eligible obligation and stops consulting shared rules for new checks.
+- `configure_shared_satisfaction_rule` refuses new rules.
+- A migration replaces the second-link constraint with the same-vehicle-item-kit trigger.
+- CON-3 compares across all obligations of the vehicle, item and kit instance.
+- Until step 4 lands, links are made only between obligations whose pinned requirement versions have equal check properties. This guard fails closed and is removed in step 4.
 
 **Tests:**
 
-- At `opened_at + 12 h − 1 µs` a check, a join and a reopen succeed. At `opened_at + 12 h` all three are refused, before the job runs.
-- An idle close at 6 h followed by a reopen at 8 h: the new window ends at 12 h, not 14 h.
-- The job:
-  - writes one `DEADLINE_INCOMPLETE` stamped at `R` even when it runs hours late;
-  - replays idempotently;
-  - picks `AUTO_INCOMPLETE` when the idle limit comes first;
-  - counts sessions changed underneath it as skipped.
-- A legacy session with activity after `R` closes at `max(R, last activity)`, and the trigger accepts exactly that instant.
-- The database refuses:
-  - a raw check, JOIN or REOPEN after `R`;
-  - a `DEADLINE_INCOMPLETE` with an actor or a wrong instant.
-- A new session after expiry shows the old session's checks as satisfying current obligations (AC-41 (5)), and the old session's header, participants, events and checks are byte-identical before and after.
-- An expired session page has no Reopen control, and its history is still shown.
+- Overlapping windows across two checklists give two links.
+- One on-time and one late (within `L`) obligation give two links; past `L` gives none.
+- The same-checklist earlier late obligation follows Q7.
+- A kit instance never links to another instance; a presence check only links within its line.
+- Unable to Inspect satisfies neither obligation.
+- Correction and invalidation re-derive or void all links.
+- Concurrent checks from two sessions raise CON-3.
+- Replaying a lost response returns the same links.
+- The trigger refuses a link to another item.
+- Readiness and reports (AC-36, RPT-5a) count each obligation once.
+- The interim guard skips mismatched requirements.
+
+### Step 4: one requirement per item on a vehicle (CHK-11)
+
+This is the largest step. It covers:
+
+- the `vehicle_item_requirement` model, versioned and effective-dated;
+- obligation generation reading the requirement in force at `D`;
+- the checklist editor editing item requirements once per vehicle;
+- vehicle file export and import (IMP-7, format version bump);
+- the cutover with dry-run, conflict report and idempotent replay;
+- docs: `checklists-implementation.md`, `configuration-management.md`, `vehicle-files.md`.
+
+**Tests:**
+
+- Publishing a checklist cannot set a different quantity for an item.
+- Changing the item requirement changes both checklists from its effective instant, and earlier obligations keep their pins.
+- The cutover refuses on a conflict and succeeds after it is resolved.
+- Export and import round-trip.
+- A future-effective requirement applies only from its instant.
+- Permissions follow checklist publishing.
+
+### Step 5: one session in progress per vehicle checklist (SES-7)
+
+**Code:**
+
+- `in_progress_session(org, vehicle_id, template_id, now)` under the vehicle lock.
+- The default start joins the in-progress session of the chosen checklist.
+- `separate: true` and reopen are refused while one is in progress.
+- API codes.
+- The OPEN/REOPEN trigger backstop.
+- The vehicle page lists each checklist's session in progress with Join or Continue, removes "Start a separate inspection", and offers Resume only when that checklist has nothing in progress.
+- `checklist.js` handles `SESSION_IN_PROGRESS`.
+- Docs.
+
+**Tests:**
+
+- Rewrite: `test_open_join_and_explicit_parallel_session`, `test_new_session_can_start_while_another_is_open_closed_or_incomplete`, `test_default_join_is_vehicle_scoped_even_when_requested_template_differs` (now joins only the same checklist), `test_separate_always_opens_another`, `test_an_open_inspection_is_explicitly_joinable_and_separate_start_is_explained`.
+- A start of A while A is in progress joins it, even on an older version pin.
+- A start of B while A is in progress opens B.
+- `separate: true` for A while A is in progress is refused with no writes and an audited refusal.
+- Reopen is refused, then allowed after A's session ends.
+- Threaded races: two starts of A give one session, and a start racing a reopen of A leaves one in progress.
+- Legacy: two Open A sessions continue for their own participants, and no third opens.
+- The trigger refuses a raw second A OPEN.
+- The vehicle page shows one entry per checklist in progress.
+- Browser smoke at every viewport.
+
+### Step 6: resume deadline (SES-8, SES-9)
+
+This is as revision 1 step 3:
+
+- `RESUME_HOURS = 12`;
+- `DEADLINE_INCOMPLETE` event type and constraints;
+- `time_limit()` replaces `is_expired`;
+- reopen, join and check refusals after `R`;
+- job extension with `--dry-run`;
+- triggers in `cya_inspections` and `cya_checks` that refuse reversal while a deadline event exists;
+- a read-only expired session page;
+- the home filter;
+- runbook and docs (run `test_asgi_server`).
+
+**Tests:**
+
+- At `R − 1 µs` a check, join and reopen succeed; at `R` all are refused, before the job runs.
+- Idle at 6 h then a reopen at 8 h: the window ends at 12 h.
+- The job stamps `R` when late, replays idempotently, prefers `AUTO_INCOMPLETE` when the idle limit comes first, and skips sessions that changed.
+- A legacy session closes at `max(R, last activity)`.
+- The database refuses a raw late check, JOIN or REOPEN, and a wrong `DEADLINE_INCOMPLETE`.
+- A new session after expiry shows the old checks, and the old records are byte-identical.
+- The expired page has no Reopen.
 - Home omits expired sessions.
 - `--dry-run` writes nothing.
-- The management command validates its arguments and exits 1 on failure.
-- Rebuilding the projection from history matches.
-- Reversing the migration with a deadline event refuses.
+- The projection rebuild matches.
+- Reversal refuses.
 
-### Step 4: deploy notes (no deploy without the owner)
+### Step 7: deploy notes
 
-Record the pre-deploy `--dry-run` and the quiet-time recommendation in the runbook release notes.
+Record both dry-runs and the quiet-time recommendation in the runbook release notes.
 
-Rehearse on the Ubuntu VM only after the owner asks. The Rocky VM is reserved for the issue #70 capacity test.
+Rehearse on the Ubuntu VM only if the owner asks. The Rocky VM is reserved for issue #70. Deployment needs the owner's authorization.
 
-## 8. Open questions for the owner
+**Ordering:** steps 5 and 6 touch the same session files and run one after the other. Step 2 is independent of the session steps. Step 3 can land before step 4 because of its fail-closed guard.
 
-1. **Confirm the policy** in §1, as Codex relayed it.
-2. **Duration and anchor (OQ-81):** 12 hours from when the session opened? Alternatives are in §4.
-3. **Hard cap while active:** should a session that is still being used at 12 hours also end then, so that one rule covers both cases (recommended)? The alternative is to stop only reopening and leave active sessions running. Then an active session never ends until it goes idle, which allows a chain of checks with no limit.
-4. **Override:** none (recommended). The alternative is a Supervisor or Administrator "extend once by 12 h" action, audited.
-5. **Per vehicle or per checklist (OQ-82):** since 5.0.0 a vehicle can have several checklists. Under "one per truck", a crew that needs checklist B while a checklist-A session is in progress must join it and end it (or wait for it to end) before starting B. Is that acceptable, or should the limit be one in progress per vehicle checklist? Both rule out the parallel duplicates seen on Medic 1. I recommend per vehicle, as directed, unless several Medic 1 checklists are routinely due at the same time.
-6. **Ending someone else's inspection:** anyone may join, and any participant may end, so in practice any crew member can end the vehicle's session in progress. Keep this (recommended, since session state is informational), or restrict it?
-7. **Separate sessions open at deploy:** let them finish on their own within 12 hours (recommended), or end all but the newest at deploy?
-8. **Fixed constant or Administrator setting:** a fixed 12 h (recommended for R1), or a per-organization setting like OQ-79?
+## 9. Open questions for the owner
 
-## 9. Not changed
+**Answered 2026-11-21** (§1.2):
+
+- "Active" means requirements currently open on the vehicle.
+- An item has one requirement.
+- Late requirements within their limit are completed too.
+
+**Still open:**
+
+1. **Confirm the direction.** One session in progress per vehicle checklist, with shared completion, replaces "one per truck" in the relayed policy. Also confirm points 1 and 3 of §1.1.
+2. **Duration (OQ-81):** 12 h from the session's open instant?
+3. **Hard cap while active:** should a session still in use at 12 h also end then (recommended)?
+4. **Override:** none (recommended), or a Supervisor or Administrator "extend once" action?
+5. **Item requirement scope (OQ-83):** per vehicle (recommended) or organization-wide?
+6. **Requirement contents (OQ-84):** I propose kind, expected quantity and unit, allowed outcomes, bulk-pass eligibility, Not-Applicable rules, conditional rules, instructions and placement. In particular, should placement belong to the item, so that an item stocked in two places becomes two items (recommended)?
+7. **Same checklist's earlier late obligation (OQ-85):** should one check also complete it, within `L` (recommended, uniform rule)?
+8. **Ending someone else's inspection:** any crew member can in practice end a checklist's session by joining it. Keep this (recommended)?
+9. **Duplicate sessions of one checklist open at deploy:** let them finish within 12 h (recommended)?
+10. **Fixed 12 h or an Administrator setting?** Fixed (recommended for R1).
+
+## 10. Not changed
 
 The following are unchanged:
 
 - item-level compliance (PRN-1, AC-1, AC-2);
-- checks recorded outside any session;
+- checks outside sessions;
 - the 6-hour inactivity rule;
-- CHK-4 version pinning;
+- CHK-4 pinning;
+- CHK-10 single obligation per anchor;
+- kit-instance and kit-list-line separation;
 - who may open, join or end;
 - reopen notifications;
 - corrections and invalidation;
-- roster correction (§15.3);
+- roster correction;
 - every historical record.
 
-I have not seen the Medic 1 screenshots. This proposal relies only on the policy as Codex relayed it.
+I have not seen the Medic 1 screenshots.
