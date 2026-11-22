@@ -52,6 +52,7 @@ The owner asked what would be required for "one session per truck per checklist"
 | Requirement scope, and is place part of the requirement? | "Yes, and yes." and "Per truck (and per location if it appears in more than one place in the truck)" | Requirements are per truck. An item kept in several places on a truck has a separate requirement for each place, so a check in one place never completes another place. §5.1 |
 | Should one check also complete the same checklist's earlier late obligation? | "Yes." | Uniform rule within `L` |
 | Can any crew member end a checklist's open inspection? Should duplicate sessions open at deploy finish on their own? Fixed limit or setting? | "Yes, yes, and configurable" | Kept, kept, organization setting |
+| If gloves are missing in cabinet 1, does only that place turn red and carry the problem, or the item on the whole truck? | "Only that place" | Attention and deficiencies are per item-place (§5.1) |
 
 These are decisions of direction, not approval of the SPEC text in §6, which §25.4(e) requires separately. Two readings need confirming (§9):
 
@@ -180,7 +181,11 @@ Because every checklist that lists an item-place uses the same record, two check
 
 - **Obligation key (§5.1, CHK-10):** `(vehicle, item requirement, kit instance, D)` instead of `(vehicle, item, kit instance, D)`. For an item with one place this changes nothing visible.
 - **Check record (§7.2):** a check of an item outside a kit names the item requirement shown to the inspector, taken from the row and never inferred, as a kit presence check names its kit-list line (KDEF-12).
-- **Attention and deficiencies:** I recommend these become per item-place too. A missing item in cabinet 1 should not turn the same item in cabinet 4 red, and a deficiency names the item and its place, as KDEF-12 does for kit-list lines. This follows from the owner's answer but changes PRN-3, PRN-6 wording and §9 from "item" to "item-place" (Q2).
+- **Attention and deficiencies (owner, "Only that place"):** these are per item-place.
+  - A missing item in cabinet 1 turns only that item-place red. The same item in cabinet 4 is unaffected.
+  - A deficiency names the item and its place, as KDEF-12 does for kit-list lines. Its verification scope (VER-3) and any check suspension (§8.9) apply to that item-place only.
+  - PRN-3, PRN-6, §8 and §9 change from "item" to "item-place" (item requirement). Kit items keep their per-kit-instance targets.
+  - Existing deficiencies were raised against an item. They map to the item requirement in the checklist version their originating check pinned. Where that mapping is ambiguous (the item now has several places), the deficiency is reported in the cutover dry-run and a Supervisor assigns its place before cutover. A deficiency is never silently attached to every place.
 
 **Unchanged:**
 
@@ -332,7 +337,7 @@ SES-1, SES-4, SES-5 and SES-6 are unchanged.
 
 ### 6.7 Other sections
 
-- **§9 attention, PRN-3, PRN-6:** "item" reads "item requirement (item and place)" for attention and deficiency targets, subject to Q2. If the owner chooses per-place attention, this touches PRN wording and needs explicit owner approval as part of this major amendment (§25.5).
+- **§8, §9, PRN-3, PRN-6 (owner decision 2026-11-21, "Only that place"):** for items outside kits, the attention state and deficiency target are the item requirement (item and place), not the item on the vehicle. VER-3 scope and §8.9 suspension follow the same target. This changes §25.5 principle wording, so the owner's approval of the 6.0.0 text must name it explicitly.
 - **§17.2 ARC-4:** cite SES-9.
 - **§18:**
   - `session_event` lists "close (auto inactivity / resume deadline / manual)";
@@ -360,7 +365,7 @@ SES-1, SES-4, SES-5 and SES-6 are unchanged.
   > | OQ-81 | How long may an incomplete inspection session be resumed? | **Decided** (owner, 2026-11-21) | 6.3 (SES-8) | Organization setting, default 6 h from the open instant, captured per session; no override | Pending text approval |
   > | OQ-82 | One session in progress per vehicle or per vehicle checklist? | **Decided** (owner, 2026-11-21) | 6.2, 6.3 (SES-7) | Per vehicle checklist, with shared completion (SCH-6) | Pending text approval |
   > | OQ-83 | Where do an item's requirements live? | **Decided** (owner, 2026-11-21) | 4.3 (CHK-11) | Per vehicle and per place | Pending text approval |
-  > | OQ-84 | Are attention and deficiencies per item-place? | **Owner** | 9, 8 | Yes | Proposed |
+  > | OQ-84 | Are attention and deficiencies per item-place? | **Decided** (owner, 2026-11-21) | 8, 9, PRN-3, PRN-6 | Yes: only that place turns red and carries the problem | Pending text approval |
   > | OQ-85 | Does one check also complete the same checklist's earlier late obligation? | **Decided** (owner, 2026-11-21) | 5.3, 5.5 (SCH-2, SCH-6) | Yes, within `L` | Pending text approval |
 
 - **§26.3, §27, §25.6 and the header:** as for any amendment. The OQ-03 row cites SCH-6 as revised.
@@ -445,7 +450,7 @@ This is the largest step. It covers:
 - `vehicle_item_requirement` and its versions;
 - the obligation key and generator moving to the requirement;
 - `item_requirement_id` on checks;
-- per-place attention and deficiencies if Q2 is yes;
+- per-place attention and deficiencies, including verification scope, suspension, and the cutover report of deficiencies whose place is ambiguous;
 - the editor editing requirements once per truck and place;
 - vehicle files (IMP-7, format version bump);
 - the cutover with dry-run, conflict report, map and idempotent replay;
@@ -462,7 +467,9 @@ This is the largest step. It covers:
 - Old checks and deficiencies read the same through the map.
 - Export and import round-trip.
 - A check without a requirement ID is refused.
-- Per-place attention, if adopted.
+- A Fail in cabinet 1 turns only cabinet 1 red and opens a problem naming that place; cabinet 4 stays clear.
+- Verification and suspension of that problem apply to cabinet 1 only.
+- An existing deficiency with an ambiguous place blocks the cutover until it is assigned.
 
 ### Step 5: one session in progress per vehicle checklist (SES-7)
 
@@ -536,13 +543,13 @@ Record both dry-runs and the quiet-time recommendation in the runbook. Rehearse 
 - the resume limit defaults to 6 h and is set per organization;
 - there is no override;
 - any participant may end a session;
-- duplicates open at deploy finish on their own.
+- duplicates open at deploy finish on their own;
+- attention and problems are per place.
 
 **Still open:**
 
 1. **Hard cap while active.** At the resume limit, should a session still in use also end, so that an inspection lasts at most the limit? This proposal assumes yes (SES-8).
-2. **Per-place attention and deficiencies (OQ-84).** If gloves are missing in cabinet 1, should only "Gloves — cabinet 1" turn red and carry the problem (recommended)? Today the whole item on the truck turns red.
-3. **Setting range.** Is 1 to 24 hours, in whole hours, right?
+2. **Setting range.** Is 1 to 24 hours, in whole hours, right?
 
 ## 10. Not changed
 
