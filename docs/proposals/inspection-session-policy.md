@@ -11,6 +11,10 @@
   - requirements are kept per truck **and per place** when an item is kept in more than one place on the truck;
   - one check also completes the same checklist's earlier late obligation;
   - there is no override.
+- **Revision 4 (2026-11-21).** This revision follows Codex review 6010089090 at `0d48bfa`:
+  - the owner confirmed "One per checklist" over one per truck (§1.3);
+  - §4 now explains how idle close and the deadline interact for any setting;
+  - SES-9 uses one effective end instant for reads, refusals, the projection, the triggers and the job, including older sessions with activity after their deadline.
 
 **Proposed SPEC change:** amendment 6.0.0. It is major under §25.4(b), because it reverses approved rules:
 
@@ -46,7 +50,7 @@ The owner asked what would be required for "one session per truck per checklist"
 
 | Question | Owner's answer | How this proposal reads it |
 |---|---|---|
-| Does one session per checklist replace "one per truck"? | "I believe so" | Per vehicle checklist; to be confirmed with the text approval |
+| Does one session per checklist replace "one per truck"? | "I believe so"; then, asked to reconcile this with the earlier direction of a single inspection per truck (Codex review 6010089090): "One per checklist" | One session in progress per vehicle checklist. Different checklists on one truck may be in progress at the same time. This supersedes the per-truck wording in §1.1 |
 | Resume limit of 12 h from the start? | "6 hours is a good default. We should make it configurable per organization." | Default 6 h, an organization setting |
 | Override? (Claude recommended none) | "I agree with you." | No override |
 | Requirement scope, and is place part of the requirement? | "Yes, and yes." and "Per truck (and per location if it appears in more than one place in the truck)" | Requirements are per truck. An item kept in several places on a truck has a separate requirement for each place, so a check in one place never completes another place. §5.1 |
@@ -130,15 +134,21 @@ This comes from reading the code. Plan step 2 first adds a test that confirms it
 - The current value is captured on each session when it opens, as SCH-3 captures `w_late` on each obligation. Changing the setting never moves the deadline of a session already open.
 - The change is audited like other administrative settings (AUD-4).
 
-**When it starts:** `R = opened_at + resume limit captured at open`. Joins, checks and reopens never move it, because a reopen counts as activity (SES-2) and a moving window could be extended indefinitely.
+**When it starts:** `R = opened_at + resume limit captured at open`. Joins, checks and reopens never move it, because a reopen counts as activity (SES-2) and a moving window could be extended indefinitely. For sessions opened before 6.0.0, SES-9 defines an effective deadline; for every session opened afterwards it is exactly `R`.
 
-**Effect of the 6-hour default:**
+**How the two limits interact.** An Open session ends at whichever comes first:
 
-- An inspection can last at most 6 hours.
-- A session that goes idle cannot be reopened. Its idle close comes 6 hours after its last activity, which is never earlier than `R`.
-- Only a session that someone ended by hand can be reopened, until 6 hours after it started.
+- its idle close, at last activity + 6 h (SES-1);
+- its deadline `R`.
 
-For example, a crew starts at 07:00, is called out at 07:20 and returns at 14:00. The session ended at 13:00, so they start a new one. Nothing is lost, because their checks still satisfy obligations and show as done in the new session. If an organization sets a limit longer than 6 hours, the inactivity rule matters again as before.
+An ended session, however it ended, can be reopened by a participant until `R` (SES-3). The setting decides which limit usually comes first:
+
+- **Limit of 6 h or less (including the default).** The last activity is never before `opened_at`, so last activity + 6 h is never before `R`. An Open session therefore always reaches `R` first, and the idle close never happens. Reopening is possible only for a session someone ended by hand, until `R`.
+
+  Example with the default: a crew starts at 07:00, is called out at 07:20 and returns at 14:00. The session ended at 13:00 (`R`), so they start a new one. Nothing is lost, because their checks still satisfy obligations and show as done in the new session.
+- **Limit over 6 h.** A session left idle can close before `R` and can then be reopened until `R`.
+
+  Example with a 12 h limit: a session opened at 07:00 with no activity after that idle-closes at 13:00, and a participant can reopen it until 19:00, if no other session of that checklist is in progress. Each reopen starts a new 6-hour idle window, which never extends past `R` (SES-2).
 
 **On reaching the limit:**
 
@@ -317,16 +327,25 @@ SES-1, SES-4, SES-5 and SES-6 are unchanged.
 
 **New SES-8:**
 
-> **SES-8 [C: owner decisions 2026-11-21, amendment 6.0.0] Resume limit.** Each organization has a resume limit that an Administrator sets in whole hours from 1 to 24 (default 6). The current value is captured on each session when it opens, so a later change never moves an existing session's deadline. The session's resume deadline is `R = opened_at + captured limit`. Joins, activity and reopens never move it. From `R` on, the session cannot be reopened, joined or recorded into by anyone. If it is still Open, it ends as Incomplete at `R` even if it is in active use, stamped under SES-9. Its records are kept permanently and stay readable (AUD-1, AUD-5). Work continues in a new session, which pins the current version (CHK-4) and shows earlier checks through current obligations (SES-4, SES-5, PRN-1). There is no override.
+> **SES-8 [C: owner decisions 2026-11-21, amendment 6.0.0] Resume limit.** Each organization has a resume limit that an Administrator sets in whole hours from 1 to 24 (default 6). The current value is captured on each session when it opens, so a later change never moves an existing session's deadline. The session's resume deadline is `R = opened_at + captured limit`. Joins, activity and reopens never move it. From `R` on, the session cannot be reopened, joined or recorded into by anyone. For a session opened before 6.0.0, read `R` as its effective deadline `R*` (SES-9). If it is still Open, it ends as Incomplete at `R` even if it is in active use, recorded under SES-9. Its records are kept permanently and stay readable (AUD-1, AUD-5). Work continues in a new session, which pins the current version (CHK-4) and shows earlier checks through current obligations (SES-4, SES-5, PRN-1). There is no override.
 
 **New SES-9:**
 
-> **SES-9 [P] Enforcement and recording.** Both time limits are enforced whenever a session is read or written, computed from its event history, its checks and its captured limit, whether or not the job has run. The idempotent, restart-safe job (ARC-4) then appends the ending event, stamped by rule:
+> **SES-9 [P] Enforcement and recording.** Let `A` be the session's last persisted activity, and let the **effective deadline** be `R* = max(R, A)`.
 >
-> - if last activity + 6 h ≤ max(R, last activity), `AUTO_INCOMPLETE` at last activity + 6 h (SES-6);
-> - otherwise `DEADLINE_INCOMPLETE` at max(R, last activity).
+> - For a session opened under 6.0.0, no activity can be recorded at or after `R`, so `A < R` and `R* = R`.
+> - For a session opened before 6.0.0, activity recorded after `R` under the earlier rules remains valid history, and `R*` is the later of `R` and that activity.
 >
-> For a session opened under 6.0.0, last activity is always before `R`. The max() applies only to older sessions.
+> **One instant for every purpose.** The session's end instant is `min(A + 6 h, R*)`. Reads, refusals, the projection, the database triggers and the job all use this same instant:
+>
+> - The session is in progress only while it is Open and the current time is before its end instant.
+> - A participant may reopen an ended session only before `R*`.
+> - No check, join or reopen is accepted at or after `R*`.
+>
+> **Recording.** Enforcement never waits for the job. The idempotent, restart-safe job (ARC-4) appends the ending event at exactly that end instant, never at the time it runs:
+>
+> - `AUTO_INCOMPLETE` if `A + 6 h ≤ R*` (SES-6);
+> - otherwise `DEADLINE_INCOMPLETE` at `R*`.
 
 ### 6.6 §6.5 Views
 
@@ -377,8 +396,8 @@ SES-1, SES-4, SES-5 and SES-6 are unchanged.
 - **Read and write time:** a pure function computes from history and the captured limit whether a session is in progress and, if not, which limit ended it.
 - **Callers:** joins, reopen and end (which write the ending event first), `_session_for_check`, the vehicle and session pages, and home.
 - **Database backstops:**
-  - the check trigger refuses session checks at or after `R`, read from the session row;
-  - the `session_event` trigger refuses JOIN and REOPEN at or after `R`, and fixes the `DEADLINE_INCOMPLETE` instant and service receipt;
+  - the check trigger refuses session checks at or after `R*`, computed from the session row's captured limit and its recorded activity, by the same formula as the reads (SES-9);
+  - the `session_event` trigger refuses JOIN and REOPEN at or after `R*`. It requires the ending event's instant to equal the SES-9 end instant, and requires a service receipt;
   - the `session_event` trigger refuses OPEN or REOPEN while another session of the same vehicle checklist is in progress, computed from history.
 - **Captured limit:** the header row is immutable, so it can never change after the session opens. The insert trigger checks that it equals the organization setting in force at the open instant.
 - **Scheduler:** `close_inactive_sessions` on the existing 30-minute timer adds deadline closes, an `expired=` count and `--dry-run`. With a 6-hour limit, a session ends up to 30 minutes before the job records it. Enforcement never waits for the job, and a missed run or a restart only delays the audit event.
@@ -395,7 +414,7 @@ SES-1, SES-4, SES-5 and SES-6 are unchanged.
 - **Sessions:**
   - each existing session's captured limit is set to 6 h by migration, as 1.31.0 gave existing obligations `w_late`;
   - ended sessions older than the limit cannot be reopened;
-  - Open sessions older than the limit read as ended, and the first job run stamps them at `max(R, last activity)`;
+  - an Open session whose end instant (SES-9) has passed reads as ended at that instant, and the first job run records its ending event at that same instant. For an older session with activity after `R`, the end instant is its last activity. That activity remains valid history and stays linked as it was;
   - duplicate sessions of one checklist open at deploy finish on their own within 6 h (owner, §1.3);
   - reversal stops if any `DEADLINE_INCOMPLETE` exists.
 - **Item requirements:** the cutover in §5.1 builds the requirements and the map from old (item, place in pinned version) to requirement. It refuses on conflicts with a list and is idempotent. Existing obligations, checks, links and deficiencies keep their rows; readers use the map, as §18.2 does for 5.0.0.
@@ -512,7 +531,11 @@ This is as revision 2 step 5.
 - The header trigger refuses a captured value that does not match.
 - With a 12 h setting, idle at 6 h then a reopen at 8 h ends at 12 h.
 - The job stamps `R` when late, replays idempotently, and skips sessions that changed.
-- A legacy session closes at `max(R, last activity)`.
+- A legacy session with a check after its `R`:
+  - reads as ended at that check's instant (`R*`);
+  - the projection and the job's `DEADLINE_INCOMPLETE` use the same instant;
+  - a reopen or check after it is refused;
+  - its existing checks and links are unchanged.
 - The database refuses a raw late check, JOIN, REOPEN or a wrong deadline event.
 - The old records stay byte-identical.
 - The expired page has no Reopen.
@@ -547,7 +570,7 @@ Record both dry-runs and the quiet-time recommendation in the runbook. Rehearse 
 - a session still in use ends at the limit;
 - the setting range is 1 to 24 whole hours.
 
-**Still open:** no direction questions remain. What remains is the owner's explicit approval of the concrete SPEC 6.0.0 text (§25.4(e)), naming the change to PRN-3 and PRN-6 (§25.5), and confirmation of the per-checklist reading of "one per truck" and of the §5.1 model.
+**Still open:** no direction questions remain. The owner confirmed one session per checklist over one per truck. What remains is the owner's explicit approval of the concrete SPEC 6.0.0 text (§25.4(e)), naming the change to PRN-3 and PRN-6 (§25.5), and confirmation of the §5.1 model.
 
 ## 10. Not changed
 
