@@ -355,7 +355,7 @@ class Reloader:
         await asyncio.gather(*self.tasks, return_exceptions=True)
 
 
-async def crew_member(site, user, member_index, plan, recorder, think, rng):
+async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_reload=True):
     browser = Browser(site, user["cookie"], recorder)
     vehicle_page = f"/inspection/vehicles/{user['vehicle_id']}/"
     status, page = await browser.get("page_vehicle", vehicle_page)
@@ -415,7 +415,8 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng):
             if row is None:
                 recorder.count("item_vanished")
                 continue
-            await save(browser, config, session_page, row, recorder)
+            if await save(browser, config, session_page, row, recorder) and ack_reload:
+                reloader.schedule(0)  # checklist.js: scheduleReload(0) after a committed save
     finally:
         await live.stop()
         await reloader.stop()
@@ -442,7 +443,7 @@ async def save(browser, config, referer, row, recorder):
         body = json_body(data) or {}
         if body.get("status") == "COMMITTED":
             recorder.count("saved")
-            return
+            return True
         if body.get("status") == "CONFLICT" and status == 409:
             # Proceed after the warning: a new decision acknowledging the newer check (CON-3).
             newer = (body.get("newest_check") or {}).get("check_id")
@@ -452,10 +453,11 @@ async def save(browser, config, referer, row, recorder):
             continue
         if body.get("status") == "REJECTED" and 0 < status < 500:
             recorder.count(f"rejected_{body.get('code')}")
-            return
+            return False
         recorder.count("unconfirmed_retry")
         await asyncio.sleep(1 + attempt)
     recorder.count("gave_up")
+    return False
 
 
 async def supervisor(site, user, recorder, done):
@@ -487,7 +489,7 @@ async def supervisor(site, user, recorder, done):
         browser.close()
 
 
-async def run(plan, site, think, arrival, seed):
+async def run(plan, site, think, arrival, seed, limit=None, ack_reload=True):
     recorder = Recorder()
     rng = random.Random(seed)
     done = asyncio.Event()
@@ -510,9 +512,14 @@ async def run(plan, site, think, arrival, seed):
     for members in by_vehicle.values():
         for index, user in enumerate(members):
             own = random.Random(rng.random())
-            work = crew_member(site, user, index, plan, recorder, think, own)
+            work = crew_member(site, user, index, plan, recorder, think, own, ack_reload)
             crews.append(asyncio.create_task(arrive(rng.uniform(0, arrival), work)))
-    await asyncio.gather(*crews)
+    finished, pending = await asyncio.wait(crews, timeout=limit)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+    if pending:
+        recorder.events["crew_stopped_at_limit"] = len(pending)
     done.set()
     await asyncio.gather(*supervisors)
     report = recorder.report()
@@ -525,6 +532,8 @@ async def run(plan, site, think, arrival, seed):
         "think_seconds": list(think),
         "arrival_seconds": arrival,
         "seed": seed,
+        "limit_seconds": limit,
+        "ack_reload": ack_reload,
     }
     return report
 
@@ -538,6 +547,15 @@ def main(argv=None):
     parser.add_argument("--arrival", type=float, default=30.0, help="arrivals spread over seconds")
     parser.add_argument("--seed", type=int, default=10)
     parser.add_argument("--ca-file")
+    parser.add_argument(
+        "--limit", type=float, help="stop crews still working after this many seconds"
+    )
+    parser.add_argument(
+        "--no-ack-reload",
+        dest="ack_reload",
+        action="store_false",
+        help="do not reload the checklist after a committed save (the shipped page does)",
+    )
     args = parser.parse_args(argv)
     if not 0 <= args.think[0] <= args.think[1] or args.arrival < 0:
         parser.error("think times must satisfy 0 <= MIN <= MAX and arrival must be >= 0")
@@ -545,7 +563,9 @@ def main(argv=None):
     with source:
         plan = json.load(source)
     site = Site(args.base_url, args.ca_file)
-    report = asyncio.run(run(plan, site, tuple(args.think), args.arrival, args.seed))
+    report = asyncio.run(
+        run(plan, site, tuple(args.think), args.arrival, args.seed, args.limit, args.ack_reload)
+    )
     text = json.dumps(report, indent=2)
     if args.report:
         with open(args.report, "w", encoding="utf-8") as out:
