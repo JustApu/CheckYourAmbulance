@@ -263,16 +263,19 @@ def overdue_cleared_after_grace_missed_only_after_late_limit(ctx):
     from cya.obligations.models import Obligation
 
     before, case9, rows = ctx["case9_before"], ctx["case9"], ctx["case9_rows"]
-    ((timing, obligation_id),) = ctx["case9_links"]
-    _check(timing == "ON_TIME", f"the check took the order's on-time window, not {timing}")
-    _check(not Obligation.objects.get(pk=obligation_id).routine, "the check linked to the order")
-    # Every earlier overdue row of that kit instance in the window clears, including day 7's
-    # own 06:00 row, which is past G but not past L (case 9).
+    # SPEC 6.0.0 SCH-6 (amendment 6.0.1 wording of case 9): the check links the order on time
+    # and day 7's 06:00 routine obligation late, since it is past G but not past L.
+    links = {
+        timing: Obligation.objects.get(pk=obligation_id).routine
+        for timing, obligation_id in ctx["case9_links"]
+    }
+    _check(links == {"ON_TIME": False, "LATE": True}, f"case 9 links {ctx['case9_links']}")
+    # Every earlier overdue row of that kit instance in the window clears.
     _check(rows >= 1, "the kit instance had overdue rows")
     _check(case9["after"]["OVERDUE"] == before["OVERDUE"] - rows, f"case 9 Overdue {case9}")
     limit = case9["limit"]
     _check(limit[-1]["MISSED"] == limit[0]["MISSED"], "not missed at exactly L")
-    _check(limit[1]["MISSED"] > limit[0]["MISSED"], "missed after L")
+    _check(limit[1]["MISSED"] == limit[0]["MISSED"], "completed late, so not missed after L")
     _check(limit[1]["OVERDUE"] == limit[0]["OVERDUE"], "still cleared from Overdue after L")
 
 
