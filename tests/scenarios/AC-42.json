@@ -16,7 +16,8 @@
     "checklists A and B on one vehicle inspecting the same item in the same place",
     "an item kept in cabinets 1 and 4",
     "older checklist versions that disagree about one item-place, and a deficiency whose place is unclear",
-    "an item requirement moved from cabinet 1 to cabinet 4 while an obligation pinned to cabinet 1 is in its window, and another requirement for the same item still kept in cabinet 1"
+    "an item requirement moved from cabinet 1 to cabinet 4 while an obligation pinned to cabinet 1 is in its window, and another requirement for the same item still kept in cabinet 1",
+    "checklists A and B both keeping an item in cabinet 1, with a later version of A placing it in cabinet 4 while B keeps it in cabinet 1"
   ],
   "when": [
     "a Supervisor publishes a checklist giving the shared item-place a different quantity",
@@ -24,7 +25,8 @@
     "the item passes and then fails in cabinet 1",
     "a Supervisor changes the quantity of the item requirement",
     "the migration runs as a dry-run, for real and again",
-    "a crew member checks the moved item at cabinet 4"
+    "a crew member checks the moved item at cabinet 4",
+    "the migration runs, a Supervisor resolves the listed case, and the migration runs again"
   ],
   "then": [
     "the conflicting publication is refused",
@@ -32,7 +34,8 @@
     "cabinet 4 stays due and clear, and only cabinet 1 needs attention with a deficiency naming its place",
     "both checklists use the new quantity from its effective instant and earlier obligations keep their pins",
     "the migration refuses until the conflict and the deficiency's place are resolved, then splits places, is idempotent and reads history the same",
-    "the open obligation is completed, it keeps cabinet 1 and the check records cabinet 4, and the other cabinet-1 requirement is not completed"
+    "the open obligation is completed, it keeps cabinet 1 and the check records cabinet 4, and the other cabinet-1 requirement is not completed",
+    "the first run refuses and lists the possible move or split; afterwards every earlier record resolves through its own checklist version and item row to exactly one requirement"
   ],
   "status": "contract",
   "notes": "Language-neutral contract for draft SPEC amendment 6.0.0 (PR #254). The scenario is not yet bound to application commands.",
