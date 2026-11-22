@@ -1,6 +1,6 @@
 """The rehearsal history generator (issue #7, Part A) on a tiny synthetic agency."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 from django.core.management import call_command
@@ -56,6 +56,26 @@ class RehearsalHistoryTests(TransactionTestCase):
         self.assertGreater(AuditEvent.objects.count(), checks)
         # The history ends before the end instant and starts in the past.
         self.assertLess(CheckRecord.objects.order_by("-recorded_at").first().recorded_at, END)
+
+    def test_extend_continues_the_same_history_to_the_given_instant(self):
+        # Issue #70: the load history is extended to the present before a rehearsal.
+        self.generate()
+        before = CheckRecord.objects.count()
+        last = CheckRecord.objects.order_by("-recorded_at").first().recorded_at
+        lines = []
+        until = END + timedelta(days=3)  # three more mornings have passed by then
+        counts = rehearsal_history.extend(until=until, seed=5, progress=lines.append)
+        added = sum(counts.get(k, 0) for k in ("PASSED", "FAILED", "UNABLE_TO_INSPECT"))
+        self.assertEqual(added, 2 * 3 * len(lines))
+        self.assertEqual(len(lines), 5)  # the mornings of 06-19 to 06-23
+        self.assertEqual(CheckRecord.objects.count(), before + added)
+        newest = CheckRecord.objects.order_by("-recorded_at").first().recorded_at
+        self.assertGreater(newest, last)
+        self.assertLess(newest, until)
+        # Every new check is linked to its obligation, as in the generated history.
+        self.assertEqual(CheckObligationLink.objects.count(), CheckRecord.objects.count())
+        # Nothing to add when no further morning has passed.
+        self.assertEqual(rehearsal_history.extend(until=until, progress=lines.append), {})
 
     def test_a_database_with_data_or_an_unsupported_size_is_refused(self):
         with self.assertRaises(ValueError):
