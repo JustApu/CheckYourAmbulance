@@ -37,6 +37,7 @@ from django.utils import timezone
 
 from cya.attention.facts import deficiency_facts, latest_effective_checks
 from cya.attention.state import Attention, applies, attention_states, latest_checks
+from cya.authorization.backend import canonical_id
 from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
 from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, resolve_checklist
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
@@ -128,13 +129,14 @@ class VehicleChecklist:
 
 
 def _resolved_items(organization_id, vehicle_id, as_of):
-    """(template order, ResolvedItem, version id) per item the vehicle's bound checklists require.
+    """(template order, item id, ResolvedItem, version id) per item of each bound checklist.
 
     Only templates with a BIND in force for this vehicle at as_of apply (a template published
     for another vehicle does not), and only publications and bindings recorded by as_of count,
-    so a past answer is reproducible. The first template by id wins an item both define.
+    so a past answer is reproducible. An item two checklists both list appears once for each
+    (SPEC 6.0.0 VW-5), in template order; _one_per_key keeps the first for a vehicle-wide read.
     """
-    chosen = {}
+    chosen = []
     bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
     templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
     for order, template in enumerate(t for t in templates if str(t.pk) in bound):
@@ -150,11 +152,40 @@ def _resolved_items(organization_id, vehicle_id, as_of):
             continue
         except ResolutionError as error:
             raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+        seen = set()
         for item in resolved.items:
-            chosen.setdefault(
-                str(item.requirement.item_id), (order, item, str(resolved.template_version_id))
-            )
+            item_id = str(item.requirement.item_id)
+            if item_id not in seen:
+                seen.add(item_id)
+                chosen.append((order, item_id, item, str(resolved.template_version_id)))
     return chosen
+
+
+def _first_resolved_items(organization_id, vehicle_id, as_of):
+    """{item id: (template order, ResolvedItem, version id)}, the first template by id winning.
+
+    The one-entry-per-item view of _resolved_items, for callers that pin an item to a single
+    checklist version (ad hoc inspections, cya.obligations.adhoc).
+    """
+    chosen = {}
+    for order, item_id, item, version_id in _resolved_items(organization_id, vehicle_id, as_of):
+        chosen.setdefault(item_id, (order, item, version_id))
+    return chosen
+
+
+def _one_per_key(placed):
+    """The first entry per (item, kit) key, in build order: one row per item vehicle-wide.
+
+    _placements lists checklists in template order, so this keeps the first template by id for an
+    item two checklists both list, as the vehicle-wide read always has.
+    """
+    kept, seen = [], set()
+    for entry in placed:
+        key = (entry[2], entry[3] or NO_KIT)
+        if key not in seen:
+            seen.add(key)
+            kept.append(entry)
+    return kept
 
 
 def _placed_content(organization_id, vehicle_id, as_of):
@@ -450,13 +481,17 @@ def _ordered_rows(organization_id, vehicle_id, placed, obligations):
 
 
 def _placements(organization_id, vehicle_id, as_of):
-    """(placed, labels): one entry per checklist row the bound templates define, before any
-    obligation is consulted, and the item labels by id. Shared by the full and label-only paths."""
+    """(placed, labels): one entry per checklist row each bound template defines, before any
+    obligation is consulted, and the item labels by id. Shared by the full and label-only paths.
+
+    An item or kit two checklists both list has one entry per checklist (SPEC 6.0.0 VW-5);
+    callers that read the vehicle as a whole keep one per key with _one_per_key.
+    """
     items = _resolved_items(organization_id, vehicle_id, as_of)
     labels = dict(
-        Item.objects.filter(organization_id=organization_id, pk__in=list(items)).values_list(
-            "pk", "label"
-        )
+        Item.objects.filter(
+            organization_id=organization_id, pk__in={entry[1] for entry in items}
+        ).values_list("pk", "label")
     )
     # (order, display key, item_id, kit id, kit label, ResolvedItem, version id). The display key
     # is a tuple: (display_order,) for a checklist item; for a placed kit definition, its
@@ -464,7 +499,7 @@ def _placements(organization_id, vehicle_id, as_of):
     # so each kit's presence line comes before its contents (KDEF-10).
     placed = []
     slots = {}
-    for item_id, (order, resolved, version_id) in items.items():
+    for order, item_id, resolved, version_id in items:
         requirement = resolved.requirement
         if requirement.kit_id:  # one row per kit instance; none means nothing is owed
             kits = _kits_at(organization_id, vehicle_id, str(requirement.kit_id), as_of, slots)
@@ -484,8 +519,9 @@ def _placements(organization_id, vehicle_id, as_of):
             placed.append(
                 (order, (requirement.display_order,), item_id, None, None, resolved, version_id)
             )
-    # Content of kits placed by definition (issue #129): one row per kit of that definition.
-    present = {(row[2], row[3]) for row in placed}
+    # Content of kits placed by definition (issue #129): one row per kit of that definition, in
+    # each checklist that places it.
+    present = {(row[6], row[2], row[3]) for row in placed}
     content = _placed_content(organization_id, vehicle_id, as_of)
     placement_order = dict(
         ChecklistKitPlacement.objects.filter(
@@ -496,9 +532,9 @@ def _placements(organization_id, vehicle_id, as_of):
     for order, resolved, version_id, kits in content:
         item_id = str(resolved.requirement.item_id)
         for kit_id, kit_label in kits:
-            if (item_id, kit_id) in present:
+            if (version_id, item_id, kit_id) in present:
                 continue
-            present.add((item_id, kit_id))
+            present.add((version_id, item_id, kit_id))
             placed.append(
                 (
                     order,
@@ -519,8 +555,8 @@ def _placements(organization_id, vehicle_id, as_of):
         organization_id, vehicle_id, as_of
     ):
         item_id = str(resolved.requirement.item_id)
-        if (item_id, unit) not in present:
-            present.add((item_id, unit))
+        if (version_id, item_id, unit) not in present:
+            present.add((version_id, item_id, unit))
             placed.append(
                 (
                     order,
@@ -541,12 +577,26 @@ def _placements(organization_id, vehicle_id, as_of):
     return placed, labels
 
 
-def _rows(organization_id, vehicle_id, as_of, suspension_lookup, *, current=False):
+def _rows(
+    organization_id,
+    vehicle_id,
+    as_of,
+    suspension_lookup,
+    *,
+    current=False,
+    checklist_version_id=None,
+):
     placed, labels = _placements(organization_id, vehicle_id, as_of)
+    if checklist_version_id is None:
+        placed = _one_per_key(placed)
     obligations = _obligation_by_key(
         organization_id, vehicle_id, as_of, suspension_lookup, current=current
     )
     placed = _ordered_rows(organization_id, vehicle_id, placed, obligations)
+    if checklist_version_id is not None:
+        # One checklist's rows (VW-5): every item it lists, sharing the vehicle's obligation and
+        # attention state by (item, kit) key with any other checklist that lists the same item.
+        placed = [p for p in placed if p[6] == checklist_version_id]
     labels.update(
         Item.objects.filter(
             organization_id=organization_id, pk__in=[p[2] for p in placed]
@@ -694,10 +744,23 @@ def vehicle_checklist(
     needs_attention_only=False,
     as_of=None,
     suspension_lookup=None,
+    checklist_version_id=None,
 ):
-    """The vehicle's checklist rows for a view and filter, as of an instant (default now)."""
+    """The vehicle's checklist rows for a view and filter, as of an instant (default now).
+
+    Without checklist_version_id there is one row per item (and kit) for the whole vehicle. With
+    it, the rows are that checklist version's own, including items another checklist also lists
+    (SPEC 6.0.0 VW-5), and group progress counts those rows; an unknown version lists nothing.
+    """
     if view not in (NORMAL, PRIORITY):
         raise ChecklistQueryError("INVALID_VIEW", "view must be NORMAL or PRIORITY", 400)
+    if checklist_version_id is not None:
+        try:
+            checklist_version_id = canonical_id(checklist_version_id)
+        except (ValueError, TypeError, AttributeError):
+            raise ChecklistQueryError(
+                "INVALID_CHECKLIST_VERSION", "checklist_version_id must be an identifier", 400
+            ) from None
     if type(needs_attention_only) is not bool:
         raise ChecklistQueryError("INVALID_FILTER", "needs_attention_only must be a boolean", 400)
     instant = timezone.now() if as_of is None else as_of
@@ -706,7 +769,12 @@ def vehicle_checklist(
     if not Vehicle.objects.filter(organization_id=organization_id, pk=vehicle_id).exists():
         raise ChecklistQueryError("NOT_FOUND", "vehicle was not found", 404)
     rows = _rows(
-        organization_id, str(vehicle_id), instant, suspension_lookup, current=as_of is None
+        organization_id,
+        str(vehicle_id),
+        instant,
+        suspension_lookup,
+        current=as_of is None,
+        checklist_version_id=checklist_version_id,
     )
     group_progress = _group_progress(rows)
     if needs_attention_only:
@@ -799,6 +867,7 @@ def vehicle_label_rows(organization_id, vehicle_id):
         raise ChecklistQueryError("NOT_FOUND", "vehicle was not found", 404)
     vehicle_id = str(vehicle_id)
     placed, labels = _placements(organization_id, vehicle_id, instant)
+    placed = _one_per_key(placed)
     if _adhoc_keys_missing(organization_id, vehicle_id, instant, placed):
         rows = _rows(organization_id, vehicle_id, instant, None, current=True)
         return tuple(_label_row(row) for row in rows)

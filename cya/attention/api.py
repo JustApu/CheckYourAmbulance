@@ -28,7 +28,7 @@ from tools.command_identity import human_operation_id
 logger = logging.getLogger(__name__)
 
 PREFERENCE_FIELDS = frozenset({"operation_id", "preferred_view", "needs_attention_only"})
-CHECKLIST_QUERY = frozenset({"view", "needs_attention_only"})
+CHECKLIST_QUERY = frozenset({"view", "needs_attention_only", "checklist_version_id"})
 
 
 def _stamped(value):
@@ -114,7 +114,13 @@ def checklist(request, vehicle_id):
             if "needs_attention_only" in request.GET
             else saved["needs_attention_only"]
         )
-        result = vehicle_checklist(organization, vehicle, view=view, needs_attention_only=only)
+        result = vehicle_checklist(
+            organization,
+            vehicle,
+            view=view,
+            needs_attention_only=only,
+            checklist_version_id=request.GET.get("checklist_version_id"),
+        )
     except Rejected as error:
         return _reply(error.status, error.code, correlation_id, error.field_errors)
     except ChecklistQueryError as error:
