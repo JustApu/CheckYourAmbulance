@@ -59,6 +59,7 @@ The owner asked what would be required for "one session per truck per checklist"
 | If gloves are missing in cabinet 1, does only that place turn red and carry the problem, or the item on the whole truck? | "Only that place" | Attention and deficiencies are per item-place (§5.1) |
 | Should an inspection still in use end when it reaches the resume limit? | "Yes, end it" | An Open session ends at `R` even if it is active, so an inspection lasts at most the limit (SES-8) |
 | Is 1 to 24 hours, in whole hours, the right range for the setting? | "Yes, 1–24 hours" | SES-8 range |
+| When an item moves while a check is due, does a check at its new place complete it? (Codex finding 4656644872 on #255) | "Yes, same stock" | A move keeps the item requirement; a check at the new place completes its open obligations; history keeps each place (CHK-11, SCH-6) |
 
 These are decisions of direction, not approval of the SPEC text in §6, which §25.4(e) requires separately. The model for place-specific requirements (§5.1) is Claude's reading of the owner's answer and is confirmed with the text.
 
@@ -179,6 +180,7 @@ The rules for item-places:
 
 - An item kept in two places on a truck has two requirements, one for each place.
 - Moving the item publishes a new version of the same requirement with the new place. Adding a second place creates a second requirement.
+- A move is the same stock in a new place (owner, §1.3). A check at the new place completes the requirement's open obligations, including one due when the move took effect. The obligation keeps the old place and the check records the new one. The "never completes another place" rule applies to two requirements for the same item at the same time, not to one requirement that moved.
 - A truck cannot have two requirements for the same item in the same place.
 - A checklist version lists requirements (item-places) with its own schedule rules and display order, and never stores quantities or other requirements of its own.
 
