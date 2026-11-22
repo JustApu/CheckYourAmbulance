@@ -6,6 +6,8 @@
     "SES-1",
     "SES-2",
     "SES-3",
+    "SES-7",
+    "SES-8",
     "CHK-4"
   ],
   "fixture": "../fixtures/base.json",
@@ -14,11 +16,11 @@
     "session with persisted activity at t0, original template v1"
   ],
   "when": [
-    "heartbeat and view; advance 6h; reopen after publishing v2"
+    "heartbeat; advance six hours; reopen before the deadline; reopen while another session of the same checklist is in progress"
   ],
   "then": [
-    "session Incomplete with checks intact; heartbeat not activity; reopen audited and v1 retained"
+    "Incomplete with checks and v1 preserved; the reopen is audited; the reopen is refused while the other session is in progress"
   ],
   "status": "contract",
-  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection. Revised for draft SPEC amendment 6.0.0 (PR #254)."
 }

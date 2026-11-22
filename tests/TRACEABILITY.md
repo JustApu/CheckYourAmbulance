@@ -9,7 +9,7 @@ Authoritative mappings: `contracts/step-catalog.json` (`cases[*].requirements`);
 | AC-3 | [AC-03.json](scenarios/AC-03.json) | SCH-1, SCH-2, SCH-6 | Symbolic; unimplemented |
 | AC-4 | [AC-04.json](scenarios/AC-04.json) | TIME-1, TIME-2, TIME-3 | Symbolic; unimplemented |
 | AC-5 | [AC-05.json](scenarios/AC-05.json) | CND-1, CND-2, CND-3 | Symbolic; unimplemented |
-| AC-6 | [AC-06.json](scenarios/AC-06.json) | SES-1, SES-2, SES-3, CHK-4 | Symbolic; unimplemented |
+| AC-6 | [AC-06.json](scenarios/AC-06.json) | SES-1, SES-2, SES-3, SES-7, SES-8, CHK-4 | Symbolic; unimplemented |
 | AC-7 | [AC-07.json](scenarios/AC-07.json) | REC-1, REC-2 | Symbolic; unimplemented |
 | AC-8 | [AC-08.json](scenarios/AC-08.json) | REC-4 | Symbolic; unimplemented |
 | AC-9 | [AC-09.json](scenarios/AC-09.json) | CON-1, CON-2, CON-3 | Covered by direct tests in `cya/checks/tests/test_conflicts.py` (warning, proceed keeps both, different items unblocked); scenario stays symbolic |
@@ -33,7 +33,7 @@ Authoritative mappings: `contracts/step-catalog.json` (`cases[*].requirements`);
 | AC-27 | [AC-27.json](scenarios/AC-27.json) | REG-4, REG-6, CHK-3 | Symbolic; unimplemented |
 | AC-28 | [AC-28.json](scenarios/AC-28.json) | ARC-8 | Symbolic; unimplemented |
 | AC-29 | [AC-29.json](scenarios/AC-29.json) | UTI-1, UTI-2, UTI-3 | Direct tests in `cya/checks/tests/test_obligation_links.py` and `cya/obligations/tests/test_state.py`: reason, attribution, self-completion flag, direct and whole-chain invalidation, Unable-to-Passed/Failed supersession, as-of history, replay, rollback, effect bounds, shared obligations and concurrent completion/invalidation; scenario remains symbolic |
-| AC-30 | [AC-30.json](scenarios/AC-30.json) | SCH-5, SCH-6, INV-2 | Symbolic; unimplemented |
+| AC-30 | [AC-30.json](scenarios/AC-30.json) | SCH-2, SCH-5, SCH-6, CHK-11, INV-2 | Symbolic; unimplemented |
 | AC-31 | [AC-31.json](scenarios/AC-31.json) | REC-4, CON-3 | Covered by direct tests in `cya/checks/tests/test_conflicts.py` (lost response, replay after warning, a check between warning and acknowledgement); scenario stays symbolic |
 | AC-32 | [AC-32.json](scenarios/AC-32.json) | INV-2a, COR-2 | Covered by direct tests in `cya/checks/tests/test_invalidation.py` (whole chain excluded, no earlier outcome revives, later correction refused; INV-7 reopening in `cya/deficiencies/tests/test_effects.py`); scenario stays symbolic |
 | AC-33 | [AC-33.json](scenarios/AC-33.json) | SEAL-4, STK-B, PRN-1 | Symbolic; unimplemented |
@@ -44,6 +44,8 @@ Authoritative mappings: `contracts/step-catalog.json` (`cases[*].requirements`);
 | AC-38 | [AC-38.json](scenarios/AC-38.json) | AUD-1, DEP-10, DEP-12, DEP-13 | Symbolic; unimplemented |
 | AC-39 | [AC-39.json](scenarios/AC-39.json) | AUD-1, ASG-2, ASG-3, ASG-4, ASG-5, ASG-6, ASG-7, ASG-8 | Symbolic; unimplemented |
 | AC-40 | [AC-40.json](scenarios/AC-40.json) | AUD-1, CHK-1, CHK-2, CHK-3, CHK-4, CHK-5, CHK-8, CHK-9, CHK-10, CFG-2, CFG-4, CFG-7, CFG-8, CFG-9, IMP-2, IMP-6, IMP-7, KDEF-4, KDEF-9, TIME-1a, CAB-2, CAB-4, CAB-5, DEP-11 | Symbolic; unimplemented |
+| AC-41 | [AC-41.json](scenarios/AC-41.json) | AUD-1, SES-2, SES-3, SES-7, SES-8, SES-9, CHK-4 | Symbolic; unimplemented |
+| AC-42 | [AC-42.json](scenarios/AC-42.json) | AUD-1, CHK-5, CHK-11, SCH-6, VW-5, CON-7 | Symbolic; unimplemented |
 
 ## Supplemental coverage
 
