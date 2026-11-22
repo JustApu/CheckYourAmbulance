@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "AC-41",
+  "criterion": "AC-41",
+  "requirements": [
+    "AUD-1",
+    "SES-2",
+    "SES-3",
+    "SES-7",
+    "SES-8",
+    "SES-9",
+    "CHK-4"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "one vehicle with checklists A and B and every role",
+    "the organization's default resume limit of 6 hours",
+    "a session opened before amendment 6.0.0 with a check after its deadline"
+  ],
+  "when": [
+    "each role starts A while an A session is in progress, and someone starts B",
+    "two people start A at the same instant",
+    "a participant reopens an ended A session while A is in progress, and again after it ends",
+    "time reaches the A session's deadline while it is in use",
+    "an Administrator changes the limit to 8 hours, and others try to change it or set 0 or 25",
+    "the session job runs late and then again",
+    "a crew member starts a new A session after the deadline"
+  ],
+  "then": [
+    "every start of A joins the one A session, and B gets its own session",
+    "the simultaneous starts produce one session",
+    "the reopen is refused while A is in progress and allowed afterwards before its own deadline",
+    "the session reads as Incomplete at its deadline before the job runs, and nothing can reopen, join or record into it",
+    "the job records one deadline event stamped at the deadline",
+    "the open session keeps its 6-hour deadline, a later session gets 8 hours, and the other changes are refused",
+    "with a 12-hour limit an idle session closes after 6 hours and can be reopened until its deadline",
+    "the legacy session reads and records the same end instant, its last check",
+    "the new session shows earlier checks as done and the earlier session is unchanged"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral contract for draft SPEC amendment 6.0.0 (PR #254). The scenario is not yet bound to application commands.",
+  "database": "commit"
+}

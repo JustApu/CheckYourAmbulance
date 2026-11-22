@@ -3,21 +3,23 @@
   "id": "AC-30",
   "criterion": "AC-30",
   "requirements": [
+    "SCH-2",
     "SCH-5",
     "SCH-6",
+    "CHK-11",
     "INV-2"
   ],
   "fixture": "../fixtures/base.json",
   "synthetic": true,
   "given": [
-    "overlapping obligations and shared rule IDs"
+    "two checklists with overlapping obligations of one item requirement, a late obligation within L, one past L, an item in two places and two kit instances"
   ],
   "when": [
-    "link check to earliest due; attempt second without shared rule; invalidate"
+    "record one check; check the item in one place and one kit instance; invalidate the check"
   ],
   "then": [
-    "only earliest linked unless approved shared rule; invalidation voids all links"
+    "every on-time and late-within-L obligation of that item requirement is linked, nothing past L or in another place or kit instance is linked, and invalidation voids all links"
   ],
   "status": "contract",
-  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection."
+  "notes": "Language-neutral behavioral contract; runner implementation deferred until stack selection. Revised for draft SPEC amendment 6.0.0 (PR #254)."
 }

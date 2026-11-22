@@ -103,18 +103,22 @@
       "actions": [
         "heartbeat",
         "advance_6_hours",
-        "reopen"
+        "reopen_before_deadline",
+        "reopen_while_same_checklist_in_progress"
       ],
       "assert": [
         "incomplete",
         "checks_preserved",
         "v1_preserved",
-        "reopen_audited"
+        "reopen_audited",
+        "reopen_refused_while_other_in_progress"
       ],
       "requirements": [
         "SES-1",
         "SES-2",
         "SES-3",
+        "SES-7",
+        "SES-8",
         "CHK-4"
       ]
     },
@@ -530,21 +534,30 @@
     },
     "AC-30": {
       "setup": [
-        "overlapping_obligations"
+        "overlapping_obligations_from_two_checklists",
+        "late_obligation_within_L",
+        "obligation_past_L",
+        "item_in_two_places",
+        "two_kit_instances"
       ],
       "actions": [
         "link_check",
-        "second_link_no_shared_rule",
+        "check_place_p1",
+        "check_kit_instance_k",
         "invalidate"
       ],
       "assert": [
-        "earliest_due_linked",
-        "second_denied",
+        "all_on_time_and_late_obligations_linked",
+        "past_L_not_linked",
+        "other_place_not_linked",
+        "other_kit_instance_not_linked",
         "all_links_voided"
       ],
       "requirements": [
+        "SCH-2",
         "SCH-5",
         "SCH-6",
+        "CHK-11",
         "INV-2"
       ]
     },
@@ -919,6 +932,78 @@
         "§17.8",
         "§18",
         "§23"
+      ]
+    },
+    "AC-41": {
+      "setup": [
+        "checklists_a_and_b_on_one_vehicle",
+        "default_resume_limit_6_hours",
+        "legacy_session_with_check_after_deadline"
+      ],
+      "actions": [
+        "start_a_by_each_role",
+        "start_b",
+        "simultaneous_starts_of_a",
+        "reopen_ended_a_while_a_in_progress",
+        "advance_to_deadline",
+        "change_resume_limit",
+        "run_session_job_late_and_twice",
+        "start_new_session_after_deadline"
+      ],
+      "assert": [
+        "one_session_per_checklist",
+        "different_checklists_coexist",
+        "reopen_refused_then_allowed",
+        "ended_at_deadline_without_job",
+        "deadline_event_stamped_once_at_deadline",
+        "captured_limit_unchanged_by_setting",
+        "setting_admin_only_and_bounded",
+        "idle_close_then_reopen_until_deadline_with_longer_limit",
+        "legacy_end_instant_consistent",
+        "earlier_checks_shown_records_unchanged"
+      ],
+      "requirements": [
+        "AUD-1",
+        "SES-2",
+        "SES-3",
+        "SES-7",
+        "SES-8",
+        "SES-9",
+        "CHK-4"
+      ]
+    },
+    "AC-42": {
+      "setup": [
+        "checklists_a_and_b_share_item_requirement",
+        "item_in_cabinets_1_and_4",
+        "conflicting_legacy_checklists",
+        "deficiency_with_ambiguous_place"
+      ],
+      "actions": [
+        "publish_conflicting_requirement",
+        "pass_in_a_session",
+        "pass_and_fail_in_cabinet_1",
+        "change_item_requirement_quantity",
+        "run_migration_dry_run_and_replay"
+      ],
+      "assert": [
+        "conflicting_publication_refused",
+        "shared_row_in_both_sessions_updates_live",
+        "other_place_unaffected",
+        "deficiency_names_place",
+        "quantity_change_effective_for_both_checklists",
+        "earlier_obligations_keep_pins",
+        "migration_refuses_conflicts_and_ambiguous_deficiency",
+        "migration_splits_places_and_is_idempotent",
+        "history_reads_same_through_map"
+      ],
+      "requirements": [
+        "AUD-1",
+        "CHK-5",
+        "CHK-11",
+        "SCH-6",
+        "VW-5",
+        "CON-7"
       ]
     }
   }

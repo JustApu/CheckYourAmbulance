@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "AC-42",
+  "criterion": "AC-42",
+  "requirements": [
+    "AUD-1",
+    "CHK-5",
+    "CHK-11",
+    "SCH-6",
+    "VW-5",
+    "CON-7"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "checklists A and B on one vehicle inspecting the same item in the same place",
+    "an item kept in cabinets 1 and 4",
+    "older checklist versions that disagree about one item-place, and a deficiency whose place is unclear"
+  ],
+  "when": [
+    "a Supervisor publishes a checklist giving the shared item-place a different quantity",
+    "a crew member passes the shared item in the A session while someone has the B session open",
+    "the item passes and then fails in cabinet 1",
+    "a Supervisor changes the quantity of the item requirement",
+    "the migration runs as a dry-run, for real and again"
+  ],
+  "then": [
+    "the conflicting publication is refused",
+    "the B session shows the item as done within the live-update targets",
+    "cabinet 4 stays due and clear, and only cabinet 1 needs attention with a deficiency naming its place",
+    "both checklists use the new quantity from its effective instant and earlier obligations keep their pins",
+    "the migration refuses until the conflict and the deficiency's place are resolved, then splits places, is idempotent and reads history the same"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral contract for draft SPEC amendment 6.0.0 (PR #254). The scenario is not yet bound to application commands.",
+  "database": "commit"
+}
