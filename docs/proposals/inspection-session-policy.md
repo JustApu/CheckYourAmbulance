@@ -165,7 +165,7 @@ An ended session, however it ended, can be reopened by a participant until `R` (
 
 ### 5.1 One requirement per item and place on a truck
 
-**Model (recommended).** A **vehicle item requirement** is a stable record on one truck for one item kept in one place. Its versions are effective-dated and published under CHK-3. Each version holds:
+**Model (recommended).** A **vehicle item requirement** is a stable record of one stock of an item on one truck, kept in one place at a time; the place belongs to each version, not to the identity. At any instant a truck has at most one requirement in force for one item in one place. Its versions are effective-dated and published under CHK-3. Each version holds:
 
 - the place: a compartment or system of that truck, or **Not placed** (CHK-9);
 - kind;
