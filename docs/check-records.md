@@ -5,8 +5,8 @@
 "Record a check"). [issue #74](https://github.com/JustApu/CheckYourAmbulance-archive/issues/74) adds append-only `check_obligation_link` rows to the same
 transaction. One call records one attributed, item-level check and links it to an eligible
 obligation when one exists: a selected routine obligation or an explicit ad hoc order
-(SPEC ADH-1, [issue #158](https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)). Shared-rule extras are explicit and audited; an ordinary
-check never silently satisfies multiple requirements.
+(SPEC ADH-1, [issue #158](https://github.com/JustApu/CheckYourAmbulance-archive/issues/158)). Since SPEC 6.0.0 one check links to every eligible
+obligation of its item, from any checklist (SCH-6; [issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256)).
 
 [issue #76](https://github.com/JustApu/CheckYourAmbulance-archive/issues/76) adds author-only correction chains at `POST /api/v1/checks/{check_id}/corrections`.
 Each accepted correction appends a replacement check and a `check_event` in the same audited
@@ -136,10 +136,15 @@ All of it runs server-side; the UI is never the enforcement point.
   records and each is kept.
 - The audit event records ids and the outcome but **no free text**: the explanation is not copied
   into the audit snapshot.
-- A check links to the earliest-due eligible obligation, with obligation ID breaking due-time
-  ties. An on-time eligible obligation takes precedence over late linking. Late linking is
-  considered only when no unsatisfied on-time obligation exists for the same vehicle, item and kit
-  instance, and only for obligations past their grace deadline but not past their pinned late
+- A check links to every eligible obligation of the same vehicle, item and kit instance
+  (SPEC 6.0.0 SCH-2, SCH-6): every unsatisfied one whose on-time window holds the check, and every
+  unsatisfied one past its grace deadline but not past its pinned late limit
+  `L`, whichever checklist created it. On-time links come first, then late ones, each by due
+  instant with obligation ID breaking ties; the first is the primary link (ordinal 0). Until item
+  requirements exist ([issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256)
+  Part C) an interim guard links only obligations whose requirement versions check the item the
+  same way in the same place as the checklist the check was recorded from. Late linking covers
+  obligations past their grace deadline but not past their pinned late
   limit `L` (`late_limit_at`: `G` plus the `w_late` captured when the obligation was created;
   SCH-2/SCH-3, SPEC 1.31.0; `CYA_LATE_COMPLETION_HOURS`, default 12, applies to obligations
   created after it is set); a later unsatisfied obligation stays missed. The on-time lookup reads
@@ -149,8 +154,8 @@ All of it runs server-side; the UI is never the enforcement point.
   kit instances.
 - As-of obligation projections read immutable links from the database by default and ignore links
   recorded after the requested instant. Pure-function callers may still provide an explicit check
-  adapter. Shared satisfaction rules are audited administrator records; each explicit member pair
-  must have the same vehicle, item and kit scope. There is no administration UI yet.
+  adapter. Shared-satisfaction rules recorded before SPEC 6.0.0 remain in history with their
+  links; no new rule can be created (SCH-5), and the command refuses with `SHARED_RULES_RETIRED`.
 
 Correction requests require `operation_id`, `expected_tip_check_id`, and `outcome`; an optional
 typed observation and explanation can replace the stored observation. The authenticated user is

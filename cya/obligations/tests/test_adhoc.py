@@ -174,36 +174,39 @@ class AdHocTests(GenerationCase):
             self.generate()
             self.assertTrue(any(o.pk == oid for o in self.obligations()))
 
-    def test_real_checks_satisfy_only_one_of_colliding_obligations(self):
+    def test_one_check_satisfies_colliding_obligations(self):
+        # SPEC 6.0.0 SCH-6: one check links every eligible obligation of the item requirement,
+        # the explicit request and the routine one alike (issue #256 Part B).
         self.generate()
         order = self.order()
         self.clock.set(self.at(hours=6))
         first = self.check()
         self.assertEqual(
-            CheckObligationLink.objects.filter(check_record_id=first.body["check_id"]).count(), 1
+            CheckObligationLink.objects.filter(check_record_id=first.body["check_id"]).count(), 2
         )
-        matching = [
-            s
-            for s in self.project()
-            if s.obligation.item_id == str(self.suction.pk)
-            and s.obligation.due_at == self.at(hours=6)
-        ]
-        self.assertEqual(sum(s.state == State.SATISFIED for s in matching), 1)
-        # Acknowledging the displayed basis records an independent check, never a session completion.
-        self.check(
+
+        def matching():
+            return [
+                s
+                for s in self.project()
+                if s.obligation.item_id == str(self.suction.pk)
+                and s.obligation.due_at == self.at(hours=6)
+            ]
+
+        self.assertEqual(sum(s.state == State.SATISFIED for s in matching()), 2)
+        self.assertEqual(len({s.obligation.id for s in matching()}), 2)
+        self.assertIn(order.body["obligation_ids"][0], {s.obligation.id for s in matching()})
+        # Acknowledging the displayed basis records an independent check, never a session
+        # completion; nothing is left for it to link.
+        second = self.check(
             actor=self.supervisor,
             basis_check_id=first.body["check_id"],
             acknowledges_check_id=first.body["check_id"],
         )
-        matching = [
-            s
-            for s in self.project()
-            if s.obligation.item_id == str(self.suction.pk)
-            and s.obligation.due_at == self.at(hours=6)
-        ]
-        self.assertEqual(sum(s.state == State.SATISFIED for s in matching), 2)
-        self.assertEqual(len({s.obligation.id for s in matching}), 2)
-        self.assertIn(order.body["obligation_ids"][0], {s.obligation.id for s in matching})
+        self.assertFalse(
+            CheckObligationLink.objects.filter(check_record_id=second.body["check_id"]).exists()
+        )
+        self.assertEqual(sum(s.state == State.SATISFIED for s in matching()), 2)
 
     def test_outage_return_and_shuffled_replay_preserve_historical_answers(self):
         before = self.clock.now

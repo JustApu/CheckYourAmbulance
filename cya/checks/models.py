@@ -295,10 +295,11 @@ class CheckObligationLink(Evidence):
             models.CheckConstraint(
                 condition=models.Q(ordinal__gte=0), name="check_link_ordinal_min"
             ),
+            # SPEC 6.0.0 SCH-5: a second link no longer needs a rule. A primary link never had
+            # one; links recorded before 6.0.0 keep theirs (cya_checks 0015).
             models.CheckConstraint(
-                condition=models.Q(ordinal=0, shared_rule__isnull=True)
-                | models.Q(ordinal__gt=0, shared_rule__isnull=False),
-                name="check_link_shared_shape",
+                condition=models.Q(ordinal=0, shared_rule__isnull=True) | models.Q(ordinal__gt=0),
+                name="check_link_primary_unshared",
             ),
         ]
 

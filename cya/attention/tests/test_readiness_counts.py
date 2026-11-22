@@ -60,19 +60,21 @@ class Rpt5aCountTests(AttentionCase):
         mine = next(v for v in picture.vehicles if v.vehicle_id == str(self.vehicle.pk))
         self.assertEqual(mine.counts["FAILED"], 1)
 
-    def test_after_g_before_l_overdue_clears_and_missed_starts_after_l(self):  # AC-36 (4), (9)
+    def test_after_g_before_l_overdue_clears_and_missed_starts_after_l(self):  # AC-36 (4)
         self.clock.set(self.at(hours=8))
         self.order(self.at(hours=10))
         before = self.counts(self.at(hours=8, minutes=4))
         self.assertEqual(before[1], 0)
         self.clock.set(self.at(hours=8, minutes=5))
-        self.record(self.suction)  # links to the order, whose on-time window holds it (SCH-2)
+        # SPEC 6.0.0 SCH-6: the check links the order, whose on-time window holds it, and also
+        # completes the 06:00 obligation late, since it is within that obligation's L.
+        self.record(self.suction)
         self.assertEqual(self.counts(self.at(hours=8, minutes=10)), (before[0] - 1, 0))
         limit = self.at(hours=19)
         self.assertEqual(self.counts(limit - US)[1], 0)
         self.assertEqual(self.counts(limit)[1], 0)  # at exactly L it is not yet missed
         overdue, missed = self.counts(limit + US)
-        self.assertEqual(missed, overdue + 1)  # the cleared one is missed but not Overdue
+        self.assertEqual(missed, overdue)  # completed late, so it is not missed either
 
     def test_the_seven_day_edge_is_inclusive_at_the_due_instant(self):  # AC-36 (5)
         for day in range(1, 8):

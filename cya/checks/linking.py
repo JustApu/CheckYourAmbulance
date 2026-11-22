@@ -1,5 +1,13 @@
-"""Choose and record links from a check to selected, unsatisfied obligations (SPEC §5.3–§5.5)."""
+"""Choose and record links from a check to selected, unsatisfied obligations (SPEC §5.3–§5.5).
 
+SPEC 6.0.0 (SCH-2, SCH-5, SCH-6; issue #256 Part B): a check links to every unsatisfied
+obligation of its item for which it is on time or late within that obligation's L, whichever
+checklist created it. Shared-satisfaction rules no longer create links; links recorded under them
+stay in history. Seal evidence keeps its earlier selection (choose_seal_links), which SPEC 6.0.0
+does not change.
+"""
+
+import json
 from datetime import timedelta
 
 from django.conf import settings
@@ -116,9 +124,12 @@ def _eligible(
             ~Exists(already_satisfied), ~Exists(already_substituted), ~Exists(already_inspected)
         )
     return list(
-        candidates.select_related("requirement_version").order_by("due_at", "pk")[
-            : MAX_LINK_CANDIDATES + 1
-        ]
+        candidates.select_related(
+            "requirement_version__item_def__compartment",
+            "requirement_version__item_def__system",
+            "requirement_version__kit_definition_item",
+            "requirement_version__placement",
+        ).order_by("due_at", "pk")[: MAX_LINK_CANDIDATES + 1]
     )
 
 
@@ -159,18 +170,104 @@ def _scope(check, recorded_at):
 
 
 def conflict_obligation(check, *, recorded_at):
-    """The obligation whose on-time window holds the instant, satisfied or not, or None.
+    """Of the obligations whose on-time window holds the instant, the one opened first, or None.
 
     This anchors the conflict warning (SPEC CON-3). A second crew member about to repeat a check
     someone just recorded is exactly the case to warn about, even though linking sends the repeat
-    elsewhere because the obligation is already satisfied. The caller holds the vehicle/item lock.
+    elsewhere because the obligation is already satisfied. The comparison covers every obligation
+    of the item from any checklist (CON-7), so the anchor is the window that opened first and
+    every check since then is in scope. The caller holds the vehicle/item lock.
     """
     on_time = _eligible(**_scope(check, recorded_at), late=False, include_satisfied=True)
-    return on_time[0] if on_time else None
+    return min(on_time, key=lambda o: (o.early_at, o.due_at, o.pk)) if on_time else None
+
+
+def _outcomes(value):
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return tuple(sorted(value))
+    return json.dumps(value, sort_keys=True)
+
+
+def _requirement_key(version):
+    """What a check of this requirement checks, and where (interim guard, issue #256 Part B).
+
+    Until vehicle item requirements exist (SPEC 6.0.0 CHK-11, Part C), one check is shared only
+    between obligations whose pinned requirement versions check the item the same way in the
+    same place. A kit item's place is its kit instance, and a kit presence check's place is its
+    kit list line; both are already part of the link scope (KDEF-12).
+    """
+    if version.kit_requirement_id is not None:
+        return ("PRESENCE", str(version.kit_requirement_id))
+    content = version.item_def or version.kit_definition_item
+    properties = (
+        content.kind,
+        content.expected_quantity,
+        content.unit,
+        _outcomes(content.allowed_outcomes),
+        bool(content.expiration_tracked),
+    )
+    if version.item_def is None:
+        return ("KIT", properties)
+    item_def = version.item_def
+    place = (
+        str(item_def.compartment.stable_slot_id) if item_def.compartment_id else None,
+        str(item_def.system.stable_slot_id) if item_def.system_id else None,
+        str(item_def.kit_id) if item_def.kit_id else None,
+    )
+    return ("ITEM", properties, place)
+
+
+def _source_checklist_version(version):
+    if version.item_def is not None:
+        return version.item_def.checklist_version_id
+    if version.placement is not None:
+        return version.placement.checklist_version_id
+    return None
+
+
+def _anchor(check, candidates):
+    """The obligation of the checklist the check was recorded from, else the first candidate."""
+    own = getattr(check, "checklist_version_id", None)
+    if own is not None:
+        for obligation in candidates:
+            source = _source_checklist_version(obligation.requirement_version)
+            if source is not None and str(source) == str(own):
+                return obligation
+    return candidates[0]
 
 
 def choose_links(check, *, recorded_at, ignore_root_check_id=None):
-    """Return primary and explicitly shared links in deterministic order.
+    """Return a link to every eligible obligation, on-time ones first (SPEC 6.0.0 SCH-6).
+
+    The caller holds the vehicle/item lock and supplies the exact timestamp that will be stored
+    on the receipt and check. Only the latest selected obligation for each due instant is
+    considered, and satisfied obligations are skipped. Every unsatisfied obligation whose on-time
+    window holds the instant, and every one past its grace deadline but not past its late limit
+    L, is linked, whichever checklist created it. On-time links come first, then late ones, each
+    by due instant and stable obligation ID; the first is the primary link (ordinal 0). The
+    interim guard (_requirement_key) keeps only obligations of the same requirement and place as
+    the checklist the check was recorded from.
+    """
+    scope = _scope(check, recorded_at)
+    scope["ignore_root_check_id"] = ignore_root_check_id
+    on_time = _eligible(**scope, late=False)
+    late = _eligible(**scope, late=True)
+    if len(on_time) + len(late) > MAX_LINK_CANDIDATES:
+        raise LinkScopeTooLarge("too many eligible obligations")
+    candidates = [(o, "ON_TIME") for o in on_time] + [(o, "LATE") for o in late]
+    if not candidates:
+        return []
+    anchor = _anchor(check, [o for o, _ in candidates])
+    key = _requirement_key(anchor.requirement_version)
+    chosen = [(o, t) for o, t in candidates if _requirement_key(o.requirement_version) == key]
+    return [
+        {"id": new_id(), "obligation": o, "ordinal": n, "shared_rule": None, "timing": t}
+        for n, (o, t) in enumerate(chosen)
+    ]
+
+
+def choose_seal_links(check, *, recorded_at, ignore_root_check_id=None):
+    """Return primary and explicitly shared links for seal evidence, as before SPEC 6.0.0.
 
     The caller holds the vehicle/item lock and supplies the exact timestamp that will be stored
     on the receipt and check. Only the latest selected obligation for each due instant is

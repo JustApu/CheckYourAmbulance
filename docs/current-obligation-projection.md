@@ -24,8 +24,8 @@ winner per item and physical kit using the existing urgency and inclusive late
 limit rules (issue #66). Readiness still counts **every selected obligation in
 its seven-day-back / 48-hour-ahead window**, including missed obligations, and
 keeps Passed, Failed, Unable, supervisor completion, suspensions, exemptions,
-waivers, invalidations, supersessions and late completions distinct. Shared-rule
-check chains contribute their invalidation/correction counts once per window,
+waivers, invalidations, supersessions and late completions distinct. Check
+chains linked to several obligations contribute their invalidation/correction counts once per window,
 even when linked to multiple obligations. It is not a count of checklist rows.
 
 The existing pure obligation evaluator computes state from the assembled facts at

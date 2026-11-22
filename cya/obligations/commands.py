@@ -10,28 +10,19 @@ obligations are reconciled; a failure there is logged and left to the next gener
 
 import logging
 import re
-from datetime import datetime
 
-from cya.accounts.fields import new_id
-from cya.accounts.models import Organization
-from cya.authorization.backend import canonical_id, load_state
-from cya.authorization.locking import locked_identities
-from cya.authorization.persistence import DatabaseRoleBackend, digest
-from cya.authorization.policy import Role
+from cya.authorization.backend import canonical_id
+from cya.authorization.persistence import digest
 from cya.checklists.models import ChecklistItemDef, ChecklistTemplate, Vehicle
-from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
+from cya.core.audit_commands import Plan, run_command
 from cya.obligations.generation import reconcile_vehicle
 from cya.obligations.models import (
     BINDING_ACTIONS,
     RequirementBinding,
-    RequirementVersion,
-    SharedSatisfactionRule,
-    SharedSatisfactionRuleMember,
 )
 from cya.schedules.models import ScheduleRule
 
 logger = logging.getLogger(__name__)
-MAX_SHARED_RULE_MEMBERS = 1000
 
 
 BIND_ACTION = "bind_unbind_template"
@@ -39,6 +30,15 @@ BIND_ACTION = "bind_unbind_template"
 
 class BindingError(ValueError):
     """The requested binding is invalid or does not change anything."""
+
+
+class SharedRulesRetired(BindingError):
+    """SPEC 6.0.0 SCH-5: shared-satisfaction rules are history only."""
+
+    code, status = "SHARED_RULES_RETIRED", 409
+
+    def __init__(self):
+        super().__init__("shared-satisfaction rules can no longer be created (SPEC 6.0.0 SCH-5)")
 
 
 class PreviewChanged(BindingError):
@@ -227,149 +227,14 @@ def bind_requirement(
     return result
 
 
-def configure_shared_satisfaction_rule(
-    *,
-    organization_id,
-    actor_id,
-    members,
-    effective_at=None,
-    operation_id,
-    correlation_id,
-    request_attempt_id,
-):
-    """Append an audited rule snapshot; there is deliberately no administration UI yet."""
-    for value in (organization_id, actor_id):
-        canonical_id(value)
-    if not isinstance(members, (list, tuple)) or not members:
-        raise BindingError("members must be a non-empty list")
-    if len(members) > MAX_SHARED_RULE_MEMBERS:
-        raise BindingError("shared rules may name at most 1000 requirement pairs")
-    normalized = []
-    for pair in members:
-        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-            raise BindingError("each member must name source and additional requirement versions")
-        source, additional = canonical_id(pair[0]), canonical_id(pair[1])
-        if source == additional:
-            raise BindingError("a shared rule cannot name the same requirement twice")
-        normalized.append((source, additional))
-    if len(set(normalized)) != len(normalized):
-        raise BindingError("shared rule members must be unique")
-    if effective_at is not None and (
-        not isinstance(effective_at, datetime)
-        or effective_at.tzinfo is None
-        or effective_at.utcoffset() is None
-    ):
-        raise BindingError("effective_at must be timezone-aware")
+def configure_shared_satisfaction_rule(**_ignored):
+    """Refuse: no new shared-satisfaction rule can be created (SPEC 6.0.0 SCH-5).
 
-    def authorize(org):
-        with locked_identities(organization_id, [actor_id]) as (
-            current_org,
-            users,
-        ):
-            user = users[actor_id]
-            roles = load_state(DatabaseRoleBackend(), user).grants
-            actor = Actor(
-                user=user,
-                roles=tuple(sorted((Role.CREW if r == Role.EMT else r).value for r in roles)),
-            )
-            if not current_org.active or not user.active or Role.ADMINISTRATOR not in roles:
-                raise CommandDenied(actor)
-            return actor
-
-    def prepare(actor):
-        Organization.objects.select_for_update().get(pk=organization_id)
-        versions = {
-            str(row.pk): row
-            for row in RequirementVersion.objects.filter(
-                organization_id=organization_id,
-                pk__in={value for pair in normalized for value in pair},
-            )
-        }
-        if len(versions) != len({value for pair in normalized for value in pair}):
-            raise BindingError("a shared rule requirement version was not found")
-        for source_id, additional_id in normalized:
-            source, additional = versions[source_id], versions[additional_id]
-            if (source.vehicle_id, source.item_id, source.kit_key) != (
-                additional.vehicle_id,
-                additional.item_id,
-                additional.kit_key,
-            ):
-                raise BindingError("shared rule members must have the same vehicle/item/kit scope")
-        revision = (
-            SharedSatisfactionRule.objects.filter(organization_id=organization_id)
-            .order_by("-revision")
-            .values_list("revision", flat=True)
-            .first()
-            or 0
-        ) + 1
-        prior_effective = (
-            SharedSatisfactionRule.objects.filter(organization_id=organization_id)
-            .order_by("-effective_at")
-            .values_list("effective_at", flat=True)
-            .first()
-        )
-        rule_id = new_id()
-
-        def apply(receipt, current):
-            effective = effective_at or receipt.recorded_at
-            if effective < receipt.recorded_at:
-                raise BindingError("effective_at cannot precede the rule's recorded instant")
-            if prior_effective is not None and effective <= prior_effective:
-                raise BindingError("a shared-rule revision must follow the prior effective instant")
-            rule = SharedSatisfactionRule.objects.create(
-                id=rule_id,
-                organization_id=organization_id,
-                revision=revision,
-                effective_at=effective,
-                command=receipt,
-                recorded_at=receipt.recorded_at,
-                actor_user=current.user,
-                actor_roles_at_time=list(current.roles),
-            )
-            SharedSatisfactionRuleMember.objects.bulk_create(
-                SharedSatisfactionRuleMember(
-                    id=new_id(),
-                    organization_id=organization_id,
-                    rule=rule,
-                    command=receipt,
-                    recorded_at=receipt.recorded_at,
-                    actor_user=current.user,
-                    actor_roles_at_time=list(current.roles),
-                    source_requirement_version_id=source,
-                    additional_requirement_version_id=additional,
-                )
-                for source, additional in normalized
-            )
-
-        values = {
-            "rule_id": rule_id,
-            "revision": revision,
-            "members": normalized,
-            "effective_at": effective_at.isoformat() if effective_at else None,
-        }
-        return Plan(
-            response_body={"code": "SHARED_RULE_CONFIGURED", **values},
-            apply=apply,
-            target_type="ORGANIZATION",
-            target_id=organization_id,
-            new_snapshot={"schema_version": 1, "values": values},
-        )
-
-    return run_command(
-        organization_id=organization_id,
-        operation_id=operation_id,
-        command_type="SHARED_SATISFACTION_RULE_SET",
-        request_digest=digest(
-            {
-                "members": normalized,
-                "effective_at": effective_at.isoformat() if effective_at else None,
-            }
-        ),
-        correlation_id=correlation_id,
-        request_attempt_id=request_attempt_id,
-        authorize=authorize,
-        prepare=prepare,
-    )
+    One check now links to every eligible obligation of its item (SCH-6), so a rule has nothing
+    left to declare. Rules and links recorded before 6.0.0 remain in history; the database
+    refuses a new rule row too (cya_checks 0015).
+    """
+    raise SharedRulesRetired()
 
 
 def _reconcile_after(organization_id, vehicle_id):

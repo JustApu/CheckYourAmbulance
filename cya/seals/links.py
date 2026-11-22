@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from cya.checks.linking import choose_links
+from cya.checks.linking import choose_seal_links
 from cya.seals.scope import MAX_SCOPE
 
 MAX_LINKS = 10000
@@ -41,7 +41,7 @@ def plan_links(organization_id, vehicle_id, targets, *, recorded_at):
             kit_id=target.kit_id,
             kit_requirement_id=target.kit_requirement_id,
         )
-        links = choose_links(prospective, recorded_at=recorded_at)
+        links = choose_seal_links(prospective, recorded_at=recorded_at)
         total += len(links)
         if total > MAX_LINKS:
             raise ValueError("too many seal obligation links")

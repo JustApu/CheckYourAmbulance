@@ -51,7 +51,7 @@ class SealLinkTests(SimpleTestCase):
             LinkTarget("presence", kit_requirement_id="line-b"),
         ]
         instant = datetime(2026, 11, 14, tzinfo=UTC)
-        with patch("cya.seals.links.choose_links", return_value=[{"ordinal": 0}]) as choose:
+        with patch("cya.seals.links.choose_seal_links", return_value=[{"ordinal": 0}]) as choose:
             plans = plan_links("org", "vehicle", targets, recorded_at=instant)
         self.assertEqual([target for target, _ in plans], targets)
         self.assertEqual(
@@ -67,7 +67,7 @@ class SealLinkTests(SimpleTestCase):
 
     def test_duplicate_or_ambiguous_physical_targets_are_refused(self):
         target = LinkTarget("item", "kit")
-        with patch("cya.seals.links.choose_links", return_value=[]):
+        with patch("cya.seals.links.choose_seal_links", return_value=[]):
             with self.assertRaises(ValueError):
                 plan_links("org", "vehicle", [target, target], recorded_at="instant")
             with self.assertRaises(ValueError):

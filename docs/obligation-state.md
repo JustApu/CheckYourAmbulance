@@ -185,8 +185,8 @@ until `L = D + w_late`, with `w_late` captured when the order is created (SCH-2/
 SPEC 1.31.0); after that it stays Overdue (missed). Out-of-Service does
 not exempt a non-routine order, and carry-over does not waive it. Later publications
 or kit changes do not erase the order. Normal check-link allocation still applies:
-one primary link, earliest eligible due time (stable ID breaks ties), additional
-links only under an explicit shared-satisfaction rule. A session satisfies nothing.
+a check links every eligible obligation of its item, on time or late within `L`
+(SPEC 6.0.0 SCH-6). A session satisfies nothing.
 
 The checklist opts into `include_all_ad_hoc=True` so an explicit order remains
 visible even beyond the routine seven-day lookback/48-hour horizon, until its
