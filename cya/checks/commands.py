@@ -604,7 +604,7 @@ def _needs_deficiency(outcome):
     return outcome in ("FAILED", "UNABLE_TO_INSPECT")
 
 
-def _verification_plan(organization_id, shape, chosen_kit):
+def _verification_plan(organization_id, shape, chosen_kit, item_requirement_id=None):
     """Lock the verified deficiency and decide what this verification check does (VER-4, VER-5).
 
     Runs in prepare after the vehicle and item locks, as the last lock group. The deficiency must
@@ -645,10 +645,20 @@ def _verification_plan(organization_id, shape, chosen_kit):
         raise CheckError(
             "CONFIGURATION_UNAVAILABLE", "verification scope is unavailable", status=503
         )
-    key = chosen_kit or NO_KIT_KEY
-    own = next(
-        (r for r in rows if str(r.item_id) == shape["item_id"] and r.instance_key == key), None
-    )
+    # The check's unit: its kit, else the item requirement of the row shown (SPEC 6.0.0 VER-3),
+    # else NO_KIT. A per-item row (all-zero key, no version) is met at any place outside a kit.
+    key = chosen_kit or item_requirement_id or NO_KIT_KEY
+    mine = [r for r in rows if str(r.item_id) == shape["item_id"]]
+    own = next((r for r in mine if r.instance_key == key), None)
+    if own is None and chosen_kit is None:
+        own = next(
+            (
+                r
+                for r in mine
+                if r.instance_key == NO_KIT_KEY and r.item_requirement_version_id is None
+            ),
+            None,
+        )
     if own is None:
         raise CheckError(
             "NOT_IN_VERIFICATION_SCOPE",
@@ -1061,7 +1071,12 @@ def record_check(
         verification = None
         if verification_id is not None:
             try:
-                verification = _verification_plan(organization_id, shape, chosen_kit)
+                verification = _verification_plan(
+                    organization_id,
+                    shape,
+                    chosen_kit,
+                    item.requirement.item_requirement_id if item_version else None,
+                )
             except DeficiencyError as error:
                 raise CheckError(
                     error.code, str(error), status=error.status, path=error.path
@@ -1114,9 +1129,11 @@ def record_check(
                         category=category,
                         severity=severity,
                         fields=selection[1],
-                        affected=[(shape["item_id"], item.requirement.definition_id)],
+                        affected=[(shape["item_id"], item.requirement.definition_id, item_version)],
                         item_id=shape["item_id"],
                         kit_id=chosen_kit,
+                        # The place of the failed check (SPEC 6.0.0 7.5, 8.1; AC-42 (3)).
+                        item_requirement_version_id=item_version,
                     )
                 deficiency_service.add_check_evidence(
                     receipt,

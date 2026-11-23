@@ -474,6 +474,9 @@ class PlacedKitCheckTests(PlacedKitCase):
         kit = self.add_placed_kit("Jump kit 1", self.definition)
         content = KitDefinitionItem.objects.get(version_id=self.kit_version, item=self.gauze)
         resolved = resolve_items(
-            str(self.org.pk), str(self.vehicle.pk), [(str(self.gauze.pk), kit)], self.at(hours=5)
+            str(self.org.pk),
+            str(self.vehicle.pk),
+            [(str(self.gauze.pk), kit, None)],
+            self.at(hours=5),
         )
-        self.assertEqual(resolved, [(str(self.gauze.pk), str(content.pk), kit)])
+        self.assertEqual(resolved, [(str(self.gauze.pk), str(content.pk), kit, None, None)])

@@ -34,8 +34,7 @@ from cya.deficiencies.commands import (
     _operation_id,
     publish_changed,
 )
-from cya.deficiencies.effects import NO_KIT_KEY
-from cya.deficiencies.expansion import _lock, parse_items, resolve_items
+from cya.deficiencies.expansion import _lock, item_body, items_digest, parse_items, resolve_items
 from cya.deficiencies.models import (
     CheckSuspension,
     Deficiency,
@@ -55,8 +54,8 @@ MAX_SUSPENSION_ROWS = 5000  # START and END rows one history read will return
 def _not_suspended_yet(in_force, resolved):
     """Refuse an item and kit this deficiency already suspends; the refusal names the entry."""
     held = {(str(row.item_id), row.instance_key) for row in in_force}
-    for index, (item_id, _definition, kit_id) in enumerate(resolved):
-        if (item_id, kit_id or NO_KIT_KEY) in held:
+    for index, row in enumerate(resolved):
+        if (row.item_id, row.instance_key) in held:
             raise DeficiencyError(
                 "ALREADY_SUSPENDED",
                 "this deficiency already suspends the check of that item and kit",
@@ -79,13 +78,15 @@ def _within_scope(organization_id, deficiency_id, resolved, now):
     """
     deficiency = Deficiency.objects.get(organization_id=organization_id, pk=deficiency_id)
     scope = {
-        (item_id, kit_id)
-        for item_id, _definition, kit_id in service.correction_scope(
-            organization_id, deficiency, now
-        )
+        (row.item_id, row.unit)
+        for row in service.correction_scope(organization_id, deficiency, now)
     }
-    for index, (item_id, _definition, kit_id) in enumerate(resolved):
-        if (item_id, kit_id) not in scope:
+    for index, row in enumerate(resolved):
+        # A per-item scope row (all-zero key: reported before the cutover without a place) covers
+        # every place of its item outside a kit; the suspension still names one (SUS-2).
+        if (row.item_id, row.unit) not in scope and not (
+            row.item_requirement_id and (row.item_id, None) in scope
+        ):
             raise DeficiencyError(
                 "ITEM_NOT_IN_SCOPE",
                 "only an item and kit within the deficiency's affected scope can be suspended",
@@ -100,15 +101,16 @@ def _start_rows(resolved, *, organization_id, deficiency_id, vehicle_id, event, 
             organization_id=organization_id,
             deficiency_id=deficiency_id,
             vehicle_id=vehicle_id,
-            item_id=item_id,
-            **content_columns(definition_id),
-            kit_instance_id=kit_id,
-            instance_key=kit_id or NO_KIT_KEY,
+            item_id=row.item_id,
+            **content_columns(row.definition_id),
+            kit_instance_id=row.kit_id,
+            item_requirement_version_id=row.item_requirement_version_id,
+            instance_key=row.instance_key,
             action="START",
             deficiency_event=event,
             **stamp,
         )
-        for suspension_id, (item_id, definition_id, kit_id) in zip(ids, resolved, strict=True)
+        for suspension_id, row in zip(ids, resolved, strict=True)
     ]
     CheckSuspension.objects.bulk_create(rows)
     return rows
@@ -190,10 +192,7 @@ def suspend_checks(
                 "deficiency_id": deficiency_id,
                 "event_id": event_id,
                 "status": projection.status,
-                "items": [
-                    {"item_id": item_id, "kit_instance_id": kit_id}
-                    for item_id, _definition, kit_id in resolved
-                ],
+                "items": [item_body(row) for row in resolved],
                 "suspension_ids": suspension_ids,
             },
             apply=apply,
@@ -208,7 +207,7 @@ def suspend_checks(
                     "event_type": "CHECKS_SUSPENDED",
                     "status": projection.status,
                     "suspension_ids": sorted(suspension_ids),
-                    "item_ids": sorted({item_id for item_id, _d, _k in resolved}),
+                    "item_ids": sorted({row.item_id for row in resolved}),
                 },
             },
             recorded_at=now,
@@ -223,7 +222,7 @@ def suspend_checks(
                 "deficiency_id": deficiency_id,
                 "expected_event_id": expected_event_id,
                 "explanation": explanation,
-                "items": sorted([item_id, kit or ""] for item_id, kit in items),
+                "items": items_digest(items),
             }
         ),
         correlation_id=correlation_id,
