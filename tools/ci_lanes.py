@@ -70,6 +70,7 @@ MIGRATION_TEST_INPUTS = frozenset(
         "cya/deficiencies/tests/test_correction.py",
         "cya/deficiencies/tests/test_migration_reversal.py",
         "cya/deficiencies/tests/test_scope_expansion.py",
+        "cya/deficiencies/tests/test_per_place.py",
         "cya/deficiencies/tests/test_suspension.py",
         "cya/deficiencies/tests/test_suspension_end.py",
         "cya/deficiencies/tests/test_verification.py",
@@ -83,6 +84,8 @@ MIGRATION_TEST_INPUTS = frozenset(
         "cya/obligations/tests/support.py",
         "cya/obligations/tests/synthetic_history.py",
         "cya/obligations/tests/test_projections.py",
+        "cya/obligations/tests/test_vehicle_checklists.py",
+        "cya/obligations/tests/test_requirement_obligations.py",
         "cya/obligations/tests/test_routine_index_migration.py",
         "cya/tests/test_audit_integrity_db.py",
     }
