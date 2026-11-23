@@ -79,6 +79,7 @@ Part 5b opens the Administration section to Supervisors, and part 5c to Supply O
 - **Retiring is refused** while any of these still use the slot:
   - a version, in force or published for a later instant, of any template bound to the vehicle places an item there. This includes a template bound by a binding recorded to take effect later, and the vehicle's overrides;
   - the kit list in force or a published future kit list names it;
+  - an item requirement version (SPEC 6.0.0 CHK-11) keeps an item there: the latest version of each of the vehicle's requirements effective by now, or any version published for a later instant. A requirement blocks even when no checklist inspects it any more; move it first, by publishing a version at another place or Not placed (issue #256 C4);
   - an active kit instance is assigned to it.
 
   The refusal lists each dependency. A retired slot stays readable for history. It is left out of pickers and new placements, and an un-retire is one more revision.
