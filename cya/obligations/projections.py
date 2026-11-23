@@ -23,6 +23,7 @@ from cya.deficiencies.models import (
     DeficiencyAffectedItem,
     DeficiencyEvent,
 )
+from cya.deficiencies.place_units import affected_unit, with_place
 from cya.kits.models import VehicleKitRequirement
 from cya.kits.presence import line_unit_key, line_unit_keys
 from cya.obligations.history import (
@@ -745,13 +746,20 @@ def _history(organization_id, obligations, since, instant, limit, *, current_fac
     # applies to their item, resolved ones too. Deficiencies are rare next to checks, so this
     # stays far below the bound for years (issue #63 bounds the check reads).
     header_rows = _bounded(
-        Deficiency.objects.filter(
-            organization_id=organization_id,
-            vehicle_id__in=vehicle_ids,
-            recorded_at__lte=instant,
+        with_place(
+            Deficiency.objects.filter(
+                organization_id=organization_id,
+                vehicle_id__in=vehicle_ids,
+                recorded_at__lte=instant,
+            )
         ).order_by("recorded_at", "id")[: limit + 1],
         limit,
     )
+    places = {
+        str(d.pk): (str(d.item_id), str(d.place_requirement_id))
+        for d in header_rows
+        if d.place_requirement_id
+    }
     headers = _per_vehicle(_by_vehicle(header_rows, lambda d: str(d.vehicle_id), vehicle_ids))
     deficiency_owner = {str(d.pk): str(d.vehicle_id) for d in header_rows}
     scope = _per_vehicle(
@@ -761,7 +769,9 @@ def _history(organization_id, obligations, since, instant, limit, *, current_fac
                     organization_id=organization_id,
                     deficiency_id__in=sorted(deficiency_owner),
                     recorded_at__lte=instant,
-                ).order_by("id")[: limit + 1],
+                )
+                .annotate(requirement_id=F("item_requirement_version__requirement_id"))
+                .order_by("id")[: limit + 1],
                 limit,
             ),
             lambda r: deficiency_owner.get(str(r.deficiency_id)),
@@ -772,7 +782,16 @@ def _history(organization_id, obligations, since, instant, limit, *, current_fac
     presence_lines = {}  # deficiency id -> its kit presence line (KDEF-12)
     for found in scope.values():
         for row in found:
-            affected.setdefault(str(row.deficiency_id), set()).add(str(row.item_id))
+            # A row of a place (SPEC 6.0.0 7.5) is kept as (item, requirement) in a unit set.
+            unit = affected_unit(
+                places.get(str(row.deficiency_id)),
+                str(row.item_id),
+                row.kit_requirement_id,
+                row.requirement_id,
+            )
+            affected.setdefault(str(row.deficiency_id), set()).add(
+                (str(row.item_id), unit) if unit else str(row.item_id)
+            )
             if row.kit_requirement_id:
                 presence_lines[str(row.deficiency_id)] = str(row.kit_requirement_id)
     line_units = line_unit_keys(set(presence_lines.values()))
@@ -891,8 +910,9 @@ def _history_fields(
             RecordedDeficiency(
                 str(d.pk),
                 d.recorded_at,
-                frozenset(items.get(str(d.pk), ())),
+                frozenset(i for i in items.get(str(d.pk), ()) if isinstance(i, str)),
                 str(d.kit_id) if d.kit_id else deficiency_units.get(str(d.pk), NO_KIT),
+                frozenset(i for i in items.get(str(d.pk), ()) if isinstance(i, tuple)),
             )
             for d in headers
         ),
@@ -1042,15 +1062,21 @@ def _page_suspensions(organization_id, obligations, instant):
             pk__in=sorted(owner),
         )
         .order_by("id")
-        .values_list("pk", "vehicle_id", "item_id", "kit_instance_id", "recorded_at", "grace_at")[
-            : page + 1
-        ],
+        .values_list(
+            "pk", "vehicle_id", "item_id", "kit_instance_id", "kit_key", "recorded_at", "grace_at"
+        )[: page + 1],
         page,
     )
-    by_key = {}
-    for pk, vehicle_id, item_id, kit_id, recorded_at, grace_at in wanted:
-        key = (str(vehicle_id), str(item_id), str(kit_id) if kit_id else NO_KIT)
-        by_key.setdefault(key, []).append((str(pk), recorded_at, grace_at))
+    # by_key: (vehicle, item, unit), the unit being the kit instance, else the obligation's stream
+    # (an item requirement after the cutover, SPEC 6.0.0 SUS-2). loose: every obligation of an
+    # item outside a kit, which a per-item suspension (the all-zero key) covers, as before.
+    by_key, loose = {}, {}
+    for pk, vehicle_id, item_id, kit_id, kit_key, recorded_at, grace_at in wanted:
+        entry = (str(pk), recorded_at, grace_at)
+        unit = str(kit_id) if kit_id else str(kit_key)
+        by_key.setdefault((str(vehicle_id), str(item_id), unit), []).append(entry)
+        if not kit_id:
+            loose.setdefault((str(vehicle_id), str(item_id)), []).append(entry)
     if not by_key:
         return {vehicle_id: () for vehicle_id in vehicle_ids}
     rows = _bounded(
@@ -1068,9 +1094,12 @@ def _page_suspensions(organization_id, obligations, instant):
             continue
         end = ended.get(str(row.pk))
         vehicle_id = str(row.vehicle_id)
-        for obligation_id, recorded_at, grace_at in by_key.get(
-            (vehicle_id, str(row.item_id), row.instance_key), ()
-        ):
+        covered = (
+            loose.get((vehicle_id, str(row.item_id)), ())
+            if row.instance_key == NO_KIT
+            else by_key.get((vehicle_id, str(row.item_id), row.instance_key), ())
+        )
+        for obligation_id, recorded_at, grace_at in covered:
             # The same in-force test as stored_suspensions.
             if row.recorded_at <= grace_at and (end is None or end > min(recorded_at, grace_at)):
                 result[vehicle_id].append(

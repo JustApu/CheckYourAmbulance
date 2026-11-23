@@ -644,7 +644,7 @@ def rebuild_vehicle_projection(
     # obligation grew with the vehicle's whole history (issue #63).
     by_item = {}
     for d in deficiencies:
-        for item_id in d.item_ids:
+        for item_id in d.all_item_ids:
             by_item.setdefault(item_id, []).append(d)
     result = [
         replace(

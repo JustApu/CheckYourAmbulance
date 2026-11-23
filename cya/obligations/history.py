@@ -39,6 +39,8 @@ class RecordedDeficiency:
     recorded_at: datetime
     item_ids: frozenset[str]
     kit_key: str = NO_KIT
+    # (item_id, item requirement id) of rows that name their place (SPEC 6.0.0 7.5).
+    item_units: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
@@ -84,7 +86,11 @@ def deficiency_states(headers, events, instant):
             if event.from_status != event.to_status:
                 validate_transition(event.from_status, event.to_status)
             previous = event
-        result.append(DeficiencyFact(pk, previous.to_status, header.item_ids, header.kit_key))
+        result.append(
+            DeficiencyFact(
+                pk, previous.to_status, header.item_ids, header.kit_key, header.item_units
+            )
+        )
     return tuple(result)
 
 
