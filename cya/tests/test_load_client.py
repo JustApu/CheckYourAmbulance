@@ -33,6 +33,8 @@ class FakeSite:
         self.fail_first_save_of = ITEMS[0]  # answer 503 once: the client must retry the same op
         self.conflict_first_save_of = ITEMS[1]  # answer 409 once: the client acknowledges
         self.refused = []
+        self.stall = None  # a path whose requests are read but never answered
+        self.release = asyncio.Event()
 
     async def handle(self, reader, writer):
         head = b""
@@ -70,6 +72,10 @@ class FakeSite:
                     writer.close()
                     return
             headers = {k.decode().lower(): v.decode() for k, v in request.headers}
+            if request.target.decode().split("?")[0] == self.stall:
+                await self.release.wait()
+                writer.close()
+                return
             status, content, extra = self.route(
                 request.method.decode(), request.target.decode(), headers, body
             )
@@ -186,6 +192,7 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.site = load_client.Site(self.fake.origin)
 
     async def asyncTearDown(self):
+        self.fake.release.set()
         self.server.close()
         await self.server.wait_closed()
 
@@ -246,6 +253,29 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((status, body), (0, b""))
         self.assertEqual(browser.recorder.samples[0][2], 0)
 
+    async def test_a_stalled_request_times_out_as_no_answer(self):
+        self.fake.stall = f"/inspection/vehicles/{VEHICLE}/"
+        site = load_client.Site(self.fake.origin, timeout=0.2)
+        browser = load_client.Browser(site, "synthetic-x", load_client.Recorder())
+        started = asyncio.get_running_loop().time()
+        status, body = await browser.get("page_vehicle", self.fake.stall)
+        self.assertEqual((status, body), (0, b""))
+        self.assertLess(asyncio.get_running_loop().time() - started, 2)
+        self.assertEqual(browser.recorder.samples[0][2], 0)
+        self.assertEqual(browser.recorder.events["request_timeout"], 1)
+
+    async def test_a_stalled_readiness_page_does_not_hang_the_run(self):
+        # A supervisor waiting on an unanswered readiness request once kept run() from reporting.
+        self.fake.stall = "/fleet/readiness/"
+        site = load_client.Site(self.fake.origin, timeout=0.3)
+        report = await asyncio.wait_for(
+            load_client.run(self.plan(), site, (0, 0.01), 0.01, seed=3), 10
+        )
+        self.assertEqual(report["events"]["saved"], 3)
+        self.assertEqual(report["events"]["supervisor_could_not_start"], 1)
+        self.assertGreaterEqual(report["events"]["request_timeout"], 1)
+        self.assertEqual(report["shape"]["request_timeout_seconds"], 0.3)
+
 
 class ReportTests(unittest.TestCase):
     def test_nearest_rank_percentiles(self):
@@ -271,6 +301,8 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(recorder.report()["groups"]["live_reloads"], {"count": 0, "errors": 0})
 
     def test_bad_arguments_are_refused(self):
+        with self.assertRaises(ValueError):
+            load_client.Site("http://127.0.0.1:1", timeout=0)
         with self.assertRaises(ValueError):
             load_client.Site("ftp://example.test")
         with self.assertRaises(ValueError):

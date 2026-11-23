@@ -52,8 +52,11 @@ are not a deployable configuration.
 | W2b | 2 | 710 of 750 (600 s, stopped at the limit) | 5.8 / 10.0 | 1.3% / 3.7% | 10.6 / 16.2 | 60.0 (2) | 1.88 / 0.78 | 728 MB |
 | W1b | 1 | 362 of 750 (600 s, stopped at the limit) | 15.4 / 22.7 | 1.0% / 2.2% | 21.7 / 34.2 | 60.0 (2) | 1.05 / 0.39 | 550 MB |
 
-The supervisor readiness errors are the client's 60 s timeout; a supervisor whose first readiness page timed out did not
-start. The client recorded no save errors in any arm. Swap stayed at 268 to 524 KB and the highest 5-second I/O-wait sample
+The supervisor readiness errors are the reverse proxy's 60 s read timeout (`proxy_read_timeout` on the test VM): each
+failed request ended at 60.03 to 60.04 s in the run reports. The client then had no timeout of its own. A supervisor whose
+first readiness page failed did not start. The client now also bounds each connection open and request
+(`--request-timeout`, default 90 s), so a site that never answers is recorded as no answer and cannot keep a run from
+reporting; with the default, this proxy's 60 s answer is still what gets recorded. The client recorded no save errors in any arm. Swap stayed at 268 to 524 KB and the highest 5-second I/O-wait sample
 was 11%.
 
 **Direct measurements.** After the arms, the snapshot was restored and the service stopped. One process then called the

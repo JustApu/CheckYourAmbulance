@@ -10,6 +10,8 @@ time, what the pages do (`checklist.js`, `vehicle.js`, `readiness.js`):
 * **Supervisors:** open the fleet readiness page and its live-update sockets, then reload the panel every refresh interval and 250 ms after each push.
 
 Every request's latency is recorded, and the report gives percentiles per kind and per group.
+Opening a connection and each request-response exchange are bounded by `--request-timeout`; a
+request that times out counts as no answer, so a stalled site cannot hang the run.
 It uses only the standard library and the pinned `h11` and `wsproto`. It sends nothing outside
 the given site, and needs the site's real (or a given) TLS trust.
 
@@ -48,6 +50,9 @@ PERCENTILES = (50, 90, 95, 98, 99)
 MAX_CONNECTIONS = 6  # per user, as browsers do per host
 RETRIES = 3
 READ_SIZE = 65536
+# Seconds per connection open or request-response exchange. Above a reverse proxy's usual 60 s
+# read timeout, so the proxy's answer is what gets recorded when it gives one.
+DEFAULT_TIMEOUT = 90.0
 
 
 def percentile(values, p):
@@ -97,7 +102,10 @@ class Recorder:
 
 
 class Site:
-    def __init__(self, base_url, ca_file=None):
+    def __init__(self, base_url, ca_file=None, timeout=DEFAULT_TIMEOUT):
+        if not timeout > 0:
+            raise ValueError("timeout must be positive")
+        self.timeout = timeout
         parts = urlsplit(base_url)
         if (
             parts.scheme not in ("https", "http")
@@ -112,8 +120,11 @@ class Site:
         self.ssl = ssl.create_default_context(cafile=ca_file) if self.tls else None
 
     async def open(self):
-        return await asyncio.open_connection(
-            self.host, self.port, ssl=self.ssl, server_hostname=self.host if self.tls else None
+        return await asyncio.wait_for(
+            asyncio.open_connection(
+                self.host, self.port, ssl=self.ssl, server_hostname=self.host if self.tls else None
+            ),
+            self.timeout,
         )
 
 
@@ -192,13 +203,24 @@ class Browser:
         async with self.slots:
             connection = self.idle.pop() if self.idle else None
             started = time.monotonic()
-            try:
+
+            async def exchange():
+                nonlocal connection
                 if connection is None:
                     connection = HttpConnection(*await self.site.open())
-                response, data = await connection.request(
-                    method, target, self._headers(extra), body
-                )
-            except (OSError, ConnectionError, h11.ProtocolError, asyncio.IncompleteReadError):
+                return await connection.request(method, target, self._headers(extra), body)
+
+            try:
+                response, data = await asyncio.wait_for(exchange(), self.site.timeout)
+            except (
+                TimeoutError,
+                OSError,
+                ConnectionError,
+                h11.ProtocolError,
+                asyncio.IncompleteReadError,
+            ) as error:
+                if isinstance(error, asyncio.TimeoutError):
+                    self.recorder.count("request_timeout")
                 if connection is not None:
                     connection.close()
                 self.recorder.add(kind, time.monotonic() - started, 0)
@@ -267,7 +289,7 @@ class Live:
         started = time.monotonic()
         try:
             reader, writer = await site.open()
-        except OSError:
+        except (TimeoutError, OSError):
             self.recorder.add("ws_connect", time.monotonic() - started, 0)
             return
         ws = WSConnection(ConnectionType.CLIENT)
@@ -521,7 +543,16 @@ async def run(plan, site, think, arrival, seed, limit=None, ack_reload=True):
     if pending:
         recorder.events["crew_stopped_at_limit"] = len(pending)
     done.set()
-    await asyncio.gather(*supervisors)
+    # Each supervisor request is bounded by the site timeout; this deadline is a backstop so a
+    # supervisor can never keep the run from reporting.
+    stuck = set()
+    if supervisors:
+        _, stuck = await asyncio.wait(supervisors, timeout=2 * site.timeout)
+    for task in stuck:
+        task.cancel()
+    await asyncio.gather(*supervisors, return_exceptions=True)
+    if stuck:
+        recorder.events["supervisor_stopped_at_limit"] = len(stuck)
     report = recorder.report()
     report["seconds"] = round(time.monotonic() - started, 1)
     report["shape"] = {
@@ -533,6 +564,7 @@ async def run(plan, site, think, arrival, seed, limit=None, ack_reload=True):
         "arrival_seconds": arrival,
         "seed": seed,
         "limit_seconds": limit,
+        "request_timeout_seconds": site.timeout,
         "ack_reload": ack_reload,
     }
     return report
@@ -551,6 +583,12 @@ def main(argv=None):
         "--limit", type=float, help="stop crews still working after this many seconds"
     )
     parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT,
+        help="seconds allowed to open a connection or complete one request (no answer after)",
+    )
+    parser.add_argument(
         "--no-ack-reload",
         dest="ack_reload",
         action="store_false",
@@ -559,10 +597,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 0 <= args.think[0] <= args.think[1] or args.arrival < 0:
         parser.error("think times must satisfy 0 <= MIN <= MAX and arrival must be >= 0")
+    if not args.request_timeout > 0:
+        parser.error("--request-timeout must be positive")
     source = sys.stdin if args.plan == "-" else open(args.plan, encoding="utf-8")  # noqa: SIM115
     with source:
         plan = json.load(source)
-    site = Site(args.base_url, args.ca_file)
+    site = Site(args.base_url, args.ca_file, args.request_timeout)
     report = asyncio.run(
         run(plan, site, tuple(args.think), args.arrival, args.seed, args.limit, args.ack_reload)
     )
