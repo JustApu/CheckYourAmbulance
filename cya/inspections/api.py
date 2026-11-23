@@ -5,8 +5,9 @@ POST /api/v1/inspection-sessions               start a vehicle checklist: join i
 POST /api/v1/inspection-sessions/{id}/reopen   a participant resumes an ended session (SES-3)
 POST /api/v1/inspection-sessions/{id}/end      a participant ends an open session
 
-A refusal is 409 SESSION_UNAVAILABLE, or 409 SESSION_IN_PROGRESS when a separate start or a
-reopen would make a second session of one vehicle checklist in progress (SES-7).
+A refusal is 409 SESSION_UNAVAILABLE, 409 SESSION_IN_PROGRESS when a separate start or a
+reopen would make a second session of one vehicle checklist in progress (SES-7), or 409
+SESSION_DEADLINE_PASSED for a reopen at or after the session's resume deadline (SES-8).
 
 Authenticated same-origin JSON like the other endpoints: actor, organization and roles come from
 the signed-in user, never the body (SPEC 3.2). The rules, authorization and audit are in
@@ -43,8 +44,9 @@ def _identifier(value, path):
 def _acknowledge(stored):
     body = stored.body
     result = {"code": body["code"], "session_id": body["session_id"], "state": body["state"]}
-    if "checklist_version_id" in body:
-        result["checklist_version_id"] = body["checklist_version_id"]
+    for field in ("checklist_version_id", "resume_deadline_at"):
+        if field in body:
+            result[field] = body[field]
     return result
 
 

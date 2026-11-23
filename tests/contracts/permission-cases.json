@@ -3110,6 +3110,42 @@
       "action": "view_current_crew",
       "mode": "allow",
       "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
+    },
+    {
+      "id": "AUTH-PERM-55-CREW",
+      "criterion": "AC-41",
+      "permission_row": "PERM-55",
+      "actor_role": "Crew",
+      "action": "set_inspection_resume_limit",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-55-SUPERVISOR",
+      "criterion": "AC-41",
+      "permission_row": "PERM-55",
+      "actor_role": "Supervisor",
+      "action": "set_inspection_resume_limit",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-55-SUPPLY_OFFICER",
+      "criterion": "AC-41",
+      "permission_row": "PERM-55",
+      "actor_role": "Supply Officer",
+      "action": "set_inspection_resume_limit",
+      "mode": "deny",
+      "tests": [{"context": "default", "expected": "deny", "denied_action_audited": true, "business_mutation": "none"}]
+    },
+    {
+      "id": "AUTH-PERM-55-ADMINISTRATOR",
+      "criterion": "AC-41",
+      "permission_row": "PERM-55",
+      "actor_role": "Administrator",
+      "action": "set_inspection_resume_limit",
+      "mode": "allow",
+      "tests": [{"context": "authorized", "expected": "allow", "denied_action_audited": false, "business_mutation": "conditional"}]
     }
   ]
 }

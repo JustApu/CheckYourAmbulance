@@ -59,7 +59,6 @@ def in_progress(user, now):
     """The user's open sessions, most recently active first, with checked counts."""
     from cya.checks.models import CheckRecord
     from cya.inspections.models import SessionParticipant, SessionProjection
-    from cya.inspections.projections import INACTIVITY
 
     org = user.organization_id
     mine = SessionParticipant.objects.filter(organization_id=org, user=user).values("session_id")
@@ -68,7 +67,7 @@ def in_progress(user, now):
             organization_id=org,
             session__in=mine,
             state="OPEN",
-            last_activity_at__gt=now - INACTIVITY,  # past this a session reads as Incomplete
+            ends_at__gt=now,  # at its end instant a session reads as Incomplete (SES-9)
         )
         .select_related("session__vehicle", "session__checklist_version__template")
         .order_by("-last_activity_at", "-pk")[:MAX_IN_PROGRESS]

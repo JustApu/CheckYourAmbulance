@@ -27,6 +27,7 @@ from cya.inspections.projections import (
     fold_session,
     read_session,
     rebuild_session_projection,
+    resume_deadline,
 )
 from cya.notifications.models import NotificationOutbox
 from cya.obligations.projections import get_vehicle_obligations_as_of
@@ -345,7 +346,9 @@ class SessionCommandsTests(SessionCase):
         self.end(session_id)
         session = InspectionSession.objects.get(pk=session_id)
         history = list(SessionEvent.objects.filter(session=session).order_by("sequence"))
-        self.assertEqual(fold_session(history), current_state(session))
+        self.assertEqual(
+            fold_session(history, deadline=resume_deadline(session)), current_state(session)
+        )
         SessionProjection.objects.filter(session=session).delete()
         self.assertFalse(SessionProjection.objects.filter(session=session).exists())
         with transaction.atomic():
@@ -404,6 +407,7 @@ class SessionCommandsTests(SessionCase):
                 vehicle=self.vehicle,
                 checklist_version_id=self.v1,
                 opened_at=session.opened_at,
+                resume_limit_hours=6,
                 command=wrong,
                 recorded_at=wrong.recorded_at,
                 actor_user=self.supervisor,

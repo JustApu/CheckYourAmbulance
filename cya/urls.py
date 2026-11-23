@@ -10,6 +10,7 @@ from cya.checks import api as check_api
 from cya.conditions import api as condition_api
 from cya.deficiencies import api as deficiency_api
 from cya.inspections import api as inspection_api
+from cya.inspections import settings_views as inspection_settings_views
 from cya.inspections import views as inspection_views
 from cya.inspections import workflow_views
 from cya.kits import (
@@ -117,6 +118,11 @@ urlpatterns = [
         "administration/crew-assignments/",
         crew_views.limit_settings,
         name="crew-assignment-settings",
+    ),
+    path(
+        "administration/inspection-sessions/",
+        inspection_settings_views.resume_limit_settings,
+        name="inspection-session-settings",
     ),
     path("administration/kits/", kit_views.library, name="kit-library"),
     path(

@@ -111,7 +111,11 @@ class RecordTests(CheckCase):
     def test_correction_cannot_revive_an_idle_session_before_auto_close(self):
         from cya.inspections import commands as session_commands
         from cya.inspections.projections import current_state, is_expired
+        from cya.inspections.resume_limit import set_resume_limit
 
+        # Idle, not past the deadline: with the default 6-hour limit the deadline comes first
+        # (SPEC 6.0.0 SES-8); test_correction_is_refused_past_the_session_deadline covers that.
+        set_resume_limit(hours=24, **self.context(self.admin))
         opened = session_commands.open_or_join_session(
             vehicle_id=str(self.vehicle.pk),
             template_id=str(self.template.pk),
@@ -135,6 +139,28 @@ class RecordTests(CheckCase):
         self.assertTrue(is_expired(state, root.recorded_at + timedelta(hours=6, minutes=1)))
         self.assertEqual(CheckRecord.objects.filter(root_check_id=original).count(), 1)
         self.assertFalse(CheckEvent.objects.filter(root_check_id=original).exists())
+
+    def test_correction_is_refused_past_the_session_deadline(self):
+        from cya.inspections import commands as session_commands
+
+        opened = session_commands.open_or_join_session(
+            vehicle_id=str(self.vehicle.pk),
+            template_id=str(self.template.pk),
+            **self.context(self.crew),
+        )
+        original = self.record(session_id=opened.body["session_id"]).body["check_id"]
+        root = CheckRecord.objects.get(pk=original)
+        before = self.counts()
+        with mock.patch(
+            "cya.checks.commands.timezone.now",
+            return_value=root.session.opened_at + timedelta(hours=6),
+        ):
+            with self.assertRaises(CheckError) as caught:
+                self.correct(original, original)
+        self.assertEqual(
+            (caught.exception.code, caught.exception.status), ("SESSION_DEADLINE_PASSED", 409)
+        )
+        self.assertEqual(self.counts(), before)
 
     def test_non_author_and_stale_tip_cannot_extend_a_chain(self):
         original = self.record().body["check_id"]

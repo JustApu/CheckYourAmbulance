@@ -102,6 +102,7 @@
     SESSION_UNAVAILABLE: "This inspection cannot be reopened right now.",
     CHECKLIST_VERSION_NOT_CURRENT: "The checklist changed. Reload the screen.",
     SESSION_NOT_OPEN: "This session is not open. Reopen it to continue.",
+    SESSION_DEADLINE_PASSED: "This inspection reached its time limit. Start a new one from the vehicle page.",
     OPERATION_REUSED: "This request changed after it was sent. Tap the result again.",
     OPERATION_OWNED_BY_ANOTHER_ACTOR: "This request belongs to another user. Tap the result again.",
     ANOMALY_CONFIRMATION_REQUIRED: "That reading looks unusual.",
@@ -213,7 +214,8 @@
         askConflict(row, entry, answer.body.newest_check);
       } else if (answer.kind === "rejected") {
         entry.status = "failed"; entry.text = say(answer.code);
-        if (answer.code === "CHECKLIST_VERSION_NOT_CURRENT" || answer.code === "SESSION_NOT_OPEN") {
+        if (answer.code === "CHECKLIST_VERSION_NOT_CURRENT" || answer.code === "SESSION_NOT_OPEN" ||
+            answer.code === "SESSION_DEADLINE_PASSED") {
           scheduleReload(0);
         }
       } else {

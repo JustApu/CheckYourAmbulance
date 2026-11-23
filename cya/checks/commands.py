@@ -77,7 +77,12 @@ from cya.deficiencies.transitions import (
     validate_transition,
 )
 from cya.inspections.models import InspectionSession, SessionParticipant
-from cya.inspections.projections import current_state, is_expired, rebuild_session_projection
+from cya.inspections.projections import (
+    current_state,
+    deadline_passed,
+    is_expired,
+    rebuild_session_projection,
+)
 from cya.kits.placements import KIT_DEFINITION_SOURCE, placed_contents
 from cya.kits.presence import PRESENCE_SOURCE, presence_resolved_item
 from cya.notifications.recipients import notify
@@ -504,9 +509,10 @@ def _session_for_check(organization_id, actor, shape, version, now):
 
     A participant may record into a session on its own vehicle and pinned checklist version
     while it is Open. An unknown session and one the actor did not join answer alike (404), so
-    its existence is not revealed. A session idle for six hours has already closed (SES-1): the
-    check is refused so late work can never extend or contradict the close; the crew member
-    reopens the session and records again.
+    its existence is not revealed. A session past its end instant has already ended (SES-9): the
+    check is refused so late work can never extend or contradict the close. Before the resume
+    deadline the crew member reopens the session and records again (SESSION_NOT_OPEN); at or
+    after it, work continues in a new session (SESSION_DEADLINE_PASSED, SES-8).
     """
     if shape["session_id"] is None:
         return None
@@ -526,7 +532,19 @@ def _session_for_check(organization_id, actor, shape, version, now):
             "the session is for another vehicle or checklist version",
             path="session_id",
         )
-    state = current_state(session)
+    session_closed(current_state(session), now)
+    return session
+
+
+def session_closed(state, now):
+    """Refuse recording into a session that is not in progress (SPEC 6.3 SES-1, SES-8, SES-9)."""
+    if deadline_passed(state, now):
+        raise CheckError(
+            "SESSION_DEADLINE_PASSED",
+            "the session has reached its resume deadline; start a new inspection",
+            status=409,
+            path="session_id",
+        )
     if state.state != "OPEN" or is_expired(state, now):
         raise CheckError(
             "SESSION_NOT_OPEN",
@@ -534,7 +552,6 @@ def _session_for_check(organization_id, actor, shape, version, now):
             status=409,
             path="session_id",
         )
-    return session
 
 
 def content_source(requirement):
@@ -1357,14 +1374,7 @@ def correct_check(
                 raise CheckError(
                     "CONFIGURATION_UNAVAILABLE", "inspection session is unavailable", status=503
                 )
-            session_state = current_state(session)
-            if session_state.state != "OPEN" or is_expired(session_state, now):
-                raise CheckError(
-                    "SESSION_NOT_OPEN",
-                    "the session has ended or been idle for six hours; reopen it first",
-                    status=409,
-                    path="session_id",
-                )
+            session_closed(current_state(session), now)
         if _correction_time_limit_elapsed(check=root, now=now):
             raise CheckError("CORRECTION_EXPIRED", "the correction period has ended", status=409)
         if CheckEvent.objects.filter(

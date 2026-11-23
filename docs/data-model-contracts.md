@@ -80,6 +80,7 @@ Every mutable change has an audit entry in the same transaction.
 | `vehicle_activity_event` | A | vehicle_id ref, prior_event_id? ref, active, basis (`CHANGE` or `BASELINE`); sequence unique per vehicle. A baseline is only a vehicle's first event and has no user actor (its receipt names the service identity); active equals the vehicle's flag when written (SPEC 4.8 CFG-1, [issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130)) |
 | `vehicle_assignment_event` | A | person_id ref, vehicle_id ref, from_vehicle_id? ref (`MOVE` only, never the same vehicle), action (`ASSIGN`, `MOVE`, `EXTEND`, `END`), ends_at (after recorded_at; none for `END`), source (`SELF` exactly when the actor is the person, `CREW`, `SUPERVISOR`), end_reason (`ENDED` or `VEHICLE_INACTIVE`, `END` only); sequence unique per person, one linear chain per person. `ASSIGN` only without a current assignment; `MOVE`, `EXTEND` and `END` only on a current one; `EXTEND` only later; `ASSIGN`, `MOVE` and `EXTEND` only to an active vehicle. Expiry writes no event (SPEC 15.4 ASG-3 to ASG-8, [issue #202](https://github.com/JustApu/CheckYourAmbulance/issues/202)) |
 | `vehicle_assignment_limit` | A | revision (consecutive from 1 per organization), max_hours 1 to 168; the latest revision applies, else 24 hours (ASG-4, OQ-79) |
+| `session_resume_limit` | A | revision (consecutive from 1 per organization), hours 1 to 24; the latest revision applies, else 6 hours; captured on each inspection session when it opens (SES-8, OQ-81, [issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256) Part E) |
 | `status_request` | A | vehicle_id ref, requested_status, reason, request_id? ref, action (`REQUEST`, `APPROVE`, `DENY`), decision_explanation? |
 
 Role changes lock the affected user before reading grants; concurrent attempts
@@ -191,9 +192,9 @@ remain in Part B after [issue #73](https://github.com/JustApu/CheckYourAmbulance
 | `obligation_determination` | A | obligation_id ref, type (waive/reinstate/supervisor-complete/invalidate/supersede), rule_id? ref, prior_determination_id? ref, explanation?, immutable evaluated-input snapshot |
 | `requirement_binding` | A | vehicle_id ref, template_id ref, slot, revision, action (`BIND`, `UNBIND`), effective_at; unique vehicle/template/slot/revision; consecutive append-only revisions with strictly increasing effective instants; human actor attributed by an authorized command; latest revision in force decides whether the template is bound (SPEC §5; CFG-2, CFG-4) |
 | `determination_check` | A | organization_id, receipt/time and human actor attribution; determination_id and check_id refs; unique pair; UTI completion references its supporting Unable check(s) |
-| `inspection_session` | M | vehicle_id ref, pinned checklist_version_id ref, opened_at; immutable header protected by trigger; cached state/activity only in separate `session_projection` |
+| `inspection_session` | M | vehicle_id ref, pinned checklist_version_id ref, opened_at, resume_limit_hours (1 to 24, the organization's limit captured at open, SES-8); immutable header protected by trigger; cached state/activity only in separate `session_projection` |
 | `session_participant` | A | session_id ref, user_id ref; unique pair |
-| `session_event` | A | session_id ref, type, effective_at, persisted_activity_command_id? ref; auto-close effective_at = last activity + 6h |
+| `session_event` | A | session_id ref, type, effective_at, persisted_activity_command_id? ref; the job's ending is stamped at the end instant E = min(A + 6h, R*), R* = max(opened_at + resume_limit_hours, A): `AUTO_INCOMPLETE` at A + 6h when that is not after R*, else `DEADLINE_INCOMPLETE` at R* (SES-9); no JOIN or REOPEN at or after R* |
 | `roster_snapshot` | A | provider, fetched_at, availability, shift_start, shift_end, vehicle_id ref; normalized synthetic/stub inputs until integration is authorized |
 | `roster_member` | A | snapshot_id ref, person identity ref, assignment; unique snapshot/person/assignment |
 | `session_roster_correction` | A | session_id ref, snapshot_id? ref, covers_from, covers_until, resolves_correction_id? ref; member rows retain actual membership |
@@ -361,7 +362,7 @@ cannot fulfill the audit. Event-tip conflicts fail without writing.
 | `notification_policy` | M | organization_id, event_type, channel, mandatory; unique organization/event/channel; administrator-set through an audited command; no default rows |
 | `notification_recipient_rule` | M | organization_id, event_type, recipient kind (`ASSIGNEE`, `REPORTER`, `REQUESTER`, `PARTICIPANTS`, `SUPERVISORS`, `ADMINISTRATORS`, `VEHICLE_CREW`, `PERSON`), enabled; unique organization/event/recipient; an administrator override of the documented default recipients, set through an audited command ([issue #14](https://github.com/JustApu/CheckYourAmbulance/issues/14)) |
 | `item_lock`, `vehicle_lock`, `deficiency_lock` | M | organization_id and target FK unique; no business state; prepared at publication/entity creation |
-| `session_projection`, `deficiency_projection` | M | session_id/deficiency_id ref unique, cached state/activity or status/assignee/deadline/severity_version_id, last applied event ref; disposable, rebuildable, never historical authority |
+| `session_projection`, `deficiency_projection` | M | session_id/deficiency_id ref unique, cached state/activity/end instant (`ends_at`) or status/assignee/deadline/severity_version_id, last applied event ref; disposable, rebuildable, never historical authority |
 | `obligation_projection` | M | obligation_id ref primary key, organization_id ref, vehicle_id denormalized UUID (no mutable-vehicle FK), due_at, routine, selected, effective evidence JSON, refreshed_at; disposable current-read acceleration, indexed by organization/vehicle/due; historical authority remains the event rows |
 
 The receipt reserves a client operation across **all** command kinds. A check,
@@ -428,7 +429,7 @@ creation command/actor/time columns it carries. Additional protected columns:
 | M header | Additional immutable columns |
 |---|---|
 | `user` | idp_issuer, idp_subject; email/display_name/active remain audited mutable attributes |
-| `inspection_session` | vehicle_id, checklist_version_id, opened_at (all header facts) |
+| `inspection_session` | vehicle_id, checklist_version_id, opened_at, resume_limit_hours (all header facts) |
 | `deficiency` | operation_id, reported_at, reporter, category_version_id, severity_version_id, summary, description, vehicle_id, item_id, kit_id, compartment_id (all creation facts) |
 | lock anchors | target IDs; locking must not retarget an anchor |
 
@@ -539,6 +540,7 @@ references a command receipt with an authorized `command_type`:
 | `vehicle_activity_event` | `cya_vehicle_activity_event_bi` | `CHANGE`: `'VEHICLE_CREATE'`, `'VEHICLE_IMPORT'`, `'VEHICLE_ACTIVE_SET'`, `'VEHICLE_DUPLICATE'`; `BASELINE`: `'VEHICLE_ACTIVITY_BASELINE'` |
 | `vehicle_assignment_event` | `cya_vehicle_assignment_event_bi` | `ASSIGN`, `MOVE`: `'VEHICLE_ASSIGN'`; `EXTEND`: `'VEHICLE_ASSIGNMENT_EXTEND'`; `END` with reason `ENDED`: `'VEHICLE_ASSIGNMENT_END'`; `END` with reason `VEHICLE_INACTIVE`: `'VEHICLE_ACTIVE_SET'` |
 | `vehicle_assignment_limit` | `cya_vehicle_assignment_limit_bi` | `'VEHICLE_ASSIGNMENT_LIMIT_SET'` |
+| `session_resume_limit` | `cya_session_resume_limit_bi` | `'SESSION_RESUME_LIMIT_SET'` |
 | `notification_requeue` | `cya_notification_requeue_bi` | `'NOTIFICATION_REQUEUE'` |
 | `schedule_rule` | `cya_schedule_rule_bi` | `'SCHEDULE_PUBLISH'`, `'SCHEDULE_SEED'` |
 | `requirement_binding` | `cya_requirement_binding_bi` | `'REQUIREMENT_BIND'`, `'VEHICLE_IMPORT'`, `'VEHICLE_DUPLICATE'`, `'CHECKLIST_CUTOVER'` (migrated assignments) |
