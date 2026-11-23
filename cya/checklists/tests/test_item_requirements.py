@@ -285,6 +285,62 @@ class PublicationTests(ItemRequirementCase):
                 actor_roles_at_time=masks.actor_roles_at_time,
             )
 
+    def plans(self, checklist, items):
+        """{item id: RowPlan} of a fresh draft of `checklist`, planned for now (issue #256 C4)."""
+        from django.utils import timezone
+
+        from cya.checklists import commands, item_requirements
+
+        draft = commands.save_template_draft(
+            template_id=str(checklist.pk), items=items, **self.context()
+        ).body["version_id"]
+        plans = item_requirements.plan_rows(
+            vehicle_id=self.vehicle.pk,
+            template_id=checklist.pk,
+            rows=list(ChecklistItemDef.objects.filter(checklist_version_id=draft)),
+            effective_at=timezone.now(),
+        )
+        return {plan.item_id: plan for plan in plans.values()}
+
+    def test_the_dry_run_names_a_shared_requirement_and_a_refusal(self):  # C4, AC-42 (1)
+        from cya.checklists import item_requirements as rules
+
+        self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec(6)])
+        plans = self.plans(self.b, [self.suction_spec(), self.masks_spec(4)])
+        self.assertEqual(plans[str(self.suction.pk)].rule, rules.USES)
+        refused = plans[str(self.masks.pk)]
+        self.assertEqual((refused.rule, refused.users), (rules.REFUSED, ("Synthetic checklist A",)))
+        self.assertFalse(VehicleItemRequirementVersion.objects.filter(expected_quantity=4).exists())
+
+    def test_the_dry_run_names_a_change_a_move_and_a_new_requirement(self):  # C4
+        from cya.checklists import item_requirements as rules
+
+        self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec(6)])
+        system = str(self.own_row(self.system, self.vehicle).pk)
+        items = [
+            self.suction_spec(compartment_id=None, system_id=system),
+            self.masks_spec(4),
+            self.spec(self.siren, 30, compartment_id=None),
+        ]
+        plans = self.plans(self.a, items)
+        self.assertEqual(
+            {item: plan.rule for item, plan in plans.items()},
+            {
+                str(self.suction.pk): rules.MOVES,
+                str(self.masks.pk): rules.NEW_VERSION,
+                str(self.siren.pk): rules.NEW_REQUIREMENT,
+            },
+        )
+        self.assertEqual(plans[str(self.suction.pk)].version.place_kind, "COMPARTMENT")
+        before = VehicleItemRequirement.objects.count()
+        version = self.publish_checklist(self.a, items)  # the writer applies the same rules
+        self.assertEqual(VehicleItemRequirement.objects.count(), before + 1)
+        moved = self.requirement(version, self.suction)
+        self.assertEqual(
+            (str(moved.requirement_id), moved.place_kind),
+            (plans[str(self.suction.pk)].requirement_id, "SYSTEM"),
+        )
+
     def test_the_database_refuses_an_unlinked_publication_after_the_cutover(self):
         with (
             mock.patch("cya.checklists.item_requirements.link_rows"),
