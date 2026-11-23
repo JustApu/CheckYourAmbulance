@@ -25,7 +25,7 @@ class MigrationCase(ItemRequirementCase):
     def system_row(self):
         return str(self.own_row(self.system, self.vehicle).pk)
 
-    def migrate(self, operation=None):
+    def cutover(self, operation=None):
         return migrate_item_requirements(
             organization_id=str(self.org.pk),
             actor_id=str(self.admin.pk),
@@ -64,7 +64,7 @@ class ItemRequirementMigrationTests(MigrationCase):
                 self.masks_spec(6),
             ],
         )
-        result = self.migrate()
+        result = self.cutover()
         self.assertEqual(result.body["requirements"], 3)  # masks shared, suction split by place
         a_masks = resolve_item_requirement(self.row(first, self.masks).pk)
         b_masks = resolve_item_requirement(self.row(second, self.masks).pk)
@@ -81,7 +81,7 @@ class ItemRequirementMigrationTests(MigrationCase):
         self.assertIn("conflict", plan.problems[0])
         self.assertIn("Synthetic checklist A", plan.problems[0])
         with self.assertRaises(ItemRequirementMigrationError):
-            self.migrate()
+            self.cutover()
         self.nothing_written()
 
     def test_a_possible_move_or_split_refuses(self):  # AC-42 (5)
@@ -94,7 +94,7 @@ class ItemRequirementMigrationTests(MigrationCase):
         self.assertEqual(len(plan.problems), 1)
         self.assertIn("possible move or split", plan.problems[0])
         with self.assertRaises(ItemRequirementMigrationError):
-            self.migrate()
+            self.cutover()
         self.nothing_written()
 
     def test_a_move_within_one_checklist_keeps_the_stock(self):
@@ -102,7 +102,7 @@ class ItemRequirementMigrationTests(MigrationCase):
         second = self.publish_checklist(
             self.a, [self.suction_spec(compartment_id=None, system_id=self.system_row())]
         )
-        self.migrate()
+        self.cutover()
         old = resolve_item_requirement(self.row(first, self.suction).pk)
         new = resolve_item_requirement(self.row(second, self.suction).pk)
         self.assertEqual(old[0], new[0])
@@ -113,17 +113,17 @@ class ItemRequirementMigrationTests(MigrationCase):
     def test_replay_returns_the_first_result_and_a_second_run_is_refused(self):
         self.publish_checklist(self.a, self.own_items())
         operation = str(uuid4())
-        first = self.migrate(operation)
-        again = self.migrate(operation)
+        first = self.cutover(operation)
+        again = self.cutover(operation)
         self.assertTrue(again.replayed)
         self.assertEqual(first.body, again.body)
         self.assertEqual(VehicleItemRequirement.objects.count(), 3)
         with self.assertRaisesRegex(ItemRequirementMigrationError, "already moved"):
-            self.migrate()
+            self.cutover()
 
     def test_later_publications_continue_the_migrated_requirements(self):
         first = self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec(6)])
-        self.migrate()
+        self.cutover()
         second = self.publish_checklist(self.b, [self.masks_spec(6)])
         self.assertEqual(
             resolve_item_requirement(self.row(first, self.masks).pk),
@@ -165,7 +165,7 @@ class ItemRequirementMigrationTests(MigrationCase):
         plan = plan_item_requirements(str(self.org.pk))
         self.assertEqual(plan.problems, [])
         self.assertEqual(len(plan.ambiguous_deficiencies), 1)
-        self.assertEqual(self.migrate().body["ambiguous_deficiencies"], 1)  # listed; C3 blocks
+        self.assertEqual(self.cutover().body["ambiguous_deficiencies"], 1)  # listed; C3 blocks
 
     def test_the_command_refuses_and_reports(self):
         self.publish_checklist(self.a, [self.masks_spec(6)])
