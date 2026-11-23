@@ -22,6 +22,9 @@ database refuses a version that would break that (migration 0014). Kit content k
 definition's requirements and is never linked.
 """
 
+from uuid import UUID, uuid5
+
+from cya.accounts.fields import new_id
 from cya.checklists.models import (
     ChecklistItemDef,
     ChecklistPublication,
@@ -32,6 +35,17 @@ from cya.checklists.models import (
     VehicleItemRequirementVersion,
     VehicleSystem,
 )
+
+# Item requirement ids are version-5 UUIDs (kit instance ids are version 4): a requirement id is
+# the unit key of its obligation stream (issue #256 C2), and readers tell a requirement key from
+# a kit key by its version alone, as they do kit presence line keys (cya.kits.presence).
+REQUIREMENT_ID_NAMESPACE = UUID("6a1f3b0e-6c56-5d0e-9a5b-2f6c1d8e4b70")
+
+
+def new_requirement_id():
+    """A fresh, unpredictable item requirement id of UUID version 5."""
+    return str(uuid5(REQUIREMENT_ID_NAMESPACE, new_id()))
+
 
 FIELDS = (
     "kind",
@@ -166,7 +180,7 @@ class _Writer:
 
     def requirement(self, item_id):
         return VehicleItemRequirement.objects.create(
-            vehicle_id=self.vehicle_id, item_id=item_id, **self.evidence
+            id=new_requirement_id(), vehicle_id=self.vehicle_id, item_id=item_id, **self.evidence
         )
 
     def version(self, requirement_id, item_id, at, row):

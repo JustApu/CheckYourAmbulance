@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from cya.accounts.fields import new_id
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
-from cya.checklists.item_requirements import FIELDS, fields_of
+from cya.checklists.item_requirements import FIELDS, fields_of, new_requirement_id
 from cya.checklists.models import (
     ChecklistCutover,
     ChecklistItemDef,
@@ -193,7 +193,9 @@ class _Vehicle:
                 if moved is not None:
                     requirement = moved
                 else:
-                    requirement = RequirementPlan(new_id(), str(self.vehicle.pk), item_id)
+                    requirement = RequirementPlan(
+                        new_requirement_id(), str(self.vehicle.pk), item_id
+                    )
                     requirements.append(requirement)
                     self.plan.requirements.append(requirement)
                 version = self.version(requirement, at, row, place)

@@ -120,6 +120,18 @@ class PublicationTests(ItemRequirementCase):
         masks = self.requirement(version, self.masks)
         self.assertEqual((masks.expected_quantity, masks.revision), (6, 1))
 
+    def test_requirement_ids_are_version_5(self):  # told apart from kit ids (C2 readers)
+        from uuid import UUID
+
+        self.publish_checklist(self.a, self.own_items())
+        self.assertEqual(
+            {
+                UUID(str(pk)).version
+                for pk in VehicleItemRequirement.objects.values_list("pk", flat=True)
+            },
+            {5},
+        )
+
     def test_a_second_checklist_shares_equal_requirements(self):  # AC-42 (2) groundwork
         first = self.publish_checklist(self.a, self.own_items())
         second = self.publish_checklist(self.b, self.own_items())
