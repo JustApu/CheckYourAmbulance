@@ -11,6 +11,10 @@ Synthetic only (DEP-9 rehearsal rules): every name ends in "Synthetic", every ad
 organization. Run it inside Django with the schema-owner environment of a rehearsal database:
 
     python manage.py shell -c "from tools.rehearsal_history import generate; generate()"
+
+`extend()` continues an existing history of this shape to the present (issue #70 asks for the
+history "extended to the present"): the same daily mornings, inspections and weekly closures,
+from the day after the last recorded check.
 """
 
 import io
@@ -26,8 +30,16 @@ from cya.accounts.models import Organization, User
 from cya.authorization.commands import change_role
 from cya.authorization.roles import grant_initial_crew
 from cya.checklists.commands import publish_template_version, save_template_draft
-from cya.checklists.models import ChecklistTemplate, Compartment, Item, Vehicle
+from cya.checklists.models import (
+    ChecklistItemDef,
+    ChecklistPublication,
+    ChecklistTemplate,
+    Compartment,
+    Item,
+    Vehicle,
+)
 from cya.checks.commands import record_check
+from cya.checks.models import CheckRecord
 from cya.deficiencies.closure import close_administrator
 from cya.deficiencies.models import DeficiencyCategory, DeficiencyEvent, DeficiencyProjection
 from cya.deficiencies.severity import ensure_default_severities
@@ -244,4 +256,72 @@ def generate(*, vehicles=5, items=150, days=365, crew=15, seed=7, end=None, prog
                 clock.set(morning + timedelta(hours=12))
                 agency.close_old(counts)
             progress(f"day {day + 1}/{days} {morning.date()} counts={counts}")
+    return counts
+
+
+def _resume(clock, rng):
+    """The Agency of an existing history, as `build` left it (one organization, one template)."""
+    if Organization.objects.count() != 1:
+        raise RuntimeError("extend needs exactly one rehearsal organization")
+    agency = Agency(clock, rng, 0, 0, 0)
+    agency.org = Organization.objects.get()
+    agency.admin = User.objects.get(
+        organization=agency.org, idp_subject="synthetic-rehearsal-administrator"
+    )
+    agency.crew = list(
+        User.objects.filter(
+            organization=agency.org, idp_subject__startswith="synthetic-rehearsal-crew-"
+        ).order_by("idp_subject")
+    )
+    if not agency.crew:
+        raise RuntimeError("the history has no rehearsal crew")
+    template = ChecklistTemplate.objects.get(organization=agency.org)
+    publication = (
+        ChecklistPublication.objects.filter(checklist_version__template=template)
+        .order_by("-recorded_at")
+        .first()
+    )
+    agency.version = str(publication.checklist_version_id)
+    item_ids = ChecklistItemDef.objects.filter(checklist_version_id=agency.version).values_list(
+        "item_id", flat=True
+    )
+    agency.items = list(Item.objects.filter(pk__in=list(item_ids)))
+    agency.items.sort(key=lambda item: item.label)
+    agency.vehicles = [
+        (vehicle, None)
+        for vehicle in sorted(
+            Vehicle.objects.filter(organization=agency.org), key=lambda v: v.display_name
+        )
+    ]
+    agency.category = DeficiencyCategory.objects.get(organization=agency.org)
+    return agency
+
+
+def extend(*, until=None, seed=70, progress=print):
+    """Continue the history: one morning per day after the last check, up to `until` (now).
+
+    A day is recorded only once its inspection time has passed. Returns the outcome counts.
+    """
+    real_now = until or datetime.now(UTC)
+    last = CheckRecord.objects.order_by("-recorded_at").values_list("recorded_at", flat=True)
+    if not last:
+        raise RuntimeError("no history to extend; use generate()")
+    last_day = last[0].astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    clock = Clock(last[0])
+    agency = _resume(clock, Random(seed))
+    counts = {}
+    day = last_day + timedelta(days=1)
+    with mock.patch("django.utils.timezone.now", side_effect=clock):
+        while day + timedelta(hours=5, minutes=30) < real_now:
+            clock.set(day + timedelta(hours=4))
+            failures = run_generation(str(agency.org.pk)).failures
+            if failures:
+                raise RuntimeError(f"obligation generation failed on {day.date()}: {failures}")
+            clock.set(day + timedelta(hours=5, minutes=30))
+            agency.inspect(counts)
+            if day.weekday() == 6:
+                clock.set(day + timedelta(hours=12))
+                agency.close_old(counts)
+            progress(f"{day.date()} counts={counts}")
+            day += timedelta(days=1)
     return counts
