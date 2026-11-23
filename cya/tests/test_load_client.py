@@ -1,7 +1,9 @@
 """The shift-change load client (issue #10) against a fake loopback site; no network."""
 
 import asyncio
+import contextvars
 import json
+import pickle
 import unittest
 
 import h11
@@ -188,6 +190,18 @@ class FakeSite:
 
 
 class LoadClientTests(unittest.IsolatedAsyncioTestCase):
+    # Django's parallel runner pickles each test to send it to a worker. Since Python 3.11 an
+    # IsolatedAsyncioTestCase holds a contextvars.Context, which cannot be pickled, so the whole
+    # run aborted ("cannot pickle '_contextvars.Context' object"). The worker gets a fresh one.
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_asyncioTestContext", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._asyncioTestContext = contextvars.copy_context()
+
     async def asyncSetUp(self):
         self.fake = FakeSite()
         self.server = await asyncio.start_server(self.fake.handle, "127.0.0.1", 0)
@@ -293,6 +307,13 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReportTests(unittest.TestCase):
+    def test_the_async_tests_survive_the_parallel_runner(self):
+        # The parallel runner pickles every test it sends to a worker.
+        test = pickle.loads(
+            pickle.dumps(LoadClientTests("test_an_unreachable_site_is_recorded_as_no_answer"))
+        )
+        self.assertIsInstance(test._asyncioTestContext, contextvars.Context)
+
     def test_nearest_rank_percentiles(self):
         values = [float(n) for n in range(1, 101)]
         self.assertEqual(load_client.percentile(values, 50), 50.0)
