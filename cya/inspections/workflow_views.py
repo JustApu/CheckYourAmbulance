@@ -30,7 +30,12 @@ from cya.checklists.models import Item, KitInstance, Vehicle
 from cya.checks.models import CheckRecord
 from cya.deficiencies import acknowledgement, overdue, service, suspension
 from cya.deficiencies.commands import ASSIGNEE_ROLES
-from cya.deficiencies.models import Deficiency, DeficiencyEvent, DeficiencyProjection
+from cya.deficiencies.models import (
+    Deficiency,
+    DeficiencyEvent,
+    DeficiencyProjection,
+    DeficiencyRequirementMap,
+)
 from cya.deficiencies.service import DeficiencyError, suggest_related
 from cya.deficiencies.severity import levels_in_force, top_active_levels
 from cya.deficiencies.transitions import (
@@ -403,8 +408,18 @@ def report(request, user, vehicle_id):
     now = timezone.now()
     rows = vehicle_label_rows(str(user.organization_id), str(vehicle.pk))
     items, compartments, systems = {}, {}, {}
+    places = {}
     for row in rows:
-        items[row.item_id] = row.item_label
+        if not row.kit_id and row.item_requirement_id:
+            places.setdefault(row.item_id, {})[row.item_requirement_id] = place_label(row)
+    for row in rows:
+        kept = places.get(row.item_id, {})
+        if len(kept) > 1:
+            # One choice per place of an item kept in several places (SPEC 6.0.0 8.1).
+            for requirement_id, where in kept.items():
+                items[f"{row.item_id}:{requirement_id}"] = f"{row.item_label} — {where}"
+        else:
+            items[row.item_id] = row.item_label
         if row.compartment_id:
             compartments[row.compartment_id] = row.compartment_label
         if row.system_id:
@@ -437,18 +452,36 @@ def report(request, user, vehicle_id):
 MAX_CHOICES = 500  # item, kit and assignee choices one form offers
 
 
+def place_label(row):
+    """Where a row outside a kit is kept: its compartment or system, else Not placed."""
+    return row.compartment_label or row.system_label or "Not placed"
+
+
 def _item_choices(organization_id, vehicle_id, within=None):
-    """[(value "item_id:kit_id", label)] from the vehicle's current checklist, optionally limited
-    to the (item, kit) pairs in `within`. The server resolves the same rows again and refuses any
-    choice that no longer applies."""
+    """[(value "item_id:kit_id[:item_requirement_id]", label)] from the vehicle's current
+    checklist, optionally limited to the (item, unit) pairs in `within` (unit: the kit, else the
+    item requirement, else None for a per-item scope row, which covers every place of the item
+    outside a kit). An item kept in more than one place is offered once per place, labelled with
+    it (SPEC 6.0.0 VER-3, SUS-2). The server resolves the same rows again and refuses any choice
+    that no longer applies."""
     rows = vehicle_label_rows(organization_id, vehicle_id)
+    places = {}
+    for row in rows:
+        if not row.kit_id and row.item_requirement_id:
+            places.setdefault(str(row.item_id), set()).add(row.item_requirement_id)
     choices = {}
     for row in rows:
-        key = (str(row.item_id), str(row.kit_id) if row.kit_id else None)
-        if within is not None and key not in within:
-            continue
+        item = str(row.item_id)
+        kit = str(row.kit_id) if row.kit_id else None
+        place = None if kit else row.item_requirement_id
+        if within is not None and (item, kit or place) not in within:
+            if kit or not place or (item, None) not in within:
+                continue
         label = row.item_label + (f" — {row.kit_label}" if row.kit_label else "")
-        choices[f"{key[0]}:{key[1] or ''}"] = label
+        if place and len(places.get(item, ())) > 1:
+            label += f" — {place_label(row)}"
+        value = f"{item}:{kit or ''}" + (f":{place}" if place else "")
+        choices[value] = label
     return sorted(choices.items(), key=lambda p: (p[1], p[0]))[:MAX_CHOICES]
 
 
@@ -540,10 +573,7 @@ def _supervisor_controls(user, found, status, roles, context, deadline, assignee
         controls["verification_items"] = _item_choices(org, str(found.vehicle_id))
         controls["expanding"] = status.status == "PENDING_VERIFICATION"
     if active and may("suspend_routine_checks"):
-        scope = {
-            (item_id, str(kit_id) if kit_id else None)
-            for item_id, _definition, kit_id in service.correction_scope(org, found, now)
-        }
+        scope = {(row.item_id, row.unit) for row in service.correction_scope(org, found, now)}
         controls["suspension_items"] = _item_choices(org, str(found.vehicle_id), scope)
         controls["can_end_suspensions"] = True  # one at a time, beside each in force (SUS-5)
     if may("explicit_deficiency_close"):
@@ -558,6 +588,34 @@ def _supervisor_controls(user, found, status, roles, context, deadline, assignee
     return controls
 
 
+def _version_place(version):
+    """The label of an item requirement version's place (SPEC 6.0.0 CHK-11)."""
+    if version is None:
+        return None
+    if version.compartment_id:
+        return version.compartment.label
+    if version.system_id:
+        return version.system.label
+    return "Not placed"
+
+
+def _deficiency_place(found):
+    """The place an item-target deficiency outside a kit concerns, or None (SPEC 6.0.0 8.1)."""
+    if found.item_id is None or found.kit_id:
+        return None
+    version = found.item_requirement_version
+    if version is None:
+        mapped = (
+            DeficiencyRequirementMap.objects.filter(
+                organization_id=found.organization_id, deficiency=found
+            )
+            .select_related("requirement_version__compartment", "requirement_version__system")
+            .first()
+        )
+        version = mapped.requirement_version if mapped else None
+    return _version_place(version)
+
+
 @page
 def deficiency(request, user, deficiency_id):
     found = (
@@ -570,6 +628,8 @@ def deficiency(request, user, deficiency_id):
             "item",
             "kit",
             "compartment",
+            "item_requirement_version__compartment",
+            "item_requirement_version__system",
         )
         .first()
     )
@@ -623,6 +683,7 @@ def deficiency(request, user, deficiency_id):
         {
             "title": found.summary,
             "deficiency": found,
+            "place": _deficiency_place(found),
             "status": STATUS_LABELS[status.status],
             "severity": status.severity_version,
             "events": events,
@@ -1014,6 +1075,15 @@ def verification(request, user, deficiency_id):
     )
 
 
+def _scope_unit(row):
+    """The unit of a verification scope row: its kit, else its item requirement, else ""."""
+    if row.kit_instance_id:
+        return str(row.kit_instance_id)
+    if row.item_requirement_version_id:
+        return str(row.instance_key)
+    return ""
+
+
 @page
 def verification_items(request, user, deficiency_id):
     found = _verification_deficiency(user, deficiency_id)
@@ -1022,10 +1092,19 @@ def verification_items(request, user, deficiency_id):
         raise ValueError("deficiency history unavailable")
     pending = events[-1].to_status == "PENDING_VERIFICATION"
     scope = verification_scope(found) if pending else []
-    needed = {(str(r.item_id), str(r.kit_instance_id or "")) for r in scope if not r.satisfied}
+    needed = {(str(r.item_id), _scope_unit(r)) for r in scope if not r.satisfied}
     result = vehicle_checklist(str(user.organization_id), str(found.vehicle_id))
-    rows = [r for r in result.rows if (r.item_id, r.kit_id or "") in needed]
+    # A scope row of a place (SPEC 6.0.0 VER-3) needs the row of that place; a per-item row (the
+    # all-zero key) is met by a check of the item at any place outside a kit.
+    rows = [
+        r
+        for r in result.rows
+        if (r.item_id, r.kit_id or r.item_requirement_id or "") in needed
+        or (not r.kit_id and (r.item_id, "") in needed)
+    ]
     authors = check_authors(str(user.organization_id), rows)
+    shown = {(r.item_id, r.kit_id or r.item_requirement_id or "") for r in rows}
+    shown |= {(r.item_id, "") for r in rows if not r.kit_id}
     return JsonResponse(
         {
             "status": "OK",
@@ -1036,6 +1115,6 @@ def verification_items(request, user, deficiency_id):
             "items": [checklist_row(r, authors.get(r.latest_check_id)) for r in rows],
             "verification_status": STATUS_LABELS[events[-1].to_status],
             "remaining_scope_rows": len(needed),
-            "unavailable_scope_rows": len(needed - {(r.item_id, r.kit_id or "") for r in rows}),
+            "unavailable_scope_rows": len(needed - shown),
         }
     )

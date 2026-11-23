@@ -828,6 +828,8 @@ class LabelRow:
     compartment_label: str | None
     system_id: str | None
     system_label: str | None
+    # The item requirement (place) of a row outside a kit after the cutover (SPEC 6.0.0 CHK-11).
+    item_requirement_id: str | None = None
 
 
 ADHOC_KEY_LIMIT = 2000  # distinct (item, kit) pairs read before the full path decides instead
@@ -844,6 +846,7 @@ def _label_row(row):
         compartment_label=row.compartment_label,
         system_id=row.system_id,
         system_label=row.system_label,
+        item_requirement_id=getattr(row, "item_requirement_id", None),
     )
 
 
@@ -909,6 +912,7 @@ def vehicle_label_rows(organization_id, vehicle_id):
             compartment_label=resolved.compartment_label,
             system_id=str(resolved.system_id) if resolved.system_id else None,
             system_label=resolved.system_label,
+            item_requirement_id=getattr(resolved.requirement, "item_requirement_id", None),
         )
         for (_order, _display, item_id, kit_id, kit_label, resolved, _version) in placed
     )
