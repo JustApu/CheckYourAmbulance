@@ -31,6 +31,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "item_requirement_cutover",
                     "item_requirement_map",
                     "deficiency_place",
+                    "deficiency_requirement_map",
                     "vehicle_position_key",
                     "roster_snapshot",
                     "roster_member",
