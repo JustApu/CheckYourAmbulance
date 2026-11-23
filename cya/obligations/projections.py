@@ -1144,14 +1144,24 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
         )
     )
     obligations = {}
+    # The same mapped-requirement evidence as load_projection_history, in one query for the page.
+    mapped = _mapped_requirements(
+        [
+            e.selected_obligation
+            for vehicle_id in vehicle_ids
+            for e in selections[vehicle_id]
+            if e.selected_obligation_id is not None
+        ]
+        + [o for vehicle_id in vehicle_ids for o in adhoc[vehicle_id]]
+    )
     for vehicle_id in vehicle_ids:
         # Built exactly as load_projection_history builds it, so the order matches too.
         by_id = {
-            str(e.selected_obligation_id): _obligation(e.selected_obligation)
+            str(e.selected_obligation_id): _obligation(e.selected_obligation, mapped)
             for e in selections[vehicle_id]
             if e.selected_obligation_id is not None
         }
-        by_id.update({str(o.pk): _obligation(o) for o in adhoc[vehicle_id]})
+        by_id.update({str(o.pk): _obligation(o, mapped) for o in adhoc[vehicle_id]})
         _bounded(by_id.values())
         obligations[vehicle_id] = by_id
     owner = {oid: vehicle_id for vehicle_id, by_id in obligations.items() for oid in by_id}

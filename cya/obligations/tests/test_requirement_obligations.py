@@ -188,6 +188,29 @@ class TransitionTests(RequirementObligationCase):
             theirs = choose_links(self.check_of(other.pk), recorded_at=due)
             self.assertNotIn(str(legacy.pk), {str(link["obligation"].pk) for link in theirs})
 
+    def test_both_history_loaders_carry_the_mapped_requirement(self):  # review on #263
+        from cya.obligations.projections import load_projection_histories, load_projection_history
+
+        a = self.publish_checklist(self.a, [self.suction_spec()])
+        self.generate()
+        due = self.at(days=2, hours=6)
+        (legacy,) = self.obligations_of(self.suction, due).filter(kit_key=NO_KIT)
+        self.clock.set(legacy.early_at)
+        migrate_item_requirements(
+            organization_id=str(self.org.pk), actor_id=str(self.admin.pk), operation_id=str(uuid4())
+        )
+        from cya.checklists.item_requirement_cutover import resolve_item_requirement
+
+        row = ChecklistItemDef.objects.get(checklist_version_id=a, item=self.suction)
+        own_requirement, _version = resolve_item_requirement(row.pk)
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        single = load_projection_history(vehicle, due, organization_id=org)
+        (page,) = load_projection_histories([vehicle], due, organization_id=org).values()
+        for history in (single, page):
+            (evidence,) = [o for o in history.obligations if o.id == str(legacy.pk)]
+            self.assertEqual(evidence.mapped_requirement_id, own_requirement)
+        self.assertEqual(single.obligations, page.obligations)
+
 
 class PlannerTransitionTests(RequirementObligationCase):
     def test_future_pre_cutover_obligations_move_to_the_requirement_stream(self):
