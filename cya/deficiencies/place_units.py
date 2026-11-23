@@ -16,15 +16,18 @@ from django.db.models.functions import Coalesce
 from cya.deficiencies.models import DeficiencyRequirementMap
 
 
-def with_place(deficiencies):
+def with_place(deficiencies, as_of=None):
     """Annotate place_requirement_id: the item requirement an item target outside a kit concerns.
 
     The header's version first (reported after the cutover), else the cutover's map for a
     deficiency whose place was recorded before it (SPEC 6.0.0 18.3 item 2); otherwise None.
+    A read at `as_of` uses the map only if it was recorded by then: before the cutover a
+    placed legacy deficiency still applies per item.
     """
-    mapped = DeficiencyRequirementMap.objects.filter(deficiency_id=OuterRef("pk")).values(
-        "requirement_id"
-    )[:1]
+    mapped = DeficiencyRequirementMap.objects.filter(deficiency_id=OuterRef("pk"))
+    if as_of is not None:
+        mapped = mapped.filter(recorded_at__lte=as_of)
+    mapped = mapped.values("requirement_id")[:1]
     return deficiencies.annotate(
         place_requirement_id=Coalesce(
             F("item_requirement_version__requirement_id"),

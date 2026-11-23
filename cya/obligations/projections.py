@@ -751,7 +751,8 @@ def _history(organization_id, obligations, since, instant, limit, *, current_fac
                 organization_id=organization_id,
                 vehicle_id__in=vehicle_ids,
                 recorded_at__lte=instant,
-            )
+            ),
+            instant,
         ).order_by("recorded_at", "id")[: limit + 1],
         limit,
     )

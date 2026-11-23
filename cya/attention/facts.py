@@ -152,7 +152,8 @@ def deficiency_facts(organization_id, vehicle_id, as_of=None):
         return []
     kits, places = {}, {}
     for pk, kit_id, item_id, place in with_place(
-        Deficiency.objects.filter(organization_id=organization_id, pk__in=statuses)
+        Deficiency.objects.filter(organization_id=organization_id, pk__in=statuses),
+        None if as_of is None else _aware(as_of, "as_of"),
     ).values_list("pk", "kit_id", "item_id", "place_requirement_id"):
         kits[pk] = kit_id
         if place:

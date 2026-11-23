@@ -36,7 +36,12 @@ from cya.deficiencies.places import assign_deficiency_place
 from cya.deficiencies.service import DeficiencyError
 from cya.deficiencies.severity import ensure_default_severities
 from cya.deficiencies.suspension import suspend_checks
-from cya.obligations.projections import _page_suspensions, stored_suspensions
+from cya.obligations.projections import (
+    MAX_ROWS,
+    _history,
+    _page_suspensions,
+    stored_suspensions,
+)
 from cya.obligations.tests.test_requirement_obligations import RequirementObligationCase
 
 NO_KIT = "00000000-0000-0000-0000-000000000000"
@@ -396,6 +401,34 @@ class BeforeTheCutoverTests(PerPlaceCase):
             rows = self.rows(as_of)
             self.assertTrue(rows[self.cabinet4_requirement].attention.red)
             self.assertFalse(rows[self.cabinet1_requirement].attention.red)
+
+    def test_a_read_before_the_cutover_keeps_a_placed_deficiency_per_item(self):
+        self.in_cabinet_4_too()
+        deficiency_id = self.report({"item_id": str(self.suction.pk)})
+        assign_deficiency_place(
+            deficiency_id=deficiency_id,
+            place_kind="COMPARTMENT",
+            position_id=str(self.own_row(self.cabinet4, self.vehicle).pk),
+            explanation="Synthetic: the cabinet 4 stock.",
+            **self.context(self.supervisor),
+        )
+        before = self.clock()
+        self.clock.set(before + timedelta(minutes=1))
+        self.cut_over()
+        mapped = DeficiencyRequirementMap.objects.get(deficiency_id=deficiency_id)
+        self.assertGreater(mapped.recorded_at, before)
+        after = self.clock()
+        suction = str(self.suction.pk)
+        per_item = (frozenset({suction}), frozenset())
+        per_place = (frozenset(), frozenset({(suction, self.cabinet4_requirement)}))
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        for instant, expected in ((before, per_item), (after, per_place)):
+            (fact,) = deficiency_facts(org, vehicle, as_of=instant)
+            self.assertEqual((frozenset(fact.item_ids), fact.item_units), expected, instant)
+            (header,) = _history(
+                org, {vehicle: {}}, self.now - timedelta(days=1), instant, MAX_ROWS
+            )[vehicle]["deficiency_headers"]
+            self.assertEqual((header.item_ids, header.item_units), expected, instant)
 
     def test_an_unplaced_deficiency_on_an_item_kept_in_one_place_stays_per_item(self):
         self.publish_checklist(self.b, [self.suction_spec()])  # one place, two checklists
