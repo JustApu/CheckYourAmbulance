@@ -61,6 +61,11 @@ class Requirement:
     system_id: str | None
     kit_id: str | None
     expiration_tracked: bool = False
+    # SPEC 6.0.0 CHK-11: the vehicle item requirement a row outside a kit inspects, and its
+    # version in force at the resolution instant, whose place and requirements replace the
+    # row's own (CHK-5). None before the organization's item-requirement cutover.
+    item_requirement_id: str | None = None
+    item_requirement_version_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -290,6 +295,60 @@ def _requirements(version, override):
     return apply_overlay(template_items, entries)
 
 
+def _with_item_requirements(requirements, as_of, recorded_before=None):
+    """Each row outside a kit with the vehicle item requirement version in force at as_of.
+
+    SPEC 6.0.0 CHK-5, CHK-11: a row's requirement is in its item_requirement_map row; its place and requirements are the requirement
+    version's in force at as_of, so changing a requirement changes it for every checklist from
+    its effective instant (AC-42 (4)). Rows of no requirement are returned unchanged.
+    """
+    from dataclasses import replace
+
+    from cya.checklists.models import ItemRequirementMap, VehicleItemRequirementVersion
+
+    ids = [str(r.definition_id) for r in requirements if r.definition_id and not r.kit_id]
+    if not ids:
+        return requirements
+    owner = {
+        str(pk): str(requirement)
+        for pk, requirement in ItemRequirementMap.objects.filter(
+            item_def_id__in=ids, requirement__isnull=False
+        ).values_list("item_def_id", "requirement_id")
+    }
+    if not owner:
+        return requirements
+    versions = VehicleItemRequirementVersion.objects.filter(
+        requirement_id__in=set(owner.values()), effective_at__lte=as_of
+    )
+    if recorded_before is not None:
+        versions = versions.filter(recorded_at__lt=recorded_before)
+    current = {}
+    for version in versions.order_by("effective_at"):
+        current[str(version.requirement_id)] = version
+    result = []
+    for requirement in requirements:
+        version = current.get(owner.get(str(requirement.definition_id)))
+        if version is None:
+            result.append(requirement)
+            continue
+        result.append(
+            replace(
+                requirement,
+                kind=version.kind,
+                instructions=version.instructions,
+                expected_quantity=version.expected_quantity,
+                unit=version.unit,
+                allowed_outcomes=tuple(version.allowed_outcomes),
+                compartment_id=str(version.compartment_id) if version.compartment_id else None,
+                system_id=str(version.system_id) if version.system_id else None,
+                expiration_tracked=version.expiration_tracked,
+                item_requirement_id=str(version.requirement_id),
+                item_requirement_version_id=str(version.pk),
+            )
+        )
+    return result
+
+
 def resolved_requirements(version, override):
     """The template version's requirements with the override applied (CHK-6 before 5.0.0).
 
@@ -464,7 +523,7 @@ def resolve_checklist(*, organization_id, vehicle_id, template_id, as_of, record
     version, override = governing_versions(
         organization_id, vehicle_id, template_id, as_of, recorded_before
     )
-    requirements = _requirements(version, override)
+    requirements = _with_item_requirements(_requirements(version, override), as_of, recorded_before)
     compartments = vehicle_slots(
         "compartment",
         vehicle_id,

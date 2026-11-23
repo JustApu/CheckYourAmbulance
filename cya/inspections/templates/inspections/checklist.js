@@ -56,8 +56,10 @@
     }
   }
   // A kit presence row (KDEF-12) has no kit; its kit list line tells two lines of one kit apart.
+  // A loose item's item requirement (SPEC 6.0.0 CHK-11) tells two places of one item apart.
   function key(row) {
-    return row.item_id + "|" + (row.kit_id || "") + (row.kit_requirement_id ? "|" + row.kit_requirement_id : "");
+    return row.item_id + "|" + (row.kit_id || "") + (row.kit_requirement_id ? "|" + row.kit_requirement_id : "") +
+      (row.item_requirement_id ? "|r" + row.item_requirement_id : "");
   }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
   function restoreFocusIntent() {

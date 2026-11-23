@@ -146,8 +146,12 @@ def _pins(org, vehicle, due_at, items):
                 publication_id=publication_id,
                 override_version_id=override_id,
                 kit_instance_id=kit_id,
-                kit_key=kit_id or NO_KIT,
+                # SPEC 6.0.0 CHK-11: a loose item's order is in its item requirement's stream.
+                kit_key=kit_id or getattr(requirement, "item_requirement_id", None) or NO_KIT,
                 kit_event_id=kit_event,
+                item_requirement_version_id=(
+                    None if kit_id else getattr(requirement, "item_requirement_version_id", None)
+                ),
             )
         )
     return result

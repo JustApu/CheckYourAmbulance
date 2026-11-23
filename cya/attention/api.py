@@ -45,6 +45,7 @@ def checklist_row(row, authors):
         "item_label": row.item_label,
         "kit_id": row.kit_id,
         "kit_requirement_id": row.kit_requirement_id,
+        "item_requirement_id": row.item_requirement_id,
         "kit_label": row.kit_label,
         "definition_id": row.definition_id,
         "kind": row.kind,

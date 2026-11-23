@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import UTC, timedelta
+from functools import lru_cache
 from itertools import islice
 
 from django.db import connection
@@ -134,7 +135,31 @@ def _bounds(instant, start, end):
     return start, end
 
 
-def _obligation(row):
+def _mapped_requirements(rows):
+    """{obligation id: requirement id} for pre-cutover NO_KIT obligations whose pinned row is mapped.
+
+    Several obligations (due instants) pin the same item row, so the row's requirement is read once
+    per row and given to each of them.
+    """
+    from cya.checklists.models import ItemRequirementMap
+
+    pinned = {
+        str(r.pk): str(r.requirement_version.item_def_id)
+        for r in rows
+        if r.kit_key == NO_KIT and r.requirement_version.item_def_id
+    }
+    if not pinned:
+        return {}
+    by_def = {
+        str(item_def): str(requirement)
+        for item_def, requirement in ItemRequirementMap.objects.filter(
+            item_def_id__in=sorted(set(pinned.values())), requirement__isnull=False
+        ).values_list("item_def_id", "requirement_id")
+    }
+    return {pk: by_def[item_def] for pk, item_def in pinned.items() if item_def in by_def}
+
+
+def _obligation(row, mapped=None):
     version = row.requirement_version
     return ObligationEvidence(
         str(row.pk),
@@ -157,6 +182,7 @@ def _obligation(row):
         late_limit_at=row.late_limit_at,
         # Only a presence unit key is carried; a kit or NO_KIT follows from kit_instance_id.
         kit_key=None if row.kit_key in (NO_KIT, str(row.kit_instance_id)) else row.kit_key,
+        mapped_requirement_id=(mapped or {}).get(str(row.pk)),
     )
 
 
@@ -198,6 +224,25 @@ def _activity(row):
     )
 
 
+def requirement_streams(by_key):
+    """{item id: [unit keys that are item requirement ids]} among (item, unit) keys.
+
+    Requirement ids are uuid5 (cya.checklists.item_requirements.new_requirement_id), as are kit
+    presence line unit keys, so only uuid5 units are looked up, and nothing is read otherwise.
+    """
+    candidates = {unit for _item, unit in by_key if unit != NO_KIT and uuid.UUID(unit).version == 5}
+    if not candidates:
+        return {}
+    from cya.checklists.models import VehicleItemRequirement
+
+    found = {}
+    for pk, item in VehicleItemRequirement.objects.filter(pk__in=candidates).values_list(
+        "pk", "item_id"
+    ):
+        found.setdefault(str(item), []).append(str(pk))
+    return found
+
+
 def stored_suspensions(*, organization_id, vehicle_id, obligation_ids, as_of):
     """Supervisor check suspensions known at as_of for the requested obligations (SPEC 8.9).
 
@@ -234,13 +279,20 @@ def stored_suspensions(*, organization_id, vehicle_id, obligation_ids, as_of):
     ended = {str(r.prior_suspension_id): r.recorded_at for r in rows if r.action == "END"}
     # A suspension of a kit presence line covers that line's obligations only (KDEF-12).
     units = line_unit_keys({r.kit_requirement_id for r in rows if r.kit_requirement_id})
+    # A suspension of an item outside a kit (NO_KIT, no line) is per item until deficiencies are
+    # per place (issue #256 C3): it covers every item requirement stream of that item too.
+    streams = requirement_streams(by_key)
     result = []
     for row in rows:
         if row.action != "START":
             continue
         end = ended.get(str(row.pk))
         key = units[str(row.kit_requirement_id)] if row.kit_requirement_id else row.instance_key
-        for obligation_id, recorded_at, grace_at in by_key.get((str(row.item_id), key), ()):
+        keys = [key]
+        if key == NO_KIT and not row.kit_requirement_id:
+            keys += streams.get(str(row.item_id), [])
+        covered = [entry for k in keys for entry in by_key.get((str(row.item_id), k), ())]
+        for obligation_id, recorded_at, grace_at in covered:
             # In force at some min(T, G) with T at or after the obligation was recorded.
             if row.recorded_at <= grace_at and (end is None or end > min(recorded_at, grace_at)):
                 result.append(
@@ -309,11 +361,33 @@ class _Units:
                     self.units.add(unit)
                     self.lines.setdefault(unit, []).append(str(pk))
                     self.unit_of[str(pk)] = unit
+        # SPEC 6.0.0 CHK-11: an item requirement's stream is keyed by its id, a uuid5 like a line's
+        # unit key (cya.checklists.item_requirements.new_requirement_id) and never a kit's uuid4,
+        # so only a uuid5 key that is not a line can be one, and ordinary keys cost no query.
+        others = candidates - self.units
+        self.requirements = set()
+        self.versions = {}  # requirement id -> its version ids
+        if others:
+            from cya.checklists.models import VehicleItemRequirementVersion
 
-    def key(self, vehicle_id, item_id, kit_id, kit_requirement_id):
-        """A check row's key: its kit, its presence line's unit key, or NO_KIT."""
+            for pk, requirement in VehicleItemRequirementVersion.objects.filter(
+                requirement_id__in=others
+            ).values_list("pk", "requirement_id"):
+                self.requirements.add(str(requirement))
+                self.versions.setdefault(str(requirement), []).append(str(pk))
+
+    def key(
+        self, vehicle_id, item_id, kit_id, kit_requirement_id, item_requirement_version_id=None
+    ):
+        """A check row's key: its kit, presence line, item requirement, or NO_KIT."""
         if kit_id:
             return _key(vehicle_id, item_id, kit_id)
+        if item_requirement_version_id:
+            return (
+                str(vehicle_id),
+                str(item_id),
+                requirement_of_version(item_requirement_version_id),
+            )
         unit = self.unit_of.get(str(kit_requirement_id)) if kit_requirement_id else None
         return (str(vehicle_id), str(item_id), unit or NO_KIT)
 
@@ -329,11 +403,19 @@ def _exact_keys(keys, units):
                 kit_requirement_id__in=units.lines.get(kit_key, ()),
             )
             continue
+        if kit_key in units.requirements:
+            condition |= Q(
+                vehicle_id=vehicle_id,
+                item_id=item_id,
+                item_requirement_version_id__in=units.versions.get(kit_key, ()),
+            )
+            continue
         condition |= Q(
             vehicle_id=vehicle_id,
             item_id=item_id,
             kit_id=None if kit_key == NO_KIT else kit_key,
             kit_requirement_id=None,
+            item_requirement_version_id=None,
         )
     return condition
 
@@ -397,8 +479,25 @@ def _newest_older_by_key(organization_id, keys, lower, units=None):
         )
         if newest is not None:
             found[(vehicle_id, item_id, unit)] = newest
+    # An item requirement's key (SPEC 6.0.0 CHK-11): one indexed lookup each, like a line's.
+    for vehicle_id, item_id, unit in sorted(k for k in keys if k[2] in units.requirements):
+        newest = (
+            CheckRecord.objects.filter(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                item_id=item_id,
+                item_requirement_version_id__in=units.versions.get(unit, ()),
+                recorded_at__lte=lower,
+            )
+            .order_by("-recorded_at")
+            .values_list("recorded_at", flat=True)
+            .first()
+        )
+        if newest is not None:
+            found[(vehicle_id, item_id, unit)] = newest
+    special = units.units | units.requirements
     for kitted in (False, True):
-        group = sorted(k for k in keys if k[2] not in units.units and (k[2] != NO_KIT) == kitted)
+        group = sorted(k for k in keys if k[2] not in special and (k[2] != NO_KIT) == kitted)
         for start in range(0, len(group), LOOKUP_CHUNK):
             chunk = group[start : start + LOOKUP_CHUNK]
             width = 3 if kitted else 2
@@ -408,6 +507,7 @@ def _newest_older_by_key(organization_id, keys, lower, units=None):
                 "c.kit_id = k.kit_id"
                 if kitted
                 else "c.kit_id IS NULL AND c.kit_requirement_id IS NULL"
+                " AND c.item_requirement_version_id IS NULL"
             )
             sql = (
                 "SELECT k.vehicle_id, k.item_id, "
@@ -458,9 +558,14 @@ def _attention_roots(organization_id, keys, since, instant, limit):
             recorded_at__lte=instant,
         )
         .order_by("recorded_at", "id")
-        .values_list("root_check_id", "vehicle_id", "item_id", "kit_id", "kit_requirement_id")[
-            : limit + 1
-        ],
+        .values_list(
+            "root_check_id",
+            "vehicle_id",
+            "item_id",
+            "kit_id",
+            "kit_requirement_id",
+            "item_requirement_version_id",
+        )[: limit + 1],
         limit,
     )
     roots = {str(root) for root, *key in recent if units.key(*key) in keys}
@@ -495,13 +600,14 @@ def _attention_roots(organization_id, keys, since, instant, limit):
                 "item_id",
                 "kit_id",
                 "kit_requirement_id",
+                "item_requirement_version_id",
                 "recorded_at",
             )[: limit + 1],
             limit,
         )
         seen = set()
-        for pk, root, vehicle_id, item_id, kit_id, kit_requirement_id, recorded_at in window:
-            key = units.key(vehicle_id, item_id, kit_id, kit_requirement_id)
+        for pk, root, vehicle_id, item_id, kit_id, line, version, recorded_at in window:
+            key = units.key(vehicle_id, item_id, kit_id, line, version)
             if key not in unresolved:
                 continue
             by_root = older_chains.setdefault(key, {})
@@ -706,12 +812,27 @@ def _database_history(organization_id, vehicle_id, obligations, since, instant):
     ]
 
 
+@lru_cache(maxsize=4096)
+def requirement_of_version(version_id):
+    """The item requirement of a requirement version (append-only, so cacheable)."""
+    from cya.checklists.models import VehicleItemRequirementVersion
+
+    return str(
+        VehicleItemRequirementVersion.objects.values_list("requirement_id", flat=True).get(
+            pk=version_id
+        )
+    )
+
+
 def check_unit_key(row, units):
-    """A check's stream key: its kit, its presence line's unit key (KDEF-12), or NO_KIT."""
+    """A check's stream key: its kit, presence line unit key (KDEF-12), item requirement
+    (SPEC 6.0.0 CHK-11), or NO_KIT."""
     if row.kit_id:
         return str(row.kit_id)
     if getattr(row, "kit_requirement_id", None):
         return units[str(row.kit_requirement_id)]
+    if getattr(row, "item_requirement_version_id", None):
+        return requirement_of_version(str(row.item_requirement_version_id))
     return NO_KIT
 
 
@@ -739,6 +860,12 @@ def _history_fields(
                 str(r.item_id),
                 check_unit_key(r, units),
                 str(r.actor_user_id) if r.actor_user_id else None,
+                str(r.item_requirement_version_id) if r.item_requirement_version_id else None,
+                (
+                    requirement_of_version(str(r.item_requirement_version_id))
+                    if r.item_requirement_version_id
+                    else None
+                ),
             )
             for r in rows
         ),
@@ -816,11 +943,7 @@ def load_projection_history(
         .select_related("selected_obligation__requirement_version")
         .order_by("sequence", "id")[: MAX_ROWS + 1]
     )
-    obligations = {
-        str(e.selected_obligation_id): _obligation(e.selected_obligation)
-        for e in events
-        if e.selected_obligation_id is not None
-    }
+    selected = [e.selected_obligation for e in events if e.selected_obligation_id is not None]
     adhoc_rows = Obligation.objects.filter(
         organization_id=organization_id,
         vehicle_id=vehicle_id,
@@ -832,7 +955,9 @@ def load_projection_history(
     adhoc = _bounded(
         adhoc_rows.select_related("requirement_version").order_by("id")[: MAX_ROWS + 1]
     )
-    obligations.update({str(o.pk): _obligation(o) for o in adhoc})
+    mapped = _mapped_requirements(selected + list(adhoc))
+    obligations = {str(o.pk): _obligation(o, mapped) for o in selected}
+    obligations.update({str(o.pk): _obligation(o, mapped) for o in adhoc})
     _bounded(obligations.values())
     ids = tuple(sorted(obligations))
     determinations = _bounded(
@@ -1024,14 +1149,24 @@ def load_projection_histories(vehicle_ids, instant_T, *, organization_id, start=
         )
     )
     obligations = {}
+    # The same mapped-requirement evidence as load_projection_history, in one query for the page.
+    mapped = _mapped_requirements(
+        [
+            e.selected_obligation
+            for vehicle_id in vehicle_ids
+            for e in selections[vehicle_id]
+            if e.selected_obligation_id is not None
+        ]
+        + [o for vehicle_id in vehicle_ids for o in adhoc[vehicle_id]]
+    )
     for vehicle_id in vehicle_ids:
         # Built exactly as load_projection_history builds it, so the order matches too.
         by_id = {
-            str(e.selected_obligation_id): _obligation(e.selected_obligation)
+            str(e.selected_obligation_id): _obligation(e.selected_obligation, mapped)
             for e in selections[vehicle_id]
             if e.selected_obligation_id is not None
         }
-        by_id.update({str(o.pk): _obligation(o) for o in adhoc[vehicle_id]})
+        by_id.update({str(o.pk): _obligation(o, mapped) for o in adhoc[vehicle_id]})
         _bounded(by_id.values())
         obligations[vehicle_id] = by_id
     owner = {oid: vehicle_id for vehicle_id, by_id in obligations.items() for oid in by_id}
