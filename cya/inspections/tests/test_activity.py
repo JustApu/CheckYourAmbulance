@@ -303,7 +303,7 @@ class CheckInSessionTests(ActivityCase):
         self.advance(hours=5)
         self.check()  # activity at +5 h
         SessionProjection.objects.filter(session_id=self.session_id).update(
-            last_activity_at=self.now - HOUR
+            last_activity_at=self.now - HOUR, ends_at=self.now + 5 * HOUR
         )  # a stale cache claims the session is long idle
         self.advance(hours=2)  # +7 h: idle 2 h in truth
         self.assertEqual(

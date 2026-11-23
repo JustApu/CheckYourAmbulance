@@ -73,8 +73,10 @@ class SessionDeadlineMigrationTests(ActivityCase):
     def test_a_session_from_before_reads_as_ended_at_its_late_check_and_the_job_agrees(self):
         """AC-41(7)."""
         opened_at = InspectionSession.objects.get(pk=self.session_id).opened_at
-        self.advance(hours=7)
-        late = self.check()  # 7 h after opening: allowed before 6.0.0
+        self.advance(hours=5)
+        self.check()  # activity keeps the session open past opened_at + 6 h ...
+        self.advance(hours=4)
+        late = self.check()  # ... so this check 9 h after opening was allowed before 6.0.0
         from cya.checks.models import CheckRecord
 
         checked_at = CheckRecord.objects.get(pk=late.body["check_id"]).recorded_at
