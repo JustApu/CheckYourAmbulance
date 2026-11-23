@@ -10,7 +10,7 @@
 {% if not uses_requirements %}<p>Item requirements start when the organization moves to them (migrate_item_requirements). Until then each checklist keeps its own values.</p>{% endif %}
 
 {% if rows %}
-<table id="item-requirements">
+<table id="item-requirements" aria-label="Item requirements">
   <thead><tr><th scope="col">Item</th><th scope="col">Place</th><th scope="col">Requires</th><th scope="col">Inspected by</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
   <tbody>
   {% for row in rows %}
