@@ -991,6 +991,8 @@ def record_check(
             item_id=shape["item_id"],
             kit_id=chosen_kit,
             kit_requirement_id=shape["kit_requirement_id"],
+            # Anchors the interim link guard on this checklist's requirement (issue #256 B).
+            checklist_version_id=version.pk if version else None,
         )
         try:
             links = choose_links(prospective_check, recorded_at=now)
@@ -1445,6 +1447,7 @@ def correct_check(
             item_id=root.item_id,
             kit_id=root.kit_id,
             kit_requirement_id=root.kit_requirement_id,
+            checklist_version_id=root.checklist_version_id,
         )
         try:
             links = choose_links(

@@ -147,7 +147,25 @@ def record_later_obligation_check_between_grace_and_late_limit(ctx):
     ctx["case9"] = {
         "after": _counts(ctx, case.at(days=7, hours=8, minutes=10)),
         "limit": {d: _counts(ctx, limit + d * US) for d in (-1, 0, 1)},
+        "late_states": {
+            d: _states_of(case, {o for t, o in ctx["case9_links"] if t == "LATE"}, limit + d * US)
+            for d in (-1, 0, 1)
+        },
     }
+
+
+def _states_of(case, obligation_ids, at):
+    """States of the given obligations at an instant, from event replay."""
+    from cya.obligations.projections import get_vehicle_obligations_as_of
+
+    states = get_vehicle_obligations_as_of(
+        str(case.vehicle.pk),
+        at,
+        organization_id=str(case.org.pk),
+        start=at - readiness.WINDOW_BACK,
+        end=at + readiness.WINDOW_AHEAD,
+    )
+    return sorted(str(s.state) for s in states if s.obligation.id in obligation_ids)
 
 
 def _overdue_rows(case, item, kit, at):
@@ -263,17 +281,22 @@ def overdue_cleared_after_grace_missed_only_after_late_limit(ctx):
     from cya.obligations.models import Obligation
 
     before, case9, rows = ctx["case9_before"], ctx["case9"], ctx["case9_rows"]
-    ((timing, obligation_id),) = ctx["case9_links"]
-    _check(timing == "ON_TIME", f"the check took the order's on-time window, not {timing}")
-    _check(not Obligation.objects.get(pk=obligation_id).routine, "the check linked to the order")
-    # Every earlier overdue row of that kit instance in the window clears, including day 7's
-    # own 06:00 row, which is past G but not past L (case 9).
+    # SPEC 6.0.0 SCH-6 (amendment 6.0.1 wording of case 9): the check links the order on time
+    # and day 7's 06:00 routine obligation late, since it is past G but not past L.
+    links = {
+        timing: Obligation.objects.get(pk=obligation_id).routine
+        for timing, obligation_id in ctx["case9_links"]
+    }
+    _check(links == {"ON_TIME": False, "LATE": True}, f"case 9 links {ctx['case9_links']}")
+    # Every earlier overdue row of that kit instance in the window clears.
     _check(rows >= 1, "the kit instance had overdue rows")
     _check(case9["after"]["OVERDUE"] == before["OVERDUE"] - rows, f"case 9 Overdue {case9}")
     limit = case9["limit"]
     _check(limit[-1]["MISSED"] == limit[0]["MISSED"], "not missed at exactly L")
-    _check(limit[1]["MISSED"] > limit[0]["MISSED"], "missed after L")
     _check(limit[1]["OVERDUE"] == limit[0]["OVERDUE"], "still cleared from Overdue after L")
+    # Other obligations sharing that L become Missed after it; the one completed late does not.
+    for d, states in case9["late_states"].items():
+        _check(states == ["SATISFIED"], f"completed late at L{d:+d} us: {states}")
 
 
 @STEPS.register("stored_summary_equals_recomputation")

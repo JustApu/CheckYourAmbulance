@@ -7,7 +7,7 @@
   "synthetic": true,
   "given": ["three synthetic crew members, a supervisor and an administrator", "one ambulance with two identical kits, overlapping inspection windows, and a zero-kit control vehicle"],
   "when": ["crew check concurrently and replay a lost response", "Pass and Fail race, a warning is acknowledged, and author corrections and administrator invalidations follow", "a supervisor completes Unable to Inspect, crew record odometer readings, and kit instances change mid-window", "a session auto-closes after six hours and is reopened"],
-  "then": ["item-level attribution and compliance survive all session transitions", "failures remain red until explicit lifecycle decisions and invalidation never closes a deficiency", "checks link only to the earliest eligible obligation and only to their own kit instance", "T1/T2/T3 historical reads equal shuffled event replay after later events", "a committed check update is delivered in-process and external networking is blocked"],
+  "then": ["item-level attribution and compliance survive all session transitions", "failures remain red until explicit lifecycle decisions and invalidation never closes a deficiency", "checks link to every eligible obligation of their item (SCH-6) and only to their own kit instance", "T1/T2/T3 historical reads equal shuffled event replay after later events", "a committed check update is delivered in-process and external networking is blocked"],
   "status": "bound",
   "database": "commit",
   "steps": ["m3_inspection_setup", "m3_crew_checks", "m3_replay_and_race", "m3_corrections", "m3_unable_and_odometer", "m3_kits_and_links", "m3_live_delivery", "m3_idle_and_history"],

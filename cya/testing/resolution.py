@@ -157,6 +157,15 @@ class ResolutionScenario(InspectionScenario):
         crew = self.crew[0]
         self.check_one, self.d_item = self.failed("suction", crew)
         expect(self.status(self.d_item), "OPEN", "a Failed check reports the deficiency")
+        # The suction Fail is invalidated later (INV-3). Under SCH-6 a later Pass, such as the
+        # compartment verification below, completes every window of its item it finds open, so
+        # the dashboard's Failed and Superseded entries (RPT-7) are recorded first: a critical
+        # Fail, and an oxygen Pass its author corrects.
+        self.failed("critical", crew)
+        entry = self.routine("oxygen", crew).body["check_id"]
+        correct_check(
+            check_id=entry, expected_tip_check_id=entry, outcome="PASSED", **self.context(crew)
+        )
         assigned = assign_deficiency(assignee_id=str(crew.pk), **self.args(self.d_item)).body
         expect(notified("deficiency.assigned", assigned["event_id"]), [crew.pk], "assignee told")
         set_deadline(deadline=self.clock.now + timedelta(hours=2), **self.args(self.d_item))

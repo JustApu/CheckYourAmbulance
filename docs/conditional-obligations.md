@@ -97,7 +97,7 @@ lookup(
 | `na_rule_id` | `str \| None` (optional) | Administrator NA rule reference required when `outcome == "NOT_APPLICABLE"` |
 | `checked_at` | `datetime \| str` | Server-recorded check timestamp (UTC) |
 | `obligation_id` | `str \| None` (optional) | Explicit `check_obligation_link` target (`SCH-5`) |
-| `shared_rule_id` | `str \| None` (optional) | Explicit shared-satisfaction rule ID when shared across obligations (`SCH-5`) |
+| `shared_rule_id` | `str \| None` (optional) | Shared-satisfaction rule ID of a link recorded before SPEC 6.0.0; null on new links (`SCH-5`) |
 | `shared_obligation_ids` | `Sequence[str]` (optional) | Additional obligation IDs authorized by `shared_rule_id` |
 
 ### Failure semantics

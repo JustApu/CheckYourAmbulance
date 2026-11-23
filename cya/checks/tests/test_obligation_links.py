@@ -7,7 +7,7 @@ from datetime import UTC, datetime, time, timedelta
 from unittest import mock
 from uuid import uuid4
 
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, connection
 from django.db.models.query import QuerySet
 from django.test import override_settings
 
@@ -39,7 +39,6 @@ from cya.deficiencies.models import (
 from cya.deficiencies.severity import ensure_default_severities
 from cya.kits.tests.support import KitCase
 from cya.obligations.adhoc import request_inspection
-from cya.obligations.commands import configure_shared_satisfaction_rule
 from cya.obligations.models import Obligation
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import State
@@ -477,10 +476,7 @@ class CheckObligationLinkTests(ObligationLinkCleanupMixin, ObligationCase):
 
     def test_invalidation_voids_every_shared_obligation_completion(self):
         obligations = self.prepare_overlapping_obligations()
-        configure_shared_satisfaction_rule(
-            members=[[str(row.requirement_version_id) for row in obligations]],
-            **self.context(self.admin),
-        )
+        # SPEC 6.0.0 SCH-6: one check links to both overlapping obligations without a rule.
         check = self.record_unable()
         self.assertEqual(len(check.body["obligation_links"]), 2)
         completions = [self.complete_unable(row, check.body["check_id"]) for row in obligations]
@@ -992,13 +988,19 @@ class CheckObligationLinkTests(ObligationLinkCleanupMixin, ObligationCase):
             ).order_by("due_at")
         )
 
-    def test_overlapping_obligations_default_to_the_earliest_only(self):
+    def test_overlapping_obligations_are_all_linked(self):
+        # SPEC 6.0.0 SCH-6 replaces the earlier earliest-only default.
         candidates = self.prepare_overlapping_obligations()
         self.assertEqual(len(candidates), 2)
         response = self.record_suction()
-        self.assertEqual(len(response.body["obligation_links"]), 1)
+        self.assertEqual(
+            [link["obligation_id"] for link in response.body["obligation_links"]],
+            [str(row.pk) for row in candidates],
+        )
 
     def test_a_waiting_check_gets_its_time_after_the_check_ahead_of_it(self):
+        # The check ahead takes both overlapping obligations (SCH-6); the waiting one, recorded
+        # later under the same item lock, finds both satisfied and links nothing.
         candidates = self.prepare_overlapping_obligations()
         self.assertEqual(len(candidates), 2)
         second_crew = self.make_user("crew-two")
@@ -1041,48 +1043,11 @@ class CheckObligationLinkTests(ObligationLinkCleanupMixin, ObligationCase):
         winner_check = CheckRecord.objects.get(pk=winner_result.body["check_id"])
         waiter_check = CheckRecord.objects.get(pk=waiter_result.body["check_id"])
         self.assertLess(winner_check.recorded_at, waiter_check.recorded_at)
-        winner_obligation = Obligation.objects.get(
-            pk=winner_result.body["obligation_links"][0]["obligation_id"]
+        self.assertEqual(
+            [link["obligation_id"] for link in winner_result.body["obligation_links"]],
+            [str(row.pk) for row in candidates],
         )
-        waiter_obligation = Obligation.objects.get(
-            pk=waiter_result.body["obligation_links"][0]["obligation_id"]
-        )
-        self.assertEqual(winner_obligation.pk, candidates[0].pk)
-        self.assertEqual(waiter_obligation.pk, candidates[1].pk)
-
-    def test_database_rejects_an_unruled_additional_obligation_link(self):
-        candidates = self.prepare_overlapping_obligations()
-        self.assertEqual(len(candidates), 2)
-        response = self.record_suction()
-        check = CheckRecord.objects.get(pk=response.body["check_id"])
-        with self.assertRaises(DatabaseError), transaction.atomic():
-            CheckObligationLink.objects.create(
-                organization=self.org,
-                check_record=check,
-                obligation=candidates[1],
-                ordinal=1,
-                shared_rule=None,
-                command=check.command,
-                recorded_at=check.recorded_at,
-                actor_user=check.actor_user,
-                actor_roles_at_time=check.actor_roles_at_time,
-            )
-
-    def test_overlapping_obligations_share_only_when_the_current_rule_names_them(self):
-        candidates = self.prepare_overlapping_obligations()
-        self.assertEqual(len(candidates), 2)
-        configure_shared_satisfaction_rule(
-            members=[
-                [
-                    str(candidates[0].requirement_version_id),
-                    str(candidates[1].requirement_version_id),
-                ]
-            ],
-            **self.context(self.admin),
-        )
-        shared = self.record_suction()
-        self.assertEqual(len(shared.body["obligation_links"]), 2)
-        self.assertIsNotNone(shared.body["obligation_links"][1]["shared_rule_id"])
+        self.assertEqual(waiter_result.body["obligation_links"], [])
 
 
 class KitObligationLinkTests(ObligationLinkCleanupMixin, KitCase):

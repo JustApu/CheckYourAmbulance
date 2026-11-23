@@ -261,12 +261,14 @@ chains. Invalidation requires an administrator, a nonblank reason, and a root
 author different from the actor; it affects the whole chain. Do not modify
 original outcome/state columns or revive predecessors.
 
-Links have ordinal 0 for the primary earliest-due eligible obligation; every
-ordinal > 0 requires shared_rule_id (DB CHECK). The handler locks item scope
-and inserts ordinal 0 first; an insert trigger rejects additional links without
-an existing primary and verifies rule membership and same vehicle/item scope.
-Primary link rule may be null. Eligibility prioritizes on-time windows over
-late linking, then earliest due (stable ID tie-break). Only a currently
+A check links to every eligible obligation of its item (SPEC 6.0.0 SCH-5,
+SCH-6): on-time links first, then late ones within `L`, each by due instant
+(stable ID tie-break); ordinal 0 is the primary link and never carries a rule
+(DB CHECK). The handler locks item scope and inserts ordinal 0 first; an insert
+trigger rejects additional links without an existing primary, verifies the same
+vehicle/item/kit scope, and refuses a shared_rule_id on a new link. Links
+recorded before 6.0.0 keep their rule; no new shared-satisfaction rule can be
+created (SCH-5). Only a currently
 selected routine obligation or an explicit non-routine ADH-1 order for the same
 vehicle/item/kit may receive a new primary link;
 superseded or retired rows cannot receive one and are excluded from current
@@ -626,9 +628,9 @@ Success HTTP 201:
 ```
 
 Result arrays contain actual created IDs; each obligation link is
-`{obligation_id, shared_rule_id, timing: ON_TIME|LATE}`. A link is written only
-to the currently selected eligible obligation; additional links require an
-audited shared-satisfaction rule. Empty links mean the check was recorded
+`{obligation_id, shared_rule_id, timing: ON_TIME|LATE}`. A link is written to
+every currently selected eligible obligation of the item (SCH-6);
+`shared_rule_id` is null on new links. Empty links mean the check was recorded
 without satisfying an obligation. Replay returns the stored status/body
 (including original correlation ID), never an extra check.
 

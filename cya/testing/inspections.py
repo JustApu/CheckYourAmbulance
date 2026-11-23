@@ -677,7 +677,7 @@ class InspectionScenario:
         self.capture("T3")
 
     def link_cardinality(self):
-        # Two eligible overlapping obligations; the command may choose exactly one without a rule.
+        # Two eligible overlapping obligations; one check links both (SPEC 6.0.0 SCH-6).
         response = self.record("link cardinality")
         check = CheckRecord.objects.get(pk=response.body["check_id"])
         rows = self.item_rows("link cardinality")
@@ -687,14 +687,10 @@ class InspectionScenario:
         expect(len(candidates), 2, "overlapping windows really eligible")
         expect(
             [r["obligation_id"] for r in response.body["obligation_links"]],
-            [min(candidates, key=lambda r: r.obligation.due_at).obligation.id],
-            "earliest due only",
+            [r.obligation.id for r in sorted(candidates, key=lambda r: r.obligation.due_at)],
+            "every eligible obligation, earliest due first",
         )
-        other = next(
-            r
-            for r in candidates
-            if r.obligation.id != response.body["obligation_links"][0]["obligation_id"]
-        )
+        other = self.earliest("suction")
 
         def forbidden_link():
             with transaction.atomic():
@@ -710,7 +706,7 @@ class InspectionScenario:
                     actor_roles_at_time=check.actor_roles_at_time,
                 )
 
-        self.refused(DatabaseError, forbidden_link, "unruled second link rejected by database")
+        self.refused(DatabaseError, forbidden_link, "another item's link rejected by database")
         invalidate_chain(
             check_id=str(check.pk), explanation="Synthetic link invalidation.", **self.context()
         )
