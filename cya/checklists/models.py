@@ -14,6 +14,8 @@ Implementation notes that differ from or complete the contract text are
 recorded in docs/checklists-implementation.md.
 """
 
+from uuid import UUID, uuid5
+
 from django.db import models
 
 from cya.accounts.fields import IdentityIDField, new_id
@@ -679,6 +681,18 @@ class CommandRecord(models.Model):
         abstract = True
 
 
+# Item requirement ids are version-5 UUIDs (kit instance ids are version 4): a requirement id is
+# the unit key of its obligation stream (issue #256 C2), and readers tell a requirement key from
+# a kit key by its version alone, as they do kit presence line keys (cya.kits.presence). The
+# database holds the version (migration 0014, cya_vehicle_item_requirement_v5).
+REQUIREMENT_ID_NAMESPACE = UUID("6a1f3b0e-6c56-5d0e-9a5b-2f6c1d8e4b70")
+
+
+def new_requirement_id():
+    """A fresh, unpredictable item requirement id of UUID version 5."""
+    return str(uuid5(REQUIREMENT_ID_NAMESPACE, new_id()))
+
+
 class VehicleItemRequirement(CommandRecord):
     """One stock of an item on one vehicle (SPEC 6.0.0 CHK-11). Append-only (A).
 
@@ -686,6 +700,7 @@ class VehicleItemRequirement(CommandRecord):
     item kept in several places at once has one requirement for each place.
     """
 
+    id = IdentityIDField(primary_key=True, default=new_requirement_id, editable=False)
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
     item = models.ForeignKey(Item, on_delete=models.PROTECT, related_name="+")
 

@@ -132,6 +132,26 @@ class PublicationTests(ItemRequirementCase):
             {5},
         )
 
+    def test_the_database_refuses_a_requirement_id_of_another_uuid_version(self):  # 6016641839
+        from uuid import uuid4
+
+        version = self.publish_checklist(self.a, [self.suction_spec()])
+        existing = self.requirement(version, self.suction)
+        evidence = {
+            "organization_id": existing.organization_id,
+            "command_id": existing.command_id,
+            "recorded_at": existing.recorded_at,
+            "actor_user_id": existing.actor_user_id,
+            "actor_roles_at_time": existing.actor_roles_at_time,
+        }
+        with self.assertRaisesRegex(DatabaseError, "v5"), transaction.atomic():
+            VehicleItemRequirement.objects.create(
+                id=str(uuid4()),
+                vehicle_id=existing.vehicle_id,
+                item_id=existing.item_id,
+                **evidence,
+            )
+
     def test_a_second_checklist_shares_equal_requirements(self):  # AC-42 (2) groundwork
         first = self.publish_checklist(self.a, self.own_items())
         second = self.publish_checklist(self.b, self.own_items())
