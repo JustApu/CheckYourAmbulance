@@ -251,3 +251,106 @@ class DuplicationTests(KitCase):
         before = ChecklistTemplate.objects.filter(vehicle=self.source).count()
         self.duplicate()
         self.assertEqual(ChecklistTemplate.objects.filter(vehicle=self.source).count(), before)
+
+
+class RequirementDuplicationTests(DuplicationTests):  # SPEC 6.0.0 CFG-4; issue #256 C4
+    def setUp(self):
+        super().setUp()
+        self.record_item_cutover()
+        for checklist in (self.first, self.second):
+            self.publish_checklist(checklist, self.own_items())
+
+    def requirements_of(self, vehicle_id):
+        from cya.checklists.models import VehicleItemRequirementVersion
+
+        return list(VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id))
+
+    def masks_requirement(self):
+        return next(v for v in self.requirements_of(self.source.pk) if v.item_id == self.masks.pk)
+
+    def publish_requirement(self, version, **changes):
+        from cya.checklists.commands import publish_item_requirement_version
+
+        values = {
+            "kind": version.kind,
+            "allowed_outcomes": version.allowed_outcomes,
+            "instructions": version.instructions,
+            "expected_quantity": version.expected_quantity,
+            "unit": version.unit,
+            "expiration_tracked": version.expiration_tracked,
+            "compartment_id": str(version.compartment_id) if version.compartment_id else None,
+            "system_id": str(version.system_id) if version.system_id else None,
+        }
+        values.update(changes)
+        return publish_item_requirement_version(
+            requirement_id=str(version.requirement_id), **values, **self.context()
+        )
+
+    def test_the_copy_takes_the_source_requirements_at_its_own_positions(self):
+        from uuid import UUID
+
+        body = self.duplicate()
+        self.assertEqual(body["item_requirements"], 3)
+        source = {str(v.item_id): v for v in self.requirements_of(self.source.pk)}
+        copied = {str(v.item_id): v for v in self.requirements_of(body["vehicle_id"])}
+        self.assertEqual(set(copied), set(source))
+        for item, version in copied.items():
+            self.assertNotEqual(version.requirement_id, source[item].requirement_id)
+            self.assertEqual(UUID(str(version.requirement_id)).version, 5)
+            self.assertEqual(
+                (version.revision, version.place_kind, version.place_slot_id),
+                (1, source[item].place_kind, source[item].place_slot_id),
+            )
+            if version.compartment_id:
+                self.assertEqual(
+                    str(Compartment.objects.get(pk=version.compartment_id).vehicle_id),
+                    body["vehicle_id"],
+                )
+
+    def test_copied_drafts_take_an_edited_requirement_and_publish_under_rule_a(self):
+        from cya.checklists.commands import publish_template_version
+
+        self.publish_requirement(self.masks_requirement(), expected_quantity=8)
+        body = self.duplicate()
+        draft = ChecklistVersion.objects.get(
+            template__vehicle_id=body["vehicle_id"], template__label="First"
+        )
+        masks = ChecklistItemDef.objects.get(checklist_version=draft, item=self.masks)
+        self.assertEqual(masks.expected_quantity, 8)  # not the 6 the source's rows recorded
+        before = len(self.requirements_of(body["vehicle_id"]))
+        publish_template_version(version_id=str(draft.pk), **self.context())
+        self.assertEqual(len(self.requirements_of(body["vehicle_id"])), before)
+
+    def test_a_retired_position_leaves_one_not_placed_requirement(self):
+        from unittest import mock
+
+        from cya.checklists.commands import publish_template_version
+
+        unplaced = self.spec(self.suction, 10, compartment_id=None, instructions="Loose.")
+        third = self.vehicle_checklist(label="Third")
+        self.publish_checklist(third, [unplaced])  # a second suction requirement, Not placed
+        with mock.patch("cya.kits.positions.retired_blockers", return_value=[]):
+            positions.revise_position(
+                vehicle_id=str(self.source.pk),
+                kind="COMPARTMENT",
+                stable_slot_id=str(self.cabinet.stable_slot_id),
+                retired=True,
+                **self.context(),
+            )
+        preview = duplication.preview_vehicle_duplicate(str(self.org.pk), str(self.source.pk))
+        self.assertTrue(any("already has the item Not placed" in e for e in preview["excluded"]))
+        body = self.duplicate()
+        suction = [
+            v for v in self.requirements_of(body["vehicle_id"]) if v.item_id == self.suction.pk
+        ]
+        self.assertEqual(
+            [(v.place_kind, v.instructions) for v in suction], [("NOT_PLACED", "Loose.")]
+        )
+        draft = ChecklistVersion.objects.get(
+            template__vehicle_id=body["vehicle_id"], template__label="First"
+        )
+        row = ChecklistItemDef.objects.get(checklist_version=draft, item=self.suction)
+        self.assertEqual((row.compartment_id, row.instructions), (None, "Loose."))
+        before = len(self.requirements_of(body["vehicle_id"]))
+        publish_template_version(version_id=str(draft.pk), **self.context())
+        self.assertEqual(len(self.requirements_of(body["vehicle_id"])), before)

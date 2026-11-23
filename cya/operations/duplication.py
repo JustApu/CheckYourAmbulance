@@ -198,6 +198,42 @@ class VehicleCopyPlan:
     keys: list = field(default_factory=list)  # (kind, stable slot, key)
     excluded: list = field(default_factory=list)  # what the copy leaves out, and why
     slot_of: dict = field(default_factory=dict)  # named source row id -> (kind, stable slot)
+    # SPEC 6.0.0 CFG-4, after the item-requirement cutover (None before it): each source
+    # requirement's version to copy and the copy's place, (version, (place kind, slot or None)).
+    requirements: list | None = None
+    merged: dict = field(default_factory=dict)  # left-out requirement id -> the one kept there
+    mapped: dict = field(default_factory=dict)  # copied item row id -> its requirement id
+
+    def requirement_of(self, definition):
+        """(version, place) a copied row outside a kit takes its requirements from, or None.
+
+        A row takes its own requirement (through its map row), or the one kept in its place when
+        its own was left out; a row with no map row takes the copied requirement at its item
+        and place, if there is one.
+        """
+        if self.requirements is None or definition.kit_id is not None:
+            return None
+        found = self.mapped.get(str(definition.pk))
+        found = self.merged.get(found, found)
+        for version, place in self.requirements:
+            if found is not None and str(version.requirement_id) == found:
+                return version, place
+            if (
+                found is None
+                and str(version.item_id) == str(definition.item_id)
+                and place == self.place_of(definition)
+            ):
+                return version, place
+        return None
+
+    def place_of(self, definition):
+        """The copy's place for a source row: its slot, or Not placed when that is retired."""
+        row = definition.compartment_id or definition.system_id
+        if row is None:
+            return ("NOT_PLACED", None)
+        kind_slot = self.slot_of.get(str(row))
+        copied = {(kind, str(r.stable_slot_id)) for kind, r in self.positions}
+        return kind_slot if kind_slot in copied else ("NOT_PLACED", None)
 
     def shown(self):
         """The preview, and the basis of its token (CFG-6): every row the copy would take."""
@@ -245,6 +281,21 @@ class VehicleCopyPlan:
             ],
             "assignments": [{"checklist_id": c, "slot": s} for c, s in self.assignments],
             "keys": [list(k) for k in self.keys],
+            # Only after the item-requirement cutover, so earlier previews keep their token.
+            **(
+                {
+                    "item_requirements": [
+                        {
+                            "requirement_id": str(version.requirement_id),
+                            "version_id": str(version.pk),
+                            "place": list(place),
+                        }
+                        for version, place in self.requirements
+                    ]
+                }
+                if self.requirements is not None
+                else {}
+            ),
             "excluded": list(self.excluded),
             "never_copied": list(NEVER_COPIED),
         }
@@ -441,11 +492,113 @@ def _plan_own_checklists(plan, org, source, now, lines, copied_slots):
         )
         if (kind, str(slot)) in copied_slots
     )
+    from cya.checklists.item_requirements import has_cutover
+
+    if has_cutover(org):
+        _plan_requirements(plan, source, now, copied_slots)
     return plan
 
 
-def _copy_checklists(org, plan, vehicle_id, row_for, evidence):
-    """The copy's own checklists (drafts), assignments and keys (CFG-4, after the cutover)."""
+def _plan_requirements(plan, source, now, copied_slots):
+    """SPEC 6.0.0 CFG-4: the source's item requirements, each at its version in force now (else
+    its first scheduled one), placed on the copy by stable slot, or Not placed where the position
+    is retired. Two that would then share an item and place (18.1 item 8) keep one: the one
+    whose own place that is, else the first by id; the other is left out and shown.
+    """
+    from cya.checklists.models import Item, ItemRequirementMap, VehicleItemRequirementVersion
+
+    chosen = {}
+    for version in VehicleItemRequirementVersion.objects.filter(vehicle=source).order_by(
+        "effective_at", "revision"
+    ):
+        key = str(version.requirement_id)
+        # In effective order: the last one effective by now wins; a scheduled one only when
+        # none is in force, and then the first.
+        if version.effective_at <= now or key not in chosen:
+            chosen[key] = version
+
+    def target(version):
+        place = (version.place_kind, str(version.place_slot_id) if version.place_slot_id else None)
+        if place[0] == "NOT_PLACED" or place in copied_slots:
+            return place
+        return ("NOT_PLACED", None)
+
+    labels = {
+        str(pk): label
+        for pk, label in Item.objects.filter(
+            pk__in={v.item_id for v in chosen.values()}
+        ).values_list("pk", "label")
+    }
+    plan.requirements, kept = [], {}
+    ordered = sorted(
+        chosen.values(),
+        key=lambda v: (target(v)[0] != v.place_kind, str(v.item_id), str(v.requirement_id)),
+    )
+    for version in ordered:
+        place, key = target(version), str(version.requirement_id)
+        if (str(version.item_id), place) in kept:
+            plan.merged[key] = kept[(str(version.item_id), place)]
+            plan.excluded.append(
+                f"an item requirement of {labels.get(str(version.item_id))}: its position is "
+                "retired and the copy already has the item Not placed"
+            )
+            continue
+        kept[(str(version.item_id), place)] = key
+        plan.requirements.append((version, place))
+    plan.requirements.sort(key=lambda entry: (str(entry[0].item_id), str(entry[0].requirement_id)))
+    rows = [d.pk for _c, _v, definitions, _p in plan.checklists for d in definitions]
+    plan.mapped = {
+        str(row): str(requirement)
+        for row, requirement in ItemRequirementMap.objects.filter(
+            item_def_id__in=rows, requirement__isnull=False
+        ).values_list("item_def_id", "requirement_id")
+    }
+
+
+def _copy_requirements(org, plan, vehicle_id, by_slot, evidence):
+    """The copy's item requirements, one version each effective at the copy's creation."""
+    from cya.checklists.item_requirements import FIELDS
+    from cya.checklists.models import (
+        VehicleItemRequirement,
+        VehicleItemRequirementVersion,
+        new_requirement_id,
+    )
+
+    for version, (kind, slot) in plan.requirements:
+        requirement = VehicleItemRequirement.objects.create(
+            id=new_requirement_id(),
+            organization_id=org,
+            vehicle_id=vehicle_id,
+            item_id=version.item_id,
+            **evidence,
+        )
+        row = by_slot.get((kind, slot)) if slot else None
+        VehicleItemRequirementVersion.objects.create(
+            organization_id=org,
+            requirement=requirement,
+            vehicle_id=vehicle_id,
+            item_id=version.item_id,
+            revision=1,
+            effective_at=evidence["recorded_at"],
+            place_kind=kind,
+            place_slot_id=slot,
+            compartment_id=row if kind == "COMPARTMENT" else None,
+            system_id=row if kind == "SYSTEM" else None,
+            bulk_eligible=version.bulk_eligible,
+            **{name: getattr(version, name) for name in FIELDS},
+            **evidence,
+        )
+
+
+def _copy_checklists(org, plan, vehicle_id, row_for, by_slot, evidence):
+    """The copy's own checklists (drafts), assignments and keys (CFG-4, after the cutover).
+
+    After the item-requirement cutover a copied row outside a kit takes the place and
+    requirements of its requirement's copied version, so publishing the draft links to that
+    requirement (rule (a), cya.checklists.item_requirements) and never reverts a requirement
+    edited since the source's version was published.
+    """
+    from cya.checklists.item_requirements import FIELDS
     from cya.kits.models import VehiclePositionKey
 
     at = evidence["recorded_at"]
@@ -472,6 +625,13 @@ def _copy_checklists(org, plan, vehicle_id, row_for, evidence):
                     values[name] = row_for.get(str(values[name]))
             if values["compartment_id"] is None:
                 values["kit_id"] = None  # a retired position: Not placed (CHK-9)
+            taken = plan.requirement_of(definition)
+            if taken is not None:
+                requirement, (kind, slot) = taken
+                values.update({name: getattr(requirement, name) for name in FIELDS})
+                row = by_slot.get((kind, slot)) if slot else None
+                values["compartment_id"] = row if kind == "COMPARTMENT" else None
+                values["system_id"] = row if kind == "SYSTEM" else None
             ChecklistItemDef.objects.create(
                 id=new_id(), organization_id=org, checklist_version=draft, **values
             )
@@ -638,8 +798,10 @@ def duplicate_vehicle(*, source_vehicle_id, vin, display_name, number=None, base
                             else None
                         ),
                     )
+            if plan.requirements is not None:
+                _copy_requirements(org, plan, vehicle_id, by_slot, evidence)
             if plan.checklists:
-                copies = _copy_checklists(org, plan, vehicle_id, row_for, evidence)
+                copies = _copy_checklists(org, plan, vehicle_id, row_for, by_slot, evidence)
                 from cya.checks.locks import ensure_item_locks
 
                 ensure_item_locks(
@@ -690,6 +852,12 @@ def duplicate_vehicle(*, source_vehicle_id, vin, display_name, number=None, base
             **(
                 {"checklists": len(shown["checklists"]), "assignments": shown["assignments"]}
                 if plan.checklists
+                else {}
+            ),
+            # Only after the item-requirement cutover (SPEC 6.0.0 CFG-4).
+            **(
+                {"item_requirements": len(plan.requirements)}
+                if plan.requirements is not None
                 else {}
             ),
         }

@@ -8,12 +8,11 @@ from django.test import tag
 from cya.checklists.models import (
     ChecklistItemDef,
     ChecklistPublication,
-    ItemRequirementCutover,
     ItemRequirementMap,
     VehicleItemRequirement,
     VehicleItemRequirementVersion,
 )
-from cya.checklists.tests.support import ChecklistCase, ids
+from cya.checklists.tests.support import ChecklistCase
 from cya.checklists.validation import ChecklistValidationError
 
 
@@ -24,40 +23,6 @@ class ItemRequirementCase(ChecklistCase):
         self.vehicle = self.vehicles[0]
         self.a = self.vehicle_checklist(label="Synthetic checklist A")
         self.b = self.vehicle_checklist(label="Synthetic checklist B")
-
-    def record_item_cutover(self):
-        from cya.authorization.persistence import digest
-        from cya.core.audit_commands import Plan, run_command
-        from cya.kits.definitions import authorizer
-
-        org = str(self.org.pk)
-
-        def prepare(_actor):
-            def apply(receipt, current):
-                ItemRequirementCutover.objects.create(
-                    organization=self.org,
-                    command=receipt,
-                    recorded_at=receipt.recorded_at,
-                    actor_user=current.user,
-                    actor_roles_at_time=list(current.roles),
-                )
-
-            return Plan(
-                response_body={"code": "ITEM_REQUIREMENT_CUTOVER"},
-                apply=apply,
-                target_type="ORGANIZATION",
-                target_id=org,
-                new_snapshot={"schema_version": 1, "values": {}},
-            )
-
-        run_command(
-            organization_id=org,
-            command_type="ITEM_REQUIREMENT_CUTOVER",
-            request_digest=digest({"organization_id": org}),
-            authorize=authorizer(org, str(self.admin.pk), "draft_edit_template"),
-            prepare=prepare,
-            **ids(),
-        )
 
     def rows(self, version_id):
         return {
