@@ -71,6 +71,12 @@ ADMINISTRATION_LINKS = (
         "configure_schedules_thresholds_notifications",
     ),
     (
+        "inspection-session-settings",
+        "Inspection sessions",
+        "set how long an inspection can be resumed after it starts.",
+        "set_inspection_resume_limit",
+    ),
+    (
         "vehicle-files",
         "Vehicle files",
         "export and import one vehicle's VIN, compartments, items and kit list.",
@@ -129,7 +135,7 @@ ADMINISTRATION_GROUPS = (
         "system",
         "System",
         "Settings for the whole system.",
-        ("mail-relay", "crew-assignment-settings"),
+        ("mail-relay", "crew-assignment-settings", "inspection-session-settings"),
     ),
 )
 

@@ -1,4 +1,5 @@
 {% extends "shell/base.html" %}
+{% load station_time %}
 {% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
 {% block content %}
 <p class="breadcrumb"><a href="{% url 'inspection-vehicle' vehicle.pk %}">&larr; {{ vehicle.display_name }} sessions</a></p>
@@ -24,12 +25,18 @@
 
 {% if verification %}
 <section class="notice"><p>Verification for <a href="{% url 'deficiencies-detail' verification.pk %}">{{ verification.summary }}</a>. Each outstanding row needs a Pass; a Fail returns the problem to In Progress. Unable to Inspect does not verify.</p></section>
+{% elif past_deadline %}
+<section class="notice" aria-label="Session ended" id="session-deadline-passed">
+  <p>This inspection reached its time limit at <time datetime="{{ resume_deadline.isoformat }}">{{ resume_deadline|station_time }}</time> and can no longer be resumed. Its records are kept. To continue, start a new inspection from the vehicle page; checks already made still count.</p>
+  <a class="button primary" href="{% url 'inspection-vehicle' vehicle.pk %}">Go to {{ vehicle.display_name }}</a>
+</section>
 {% elif state != "OPEN" %}
 <section class="notice" aria-label="Session ended">
-  <p>This session is {{ state_label|lower }}. Reopen it to record more checks; completed checks keep their original times.</p>
+  <p>This session is {{ state_label|lower }}. Reopen it to record more checks until <time datetime="{{ resume_deadline.isoformat }}">{{ resume_deadline|station_time }}</time>; completed checks keep their original times.</p>
   <button type="button" id="reopen-session" class="button primary">Reopen session</button>
 </section>
 {% else %}
+<p class="muted" id="session-deadline">This inspection ends by <time datetime="{{ resume_deadline.isoformat }}">{{ resume_deadline|station_time }}</time>. After that, start a new one.</p>
 <section aria-labelledby="odo-heading" class="panel vehicle-readings">
   <h2 id="odo-heading">Vehicle readings</h2>
   <form id="odometer-form" novalidate>
