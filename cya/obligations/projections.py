@@ -136,22 +136,27 @@ def _bounds(instant, start, end):
 
 
 def _mapped_requirements(rows):
-    """{obligation id: requirement id} for pre-cutover NO_KIT obligations whose pinned row is mapped."""
+    """{obligation id: requirement id} for pre-cutover NO_KIT obligations whose pinned row is mapped.
+
+    Several obligations (due instants) pin the same item row, so the row's requirement is read once
+    per row and given to each of them.
+    """
     from cya.checklists.models import ItemRequirementMap
 
-    by_def = {
-        str(r.requirement_version.item_def_id): str(r.pk)
+    pinned = {
+        str(r.pk): str(r.requirement_version.item_def_id)
         for r in rows
         if r.kit_key == NO_KIT and r.requirement_version.item_def_id
     }
-    if not by_def:
+    if not pinned:
         return {}
-    return {
-        by_def[str(item_def)]: str(requirement)
+    by_def = {
+        str(item_def): str(requirement)
         for item_def, requirement in ItemRequirementMap.objects.filter(
-            item_def_id__in=list(by_def), requirement__isnull=False
+            item_def_id__in=sorted(set(pinned.values())), requirement__isnull=False
         ).values_list("item_def_id", "requirement_id")
     }
+    return {pk: by_def[item_def] for pk, item_def in pinned.items() if item_def in by_def}
 
 
 def _obligation(row, mapped=None):

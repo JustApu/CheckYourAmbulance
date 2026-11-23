@@ -206,9 +206,26 @@ class TransitionTests(RequirementObligationCase):
         org, vehicle = str(self.org.pk), str(self.vehicle.pk)
         single = load_projection_history(vehicle, due, organization_id=org)
         (page,) = load_projection_histories([vehicle], due, organization_id=org).values()
+        mapped_rows = ItemRequirementMap.objects.filter(requirement__isnull=False).values(
+            "item_def_id"
+        )
+        # Pre-cutover obligations pinning a mapped row (not the legacy template's rows from
+        # before the vehicle-checklist cutover, which have no map entry).
+        legacy_ids = {
+            str(o.pk)
+            for o in Obligation.objects.filter(
+                organization_id=self.org.pk,
+                item=self.suction,
+                kit_key=NO_KIT,
+                requirement_version__item_def_id__in=mapped_rows,
+            )
+        }
         for history in (single, page):
             (evidence,) = [o for o in history.obligations if o.id == str(legacy.pk)]
             self.assertEqual(evidence.mapped_requirement_id, own_requirement)
+            # Every pre-cutover obligation pinning that row gets it, not only one of them.
+            mapped = {o.id for o in history.obligations if o.mapped_requirement_id}
+            self.assertEqual(mapped, legacy_ids & {o.id for o in history.obligations})
         self.assertEqual(single.obligations, page.obligations)
 
 
