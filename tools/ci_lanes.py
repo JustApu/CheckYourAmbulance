@@ -60,6 +60,7 @@ MIGRATION_TEST_INPUTS = frozenset(
     {
         "cya/attention/tests/support.py",
         "cya/checklists/tests/support.py",
+        "cya/checklists/tests/test_item_requirements.py",
         "cya/checks/tests/support.py",
         "cya/checks/tests/test_obligation_links.py",
         "cya/deficiencies/tests/support.py",
