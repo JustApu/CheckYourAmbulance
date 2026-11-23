@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from django.utils import timezone
 
 from cya.accounts.fields import new_id
-from cya.attention.checklist import ChecklistQueryError, _placed_content, _resolved_items
+from cya.attention.checklist import ChecklistQueryError, _first_resolved_items, _placed_content
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
 from cya.checklists.models import ChecklistPublication
@@ -98,7 +98,7 @@ def _version_pin(org, vehicle, due_at, version_id, version_pins):
 
 
 def _pins(org, vehicle, due_at, items):
-    resolved = _resolved_items(org, vehicle, due_at)
+    resolved = _first_resolved_items(org, vehicle, due_at)
     placed = _placed_content(org, vehicle, due_at)
     result = []
     version_pins = {}

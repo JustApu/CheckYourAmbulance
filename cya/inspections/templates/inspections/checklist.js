@@ -965,6 +965,11 @@
     loading = true;
     var listView = config.verification_for_deficiency_id || layoutMode === "FLAT" ? view : "NORMAL";
     var q = "?view=" + encodeURIComponent(listView) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
+    // A session reads its own checklist's rows, so an item another checklist also lists is
+    // shown here too, with the vehicle's shared state (SPEC 6.0.0 VW-5, issue #256).
+    if (config.checklist_version_id && !config.verification_for_deficiency_id) {
+      q += "&checklist_version_id=" + encodeURIComponent(config.checklist_version_id);
+    }
     fetch(config.urls.checklist + q, {credentials: "same-origin", cache: "no-store"}).then(function (r) {
       if (r.status === 401) { signedOut(); return null; }
       return r.json().then(function (b) { return {ok: r.ok, body: b}; });

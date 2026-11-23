@@ -36,11 +36,18 @@ independent, so a later Pass clears the check cause but never an unresolved defi
 
 ## The checklist query
 
-`vehicle_checklist(organization_id, vehicle_id, view=, needs_attention_only=, as_of=)` returns
-one row per checklist item, and one per kit instance for an item inside a kit. The items are
-the union of the published templates **bound to the vehicle** (a `requirement_binding` BIND in
-force at the instant), resolved at the instant, first template by id winning an item two
-define; a template published for another vehicle, or unbound, adds nothing. The kit instances
+`vehicle_checklist(organization_id, vehicle_id, view=, needs_attention_only=, as_of=,
+checklist_version_id=)` returns one row per checklist item, and one per kit instance for an
+item inside a kit. The items are the union of the published templates **bound to the
+vehicle** (a `requirement_binding` BIND in force at the instant), resolved at the instant; a
+template published for another vehicle, or unbound, adds nothing. Without
+`checklist_version_id` there is one row per item for the whole vehicle, the first template by
+id winning an item two define. With it, the rows are that checklist version's own, including
+an item another checklist also lists (SPEC 6.0.0 VW-5, [issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256)),
+and group progress counts those rows. The obligation and attention state of a shared item are
+the vehicle's, the same in every checklist. An unknown version lists nothing, and a malformed
+one is `400 INVALID_CHECKLIST_VERSION`. A session's checklist screen reads its pinned version
+this way. The kit instances
 are read from the append-only assignment history as it stood at the instant, never from the
 mutable `kit_instance` row, so a past checklist keeps a kit that was later moved or deactivated
 and omits one added later (none when the vehicle has no such kit, which is also what the
@@ -119,7 +126,7 @@ tables.
 
 | Route | Purpose |
 |---|---|
-| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=` | The query above at the present instant; the user's saved view and filter apply unless the query names them |
+| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=&checklist_version_id=` | The query above at the present instant; the user's saved view and filter apply unless the query names them; `checklist_version_id` (optional) limits the rows to that checklist version's own |
 | `GET /api/v1/me/view-preferences` | The saved (or default) view and filter |
 | `POST /api/v1/me/view-preferences` | `{operation_id (a version 4 UUID, else 400), preferred_view, needs_attention_only}`; `200` with the stored values; a replay returns the stored result |
 
