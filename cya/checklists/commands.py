@@ -934,3 +934,137 @@ def record_stocking_deviation(
         build=build,
         **context,
     )
+
+
+# --- vehicle item requirements (SPEC 6.0.0 CHK-11) ------------------------------------------
+
+
+def publish_item_requirement_version(
+    *,
+    requirement_id,
+    kind,
+    allowed_outcomes,
+    instructions="",
+    expected_quantity=None,
+    unit=None,
+    expiration_tracked=False,
+    compartment_id=None,
+    system_id=None,
+    effective_at=None,
+    **context,
+):
+    """Publish a new version of one vehicle item requirement (SPEC 6.0.0 CHK-11, AC-42 (4)).
+
+    It changes the item's place or requirements for every checklist that inspects that stock,
+    from effective_at (None: the publication instant) on; earlier obligations, checks and
+    checklist versions keep what they pinned. A compartment or system moves the stock (the
+    requirement keeps its identity); neither leaves it Not placed. Refused before the
+    organization's item-requirement cutover, at an instant not after the requirement's latest
+    version, or where another requirement of the item is in force at that place (18.1 item 8).
+    """
+    from types import SimpleNamespace
+
+    from cya.checklists import item_requirements
+    from cya.checklists.models import VehicleItemRequirement, VehicleItemRequirementVersion
+
+    canonical_id(requirement_id)
+    org = context["organization_id"]
+    requested = _aware(effective_at, "effective_at")
+    intent = {
+        "requirement_id": requirement_id,
+        "kind": kind,
+        "allowed_outcomes": allowed_outcomes,
+        "instructions": instructions,
+        "expected_quantity": expected_quantity,
+        "unit": unit,
+        "expiration_tracked": expiration_tracked,
+        "compartment_id": compartment_id,
+        "system_id": system_id,
+        "effective_at": requested.isoformat() if requested else None,
+    }
+
+    def build(actor):
+        if not item_requirements.has_cutover(org):
+            raise ChecklistValidationError(
+                "the organization has not moved to item requirements (migrate_item_requirements)"
+            )
+        found = (
+            VehicleItemRequirement.objects.filter(organization_id=org, pk=requirement_id)
+            .values_list("vehicle_id", "item_id")
+            .first()
+        )
+        if found is None:
+            raise ChecklistValidationError(f"item requirement {requirement_id} does not exist")
+        vehicle_id, item_id = str(found[0]), str(found[1])
+        _lock_vehicles(org, [vehicle_id])
+        (spec,) = validate_definitions(
+            org,
+            [
+                {
+                    "item_id": item_id,
+                    "display_order": 1,
+                    "kind": kind,
+                    "instructions": instructions,
+                    "expected_quantity": expected_quantity,
+                    "unit": unit,
+                    "allowed_outcomes": allowed_outcomes,
+                    "expiration_tracked": expiration_tracked,
+                    "compartment_id": compartment_id,
+                    "system_id": system_id,
+                }
+            ],
+            vehicle_id=vehicle_id,
+        )
+        row = SimpleNamespace(
+            compartment_id=spec.get("compartment_id"),
+            system_id=spec.get("system_id"),
+            **{name: spec.get(name) for name in item_requirements.FIELDS},
+        )
+        row.instructions = row.instructions or ""
+        row.expiration_tracked = bool(row.expiration_tracked)
+
+        version_id = new_id()
+
+        def apply(receipt, current_actor):
+            final = _final_effective_at(requested, receipt)
+            versions = list(
+                VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id, item_id=item_id)
+            )
+            own = [v for v in versions if str(v.requirement_id) == str(requirement_id)]
+            if own and final <= max(v.effective_at for v in own):
+                raise ChecklistValidationError(
+                    "effective_at must be after the requirement's latest version"
+                )
+            place = item_requirements.place_of(row)
+            for other in {str(v.requirement_id) for v in versions} - {str(requirement_id)}:
+                theirs = sorted(
+                    (v for v in versions if str(v.requirement_id) == other),
+                    key=lambda v: v.effective_at,
+                )
+                # Another requirement occupies the place over [final, ...) when its version in
+                # force at final, or any later one, is there (18.1 item 8).
+                current = [v for v in theirs if v.effective_at <= final][-1:]
+                later = [v for v in theirs if v.effective_at > final]
+                if any(item_requirements._version_place(v) == place for v in current + later):
+                    raise ChecklistValidationError(
+                        "another item requirement of this item is in force at that place"
+                    )
+            writer = item_requirements._Writer(org, vehicle_id, receipt, current_actor)
+            writer.version(requirement_id, item_id, final, row, version_id)
+
+        body = {"requirement_id": requirement_id, "requirement_version_id": version_id}
+        return _plan(
+            org,
+            body,
+            apply,
+            action="ITEM_REQUIREMENT_PUBLISHED",
+            requirement_id=requirement_id,
+        )
+
+    return _execute(
+        action="publish_template",
+        command_type="ITEM_REQUIREMENT_PUBLISH",
+        intent=intent,
+        build=build,
+        **context,
+    )

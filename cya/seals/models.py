@@ -204,6 +204,14 @@ class SealInspectionItem(Evidence):
     kit_definition_item = models.ForeignKey(
         "cya_kits.KitDefinitionItem", null=True, on_delete=models.PROTECT, related_name="+"
     )
+    # SPEC 6.0.0 CHK-11: the item requirement version of a loose item's row; it scopes the
+    # links like a check's (cya_seals 0008).
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
     outcome = models.CharField(max_length=20)
     count = models.PositiveIntegerField(null=True)
     expiration = models.DateField(null=True)

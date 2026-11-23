@@ -13,6 +13,10 @@ class RecordedCheck:
     item_id: str
     kit_key: str
     author_user_id: str | None
+    # SPEC 6.0.0 CHK-11: the item requirement version a loose item's check names (None for a kit,
+    # a presence line, or before the cutover); only such a check may take the transition link.
+    item_requirement_version_id: str | None = None
+    item_requirement_id: str | None = None  # the requirement of that version
 
 
 @dataclass(frozen=True)
@@ -119,7 +123,18 @@ def replay_checks(history, instant):
         obligation = obligations.get(link.obligation_id)
         if obligation is None:
             raise ValueError("check link has no exported obligation")
-        if (row.item_id, row.kit_key) != (obligation.item_id, obligation.unit_key):
+        # The transition of SPEC 6.0.0 18.3 item 4: a check of an item requirement may complete
+        # an obligation created before the cutover, which keeps NO_KIT; the link guard
+        # (cya_checks 0017) allowed it only for the same requirement and item.
+        transition = (
+            obligation.unit_key == NO_KIT
+            and row.kit_key != NO_KIT
+            and row.item_requirement_id is not None  # a requirement check only, and of the
+            and row.item_requirement_id == obligation.mapped_requirement_id  # pinned row's own
+        )
+        if row.item_id != obligation.item_id or (
+            row.kit_key != obligation.unit_key and not transition
+        ):
             raise ValueError("check link item or kit mismatch")
         checks.append(
             CheckEvidence(

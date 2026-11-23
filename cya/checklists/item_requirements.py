@@ -170,12 +170,13 @@ class _Writer:
             id=new_requirement_id(), vehicle_id=self.vehicle_id, item_id=item_id, **self.evidence
         )
 
-    def version(self, requirement_id, item_id, at, row):
+    def version(self, requirement_id, item_id, at, row, version_id=None):
         kind, slot = place_of(row)
         revision = (
             VehicleItemRequirementVersion.objects.filter(requirement_id=requirement_id).count() + 1
         )
         return VehicleItemRequirementVersion.objects.create(
+            **({"id": version_id} if version_id else {}),
             requirement_id=requirement_id,
             vehicle_id=self.vehicle_id,
             item_id=item_id,

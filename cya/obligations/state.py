@@ -63,6 +63,10 @@ class ObligationEvidence:
     # The obligation's stored stream key: its kit, NO_KIT, or a kit presence line's unit key
     # (SPEC 2.0.0 KDEF-12). None for evidence built without it, which falls back to the kit.
     kit_key: str | None = None
+    # SPEC 6.0.0 18.3 item 4: for an obligation created before the item-requirement cutover
+    # (kit_key NO_KIT), the item requirement its pinned row maps to (immutable map row), so a
+    # replayed transition link is checked against the exact requirement the check names.
+    mapped_requirement_id: str | None = None
 
     @property
     def unit_key(self):

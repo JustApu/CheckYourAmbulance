@@ -14,6 +14,7 @@ class LinkTarget:
     item_id: str
     kit_id: str | None = None
     kit_requirement_id: str | None = None
+    item_requirement_version_id: str | None = None  # SPEC 6.0.0 CHK-11, a loose item's row
 
 
 def plan_links(organization_id, vehicle_id, targets, *, recorded_at):
@@ -40,6 +41,7 @@ def plan_links(organization_id, vehicle_id, targets, *, recorded_at):
             item_id=target.item_id,
             kit_id=target.kit_id,
             kit_requirement_id=target.kit_requirement_id,
+            item_requirement_version_id=target.item_requirement_version_id,
         )
         links = choose_seal_links(prospective, recorded_at=recorded_at)
         total += len(links)

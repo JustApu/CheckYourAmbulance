@@ -140,10 +140,17 @@ All of it runs server-side; the UI is never the enforcement point.
   (SPEC 6.0.0 SCH-2, SCH-6): every unsatisfied one whose on-time window holds the check, and every
   unsatisfied one past its grace deadline but not past its pinned late limit
   `L`, whichever checklist created it. On-time links come first, then late ones, each by due
-  instant with obligation ID breaking ties; the first is the primary link (ordinal 0). Until item
-  requirements exist ([issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256)
-  Part C) an interim guard links only obligations whose requirement versions check the item the
-  same way in the same place as the checklist the check was recorded from. Late linking covers
+  instant with obligation ID breaking ties; the first is the primary link (ordinal 0). After the
+  organization's item-requirement cutover (SPEC 6.0.0 CHK-11,
+  [issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256) Part C2) a check of an
+  item outside a kit names the requirement version of the row shown
+  (`item_requirement_version_id`, copied to corrections) and links its requirement's stream: the
+  obligations whose `kit_key` is the requirement id, which a move keeps, so a check at the new
+  place completes an obligation pinned to the earlier place (AC-42 (6)). The one exception is the
+  transition: an obligation created before the cutover keeps `kit_key` NO_KIT and is linked only
+  while not past its late limit and when its pinned row maps to the same requirement. Before the
+  cutover an interim guard links only obligations whose requirement versions check the item the
+  same way in the same place as the checklist the check was recorded from (Part B). Late linking covers
   obligations past their grace deadline but not past their pinned late
   limit `L` (`late_limit_at`: `G` plus the `w_late` captured when the obligation was created;
   SCH-2/SCH-3, SPEC 1.31.0; `CYA_LATE_COMPLETION_HOURS`, default 12, applies to obligations

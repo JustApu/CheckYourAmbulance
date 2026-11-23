@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest import TestCase
+from uuid import NAMESPACE_URL, uuid5
 
 from cya.checks.state import CheckDecision, CheckSnapshot
 from cya.obligations.history import (
@@ -117,6 +118,32 @@ class HistoryEvidenceTests(TestCase):
         bad = replace(history.check_records[1], kit_key="another-kit")
         with self.assertRaisesRegex(ValueError, "kit mismatch"):
             replay_checks(replace(history, check_records=(bad,)), T)
+        # A presence-line unit key is a uuid5 too, like an item requirement id (review on #263):
+        # only a check that names an item requirement version may take the transition link.
+        line_unit = str(uuid5(NAMESPACE_URL, "presence-line"))
+        presence = replace(history.check_records[1], kit_key=line_unit)
+        with self.assertRaisesRegex(ValueError, "kit mismatch"):
+            replay_checks(replace(history, check_records=(presence,)), T)
+
+    def test_a_transition_link_needs_the_same_requirement(self):  # review 6017451141
+        history = self.history()
+        own, other = (str(uuid5(NAMESPACE_URL, name)) for name in ("own", "other"))
+        legacy = replace(history.obligations[0], mapped_requirement_id=own)
+
+        def check(requirement):
+            return replace(
+                history.check_records[1],
+                kit_key=requirement,
+                item_requirement_version_id="version",
+                item_requirement_id=requirement,
+            )
+
+        linked, _ = replay_checks(
+            replace(history, obligations=(legacy,), check_records=(check(own),)), T
+        )
+        self.assertEqual([c.obligation_id for c in linked], ["o"])
+        with self.assertRaisesRegex(ValueError, "kit mismatch"):
+            replay_checks(replace(history, obligations=(legacy,), check_records=(check(other),)), T)
         with self.assertRaisesRegex(ValueError, "root is missing"):
             replay_checks(
                 replace(history, check_records=(history.check_records[0],)),
