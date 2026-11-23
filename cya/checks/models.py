@@ -58,6 +58,14 @@ class CheckRecord(Evidence):
     checklist_version = models.ForeignKey(
         ChecklistVersion, null=True, on_delete=models.PROTECT, related_name="+"
     )
+    # SPEC 6.0.0 CHK-11, 7.2: the vehicle item requirement version of the row shown, for an
+    # item outside a kit after the item-requirement cutover; it records the place checked.
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
     # The vehicle's own kit that was present, frozen at check time; null when none or ambiguous.
     kit = models.ForeignKey(KitInstance, null=True, on_delete=models.PROTECT, related_name="+")
     # The inspection session this check was made in (SPEC 6.1); null for a check outside one.

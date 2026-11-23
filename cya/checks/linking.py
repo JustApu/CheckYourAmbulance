@@ -25,6 +25,8 @@ from cya.obligations.models import (
 
 MAX_LINK_CANDIDATES = 10_000
 
+NO_KIT = "00000000-0000-0000-0000-000000000000"
+
 
 def late_window():
     """The current w_late setting (SPEC SCH-3).
@@ -153,12 +155,25 @@ def _scope(check, recorded_at):
     eligible only for obligations whose requirement version pins that same line.
     """
     kit_requirement = getattr(check, "kit_requirement_id", None)
+    item_version = getattr(check, "item_requirement_version_id", None)
+    requirement = None
     if check.kit_id:
         kit_key = str(check.kit_id)
     elif kit_requirement:
         kit_key = line_unit_keys([kit_requirement])[str(kit_requirement)]
+    elif item_version:
+        # SPEC 6.0.0 CHK-11: the stream of an item requirement is keyed by its id, which a move
+        # keeps, so a check at the new place completes the earlier place's obligation.
+        from cya.checklists.models import VehicleItemRequirementVersion
+
+        requirement = str(
+            VehicleItemRequirementVersion.objects.values_list("requirement_id", flat=True).get(
+                pk=item_version
+            )
+        )
+        kit_key = requirement
     else:
-        kit_key = "00000000-0000-0000-0000-000000000000"
+        kit_key = NO_KIT
     return {
         "organization_id": str(check.organization_id),
         "vehicle_id": str(check.vehicle_id),
@@ -166,7 +181,33 @@ def _scope(check, recorded_at):
         "kit_key": kit_key,
         "kit_requirement_id": str(kit_requirement) if kit_requirement else None,
         "recorded_at": recorded_at,
+        "item_requirement_id": requirement,
     }
+
+
+def _candidates(scope, *, late, include_satisfied=False, ignore_root_check_id=None):
+    """Eligible obligations of the check's stream, plus the transition of SPEC 18.3 item 4.
+
+    An obligation created before the item-requirement cutover keeps kit_key NO_KIT. A check of
+    requirement R also takes such an obligation, still eligible (unsatisfied, not past its late
+    limit), when its pinned item row resolves to R (link or source-row map); the link guard
+    allows exactly this case (cya_checks 0017).
+    """
+    from cya.checklists.item_requirement_cutover import resolve_item_requirement
+
+    requirement = scope["item_requirement_id"]
+    base = {k: v for k, v in scope.items() if k != "item_requirement_id"}
+    extra = {"include_satisfied": include_satisfied, "ignore_root_check_id": ignore_root_check_id}
+    found = _eligible(**base, late=late, **extra)
+    if requirement is None:
+        return found
+    legacy = [
+        obligation
+        for obligation in _eligible(**{**base, "kit_key": NO_KIT}, late=late, **extra)
+        if obligation.requirement_version.item_def_id
+        and resolve_item_requirement(obligation.requirement_version.item_def_id)[0] == requirement
+    ]
+    return sorted(found + legacy, key=lambda o: (o.due_at, str(o.pk)))
 
 
 def conflict_obligation(check, *, recorded_at):
@@ -178,7 +219,7 @@ def conflict_obligation(check, *, recorded_at):
     of the item from any checklist (CON-7), so the anchor is the window that opened first and
     every check since then is in scope. The caller holds the vehicle/item lock.
     """
-    on_time = _eligible(**_scope(check, recorded_at), late=False, include_satisfied=True)
+    on_time = _candidates(_scope(check, recorded_at), late=False, include_satisfied=True)
     return min(on_time, key=lambda o: (o.early_at, o.due_at, o.pk)) if on_time else None
 
 
@@ -249,17 +290,22 @@ def choose_links(check, *, recorded_at, ignore_root_check_id=None):
     the checklist the check was recorded from.
     """
     scope = _scope(check, recorded_at)
-    scope["ignore_root_check_id"] = ignore_root_check_id
-    on_time = _eligible(**scope, late=False)
-    late = _eligible(**scope, late=True)
+    on_time = _candidates(scope, late=False, ignore_root_check_id=ignore_root_check_id)
+    late = _candidates(scope, late=True, ignore_root_check_id=ignore_root_check_id)
     if len(on_time) + len(late) > MAX_LINK_CANDIDATES:
         raise LinkScopeTooLarge("too many eligible obligations")
     candidates = [(o, "ON_TIME") for o in on_time] + [(o, "LATE") for o in late]
     if not candidates:
         return []
-    anchor = _anchor(check, [o for o, _ in candidates])
-    key = _requirement_key(anchor.requirement_version)
-    chosen = [(o, t) for o, t in candidates if _requirement_key(o.requirement_version) == key]
+    if scope["item_requirement_id"] is not None:
+        # The stream is the item requirement itself (SPEC 6.0.0 CHK-11); Part B's interim
+        # guard is not needed.
+        chosen = candidates
+    else:
+        # Before the item-requirement cutover the interim guard still applies (Part B).
+        anchor = _anchor(check, [o for o, _ in candidates])
+        key = _requirement_key(anchor.requirement_version)
+        chosen = [(o, t) for o, t in candidates if _requirement_key(o.requirement_version) == key]
     return [
         {"id": new_id(), "obligation": o, "ordinal": n, "shared_rule": None, "timing": t}
         for n, (o, t) in enumerate(chosen)
@@ -275,6 +321,7 @@ def choose_seal_links(check, *, recorded_at, ignore_root_check_id=None):
     late completion, then due instant and stable obligation ID decide the primary link.
     """
     scope = _scope(check, recorded_at)
+    scope.pop("item_requirement_id", None)
     scope["ignore_root_check_id"] = ignore_root_check_id
     on_time = _eligible(**scope, late=False)
     if len(on_time) > MAX_LINK_CANDIDATES:

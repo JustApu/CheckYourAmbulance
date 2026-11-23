@@ -215,6 +215,14 @@ class RequirementVersion(Evidence):
         # Enforced by the organization-pair key of migration 0016.
         db_constraint=False,
     )
+    # SPEC 6.0.0 CHK-11: the vehicle item requirement version in force at the due instant, for
+    # a row of an item requirement; its requirement id is the kit_key (the stream's unit).
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
     publication = models.ForeignKey(
         "cya_checklists.ChecklistPublication", on_delete=models.PROTECT, related_name="+"
     )
@@ -266,9 +274,22 @@ class RequirementVersion(Evidence):
             models.CheckConstraint(
                 condition=(
                     models.Q(
-                        kit_instance__isnull=True, kit_requirement__isnull=True, kit_key=NO_KIT
+                        kit_instance__isnull=True,
+                        kit_requirement__isnull=True,
+                        item_requirement_version__isnull=True,
+                        kit_key=NO_KIT,
                     )
                     | models.Q(kit_instance__isnull=False, kit_instance=models.F("kit_key"))
+                    # An item requirement's row (SPEC 6.0.0 CHK-11): the requirement id is the
+                    # unit key; the insert trigger holds it equal to the pinned version's.
+                    | (
+                        models.Q(
+                            kit_instance__isnull=True,
+                            kit_requirement__isnull=True,
+                            item_requirement_version__isnull=False,
+                        )
+                        & ~models.Q(kit_key=NO_KIT)
+                    )
                     # A kit presence requirement: no instance, its line's unit key (KDEF-12).
                     | (
                         models.Q(kit_instance__isnull=True, kit_requirement__isnull=False)

@@ -187,6 +187,7 @@ def _ensure_requirement_versions(plan, evidence):
             kit_definition_item_id=d.kit_definition_item_id,
             placement_id=d.placement_id,
             kit_requirement_id=d.kit_requirement_id,
+            item_requirement_version_id=d.item_requirement_version_id,
             **evidence,
         )
         for rid, d in wanted.items()
