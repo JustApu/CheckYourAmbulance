@@ -1,6 +1,8 @@
 """HTTP endpoints for the checklist views and the view preference (issue 83 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/83), SPEC 6.5).
 
-GET  /api/v1/vehicles/{id}/checklist        rows, attention, known deficiencies, vehicle status
+GET  /api/v1/vehicles/{id}/checklist        rows, attention, known deficiencies, vehicle status;
+                                            ?session_id= lists that session's pinned version
+                                            (participants only, CHK-4)
 GET  /api/v1/me/view-preferences            the signed-in user's saved view and filter
 POST /api/v1/me/view-preferences            save them (audited, idempotent on operation_id)
 
@@ -23,12 +25,13 @@ from cya.authorization.backend import canonical_id
 from cya.checks.api import Rejected, _reply
 from cya.checks.models import CheckRecord
 from cya.deficiencies.api import _json_body, _run, _stamp
+from cya.inspections.models import InspectionSession, SessionParticipant
 from tools.command_identity import human_operation_id
 
 logger = logging.getLogger(__name__)
 
 PREFERENCE_FIELDS = frozenset({"operation_id", "preferred_view", "needs_attention_only"})
-CHECKLIST_QUERY = frozenset({"view", "needs_attention_only", "checklist_version_id"})
+CHECKLIST_QUERY = frozenset({"view", "needs_attention_only", "checklist_version_id", "session_id"})
 
 
 def _stamped(value):
@@ -86,6 +89,28 @@ def check_authors(organization, rows):
     return {str(c.pk): c.actor_user.display_name for c in found}
 
 
+def _session(organization, vehicle, user, session_id):
+    """The session whose pinned version lists the rows (CHK-4), or None for the vehicle's own.
+
+    Only a recorded participant of a session on this vehicle gets it; any other session, real or
+    not, answers 404 alike, so nothing reveals whether it exists (as the session page does).
+    """
+    if session_id is None:
+        return None
+    try:
+        session_id = canonical_id(session_id)
+    except (ValueError, TypeError, AttributeError):
+        raise Rejected(400, "MALFORMED_REQUEST", [("session_id", "INVALID")]) from None
+    found = (
+        InspectionSession.objects.select_related("checklist_version")
+        .filter(organization_id=organization, vehicle_id=vehicle, pk=session_id)
+        .first()
+    )
+    if found is None or not SessionParticipant.objects.filter(session=found, user=user).exists():
+        raise Rejected(404, "NOT_FOUND")
+    return found
+
+
 def _flag(value):
     if value in ("true", "false"):
         return value == "true"
@@ -120,6 +145,7 @@ def checklist(request, vehicle_id):
             view=view,
             needs_attention_only=only,
             checklist_version_id=request.GET.get("checklist_version_id"),
+            session=_session(organization, vehicle, user, request.GET.get("session_id")),
         )
     except Rejected as error:
         return _reply(error.status, error.code, correlation_id, error.field_errors)

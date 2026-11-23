@@ -152,13 +152,50 @@ def _session_rows(user, vehicle, instant):
                 "id": str(session.pk),
                 "state": shown,
                 "state_label": STATE_LABELS[shown],
+                "template_id": str(session.checklist_version.template_id),
                 "template_label": session.checklist_version.template.label,
+                "template_active": session.checklist_version.template.active,
                 "opened_at": session.opened_at,
                 "participant": participant,
                 "url": reverse("inspection-session", args=[session.pk]) if participant else None,
             }
         )
     return rows
+
+
+def _checklists(templates, sessions):
+    """One entry per vehicle checklist: start it, join or continue its session, or resume.
+
+    Each vehicle checklist has at most one session in progress (SPEC 6.3 SES-7). Starting it
+    joins that session, so the entry offers Join (or Continue to a participant) instead of Start.
+    The command joins the newest in-progress session; sessions is newest first, with the same
+    effective state. A participant's incomplete session is offered for resuming only while none
+    of its checklist is in progress (SES-3). A checklist no longer bound is listed only while it
+    has a session in progress, which anyone may still join if the checklist is active.
+    """
+    entries = {
+        t["id"]: {"id": t["id"], "label": t["label"], "bound": True, "joinable": True}
+        for t in templates
+    }
+    for row in sessions:
+        if row["state"] == "OPEN" and row["template_id"] not in entries:
+            entries[row["template_id"]] = {
+                "id": row["template_id"],
+                "label": row["template_label"],
+                "bound": False,
+                "joinable": row["template_active"],
+            }
+    for entry in entries.values():
+        mine = [row for row in sessions if row["template_id"] == entry["id"]]
+        entry["in_progress"] = next((row for row in mine if row["state"] == "OPEN"), None)
+        entry["resume"] = next(
+            (row for row in mine if row["participant"] and row["state"] == "INCOMPLETE"), None
+        )
+        # The list below links a session once: not again when the entry above already does.
+        for row in (entry["in_progress"], entry["resume"]):
+            if row is not None and row["participant"]:
+                row["featured"] = True
+    return list(entries.values())
 
 
 @never_cache
@@ -171,20 +208,13 @@ def vehicle(request, vehicle_id):
     now = timezone.now()
     templates = _templates(user, found, now)
     sessions = _session_rows(user, found, now)
-    resume_session = next(
-        (row for row in sessions if row["participant"] and row["state"] == "INCOMPLETE"), None
-    )
     context = {
         "title": found.display_name,
         "vehicle": found,
         "status": _status(user, found, now),
         "templates": templates,
+        "checklists": _checklists(templates, sessions),
         "sessions": sessions,
-        # Session commands join the latest open session for the vehicle by default. The list
-        # uses the same descending order and effective-state filter as the command.
-        "active_session": next((row for row in sessions if row["state"] == "OPEN"), None),
-        "resume_session": resume_session,
-        "join_template_id": templates[0]["id"] if templates else None,
         "config": {
             "vehicle_id": str(found.pk),
             "sessions_url": reverse("api-inspection-sessions"),

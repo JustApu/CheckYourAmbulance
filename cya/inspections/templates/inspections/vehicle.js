@@ -25,14 +25,15 @@
     if (segment === "" || segment === "." || segment === "..") throw new Error("unconfirmed");
     return SESSION_PATH + segment + "/";
   }
-  function start(template, separate, button) {
-    var k = template + (separate ? "|separate" : "");
+  // Starting a checklist joins its inspection in progress, if any (SPEC 6.3 SES-7).
+  function start(template, button) {
+    var k = template;
     var id = pending[k] || uuid4();
     button.disabled = true; show("Opening…");
     fetch(config.sessions_url, {
       method: "POST", credentials: "same-origin", cache: "no-store",
       headers: {"Content-Type": "application/json", "X-CSRFToken": csrf},
-      body: JSON.stringify({operation_id: id, vehicle_id: config.vehicle_id, template_id: template, separate: separate})
+      body: JSON.stringify({operation_id: id, vehicle_id: config.vehicle_id, template_id: template})
     }).then(function (r) {
       return r.json().then(function (b) { return {ok: r.ok, status: r.status, body: b}; });
     }).then(function (a) {
@@ -54,20 +55,7 @@
       show("Unconfirmed: the server did not answer, so the inspection may or may not have started. Tap again to retry the same request.");
     });
   }
-  Array.prototype.forEach.call(document.querySelectorAll(".start-session"), function (b) {
-    b.addEventListener("click", function () { start(b.dataset.template, false, b); });
-  });
-  Array.prototype.forEach.call(document.querySelectorAll(".join-session"), function (b) {
-    b.addEventListener("click", function () { start(b.dataset.template, false, b); });
-  });
-  Array.prototype.forEach.call(document.querySelectorAll(".start-separate"), function (b) {
-    b.addEventListener("click", function () {
-      var label = b.dataset.templateLabel || "the selected checklist";
-      var question = "Start a separate inspection using “" + label +
-        "”? This creates a second inspection instead of joining the open one.";
-      if (window.confirm(question)) {
-        start(b.dataset.template, true, b);
-      }
-    });
+  Array.prototype.forEach.call(document.querySelectorAll(".start-session, .join-session"), function (b) {
+    b.addEventListener("click", function () { start(b.dataset.template, b); });
   });
 })();

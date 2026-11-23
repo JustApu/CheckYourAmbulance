@@ -1,8 +1,12 @@
 """HTTP endpoints for inspection sessions (issue 85 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/85), SPEC 6.1-6.3).
 
-POST /api/v1/inspection-sessions               open a session on a vehicle, or join the open one
+POST /api/v1/inspection-sessions               start a vehicle checklist: join its session in
+                                               progress, or open one (SES-7)
 POST /api/v1/inspection-sessions/{id}/reopen   a participant resumes an ended session (SES-3)
 POST /api/v1/inspection-sessions/{id}/end      a participant ends an open session
+
+A refusal is 409 SESSION_UNAVAILABLE, or 409 SESSION_IN_PROGRESS when a separate start or a
+reopen would make a second session of one vehicle checklist in progress (SES-7).
 
 Authenticated same-origin JSON like the other endpoints: actor, organization and roles come from
 the signed-in user, never the body (SPEC 3.2). The rules, authorization and audit are in
@@ -54,8 +58,8 @@ def _call(operation_id, user, correlation_id, run, **arguments):
             request_attempt_id=str(uuid.uuid4()),
             **arguments,
         )
-    except SessionError:
-        raise Rejected(409, "SESSION_UNAVAILABLE") from None
+    except SessionError as error:
+        raise Rejected(409, error.code) from None
     return operation_id, result, _acknowledge
 
 
