@@ -12,7 +12,7 @@ Writers go through cya.deficiencies.service and cya.deficiencies.commands; see d
 from django.db import models
 
 from cya.accounts.fields import IdentityIDField, new_id
-from cya.checklists.models import non_blank, organization_fk
+from cya.checklists.models import PLACE_KINDS, non_blank, organization_fk
 from cya.deficiencies.transitions import (
     ACTIVE_STATUSES,
     AWAITING_EXTERNAL_DEPENDENCY,
@@ -1379,3 +1379,70 @@ class DeficiencyProjection(models.Model):
 
     def __str__(self):
         return f"DeficiencyProjection {self.deficiency_id}"
+
+
+class DeficiencyPlace(Evidence):
+    """The place of the stock a loose-item deficiency concerns (SPEC 6.0.0 18.3 item 2, #256 C3).
+
+    A deficiency that names an item outside a kit, on a vehicle where the item is kept in more
+    than one place, says nothing about which stock it concerns. A Supervisor or Administrator
+    records the place here, once per deficiency; the item-requirement migration refuses while an
+    ambiguous deficiency has none and maps the place to the requirement in force there. The place
+    is a position, as on a requirement version (kind and stable slot, or Not placed), because
+    requirements do not exist before the migration; the slot revision named is kept for
+    display. Vehicle and item repeat the deficiency's. Append-only (A); a trigger ties it to its
+    DEFICIENCY_PLACE_ASSIGN receipt.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    deficiency = models.OneToOneField(Deficiency, on_delete=models.PROTECT, related_name="+")
+    vehicle = models.ForeignKey(
+        "cya_checklists.Vehicle", on_delete=models.PROTECT, related_name="+"
+    )
+    item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    place_kind = models.CharField(max_length=12)
+    place_slot_id = IdentityIDField(null=True)
+    compartment = models.ForeignKey(
+        "cya_checklists.Compartment", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    system = models.ForeignKey(
+        "cya_checklists.VehicleSystem", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    explanation = models.CharField(max_length=MAX_TEXT)
+
+    class Meta:
+        db_table = "deficiency_place"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="defplace_org_id"),
+            models.CheckConstraint(
+                condition=models.Q(place_kind__in=PLACE_KINDS), name="defplace_place_kind"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        place_kind="COMPARTMENT",
+                        place_slot_id__isnull=False,
+                        compartment__isnull=False,
+                        system__isnull=True,
+                    )
+                    | models.Q(
+                        place_kind="SYSTEM",
+                        place_slot_id__isnull=False,
+                        compartment__isnull=True,
+                        system__isnull=False,
+                    )
+                    | models.Q(
+                        place_kind="NOT_PLACED",
+                        place_slot_id__isnull=True,
+                        compartment__isnull=True,
+                        system__isnull=True,
+                    )
+                ),
+                name="defplace_place",
+            ),
+            models.CheckConstraint(condition=non_blank("explanation"), name="defplace_explanation"),
+        ]
+
+    def __str__(self):
+        return f"DeficiencyPlace {self.deficiency_id}"

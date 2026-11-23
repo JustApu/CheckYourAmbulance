@@ -52,8 +52,12 @@ IF NEW.seal_kit_count_id IS NOT NULL AND NOT EXISTS
 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'seal kit count evidence mismatch'; END IF;"""
 
 
+def event_insert():
+    """The deficiency_event insert trigger this migration installs."""
+    return _extend_commands(events.event_insert(), 2)
+
+
 def forward():
-    old_event = events.event_insert()
     header = base.HEADER_GUARD.replace(
         " THEN SIGNAL SQLSTATE",
         " OR NOT (OLD.operation_ordinal <=> NEW.operation_ordinal) THEN SIGNAL SQLSTATE",
@@ -74,7 +78,7 @@ def forward():
         "DROP TRIGGER cya_deficiency_affected_item_bi",
         _extend_commands(base.AFFECTED_INSERT, 1),
         "DROP TRIGGER cya_deficiency_event_bi",
-        _extend_commands(old_event, 2),
+        event_insert(),
         "DROP TRIGGER cya_deficiency_evidence_bi",
         _append_guard(_extend_commands(evidence.EVIDENCE_INSERT, 1), EVIDENCE_GUARD),
     ]
