@@ -281,7 +281,14 @@ def reseal(
             if value is not None
         ]
         expiration = min(dates, default=None)
-        targets = [LinkTarget(row.scope.item_id, row.scope.kit_id) for row in inspected]
+        targets = [
+            LinkTarget(
+                row.scope.item_id,
+                row.scope.kit_id,
+                item_requirement_version_id=row.scope.item_requirement_version_id,
+            )
+            for row in inspected
+        ]
         planned = plan_links(organization_id, vehicle_id, targets, recorded_at=now)
         discrepancies = []
         for row in inspected:
@@ -382,6 +389,7 @@ def reseal(
                     item_id=row.scope.item_id,
                     kit_id=row.scope.kit_id,
                     instance_key=row.scope.kit_id or "00000000-0000-0000-0000-000000000000",
+                    item_requirement_version_id=row.scope.item_requirement_version_id,
                     outcome=row.outcome,
                     count=row.count,
                     expiration=row.expiration,

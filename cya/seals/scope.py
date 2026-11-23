@@ -36,6 +36,9 @@ class ScopeItem:
     unit: str | None
     expiration_tracked: bool
     allowed_outcomes: tuple[str, ...]
+    # SPEC 6.0.0 CHK-11: the item requirement version of a loose item's row (None for kit
+    # content and before the item-requirement cutover).
+    item_requirement_version_id: str | None = None
 
     @property
     def key(self):
@@ -229,6 +232,7 @@ def resolve_scope(organization_id, vehicle_id, instant, *, kit_id=None, slot_id=
                         requirement.unit,
                         requirement.expiration_tracked,
                         requirement.allowed_outcomes,
+                        getattr(requirement, "item_requirement_version_id", None),
                     ),
                 )
         else:

@@ -321,15 +321,13 @@ def choose_seal_links(check, *, recorded_at, ignore_root_check_id=None):
     late completion, then due instant and stable obligation ID decide the primary link.
     """
     scope = _scope(check, recorded_at)
-    scope.pop("item_requirement_id", None)
-    scope["ignore_root_check_id"] = ignore_root_check_id
-    on_time = _eligible(**scope, late=False)
+    on_time = _candidates(scope, late=False, ignore_root_check_id=ignore_root_check_id)
     if len(on_time) > MAX_LINK_CANDIDATES:
         raise LinkScopeTooLarge("too many overlapping eligible obligations")
     timing = "ON_TIME"
     candidates = on_time
     if not candidates:
-        candidates = _eligible(**scope, late=True)
+        candidates = _candidates(scope, late=True, ignore_root_check_id=ignore_root_check_id)
         if len(candidates) > MAX_LINK_CANDIDATES:
             raise LinkScopeTooLarge("too many eligible late obligations")
         timing = "LATE"

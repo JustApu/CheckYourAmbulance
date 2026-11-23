@@ -371,7 +371,14 @@ def verify_seal(
         )
         if refusal:
             raise SealError(refusal)
-        targets = [LinkTarget(item.item_id, item.kit_id) for item in scope]
+        targets = [
+            LinkTarget(
+                item.item_id,
+                item.kit_id,
+                item_requirement_version_id=item.item_requirement_version_id,
+            )
+            for item in scope
+        ]
         targets.extend(
             LinkTarget(definitions[line.definition_id], kit_requirement_id=line.line_id)
             for line in lines
