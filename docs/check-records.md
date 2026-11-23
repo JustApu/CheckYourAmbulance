@@ -377,7 +377,10 @@ naming the field instead of silently ignoring it.
   check outside one. The caller must be a recorded participant of an **Open** session on this
   vehicle and this pinned checklist version; an unknown session and one the caller never
   joined both answer `NOT_FOUND`, a session for another vehicle or version `SESSION_MISMATCH`,
-  and an ended or six-hour-idle session `SESSION_NOT_OPEN` (409: reopen it first). The check is
+  an ended or six-hour-idle session `SESSION_NOT_OPEN` (409: reopen it first), and a session at or
+  past its resume deadline `SESSION_DEADLINE_PASSED` (409: start a new inspection; SPEC SES-8,
+  SES-9, [issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256) Part E; a
+  correction of a check made in such a session gets the same code). The check is
   persisted activity for the session's timer ([inspection sessions](inspection-sessions.md))
   and never compliance evidence. The command holds the vehicle row lock while it reads the
   session, so a check and the auto-close cannot interleave; the insert trigger repeats the
