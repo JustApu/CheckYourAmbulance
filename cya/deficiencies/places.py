@@ -24,6 +24,7 @@ from django.utils import timezone
 from cya.accounts.fields import new_id
 from cya.authorization.backend import canonical_id
 from cya.authorization.persistence import digest
+from cya.checklists.item_requirements import has_cutover
 from cya.checklists.models import (
     PLACE_KINDS,
     ChecklistItemDef,
@@ -115,7 +116,8 @@ def assign_deficiency_place(
     deficiency's vehicle, or NOT_PLACED without one; explanation is required (at most 4,000
     characters). The deficiency must name an item outside a kit (422 NOT_A_LOOSE_ITEM), have no
     place yet (422 PLACE_ALREADY_ASSIGNED), and a published checklist of its vehicle must keep the
-    item there outside a kit (422 PLACE_NOT_KEPT). Supervisors and Administrators only. A replay
+    item there outside a kit (422 PLACE_NOT_KEPT). After the organization's item-requirement
+    cutover nothing is assigned any more (422 CUTOVER_DONE). Supervisors and Administrators only. A replay
     with the same operation_id returns the stored answer.
     """
     for value in (organization_id, actor_id):
@@ -142,6 +144,14 @@ def assign_deficiency_place(
             raise DeficiencyError(
                 "NOT_A_LOOSE_ITEM",
                 "only a deficiency that names an item outside a kit has a place to assign",
+                path="deficiency_id",
+            )
+        if has_cutover(organization_id):
+            # The cutover maps recorded places once (deficiency_requirement_map); after it, a
+            # deficiency on an item outside a kit names its item requirement when reported.
+            raise DeficiencyError(
+                "CUTOVER_DONE",
+                "the organization already uses item requirements; places are no longer assigned",
                 path="deficiency_id",
             )
         if DeficiencyPlace.objects.filter(deficiency_id=deficiency_id).exists():
