@@ -29,6 +29,8 @@ POLICY = MappingProxyType(
         "open_join_inspection_session": ("allow", "allow", "allow", "allow"),
         "rejoin_inspection_session": ("allow", "allow", "allow", "allow"),
         "end_inspection_session": ("allow", "allow", "allow", "allow"),
+        # SPEC 6.3 SES-8 (amendment 6.0.0): the organization's inspection resume limit.
+        "set_inspection_resume_limit": ("deny", "deny", "deny", "allow"),
         "correct_check": ("own_only", "own_only", "own_only", "own_only"),
         "record_independent_check": ("allow", "allow", "allow", "allow"),
         "invalidate_others_check": ("deny", "deny", "deny", "other_only"),

@@ -10,6 +10,7 @@ the vehicle lock and then read the session's activity, so whichever runs second 
 
 import json
 import logging
+from datetime import timedelta
 
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
@@ -30,11 +31,12 @@ from cya.inspections.models import (
     SessionProjection,
 )
 from cya.inspections.projections import (
-    INACTIVITY,
     current_state,
+    deadline_passed,
     is_expired,
     rebuild_session_projection,
 )
+from cya.inspections.resume_limit import resume_limit_hours
 from cya.notifications.recipients import notify
 from tools.command_identity import worker_operation_id
 
@@ -56,15 +58,17 @@ class SessionError(ValueError):
 
 
 IN_PROGRESS = "SESSION_IN_PROGRESS"
+DEADLINE_PASSED = "SESSION_DEADLINE_PASSED"
 
 
 def _in_progress(org, vehicle_id, template_id, moment, *, exclude=None):
     """Sessions of one vehicle checklist in progress at moment, newest first (SPEC 6.3 SES-7).
 
     A vehicle checklist is (vehicle, template): its identity, not a version, so a session pinned
-    to an earlier version counts. In progress means Open and not idle for the inactivity limit
-    (SES-1). History is authoritative even when a disposable projection is missing or stale. The
-    caller holds the vehicle row lock, which every session writer takes first.
+    to an earlier version counts. In progress means Open and before its end instant (SES-9):
+    neither idle for the inactivity limit (SES-1) nor at its resume deadline (SES-8). History is
+    authoritative even when a disposable projection is missing or stale. The caller holds the
+    vehicle row lock, which every session writer takes first.
     """
     latest_event = (
         SessionEvent.objects.filter(session_id=OuterRef("pk"))
@@ -85,7 +89,8 @@ def _in_progress(org, vehicle_id, template_id, moment, *, exclude=None):
         candidates = candidates.exclude(pk=exclude)
     for candidate in candidates:
         state = current_state(candidate)
-        # An idle session has already closed (SES-1); only the job's event is pending.
+        # A session past its end instant has already ended (SES-9); only the job's event is
+        # pending.
         if state.state == "OPEN" and not is_expired(state, moment):
             yield candidate, state
 
@@ -101,13 +106,19 @@ def _execute(
     authorization_action,
     request,
     build,
+    share_organization=False,
 ):
     canonical_id(organization_id)
     canonical_id(actor_id)
     backend = DatabaseRoleBackend()
 
     def authorize(org):
-        with locked_identities(organization_id, [actor_id], lock_organization=False) as (
+        with locked_identities(
+            organization_id,
+            [actor_id],
+            lock_organization=False,
+            share_organization=share_organization,
+        ) as (
             current_org,
             users,
         ):
@@ -240,6 +251,7 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
                 "session_id": str(candidate.pk),
                 "checklist_version_id": str(candidate.checklist_version_id),
                 "state": "OPEN",
+                "resume_deadline_at": state.resume_deadline_at.isoformat(),
             }
 
             def apply(receipt, current):
@@ -274,6 +286,10 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
         except ResolutionError as error:
             raise SessionError("published checklist is unavailable for this vehicle") from error
         session_id = new_id()
+        # SES-8: capture the organization's current limit. The organization row is held in share
+        # mode since authorization, so no change of the limit can commit before this opens.
+        limit_hours = resume_limit_hours(org)
+        deadline = opened_at + timedelta(hours=limit_hours)
 
         def apply(receipt, current):
             session = InspectionSession.objects.create(
@@ -282,6 +298,7 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
                 vehicle_id=vehicle_id,
                 checklist_version_id=resolved.template_version_id,
                 opened_at=opened_at,
+                resume_limit_hours=limit_hours,
                 **_evidence(receipt, current),
             )
             _participant(session, receipt, current)
@@ -294,6 +311,7 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
                 "session_id": session_id,
                 "checklist_version_id": str(resolved.template_version_id),
                 "state": "OPEN",
+                "resume_deadline_at": deadline.isoformat(),
             },
             apply,
             current={
@@ -308,6 +326,7 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
         authorization_action="open_join_inspection_session",
         request={"vehicle_id": vehicle_id, "template_id": template_id, "separate": separate},
         build=build,
+        share_organization=True,
         **context,
     )
 
@@ -315,12 +334,14 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
 def reopen_session(*, session_id, **context):
     """A current participant may resume a Closed or Incomplete session without approval.
 
-    Refused (SESSION_IN_PROGRESS) while another session of the same vehicle checklist is in
-    progress (SPEC 6.3 SES-3, SES-7); the participant joins that one instead.
+    Refused (SESSION_DEADLINE_PASSED) at or after its effective resume deadline R* (SPEC 6.3
+    SES-8, SES-9): work continues in a new session. Refused (SESSION_IN_PROGRESS) while another
+    session of the same vehicle checklist is in progress (SES-3, SES-7); the participant joins
+    that one instead. The new window lasts six hours from the reopen and never past R* (SES-2).
     """
     canonical_id(session_id)
     org = context["organization_id"]
-    _settle_idle(org, session_id)
+    _settle_end(org, session_id)
 
     def build(actor):
         session = _session(org, session_id, actor)
@@ -328,16 +349,19 @@ def reopen_session(*, session_id, **context):
         if not SessionParticipant.objects.filter(session=session, user=actor.user).exists():
             raise CommandDenied(actor)
         state = current_state(session)
-        if state.state == "OPEN":
-            if is_expired(state, timezone.now()):
-                raise SessionError("session has gone idle and is closing; try again")
+        now = timezone.now()
+        if state.state == "OPEN" and not is_expired(state, now):
             raise SessionError("session is already open")
+        if deadline_passed(state, now):
+            raise SessionError(
+                "the session has reached its resume deadline; start a new inspection",
+                code=DEADLINE_PASSED,
+            )
+        if state.state == "OPEN":
+            raise SessionError("session has gone idle and is closing; try again")
         # SES-3, SES-7: never a second session of this vehicle checklist in progress.
         template_id = session.checklist_version.template_id
-        if next(
-            _in_progress(org, session.vehicle_id, template_id, timezone.now(), exclude=session.pk),
-            None,
-        ):
+        if next(_in_progress(org, session.vehicle_id, template_id, now, exclude=session.pk), None):
             raise SessionError(
                 "another session of this checklist is in progress; join it", code=IN_PROGRESS
             )
@@ -369,6 +393,7 @@ def reopen_session(*, session_id, **context):
                 "checklist_version_id": str(session.checklist_version_id),
                 "state": "OPEN",
                 "refresh_requirements": True,
+                "resume_deadline_at": state.resume_deadline_at.isoformat(),
             },
             apply,
             previous={"session_id": session_id, "state": state.state},
@@ -390,7 +415,7 @@ def end_session(*, session_id, state="CLOSED", **context):
     if state not in ("CLOSED", "INCOMPLETE"):
         raise SessionError("end state must be CLOSED or INCOMPLETE")
     org = context["organization_id"]
-    _settle_idle(org, session_id)
+    _settle_end(org, session_id)
 
     def build(actor):
         session = _session(org, session_id, actor)
@@ -431,10 +456,12 @@ def _lock_vehicle(org, vehicle_id):
 
 
 def auto_close_session(*, organization_id, session_id):
-    """Close one session that has been idle for six hours (SPEC 6.3 SES-1, SES-6).
+    """End one Open session at its end instant (SPEC 6.3 SES-1, SES-6, SES-8, SES-9).
 
-    The close is stamped at the last persisted activity plus six hours, not at the instant the
-    job ran, so a late job leaves a correct record. Under the vehicle lock the activity is read
+    The end instant is E = min(A + 6 h, R*). The ending event is stamped at E, never at the
+    instant the job ran, so a late job leaves a correct record: AUTO_INCOMPLETE at A + 6 h when
+    the inactivity limit comes first (or together), otherwise DEADLINE_INCOMPLETE at the effective
+    resume deadline R*. Under the vehicle lock the activity is read
     again from the event history and from the session's committed checks, so work that arrived
     after the job chose this session either keeps it open (the job refuses) or, if the close
     committed first, is rejected by the check command. Refusals roll back and leave no receipt,
@@ -468,13 +495,15 @@ def auto_close_session(*, organization_id, session_id):
             raise SessionError("session changed since the job chose it")
         if state.state != "OPEN":
             raise SessionError("session is not open")
-        closed_at = state.last_activity_at + INACTIVITY
+        closed_at = state.ends_at
         if timezone.now() < closed_at:
-            raise SessionError("session has not been idle for the inactivity limit")
+            raise SessionError("session has not reached its end instant")
+        at_deadline = state.deadline_reached_first
+        kind = "DEADLINE_INCOMPLETE" if at_deadline else "AUTO_INCOMPLETE"
         prior = SessionEvent.objects.get(pk=state.last_event_id)
 
         def apply(receipt, current):
-            _event(session, receipt, current, "AUTO_INCOMPLETE", prior, effective_at=closed_at)
+            _event(session, receipt, current, kind, prior, effective_at=closed_at)
 
         return _plan(
             organization_id,
@@ -483,6 +512,7 @@ def auto_close_session(*, organization_id, session_id):
                 "session_id": str(session.pk),
                 "state": "INCOMPLETE",
                 "closed_at": closed_at.isoformat(),
+                "reason": "DEADLINE" if at_deadline else "INACTIVITY",
             },
             apply,
             previous={"session_id": str(session.pk), "state": "OPEN"},
@@ -503,7 +533,7 @@ def auto_close_session(*, organization_id, session_id):
     )
 
 
-def _settle_idle(org, session_id):
+def _settle_end(org, session_id):
     """Run the close the job would, for a session a caller names, so it never waits for the job.
 
     A refusal means another closer or new activity got there first, which is fine: the caller's
@@ -519,26 +549,37 @@ def _settle_idle(org, session_id):
             pass
 
 
-def auto_close_inactive_sessions(*, limit=200):
-    """Close every session idle for six hours, oldest first, at most `limit` per run.
+def due_sessions(*, limit=200, now=None):
+    """Open sessions at or past their end instant, earliest first: (organization, session, E).
 
-    Candidates come from the disposable projection; every close re-checks the authoritative
-    history, so a stale projection can only delay a close, never cause a wrong one. Returns
-    counts of closed, skipped (no longer due) and failed sessions. Safe to run repeatedly.
+    Candidates come from the disposable projection, whose ends_at only moves later as activity
+    arrives, so a stale row can only offer a session early; the close re-checks history.
     """
     if type(limit) is not int or not 1 <= limit <= 10_000:
         raise ValueError("limit must be an integer from 1 to 10000")
-    cutoff = timezone.now() - INACTIVITY
-    due = list(
-        SessionProjection.objects.filter(state="OPEN", last_activity_at__lte=cutoff)
-        .order_by("last_activity_at", "id")
-        .values_list("organization_id", "session_id")[:limit]
+    instant = timezone.now() if now is None else now
+    return list(
+        SessionProjection.objects.filter(state="OPEN", ends_at__lte=instant)
+        .order_by("ends_at", "id")
+        .values_list("organization_id", "session_id", "ends_at")[:limit]
     )
-    counts = {"closed": 0, "skipped": 0, "failed": 0}
-    for org, session_id in due:
+
+
+def auto_close_inactive_sessions(*, limit=200):
+    """End every session past its end instant (SES-9), earliest first, at most `limit` per run.
+
+    Every close re-checks the authoritative history, so a stale projection can only delay a
+    close, never cause a wrong one. Returns counts of closed (of which at_deadline ended at the
+    resume deadline), skipped (no longer due) and failed sessions. Safe to run repeatedly.
+    """
+    due = due_sessions(limit=limit)
+    counts = {"closed": 0, "at_deadline": 0, "skipped": 0, "failed": 0}
+    for org, session_id, _ends_at in due:
         try:
-            auto_close_session(organization_id=str(org), session_id=str(session_id))
+            result = auto_close_session(organization_id=str(org), session_id=str(session_id))
             counts["closed"] += 1
+            if result.body.get("reason") == "DEADLINE":
+                counts["at_deadline"] += 1
         except SessionError:
             counts["skipped"] += 1
         except Exception as error:  # keep closing the rest; a later run retries this one
