@@ -19,6 +19,7 @@ from cya.checks.commands import record_check
 from cya.checks.models import CheckObligationLink
 from cya.inspections import commands
 from cya.inspections.models import InspectionSession
+from cya.obligations.tests.test_requirement_obligations import RequirementObligationCase
 from cya.testing.role_http import RoleHttpHarness, real_collaborator_settings
 
 
@@ -254,3 +255,95 @@ class PinnedVersionApiTests(PinnedVersionMixin, AttentionCase):
                 self.assertEqual(
                     (response.status_code, response.json()["code"]), (400, "MALFORMED_REQUEST")
                 )
+
+
+class PinnedTwoPlaceTests(RequirementObligationCase):
+    """After the item-requirement cutover (SPEC 6.0.0 CHK-10, CHK-11), one item kept in two places
+    is two rows with two obligation streams. Sessions pinned to each place's checklist keep that
+    keying: each row has its own obligation and latest check, and a check at one place leaves the
+    other as it was (issue #256 Part D after C2, #263)."""
+
+    def setUp(self):
+        super().setUp()
+        self.record_item_cutover()
+        # Checklist A keeps suction in the cabinet; checklist B keeps it on the system.
+        self.a_v1 = self.publish_checklist(self.a, [self.suction_spec()])
+        self.b_v1 = self.publish_checklist(
+            self.b, [self.suction_spec(compartment_id=None, system_id=self.system_row())]
+        )
+        self.assertEqual(self.generate().failures, [])
+        self.due = self.at(days=2, hours=6)
+        self.clock.set(self.due - timedelta(minutes=10))
+        self.session_a = self.open_session(self.a)
+        self.session_b = self.open_session(self.b)
+        # A newer A, published after the sessions opened, so session A's rows come from its pin.
+        self.clock.set(self.clock.now + timedelta(minutes=1))
+        self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec()])
+        self.assertEqual(self.generate().failures, [])
+        self.requirement_a = str(self.version_of(self.a_v1, self.suction).requirement_id)
+        self.requirement_b = str(self.version_of(self.b_v1, self.suction).requirement_id)
+        self.assertNotEqual(self.requirement_a, self.requirement_b)
+
+    def open_session(self, checklist):
+        session_id = commands.open_or_join_session(
+            vehicle_id=str(self.vehicle.pk),
+            template_id=str(checklist.pk),
+            **self.context(self.crew),
+        ).body["session_id"]
+        return InspectionSession.objects.select_related("checklist_version").get(pk=session_id)
+
+    def suction_row(self, session):
+        rows = vehicle_checklist(str(self.org.pk), str(self.vehicle.pk), session=session).rows
+        (row,) = [r for r in rows if r.item_id == str(self.suction.pk)]
+        return row
+
+    def test_each_pinned_place_keeps_its_own_state(self):
+        a, b = self.suction_row(self.session_a), self.suction_row(self.session_b)
+        self.assertEqual(
+            (a.item_requirement_id, b.item_requirement_id),
+            (self.requirement_a, self.requirement_b),
+        )
+        self.assertTrue(a.kit_id is None and b.kit_id is None)
+        self.assertNotIn(
+            str(self.masks.pk),
+            [
+                r.item_id
+                for r in vehicle_checklist(
+                    str(self.org.pk), str(self.vehicle.pk), session=self.session_a
+                ).rows
+            ],
+        )
+        self.clock.set(self.due + timedelta(minutes=5))  # in the window of the 06:00 inspection
+        a, b = self.suction_row(self.session_a), self.suction_row(self.session_b)
+        self.assertEqual(
+            [(r.obligation_state, r.due_at, r.latest_check_id) for r in (a, b)],
+            [("DUE", self.due, None)] * 2,
+        )
+
+        recorded = record_check(
+            vehicle_id=str(self.vehicle.pk),
+            item_id=str(self.suction.pk),
+            checklist_version_id=self.a_v1,
+            outcome="PASSED",
+            purpose="ROUTINE",
+            session_id=str(self.session_a.pk),
+            **self.context(self.crew),
+        ).body
+        self.assertEqual(recorded["code"], "CHECK_RECORDED")
+        links = CheckObligationLink.objects.filter(
+            check_record_id=recorded["check_id"]
+        ).select_related("obligation")
+        self.assertEqual(
+            {(str(link.obligation.kit_key), link.obligation.due_at) for link in links},
+            {(self.requirement_a, self.due)},
+        )
+
+        a, b = self.suction_row(self.session_a), self.suction_row(self.session_b)
+        self.assertEqual(
+            (a.item_requirement_id, a.latest_check_id, a.obligation_state),
+            (self.requirement_a, recorded["check_id"], "SATISFIED"),
+        )
+        self.assertEqual(
+            (b.item_requirement_id, b.latest_check_id, b.obligation_state, b.due_at),
+            (self.requirement_b, None, "DUE", self.due),
+        )
