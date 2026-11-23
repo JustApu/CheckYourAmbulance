@@ -50,6 +50,7 @@ MIGRATION_PATH = re.compile(r"^cya/(?:[A-Za-z_][A-Za-z0-9_]*/)+migrations/.+")
 MIGRATION_IMPORTS = frozenset(
     {
         "cya/accounts/fields.py",
+        "cya/checklists/models.py",
         "cya/deficiencies/severity.py",
         "cya/obligations/models.py",
     }
