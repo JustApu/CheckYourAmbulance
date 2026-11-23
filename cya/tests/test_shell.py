@@ -252,7 +252,19 @@ class NavigationTests(ShellTestCase):
         self.assertEqual(
             titles["kits"], ["Kit definitions", "Kit lists", "Kit instances", "Kit library"]
         )
-        self.assertEqual(titles["system"], ["Outgoing mail", "Crew assignments"])
+        self.assertEqual(
+            titles["system"], ["Outgoing mail", "Crew assignments", "Inspection sessions"]
+        )
+
+    def test_only_administrators_see_the_inspection_session_settings(self):
+        # Issue #256 Part E: the resume limit is set by an Administrator only (SPEC 3.3, SES-8).
+        html = (
+            self.client_for(self.make_user(roles=["SUPERVISOR"]))
+            .get("/administration/")
+            .content.decode()
+        )
+        self.assertNotIn('href="/administration/inspection-sessions/"', html)
+        self.assertNotIn('id="admin-group-system"', html)
 
     def test_administration_hides_groups_with_no_page_for_the_role(self):
         html = (
