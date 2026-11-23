@@ -885,6 +885,14 @@ effects or none, and the operation id makes the call idempotent. Verify with the
 - `deficiency_link` names its two keys `lower` and `upper`.
 - A target of one item may also carry the item's kit instance; a compartment target carries
   neither item nor kit (CHECK `deficiency_one_target`).
+- An item target without a kit names the item but not the place of its stock. Where the vehicle
+  keeps the item in more than one place, a Supervisor or Administrator records the place once in
+  the append-only `deficiency_place` (`assign_deficiency_place` in `cya/deficiencies/places.py`,
+  command `DEFICIENCY_PLACE_ASSIGN`, policy action `expand_verification`, explanation required;
+  SPEC 6.0.0 §18.3 item 2, issue #256 C3). The place is a position (compartment or system by
+  stable slot, or Not placed) where a published checklist of the vehicle keeps the item outside a
+  kit. The item-requirement migration refuses while such a deficiency has no place; see
+  [the item-requirement migration](checklists-implementation.md).
 - `deficiency.severity_version_id` (a reference to the level revision) replaces a literal severity column; the contract's `severity` is read through it (`code`).
 - `deficiency_event` gains `decision` and `request_event_id` ([issue #150](https://github.com/JustApu/CheckYourAmbulance-archive/issues/150)), set only on `EXTENSION_DECIDED`; the contract's `proposed_deadline` is written by `EXTENSION_REQUESTED` and `deficiency_age_rule` is new (the contract has no age table; DEF-6 requires one).
 - `deficiency_scope_expansion` is new ([issue #156](https://github.com/JustApu/CheckYourAmbulance-archive/issues/156)); the contract's `verification_scope_row` note "expansion appends, never shrinks past evidence" is implemented by the expansion revision and the closure guard.

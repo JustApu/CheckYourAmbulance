@@ -8,8 +8,10 @@ version links its rows to their requirements. It prints its operation id; rerunn
 --operation-id and that id replays the first result, and any other run is refused once the
 cutover is recorded.
 
---dry-run reads only: it prints what the migration would create, every conflict or possible
-move or split that would refuse it, and the deficiencies whose place is ambiguous.
+--dry-run reads only: it prints what the migration would create and every problem that would
+refuse it: a conflict, a possible move or split, or a deficiency whose place is ambiguous and not
+yet recorded (assign_deficiency_place). It also lists every deficiency of an item kept in several
+places, with whether its place is recorded.
 """
 
 from uuid import UUID, uuid4
@@ -64,7 +66,7 @@ class Command(BaseCommand):
             for problem in plan.problems:
                 self.stdout.write(f"  problem: {problem}")
             for deficiency in plan.ambiguous_deficiencies:
-                self.stdout.write(f"  ambiguous place: {deficiency}")
+                self.stdout.write(f"  place needed: {deficiency}")
             if plan.problems:
                 raise CommandError(f"{len(plan.problems)} problem(s) would refuse the migration")
             return

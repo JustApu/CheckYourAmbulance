@@ -65,9 +65,12 @@ The database refuses a version that would put two requirements in force for one 
 - a **conflict**: another checklist in force keeps the same item at the same place with other requirements;
 - a **possible move or split**: a later version moves the item while another checklist keeps it at the old place;
 - an override-owned row;
-- an earlier cutover, or a missing vehicle-checklist cutover.
+- an earlier cutover, or a missing vehicle-checklist cutover;
+- an **ambiguous place** (§18.3 item 2, issue #256 C3): a deficiency names an item outside a kit (no kit, no compartment) on a vehicle where the item has more than one requirement, and no place is recorded for it. It is never attached to every place.
 
-Deficiencies that name an item without a place, on a vehicle where the item has more than one requirement, are listed; part C3 makes them block. `migrate_item_requirements` applies the plan as one `ITEM_REQUIREMENT_CUTOVER` command (policy action `import_configuration`, Administrators), all or nothing. It writes the cutover, every requirement and version (in effective order, so the interval guard sees the same history) and one `item_requirement_map` row per item row of every published version; kit content is mapped to no requirement. Nothing else changes. `resolve_item_requirement(item_def_id)` reads an item row's requirement from its map row.
+A Supervisor or Administrator records such a deficiency's place with `assign_deficiency_place` (`cya/deficiencies/places.py`, command `DEFICIENCY_PLACE_ASSIGN`, policy action `expand_verification`), once per deficiency, with an explanation. Requirements do not exist before the migration, so the place is a position: a compartment or system of the deficiency's vehicle (stored by stable slot, with the revision row named) or Not placed, as on a requirement version. A published checklist of the vehicle must keep the item there outside a kit. The planner maps a recorded place to the requirement kept there when the deficiency was reported, else the latest one kept there, and refuses if none is (`plan.deficiency_requirements`). A deficiency on an item kept in one place needs no assignment.
+
+`migrate_item_requirements` applies the plan as one `ITEM_REQUIREMENT_CUTOVER` command (policy action `import_configuration`, Administrators), all or nothing. It writes the cutover, every requirement and version (in effective order, so the interval guard sees the same history) and one `item_requirement_map` row per item row of every published version; kit content is mapped to no requirement. Nothing else changes. `resolve_item_requirement(item_def_id)` reads an item row's requirement from its map row.
 
 **Precedence (CHK-10).** When two checklists governing one due instant require the same item (and kit instance), the generator picks the lowest schedule-slot text (code-point order, as the `utf8mb4_bin` column compares), then the lowest checklist precedence. Legacy templates keep their old order, by `template_id`; the two models never govern the same due instant.
 
@@ -149,7 +152,7 @@ local/venv/bin/python manage.py migrate_item_requirements --organization <organi
 local/venv/bin/python manage.py migrate_item_requirements --organization <organization id> --actor-user-id <administrator user id>
 ```
 
-`--dry-run` reads only. It prints what would be created, every conflict or possible move or split that would refuse the run, and every deficiency whose place is ambiguous. Resolve a conflict by publishing matching versions of the checklists it names, then run the dry run again. A real run prints its operation id; pass it as `--operation-id` to retry an interrupted run, which replays the first result. Any other run after a successful one is refused, and a refused run writes nothing.
+`--dry-run` reads only. It prints what would be created and every problem that would refuse the run: a conflict, a possible move or split, or an ambiguous place. It also lists, as `place needed`, every deficiency on an item kept in more than one place, saying whether its place is recorded. Resolve a conflict by publishing matching versions of the checklists it names, and an ambiguous place by having a Supervisor assign the deficiency's place; then run the dry run again. A real run prints its operation id; pass it as `--operation-id` to retry an interrupted run, which replays the first result. Any other run after a successful one is refused, and a refused run writes nothing.
 
 Seeding a development or demonstration database with the synthetic fleet (never operational checklist data; the data is labeled non-authoritative, SPEC CHK-7):
 

@@ -8,11 +8,14 @@ would refuse or add a place, the migration cannot decide, so it refuses and list
 - conflict: another checklist in force keeps the same item at the same place with other
   requirements (a Supervisor first publishes matching versions);
 - possible move or split: a later version moves the item while another checklist still keeps
-  it at the old place.
+  it at the old place;
+- ambiguous place: a deficiency names an item outside a kit, on a vehicle where the item has
+  more than one requirement, and no place is recorded for it (a Supervisor first assigns one
+  with cya.deficiencies.places.assign_deficiency_place; issue #256 C3).
 
-Kit content maps to no requirement. Deficiencies that name an item without a place, on a
-vehicle where the item has more than one requirement, are listed; C3 makes them block once
-deficiencies record a place. Any problem refuses the whole migration with nothing written.
+Kit content maps to no requirement. A deficiency with a recorded place maps to the requirement
+kept there when it was reported (else the latest one kept there). Any problem refuses the whole
+migration with nothing written.
 
 migrate_item_requirements applies the plan as one audited ITEM_REQUIREMENT_CUTOVER command:
 the cutover record, every requirement and version (inserted in effective order, so the
@@ -92,6 +95,8 @@ class ItemRequirementPlan:
     maps: list = field(default_factory=list)
     problems: list = field(default_factory=list)
     ambiguous_deficiencies: list = field(default_factory=list)
+    # deficiency id -> requirement id, for each deficiency whose place is recorded (18.3 item 2).
+    deficiency_requirements: dict = field(default_factory=dict)
 
     def problem(self, text):
         if len(self.problems) < MAX_PROBLEMS:
@@ -104,6 +109,7 @@ class ItemRequirementPlan:
             "mapped_item_rows": sum(1 for m in self.maps if m.requirement_id),
             "kit_content_rows": sum(1 for m in self.maps if not m.requirement_id),
             "ambiguous_deficiencies": len(self.ambiguous_deficiencies),
+            "placed_deficiencies": len(self.deficiency_requirements),
         }
 
 
@@ -206,25 +212,77 @@ class _Vehicle:
         self.current[str(template.pk)] = (template.label, refs)
 
 
-def _ambiguous_deficiencies(plan, vehicles):
-    from cya.deficiencies.models import Deficiency
+def _requirement_at_place(requirements, place, instant):
+    """The requirement kept at `place` at `instant`, else the latest one ever kept there."""
+    for requirement in requirements:
+        current = requirement.at(instant)
+        if current is not None and current.place == place:
+            return requirement
+    kept = [
+        (version.effective_at, requirement)
+        for requirement in requirements
+        for version in requirement.versions
+        if version.place == place
+    ]
+    return max(kept, key=lambda pair: pair[0])[1] if kept else None
 
-    places = {
-        (state.vehicle.pk, item_id): len(requirements)
+
+def _ambiguous_deficiencies(plan, vehicles):
+    """SPEC 18.3 item 2: a loose-item deficiency of an item kept in several places needs a place.
+
+    Each such deficiency without a deficiency_place row is a problem that refuses the migration;
+    it is never attached to every place. One with a place is mapped to the requirement kept
+    there (plan.deficiency_requirements), as is any other deficiency with a recorded place.
+    """
+    from cya.deficiencies.models import Deficiency, DeficiencyPlace
+
+    by_item = {
+        (str(state.vehicle.pk), item_id): requirements
         for state in vehicles.values()
         for item_id, requirements in state.by_item.items()
     }
-    for deficiency in Deficiency.objects.filter(
-        organization_id=plan.organization_id,
-        item__isnull=False,
-        kit__isnull=True,
-        compartment__isnull=True,
-    ).select_related("vehicle", "item"):
-        if places.get((deficiency.vehicle_id, str(deficiency.item_id)), 0) > 1:
+    assigned = {
+        str(row.deficiency_id): row
+        for row in DeficiencyPlace.objects.filter(organization_id=plan.organization_id)
+    }
+    for deficiency in (
+        Deficiency.objects.filter(
+            organization_id=plan.organization_id,
+            item__isnull=False,
+            kit__isnull=True,
+            compartment__isnull=True,
+        )
+        .select_related("vehicle", "item")
+        .order_by("reported_at", "pk")
+    ):
+        requirements = by_item.get((str(deficiency.vehicle_id), str(deficiency.item_id)), [])
+        what = (
+            f"deficiency {deficiency.pk} names {deficiency.item.label} on "
+            f"{deficiency.vehicle.display_name}"
+        )
+        recorded = assigned.get(str(deficiency.pk))
+        if len(requirements) > 1:
             plan.ambiguous_deficiencies.append(
-                f"deficiency {deficiency.pk} names {deficiency.item.label} on "
-                f"{deficiency.vehicle.display_name}, which is kept in more than one place"
+                f"{what}, which is kept in more than one place"
+                + ("" if recorded is None else f"; its place is recorded ({recorded.place_kind})")
             )
+            if recorded is None:
+                plan.problem(
+                    f"ambiguous place, {what}: the item is kept in more than one place; a "
+                    "Supervisor assigns the deficiency's place first"
+                )
+                continue
+        if recorded is None:
+            continue
+        place = (
+            recorded.place_kind,
+            None if recorded.place_slot_id is None else str(recorded.place_slot_id),
+        )
+        requirement = _requirement_at_place(requirements, place, deficiency.reported_at)
+        if requirement is None:
+            plan.problem(f"{what}: no checklist keeps the item at the place recorded for it")
+            continue
+        plan.deficiency_requirements[str(deficiency.pk)] = requirement.id
 
 
 def plan_item_requirements(organization_id):
