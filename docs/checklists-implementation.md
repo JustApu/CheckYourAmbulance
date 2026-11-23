@@ -50,6 +50,25 @@ Nothing old changes: templates, overrides, bindings, position keys, obligations,
 
 **Not placed (CHK-9, DEP-11, CAB-2; issue #220 part 4).** A checklist row whose requirement is a checklist item with no compartment, system or kit has `not_placed` set (`cya/attention/checklist.py`; the API row carries it). The crew screen and its group progress list it under **Not placed**, and the printed outage sheet prints it in a **Not placed** section (`cya/inspections/printable.py`), which is never a sealed section, so no cabinet seal covers it. It stays owed under the ordinary rules.
 
+**Vehicle item requirements (SPEC 6.0.0 CHK-11, §18.3; issue #256 C1).** A vehicle item requirement is one stock of an item on one vehicle (`vehicle_item_requirement`). Its effective-dated versions hold its place (a compartment or system by stable slot, or Not placed) and its requirements: kind, quantity, unit, outcomes, expiration tracking and instructions. A version is in force from its effective instant until its requirement's next version, so the stock keeps its identity while no checklist lists it, and re-adding the item to that place reuses it. NA and conditional rules are not on the version yet: NA rules have no model, and conditional rules are organization-wide per item. Kit content keeps its kit definition's requirements and has none.
+
+After the organization's item-requirement cutover, `publish_template_version` of a vehicle checklist links each row outside a kit to its requirement version (`cya/checklists/item_requirements.py`), at the version's effective instant:
+
+1. A requirement in force at the row's place with equal requirements is shared.
+2. One with different requirements gets a new version, unless another checklist in force at or after that instant uses it. In that case the publication is refused (AC-42 (1)).
+3. With none at that place, a requirement this checklist's previous version kept elsewhere moves (a new version at the new place), unless another checklist still keeps it there.
+4. Anything else creates a requirement for that place.
+
+The database refuses a version that would put two requirements in force for one item and place, a row naming a version of another item, place or requirements, and, after the cutover, a publication with an unlinked row outside a kit (migration `cya_checklists` 0014). Obligations, checks, attention and deficiencies still read the item row until parts C2 and C3.
+
+**The item-requirement migration (SPEC §18.3).** `cya/checklists/item_requirement_cutover.py`; operator command `migrate_item_requirements` (below). `plan_item_requirements` reads only. It replays every published vehicle checklist version in effective order, then checklist precedence, under the publication rules. It refuses, listing each case:
+- a **conflict**: another checklist in force keeps the same item at the same place with other requirements;
+- a **possible move or split**: a later version moves the item while another checklist keeps it at the old place;
+- an override-owned row;
+- an earlier cutover, or a missing vehicle-checklist cutover.
+
+Deficiencies that name an item without a place, on a vehicle where the item has more than one requirement, are listed; part C3 makes them block. `migrate_item_requirements` applies the plan as one `ITEM_REQUIREMENT_CUTOVER` command (policy action `import_configuration`, Administrators), all or nothing. It writes the cutover, every requirement and version (in effective order, so the interval guard sees the same history) and one `legacy_item_requirement_map` row per item row of every published version; kit content is mapped to no requirement. Nothing else changes. `resolve_item_requirement(item_def_id)` reads an item row's requirement through its link or the map.
+
 **Precedence (CHK-10).** When two checklists governing one due instant require the same item (and kit instance), the generator picks the lowest schedule-slot text (code-point order, as the `utf8mb4_bin` column compares), then the lowest checklist precedence. Legacy templates keep their old order, by `template_id`; the two models never govern the same due instant.
 
 ## Freeze rules
@@ -122,6 +141,15 @@ local/venv/bin/python manage.py migrate_vehicle_checklists --organization <organ
 ```
 
 `--dry-run` reads only and prints what would be created and every problem that would refuse the run; the equivalence check needs the writes and runs only for real. A real run prints its operation id; pass it as `--operation-id` to retry an interrupted run, which then replays the first result. Any other run after a successful one is refused. A refused run writes nothing.
+
+Moving an organization to vehicle item requirements (SPEC 6.0.0 §18.3), after its move to vehicle checklists, as an active Administrator:
+
+```sh
+local/venv/bin/python manage.py migrate_item_requirements --organization <organization id> --actor-user-id <administrator user id> --dry-run
+local/venv/bin/python manage.py migrate_item_requirements --organization <organization id> --actor-user-id <administrator user id>
+```
+
+`--dry-run` reads only. It prints what would be created, every conflict or possible move or split that would refuse the run, and every deficiency whose place is ambiguous. Resolve a conflict by publishing matching versions of the checklists it names, then run the dry run again. A real run prints its operation id; pass it as `--operation-id` to retry an interrupted run, which replays the first result. Any other run after a successful one is refused, and a refused run writes nothing.
 
 Seeding a development or demonstration database with the synthetic fleet (never operational checklist data; the data is labeled non-authoritative, SPEC CHK-7):
 
