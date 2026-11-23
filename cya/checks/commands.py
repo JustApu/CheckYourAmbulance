@@ -984,6 +984,13 @@ def record_check(
         session = _session_for_check(organization_id, actor, shape, version, now)
         chosen_kit = chosen_kit_id(item.requirement.kit_id is not None, item.kits, shape["kit_id"])
         check_id = new_id()
+        # SPEC 6.0.0 CHK-11, 7.2: the requirement version of the row shown, for an item
+        # outside a kit after the item-requirement cutover (None otherwise).
+        item_version = (
+            getattr(item.requirement, "item_requirement_version_id", None)
+            if chosen_kit is None and not shape["kit_requirement_id"]
+            else None
+        )
         prospective_check = CheckRecord(
             id=check_id,
             organization_id=organization_id,
@@ -991,6 +998,7 @@ def record_check(
             item_id=shape["item_id"],
             kit_id=chosen_kit,
             kit_requirement_id=shape["kit_requirement_id"],
+            item_requirement_version_id=item_version,
             # Anchors the interim link guard on this checklist's requirement (issue #256 B).
             checklist_version_id=version.pk if version else None,
         )
@@ -1077,6 +1085,7 @@ def record_check(
                 item_id=shape["item_id"],
                 **content_source(item.requirement),
                 checklist_version_id=version.pk if version else None,
+                item_requirement_version_id=item_version,
                 kit_id=chosen_kit,
                 session=session,
                 basis_check_id=shape["basis_check_id"],
@@ -1448,6 +1457,7 @@ def correct_check(
             kit_id=root.kit_id,
             kit_requirement_id=root.kit_requirement_id,
             checklist_version_id=root.checklist_version_id,
+            item_requirement_version_id=root.item_requirement_version_id,
         )
         try:
             links = choose_links(
@@ -1477,6 +1487,7 @@ def correct_check(
                 kit_definition_item_id=root.kit_definition_item_id,
                 kit_requirement_id=root.kit_requirement_id,
                 checklist_version_id=root.checklist_version_id,
+                item_requirement_version_id=root.item_requirement_version_id,
                 kit_id=root.kit_id,
                 session=root.session,
                 outcome=outcome,

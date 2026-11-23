@@ -22,10 +22,7 @@ database refuses a version that would break that (migration 0014). Kit content k
 definition's requirements and is never linked.
 """
 
-from uuid import UUID, uuid5
-
-from cya.accounts.fields import new_id
-from cya.checklists.models import (
+from cya.checklists.models import (  # noqa: F401 - new_requirement_id is re-exported
     ChecklistItemDef,
     ChecklistPublication,
     Compartment,
@@ -34,18 +31,8 @@ from cya.checklists.models import (
     VehicleItemRequirement,
     VehicleItemRequirementVersion,
     VehicleSystem,
+    new_requirement_id,
 )
-
-# Item requirement ids are version-5 UUIDs (kit instance ids are version 4): a requirement id is
-# the unit key of its obligation stream (issue #256 C2), and readers tell a requirement key from
-# a kit key by its version alone, as they do kit presence line keys (cya.kits.presence).
-REQUIREMENT_ID_NAMESPACE = UUID("6a1f3b0e-6c56-5d0e-9a5b-2f6c1d8e4b70")
-
-
-def new_requirement_id():
-    """A fresh, unpredictable item requirement id of UUID version 5."""
-    return str(uuid5(REQUIREMENT_ID_NAMESPACE, new_id()))
-
 
 FIELDS = (
     "kind",
@@ -183,12 +170,13 @@ class _Writer:
             id=new_requirement_id(), vehicle_id=self.vehicle_id, item_id=item_id, **self.evidence
         )
 
-    def version(self, requirement_id, item_id, at, row):
+    def version(self, requirement_id, item_id, at, row, version_id=None):
         kind, slot = place_of(row)
         revision = (
             VehicleItemRequirementVersion.objects.filter(requirement_id=requirement_id).count() + 1
         )
         return VehicleItemRequirementVersion.objects.create(
+            **({"id": version_id} if version_id else {}),
             requirement_id=requirement_id,
             vehicle_id=self.vehicle_id,
             item_id=item_id,

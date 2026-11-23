@@ -96,8 +96,9 @@ def _obligation_facts(obligation):
     """The obligation's stored facts; kit_key only when it is a presence unit key (KDEF-12), so
     every other obligation's facts, and so its digest, are unchanged."""
     facts = asdict(obligation)
-    if facts.get("kit_key") is None:
-        facts.pop("kit_key", None)
+    for optional in ("kit_key", "mapped_requirement_id"):  # absent when unset: digests unchanged
+        if facts.get(optional) is None:
+            facts.pop(optional, None)
     return facts
 
 

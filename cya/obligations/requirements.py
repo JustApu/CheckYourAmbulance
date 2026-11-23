@@ -100,6 +100,10 @@ class DesiredItem:
     # line's unit key, which stands in for the kit key of the obligation stream.
     kit_requirement_id: str | None = None
     unit_key: str | None = None
+    # SPEC 6.0.0 CHK-11: an item outside a kit after the item-requirement cutover is owed per
+    # vehicle item requirement. Its requirement id is the unit key (one stream per stock, which
+    # a move keeps), and the requirement version in force at the due instant is pinned.
+    item_requirement_version_id: str | None = None
 
     @property
     def key(self):
@@ -493,9 +497,11 @@ def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None
                 occurrence.early_at,
                 slots,
             ):
-                key = (item_id, kit.kit_id if kit else NO_KIT)
+                requirement = resolved_item.requirement
+                unit = requirement.item_requirement_id if kit is None else None
+                key = (item_id, kit.kit_id if kit else (unit or NO_KIT))
                 if key in items:
-                    continue
+                    continue  # CHK-10: per (item requirement or item, kit) and due instant
                 pin = {
                     "binding": occurrence.binding_id,
                     "conditional": conditional.get(item_id),
@@ -508,6 +514,9 @@ def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None
                     # Only a kit item carries these pins, so a non-kit requirement's id is unchanged.
                     pin["kit"] = kit.kit_id
                     pin["kit_event"] = kit.since_event_id
+                if unit:
+                    # Only a row of an item requirement carries this pin (SPEC 6.0.0 CHK-11).
+                    pin["item_requirement"] = requirement.item_requirement_version_id
                 items[key] = DesiredItem(
                     item_id=item_id,
                     requirement_id=requirement_id(organization_id, vehicle_id, item_id, pin),
@@ -523,6 +532,8 @@ def desired_at(organization_id, vehicle_id, due_at, at_due, recorded_before=None
                     grace_at=occurrence.grace_at,
                     kit_id=kit.kit_id if kit else None,
                     kit_event_id=kit.since_event_id if kit else None,
+                    unit_key=unit,
+                    item_requirement_version_id=pin.get("item_requirement"),
                 )
         placed = _placement_items(
             organization_id,

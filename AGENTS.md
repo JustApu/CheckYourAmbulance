@@ -38,7 +38,7 @@ For committed content, obtain the ID from the repository root with `git rev-pars
 
 | Repository document | Content blob ID | Authority |
 |---|---|---|
-| [/docs/coordination.md](docs/coordination.md) | `98cd3e6510cd702208b58889ec2e04fc31033d95` | Normative |
+| [/docs/coordination.md](docs/coordination.md) | `9669305478d2565740d270a41093a7e27c5fe1bf` | Normative |
 | [/docs/review.md](docs/review.md) | `4a0964ec9c600b5730e8b752ed97cc63f3ad8c98` | Normative |
 | [/docs/engineering-standards.md](docs/engineering-standards.md) | `6a257f572234461e028004ef6865525a97ff3f1e` | Normative |
 | [/docs/ci-routing.md](docs/ci-routing.md) | `44aaea23e0db4d882b99c48ad264d92cfa8ee724` | Non-normative |

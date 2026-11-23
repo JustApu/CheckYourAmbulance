@@ -161,6 +161,12 @@ SAME_REQUIREMENT_FK = (
     "REFERENCES `vehicle_item_requirement` (vehicle_id,item_id,id) "
     "ON DELETE RESTRICT ON UPDATE RESTRICT"
 )
+# Requirement ids are version-5 UUIDs with the RFC 4122 variant (models.new_requirement_id):
+# readers tell a requirement unit key from a kit id (version 4) by version alone (issue #256 C2).
+V5_CHECK = (
+    "ALTER TABLE `vehicle_item_requirement` ADD CONSTRAINT `cya_vehicle_item_requirement_v5` "
+    "CHECK (SUBSTRING(id,15,1)='5' AND SUBSTRING(id,20,1) IN ('8','9','a','b'))"
+)
 VALUE_CHECK = (
     "ALTER TABLE `vehicle_item_requirement_version` "
     "ADD CONSTRAINT `cya_vehicle_item_requirement_version_outcomes` CHECK ("
@@ -192,6 +198,7 @@ def forward_statements():
             "vehicle_id,item_id,requirement_id",
         ),
         SAME_REQUIREMENT_FK,
+        V5_CHECK,
         VALUE_CHECK,
         PUBLICATION_GUARD,
     ]
@@ -202,6 +209,7 @@ def reverse_statements():
         "DROP TRIGGER cya_checklist_publication_itemreq_bi",
         "ALTER TABLE `vehicle_item_requirement_version` "
         "DROP CONSTRAINT `cya_vehicle_item_requirement_version_outcomes`",
+        "ALTER TABLE `vehicle_item_requirement` DROP CONSTRAINT `cya_vehicle_item_requirement_v5`",
         "ALTER TABLE `vehicle_item_requirement_version` "
         "DROP FOREIGN KEY `cya_vehicle_item_requirement_version_same_fk`",
     ]

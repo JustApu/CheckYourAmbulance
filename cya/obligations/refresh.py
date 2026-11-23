@@ -11,6 +11,7 @@ from cya.conditions.models import ObligationDetermination
 from cya.deficiencies.models import CheckSuspension
 from cya.obligations.current import refresh_obligations
 from cya.obligations.models import Obligation, ObligationSelection
+from cya.obligations.state import NO_KIT
 
 CHECK_COMMANDS = frozenset(("CHECK_RECORD", "CHECK_CORRECTION", "CHECK_INVALIDATION"))
 DETERMINATION_COMMANDS = frozenset(
@@ -74,12 +75,23 @@ def refresh_for_receipt(receipt):
             "prior_suspension"
         ):
             start = suspension if suspension.action == "START" else suspension.prior_suspension
+            units = [start.instance_key]
+            if start.instance_key == NO_KIT and not start.kit_requirement_id:
+                # Per item until issue #256 C3: also the item's requirement streams.
+                from cya.checklists.models import VehicleItemRequirement
+
+                units += [
+                    str(pk)
+                    for pk in VehicleItemRequirement.objects.filter(
+                        organization_id=org, vehicle_id=start.vehicle_id, item_id=start.item_id
+                    ).values_list("pk", flat=True)
+                ]
             ids.update(
                 Obligation.objects.filter(
                     organization_id=org,
                     vehicle_id=start.vehicle_id,
                     item_id=start.item_id,
-                    kit_key=start.instance_key,
+                    kit_key__in=units,
                     routine=True,
                     grace_at__gte=start.recorded_at,
                 ).values_list("pk", flat=True)
