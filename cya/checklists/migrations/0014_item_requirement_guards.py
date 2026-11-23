@@ -19,6 +19,8 @@ place with equal requirements (AC-42 (1)). After the organization's cutover, a v
 checklist version is published only when each of its rows outside a kit names one.
 """
 
+from hashlib import sha1
+
 from django.db import migrations
 
 from cya.accounts.fields import UUID_PATTERN
@@ -56,6 +58,12 @@ TABLES = {
     ),
 }
 COMMON_FKS = [("command_id", "command_receipt"), ("actor_user_id", "user")]
+
+
+def key_index(table, name, columns):
+    """An index for a composite foreign key, kept when the key is dropped (see module notes)."""
+    index = "cya_ix_" + sha1(name.encode()).hexdigest()[:20]
+    return f"CREATE INDEX IF NOT EXISTS `{index}` ON `{table}` ({columns})"
 
 
 def signal(message):
@@ -121,10 +129,14 @@ def _table_statements(table):
         "CHECK (JSON_TYPE(actor_roles_at_time)='ARRAY' AND JSON_LENGTH(actor_roles_at_time)<=4 "
         f"AND JSON_CONTAINS('{ROLE_CODES}', actor_roles_at_time))",
         *(
-            f"ALTER TABLE `{table}` ADD CONSTRAINT `cya_{table}_{column}_org_fk` "
-            f"FOREIGN KEY ({ORG},{column}) REFERENCES `{parent}` ({ORG},id) "
-            "ON DELETE RESTRICT ON UPDATE RESTRICT"
+            statement
             for column, parent in COMMON_FKS + columns
+            for statement in (
+                key_index(table, f"cya_{table}_{column}_org_fk", f"{ORG},{column}"),
+                f"ALTER TABLE `{table}` ADD CONSTRAINT `cya_{table}_{column}_org_fk` "
+                f"FOREIGN KEY ({ORG},{column}) REFERENCES `{parent}` ({ORG},id) "
+                "ON DELETE RESTRICT ON UPDATE RESTRICT",
+            )
         ),
         *append_only_triggers(table),
         receipt_guard(table, command_types, EXTRAS.get(table, "")),
@@ -197,8 +209,18 @@ def forward_statements():
         statements += _table_statements(table)
     return [
         *statements,
+        key_index(
+            "vehicle_item_requirement_version",
+            "cya_vehicle_item_requirement_version_same_fk",
+            "vehicle_id,item_id,requirement_id",
+        ),
         SAME_REQUIREMENT_FK,
         VALUE_CHECK,
+        key_index(
+            "checklist_item_def",
+            "cya_itemdef_requirement_version_org_fk",
+            f"{ORG},item_requirement_version_id",
+        ),
         ITEMDEF_FK,
         itemdef_guard("bi", "INSERT"),
         itemdef_guard("bu", "UPDATE"),

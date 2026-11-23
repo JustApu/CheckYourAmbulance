@@ -223,3 +223,23 @@ class PublicationTests(ItemRequirementCase):
             self.assertRaisesRegex(DatabaseError, "names its item requirement"),
         ):
             self.publish_checklist(self.a, [self.suction_spec()])
+
+
+class GuardMigrationTests(ItemRequirementCase):
+    def test_the_guard_migration_reverses_and_reapplies(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        executor = MigrationExecutor(connection)
+        latest = executor.loader.graph.leaf_nodes()
+        try:
+            executor.migrate([("cya_checklists", "0013_item_requirements")])
+            MigrationExecutor(connection).migrate(latest)
+        finally:
+            MigrationExecutor(connection).migrate(latest)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM information_schema.TRIGGERS "
+                "WHERE TRIGGER_SCHEMA=DATABASE() AND TRIGGER_NAME='cya_checklist_item_def_itemreq_bu'"
+            )
+            self.assertEqual(cursor.fetchone()[0], 1)
