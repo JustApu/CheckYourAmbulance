@@ -3,6 +3,7 @@
 from unittest import mock
 
 from django.db import DatabaseError, transaction
+from django.test import tag
 
 from cya.checklists.models import (
     ChecklistItemDef,
@@ -225,6 +226,7 @@ class PublicationTests(ItemRequirementCase):
             self.publish_checklist(self.a, [self.suction_spec()])
 
 
+@tag("migration_rollback")
 class GuardMigrationTests(ItemRequirementCase):
     def test_the_guard_migration_reverses_and_reapplies(self):
         from django.db import connection
