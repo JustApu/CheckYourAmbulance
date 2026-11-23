@@ -22,9 +22,8 @@ function page() {
   });
   const button = makeButton({template: "synthetic-template"});
   const joinButton = makeButton({template: "synthetic-template"});
-  const separateButton = makeButton({template: "synthetic-template", templateLabel: "Night Shift Safety"});
+  const otherButton = makeButton({template: "other-template"});
   const confirmMessages = [];
-  let confirmAnswer = true;
   const config = {sessions_url: "/api/v1/inspection-sessions", vehicle_id: "synthetic-vehicle"};
   const document = {
     getElementById(id) {
@@ -34,15 +33,13 @@ function page() {
     },
     querySelector() { return {value: "synthetic-csrf"}; },
     querySelectorAll(selector) {
-      if (selector === ".start-session") return [button];
-      if (selector === ".join-session") return [joinButton];
-      if (selector === ".start-separate") return [separateButton];
+      if (selector === ".start-session, .join-session") return [button, joinButton, otherButton];
       return [];
     },
   };
   const context = {
     document, crypto: crypto.webcrypto, Uint8Array,
-    window: {confirm(text) { confirmMessages.push(text); return confirmAnswer; }},
+    window: {confirm(text) { confirmMessages.push(text); return true; }},
     location: {assign(url) { assigned.push(url); }},
     fetch(url, options) {
       const request = {url, body: JSON.parse(options.body)};
@@ -53,8 +50,7 @@ function page() {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(script, "utf8"), context);
   return {
-    button, joinButton, separateButton, message, requests, assigned, confirmMessages,
-    setConfirmAnswer(value) { confirmAnswer = value; },
+    button, joinButton, otherButton, message, requests, assigned, confirmMessages,
   };
 }
 function answer(request, status, body) {
@@ -82,25 +78,21 @@ function assertOneSegment(url, id) {
     assert.deepEqual(run.assigned, [SESSIONS + id + "/"]);
   }
   {
-    // Joining is explicit, and a separate session requires a clear confirmation first.
+    // Joining starts the checklist (SES-7): one plain start, never a separate session, and no
+    // confirmation is asked.
     const run = page();
     run.joinButton.tap();
-    assert.equal(run.requests[0].body.separate, false);
+    assert.equal("separate" in run.requests[0].body, false);
     assert.equal(run.requests[0].body.template_id, "synthetic-template");
     answer(run.requests[0], 200, committed("join-session")); await tick(); await tick();
     assert.deepEqual(run.assigned, [SESSIONS + "join-session/"]);
+    assert.deepEqual(run.confirmMessages, []);
 
-    const separate = page();
-    separate.setConfirmAnswer(false);
-    separate.separateButton.tap();
-    assert.equal(separate.requests.length, 0, "cancel must not start a separate inspection");
-    assert.match(separate.confirmMessages[0], /Night Shift Safety/);
-    assert.match(separate.confirmMessages[0], /instead of joining the open one/);
-    separate.setConfirmAnswer(true);
-    separate.separateButton.tap();
-    assert.equal(separate.requests[0].body.separate, true);
-    answer(separate.requests[0], 200, committed("separate-session")); await tick(); await tick();
-    assert.deepEqual(separate.assigned, [SESSIONS + "separate-session/"]);
+    // Each checklist's button starts its own checklist.
+    const other = page();
+    other.otherButton.tap();
+    assert.equal(other.requests[0].body.template_id, "other-template");
+    assert.equal("separate" in other.requests[0].body, false);
   }
   for (const id of ["../../administration/roles", "a/b", "/absolute", "javascript:alert(1)",
     "https://elsewhere.invalid/", "$&$'$`$$", "<img src=x onerror=alert(1)>", "a?b#c", "%2e%2e",

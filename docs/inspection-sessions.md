@@ -7,19 +7,25 @@ database history. It does not expose an HTTP route yet.
 ## Commands and state
 
 `cya.inspections.commands.open_or_join_session` takes authenticated command
-context, a vehicle ID and a checklist template ID. By default it joins the
-latest Open session for that vehicle, regardless of the requested template.
-All four roles may open or join. `separate=True` starts a new session even when another is
-Open, Closed, or Incomplete. If no Open
-session is joined, opening resolves the effective published checklist for the
-vehicle at the server-assigned open instant and pins its template version.
-Joining never changes that pin or the six-hour activity clock. Repeating a join
-by an existing participant adds no participant or session event.
+context, a vehicle ID and a checklist template ID. **One session in progress per vehicle
+checklist** (SPEC 6.0.0 SES-7, [issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256)
+Part D): a vehicle checklist is the pair (vehicle, checklist template), its identity rather than
+a version, and a session is in progress while it is Open and not idle for six hours (SES-1;
+Part E adds the resume deadline). Starting a checklist that has a session in progress joins that
+session, even when it pins an earlier version (CHK-4). Sessions of different checklists on one
+vehicle run together. All four roles may open or join. `separate=True` is still accepted, and is
+refused with `SESSION_IN_PROGRESS` while that checklist has a session in progress; with none in
+progress it opens one like any start. If no session is joined, opening resolves the effective
+published checklist for the vehicle at the server-assigned open instant and pins its template
+version. Joining never changes that pin or the six-hour activity clock. Repeating a join by an
+existing participant adds no participant or session event.
 
 `end_session` lets a participant explicitly mark an Open session Closed or
 Incomplete; either state is informational. `reopen_session` lets a participant
-resume either ended state without approval. A nonparticipant starts a new session
-instead, even if the prior session is Open. Reopening retains
+resume either ended state without approval, but only while no other session of the same vehicle
+checklist is in progress (SES-3, SES-7); otherwise it is refused with `SESSION_IN_PROGRESS`,
+changes nothing and is audited as a failed command. A nonparticipant joins the session in
+progress for that checklist, or starts a new one when none is in progress. Reopening retains
 the original pin and appends an
 audited REOPEN event. Its result requests a requirements refresh. An authorized
 reader can call `cya.inspections.projections.read_session` to get a fresh
@@ -45,7 +51,27 @@ one predecessor. The separate `session_projection` caches current state,
 last activity and last applied event; it can be rebuilt from the event stream.
 Opening and reopening count as activity, as does a check recorded in the session (Part B,
 below). Joining and ending do not advance the timer. Vehicle-row locking serializes concurrent session commands; a
-simultaneous default open joins the session created by the winner.
+simultaneous default open joins the session created by the winner, and a start racing a reopen
+of the same checklist leaves exactly one session in progress.
+
+Database backstop (migration `cya_inspections` 0006): the `session_event` insert trigger
+refuses an OPEN or REOPEN event while another session of the same vehicle and checklist
+template has OPEN, JOIN or REOPEN as its latest event and the event's recorded instant is before
+that session's last activity plus six hours (the activity the auto-close guard uses: OPEN and
+REOPEN events and checks in the session). Before checking, the trigger takes the session's
+vehicle row lock (`SELECT ... FOR UPDATE`), the same lock open, join, reopen, end, auto-close and
+a check in a session all take first. At READ COMMITTED each read then sees what the previous lock
+holder committed, so two concurrent OPEN or REOPEN inserts that skip the commands serialize (or
+one is rolled back as a deadlock victim) and at most one commits.
+Sessions that were in progress together before 6.0.0 are left as they are. Reversing 0006
+restores the 0005 trigger.
+
+The session screen lists the rows of the version the session pins (CHK-4, SPEC 5.7.1), even after
+a newer version is published: `GET /api/v1/vehicles/{id}/checklist?session_id=` (participants
+only; anyone else gets 404) resolves the session's checklist as a check recorded in it is
+resolved, while each row's obligation, attention, latest check, deficiencies and kits are the
+vehicle's current state. An item the newer version removes is still listed and checkable in the
+session, and an item it adds is not.
 
 The commands read synthetic or configured checklist publications, vehicle and
 current role records; they write a receipt, success or failure audit, and only
@@ -87,7 +113,7 @@ recomputes it from the events and checks. Consequences:
   session (a new six-hour window from the reopen instant) and records again. Both paths hold
   the vehicle lock, so a check and a close racing each other resolve to exactly one winner.
 - An idle session that the job has not closed yet is treated as closed: a default open does not
-  join it, and `reopen_session` and `end_session` first run the same close on it, so a caller
+  join it, it does not count as in progress for SES-7, and `reopen_session` and `end_session` first run the same close on it, so a caller
   never waits for the scheduler.
 - The close is informational. Nothing here changes an item obligation (AC-2): an Incomplete
   session leaves every obligation as it was; a check is what satisfies an obligation.

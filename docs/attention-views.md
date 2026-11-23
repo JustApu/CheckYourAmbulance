@@ -47,7 +47,8 @@ an item another checklist also lists (SPEC 6.0.0 VW-5, [issue #256](https://gith
 and group progress counts those rows. The obligation and attention state of a shared item are
 the vehicle's, the same in every checklist. An unknown version lists nothing, and a malformed
 one is `400 INVALID_CHECKLIST_VERSION`. A session's checklist screen reads its pinned version
-this way. The kit instances
+with `?session_id=` instead (CHK-4, see [crew inspection UI](crew-inspection-ui.md)); naming
+both parameters is `400 MALFORMED_REQUEST`. The kit instances
 are read from the append-only assignment history as it stood at the instant, never from the
 mutable `kit_instance` row, so a past checklist keeps a kit that was later moved or deactivated
 and omits one added later (none when the vehicle has no such kit, which is also what the

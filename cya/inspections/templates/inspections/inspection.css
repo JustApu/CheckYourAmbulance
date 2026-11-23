@@ -9,7 +9,6 @@
 .active-inspection p { margin: .25rem 0 .75rem; overflow-wrap: anywhere; }
 .inspection-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: .5rem; }
 .inspection-options .button { width: 100%; text-align: left; overflow-wrap: anywhere; }
-.separate-inspection summary { display: flex; align-items: center; min-height: 48px; font-weight: 700; cursor: pointer; }
 .session-row-status { flex: 1 1 18rem; min-width: 0; overflow-wrap: anywhere; }
 /* Vehicle cards (#194): one column on phones, two on tablets, three on wide screens; a chevron
    shows the whole card opens the vehicle. */

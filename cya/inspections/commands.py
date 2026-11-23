@@ -45,7 +45,49 @@ AUTO_CLOSE_COMMAND = "SESSION_AUTO_CLOSE"
 
 
 class SessionError(ValueError):
-    """Invalid session intent or state; run_command audits a rolled-back failure."""
+    """Invalid session intent or state; run_command audits a rolled-back failure.
+
+    code is the stable wire code the API answers with (SESSION_UNAVAILABLE unless stated).
+    """
+
+    def __init__(self, message, *, code="SESSION_UNAVAILABLE"):
+        super().__init__(message)
+        self.code = code
+
+
+IN_PROGRESS = "SESSION_IN_PROGRESS"
+
+
+def _in_progress(org, vehicle_id, template_id, moment, *, exclude=None):
+    """Sessions of one vehicle checklist in progress at moment, newest first (SPEC 6.3 SES-7).
+
+    A vehicle checklist is (vehicle, template): its identity, not a version, so a session pinned
+    to an earlier version counts. In progress means Open and not idle for the inactivity limit
+    (SES-1). History is authoritative even when a disposable projection is missing or stale. The
+    caller holds the vehicle row lock, which every session writer takes first.
+    """
+    latest_event = (
+        SessionEvent.objects.filter(session_id=OuterRef("pk"))
+        .order_by("-sequence")
+        .values("event_type")[:1]
+    )
+    candidates = (
+        InspectionSession.objects.filter(
+            organization_id=org,
+            vehicle_id=vehicle_id,
+            checklist_version__template_id=template_id,
+        )
+        .annotate(latest_event_type=Subquery(latest_event))
+        .filter(latest_event_type__in=("OPEN", "JOIN", "REOPEN"))
+        .order_by("-opened_at", "-id")
+    )
+    if exclude is not None:
+        candidates = candidates.exclude(pk=exclude)
+    for candidate in candidates:
+        state = current_state(candidate)
+        # An idle session has already closed (SES-1); only the job's event is pending.
+        if state.state == "OPEN" and not is_expired(state, moment):
+            yield candidate, state
 
 
 def _execute(
@@ -160,10 +202,15 @@ def _plan(org, body, apply, *, previous=None, current=None):
 
 
 def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
-    """Join the latest open session on a vehicle, or open a separately pinned one.
+    """Join the session of this vehicle checklist in progress, or open one (SPEC 6.3 SES-7).
 
-    A repeated join by an existing participant is an audited no-op. JOIN never advances the
-    activity clock. An explicit separate=True always starts another session on this vehicle.
+    Each vehicle checklist has at most one session in progress. Starting it while one is in
+    progress joins that session, even when it pins an earlier version (CHK-4); sessions of other
+    checklists on the vehicle are unaffected. A repeated join by an existing participant is an
+    audited no-op, and JOIN never advances the activity clock. separate=True asks for a second
+    session and is refused (SESSION_IN_PROGRESS) while one is in progress; with none in progress
+    it opens one like any start. The vehicle row lock serializes competing starts, so two
+    simultaneous starts produce one session.
     """
     canonical_id(vehicle_id)
     canonical_id(template_id)
@@ -180,48 +227,33 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
         )
         if template is None:
             raise SessionError("active checklist template is unavailable")
-        if not separate:
-            # History is authoritative even when a disposable projection is missing or stale.
-            latest_event = (
-                SessionEvent.objects.filter(session_id=OuterRef("pk"))
-                .order_by("-sequence")
-                .values("event_type")[:1]
-            )
-            candidates = (
-                InspectionSession.objects.filter(organization_id=org, vehicle_id=vehicle_id)
-                .annotate(latest_event_type=Subquery(latest_event))
-                .filter(latest_event_type__in=("OPEN", "JOIN", "REOPEN"))
-                .order_by("-opened_at", "-id")
-            )
-            moment = timezone.now()
-            for candidate in candidates:
-                state = current_state(candidate)
-                # An idle session has already closed (SES-1); only the job's event is pending.
-                if state.state == "OPEN" and not is_expired(state, moment):
-                    already = SessionParticipant.objects.filter(
-                        session=candidate, user=actor.user
-                    ).exists()
-                    body = {
-                        "code": "ALREADY_PARTICIPANT" if already else "SESSION_JOINED",
-                        "session_id": str(candidate.pk),
-                        "checklist_version_id": str(candidate.checklist_version_id),
-                        "state": "OPEN",
-                    }
+        found = next(_in_progress(org, vehicle_id, template_id, timezone.now()), None)
+        if found is not None:
+            if separate:
+                raise SessionError(
+                    "a session of this checklist is in progress; join it", code=IN_PROGRESS
+                )
+            candidate, state = found
+            already = SessionParticipant.objects.filter(session=candidate, user=actor.user).exists()
+            body = {
+                "code": "ALREADY_PARTICIPANT" if already else "SESSION_JOINED",
+                "session_id": str(candidate.pk),
+                "checklist_version_id": str(candidate.checklist_version_id),
+                "state": "OPEN",
+            }
 
-                    def apply(
-                        receipt, current, *, candidate=candidate, already=already, state=state
-                    ):
-                        if not already:
-                            _participant(candidate, receipt, current)
-                            prior = SessionEvent.objects.get(pk=state.last_event_id)
-                            _event(candidate, receipt, current, "JOIN", prior)
+            def apply(receipt, current):
+                if not already:
+                    _participant(candidate, receipt, current)
+                    prior = SessionEvent.objects.get(pk=state.last_event_id)
+                    _event(candidate, receipt, current, "JOIN", prior)
 
-                    return _plan(
-                        org,
-                        body,
-                        apply,
-                        current={"session_id": str(candidate.pk), "state": "OPEN"},
-                    )
+            return _plan(
+                org,
+                body,
+                apply,
+                current={"session_id": str(candidate.pk), "state": "OPEN"},
+            )
         # SPEC 5.0.0 CHK-1, CHK-8: a new session inspects a vehicle checklist on its own vehicle
         # only, and after the cutover never pins a legacy template. Joining a session that is
         # already open (above) is unaffected, so open sessions keep their version (CHK-4, 18.2).
@@ -281,7 +313,11 @@ def open_or_join_session(*, vehicle_id, template_id, separate=False, **context):
 
 
 def reopen_session(*, session_id, **context):
-    """A current participant may resume a Closed or Incomplete session without approval."""
+    """A current participant may resume a Closed or Incomplete session without approval.
+
+    Refused (SESSION_IN_PROGRESS) while another session of the same vehicle checklist is in
+    progress (SPEC 6.3 SES-3, SES-7); the participant joins that one instead.
+    """
     canonical_id(session_id)
     org = context["organization_id"]
     _settle_idle(org, session_id)
@@ -296,6 +332,15 @@ def reopen_session(*, session_id, **context):
             if is_expired(state, timezone.now()):
                 raise SessionError("session has gone idle and is closing; try again")
             raise SessionError("session is already open")
+        # SES-3, SES-7: never a second session of this vehicle checklist in progress.
+        template_id = session.checklist_version.template_id
+        if next(
+            _in_progress(org, session.vehicle_id, template_id, timezone.now(), exclude=session.pk),
+            None,
+        ):
+            raise SessionError(
+                "another session of this checklist is in progress; join it", code=IN_PROGRESS
+            )
         prior = SessionEvent.objects.get(pk=state.last_event_id)
 
         def apply(receipt, current):

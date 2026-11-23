@@ -85,6 +85,7 @@ MIGRATION_TEST_INPUTS = frozenset(
         "cya/obligations/tests/test_projections.py",
         "cya/obligations/tests/test_routine_index_migration.py",
         "cya/tests/test_audit_integrity_db.py",
+        "cya/tests/test_session_per_checklist_migration.py",
     }
 )
 # What decides which tests run and how the test database is built: the shared test package and

@@ -98,6 +98,8 @@
     AUTHENTICATION_REQUIRED: "Your sign-in has ended. Sign in again.",
     NOT_FOUND: "This item or session is no longer available.",
     SESSION_MISMATCH: "This session does not match the checklist. Start a new session.",
+    SESSION_IN_PROGRESS: "Another inspection of this checklist is in progress. Join it from the vehicle page.",
+    SESSION_UNAVAILABLE: "This inspection cannot be reopened right now.",
     CHECKLIST_VERSION_NOT_CURRENT: "The checklist changed. Reload the screen.",
     SESSION_NOT_OPEN: "This session is not open. Reopen it to continue.",
     OPERATION_REUSED: "This request changed after it was sent. Tap the result again.",
@@ -967,9 +969,12 @@
     loading = true;
     var listView = config.verification_for_deficiency_id || layoutMode === "FLAT" ? view : "NORMAL";
     var q = "?view=" + encodeURIComponent(listView) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
-    // A session reads its own checklist's rows, so an item another checklist also lists is
-    // shown here too, with the vehicle's shared state (SPEC 6.0.0 VW-5, issue #256).
-    if (config.checklist_version_id && !config.verification_for_deficiency_id) {
+    // A session reads its own pinned version's rows (SPEC CHK-4), even after a newer version is
+    // published, so an item another checklist also lists is shown here too, with the vehicle's
+    // shared state (SPEC 6.0.0 VW-5, issue #256).
+    if (config.session_id && !config.verification_for_deficiency_id) {
+      q += "&session_id=" + encodeURIComponent(config.session_id);
+    } else if (config.checklist_version_id && !config.verification_for_deficiency_id) {
       q += "&checklist_version_id=" + encodeURIComponent(config.checklist_version_id);
     }
     fetch(config.urls.checklist + q, {credentials: "same-origin", cache: "no-store"}).then(function (r) {

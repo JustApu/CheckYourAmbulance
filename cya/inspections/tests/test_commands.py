@@ -81,8 +81,10 @@ class SessionCommandsTests(SessionCase):
 
     def test_default_join_finds_older_open_session_past_closed_newer_one(self):
         older = self.open()
-        newer = self.open(separate=True)
+        self.end(older.body["session_id"])
+        newer = self.open()
         self.end(newer.body["session_id"])
+        self.reopen(older.body["session_id"])
         joined = self.open(actor=self.supervisor)
         self.assertEqual(joined.body["session_id"], older.body["session_id"])
 
@@ -101,7 +103,7 @@ class SessionCommandsTests(SessionCase):
         self.assertEqual(SessionParticipant.objects.count(), 2)
         self.assertEqual(SessionEvent.objects.count(), 2)
 
-    def test_open_join_and_explicit_parallel_session(self):
+    def test_open_join_and_refused_separate_session(self):
         opened = self.open()
         session_id = opened.body["session_id"]
         session = InspectionSession.objects.get(pk=session_id)
@@ -128,27 +130,35 @@ class SessionCommandsTests(SessionCase):
         self.assertEqual(SessionParticipant.objects.filter(session=session).count(), 2)
         self.assertEqual(SessionEvent.objects.filter(session=session).count(), 2)
 
-        separate = self.open(actor=self.supervisor, separate=True)
-        self.assertNotEqual(separate.body["session_id"], session_id)
-        self.assertEqual(InspectionSession.objects.filter(vehicle=self.vehicle).count(), 2)
-        self.assertEqual(
-            self.open(actor=self.admin).body["session_id"], separate.body["session_id"]
+        # SES-7: nobody can start a separate session of a checklist in progress.
+        with self.assertRaises(SessionError) as refused:
+            self.open(actor=self.supervisor, separate=True)
+        self.assertEqual(refused.exception.code, "SESSION_IN_PROGRESS")
+        self.assertEqual(InspectionSession.objects.filter(vehicle=self.vehicle).count(), 1)
+        self.assertTrue(
+            AuditEvent.objects.filter(action="SESSION_OPEN_OR_JOIN", outcome="FAILED").exists()
         )
+        self.assertEqual(self.open(actor=self.admin).body["session_id"], session_id)
 
-    def test_new_session_can_start_while_another_is_open_closed_or_incomplete(self):
-        for prior_state in ("OPEN", "CLOSED", "INCOMPLETE"):
+    def test_new_session_starts_only_after_the_one_in_progress_ended(self):
+        for prior_state in ("CLOSED", "INCOMPLETE"):
             with self.subTest(prior_state=prior_state):
-                first = self.open(separate=True)
-                if prior_state != "OPEN":
-                    self.end(first.body["session_id"], state=prior_state)
-                second = self.open(actor=self.supervisor, separate=True)
-                self.assertNotEqual(first.body["session_id"], second.body["session_id"])
+                first = self.open()
+                self.assertEqual(first.body["code"], "SESSION_OPENED")
+                with self.assertRaises(SessionError):
+                    self.open(actor=self.supervisor, separate=True)
+                self.end(first.body["session_id"], state=prior_state)
+                for separate in (True, False):
+                    second = self.open(actor=self.supervisor, separate=separate)
+                    self.assertEqual(second.body["code"], "SESSION_OPENED")
+                    self.assertNotEqual(first.body["session_id"], second.body["session_id"])
+                    self.end(second.body["session_id"], actor=self.supervisor)
                 self.assertEqual(
                     current_state(InspectionSession.objects.get(pk=first.body["session_id"])).state,
                     prior_state,
                 )
 
-    def test_default_join_is_vehicle_scoped_even_when_requested_template_differs(self):
+    def test_join_is_per_checklist_and_other_checklists_run_together(self):
         other_template = ChecklistTemplate.objects.create(
             organization=self.org, label="Synthetic alternate checklist"
         )
@@ -159,13 +169,20 @@ class SessionCommandsTests(SessionCase):
             version_id=other_version, **self.context(self.admin)
         )
         first = self.open()
-        joined = self.open(template=other_template, actor=self.supervisor)
-        self.assertEqual(joined.body["session_id"], first.body["session_id"])
-        self.assertEqual(joined.body["checklist_version_id"], self.v1)
-
-        separate = self.open(template=other_template, separate=True)
-        self.assertNotEqual(separate.body["session_id"], first.body["session_id"])
-        self.assertEqual(separate.body["checklist_version_id"], other_version)
+        # AC-41(1): a start of checklist B opens a B session while A's is in progress...
+        other = self.open(template=other_template, actor=self.supervisor)
+        self.assertEqual(other.body["code"], "SESSION_OPENED")
+        self.assertNotEqual(other.body["session_id"], first.body["session_id"])
+        self.assertEqual(other.body["checklist_version_id"], other_version)
+        # ...and later starts of each checklist join that checklist's own session.
+        self.assertEqual(self.open(actor=self.admin).body["session_id"], first.body["session_id"])
+        joined = self.open(template=other_template, actor=self.admin)
+        self.assertEqual(joined.body["session_id"], other.body["session_id"])
+        self.assertEqual(joined.body["checklist_version_id"], other_version)
+        for session_id in (first.body["session_id"], other.body["session_id"]):
+            self.assertEqual(
+                current_state(InspectionSession.objects.get(pk=session_id)).state, "OPEN"
+            )
 
     def test_reopen_keeps_original_pin_and_refreshes_current_obligations(self):
         session_id = self.open().body["session_id"]
@@ -219,7 +236,8 @@ class SessionCommandsTests(SessionCase):
         event = SessionEvent.objects.get(session_id=session_id, event_type="REOPEN")
         # NOT-3 (issue 14): the other recorded participants, never the one who reopened it.
         self.assertEqual(notified("session.reopened", event.pk), [self.supervisor.pk])
-        lone = self.open(separate=True).body["session_id"]
+        self.end(session_id)
+        lone = self.open().body["session_id"]
         self.end(lone)
         self.reopen(lone)
         reopened = SessionEvent.objects.get(session_id=lone, event_type="REOPEN")

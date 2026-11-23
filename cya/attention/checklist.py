@@ -39,7 +39,12 @@ from cya.attention.facts import deficiency_facts, latest_effective_checks
 from cya.attention.state import Attention, applies, attention_states, latest_checks
 from cya.authorization.backend import canonical_id
 from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
-from cya.checklists.overlay import NoEffectiveVersionError, ResolutionError, resolve_checklist
+from cya.checklists.overlay import (
+    NoEffectiveVersionError,
+    ResolutionError,
+    _active_deviations,
+    resolve_checklist,
+)
 from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
 from cya.kits.models import ChecklistKitPlacement, KitDefinition
@@ -131,14 +136,86 @@ class VehicleChecklist:
     group_progress: tuple
 
 
-def _resolved_items(organization_id, vehicle_id, as_of):
+@dataclass(frozen=True)
+class _Pin:
+    """A session's checklist, resolved as the session opened with it (SPEC CHK-4, 5.7.1).
+
+    resolved is the ResolvedChecklist a check recorded in the session is judged against
+    (cya.checks.commands._resolved_item): as of the session's opening, with the publications
+    recorded by then. Placed kit content uses the same instants; everything else about a row
+    (obligations, attention, checks, kits present, kit list lines) is read as of the query.
+    """
+
+    resolved: object
+    opened_at: datetime
+    recorded_before: datetime
+
+
+def _session_pin(organization_id, vehicle_id, session, instant):
+    """The session's _Pin. Only an active stocking deviation is read as of instant, so a count's
+    target is the one a check recorded now is judged against (cya.checks.commands._resolved_item).
+    """
+    if str(session.vehicle_id) != str(vehicle_id):
+        raise ChecklistQueryError("NOT_FOUND", "session was not found", 404)
+    recorded_before = session.recorded_at + timedelta(microseconds=1)
+    try:
+        resolved = resolve_checklist(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            template_id=session.checklist_version.template_id,
+            as_of=session.opened_at,
+            recorded_before=recorded_before,
+        )
+    except ResolutionError as error:
+        raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+    if str(resolved.template_version_id) != str(session.checklist_version_id):
+        raise ChecklistQueryError(
+            "CHECKLIST_UNAVAILABLE", "the session's checklist version cannot be resolved", 409
+        )
+    counted = [i.requirement.item_id for i in resolved.items if i.requirement.kind == "QUANTITY"]
+    if counted:
+        deviations = _active_deviations(organization_id, vehicle_id, counted, instant)
+
+        def current_target(item):
+            if item.requirement.kind != "QUANTITY":
+                return item
+            deviation = deviations.get(item.requirement.item_id)
+            return replace(
+                item,
+                effective_quantity=(
+                    deviation.alternate_quantity
+                    if deviation
+                    else item.requirement.expected_quantity
+                ),
+                deviation_id=deviation.pk if deviation else None,
+            )
+
+        resolved = replace(resolved, items=tuple(current_target(i) for i in resolved.items))
+    return _Pin(resolved, session.opened_at, recorded_before)
+
+
+def _items_of(order, resolved):
+    """(order, item id, ResolvedItem, version id) per item of one resolved checklist."""
+    chosen, seen = [], set()
+    for item in resolved.items:
+        item_id = str(item.requirement.item_id)
+        if item_id not in seen:
+            seen.add(item_id)
+            chosen.append((order, item_id, item, str(resolved.template_version_id)))
+    return chosen
+
+
+def _resolved_items(organization_id, vehicle_id, as_of, pin=None):
     """(template order, item id, ResolvedItem, version id) per item of each bound checklist.
 
     Only templates with a BIND in force for this vehicle at as_of apply (a template published
     for another vehicle does not), and only publications and bindings recorded by as_of count,
     so a past answer is reproducible. An item two checklists both list appears once for each
     (SPEC 6.0.0 VW-5), in template order; _one_per_key keeps the first for a vehicle-wide read.
+    With a pin, only the session's own checklist applies, whatever is bound now.
     """
+    if pin is not None:
+        return _items_of(0, pin.resolved)
     chosen = []
     bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
     templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
@@ -155,12 +232,7 @@ def _resolved_items(organization_id, vehicle_id, as_of):
             continue
         except ResolutionError as error:
             raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
-        seen = set()
-        for item in resolved.items:
-            item_id = str(item.requirement.item_id)
-            if item_id not in seen:
-                seen.add(item_id)
-                chosen.append((order, item_id, item, str(resolved.template_version_id)))
+        chosen.extend(_items_of(order, resolved))
     return chosen
 
 
@@ -200,13 +272,22 @@ def _one_per_key(placed):
     return kept
 
 
-def _placed_content(organization_id, vehicle_id, as_of):
+def _placed_content(organization_id, vehicle_id, as_of, pin=None):
     """(template order, ResolvedItem, version id, kits) per placed kit content entry (KDEF-4).
 
     Like _resolved_items, only bound templates and records made by as_of count. Each entry is one
     instance of the placed definition on the vehicle at as_of, in its own compartment, from
-    assignment history (SPEC 2.0.0 KDEF-4).
+    assignment history (SPEC 2.0.0 KDEF-4). With a pin, the session's checklist places them as a
+    check in that session resolves them.
     """
+    if pin is not None:
+        version_id = str(pin.resolved.template_version_id)
+        return [
+            (0, item, version_id, list(item.kits))
+            for item in placed_items(
+                organization_id, pin.resolved, pin.opened_at, pin.recorded_before
+            )
+        ]
     found = []
     bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
     templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
@@ -272,12 +353,42 @@ def _with_line(resolved, line_id, count):
     )
 
 
-def _presence_rows(organization_id, vehicle_id, as_of):
+def _presence_of(organization_id, order, resolved, as_of):
+    """_presence_rows' entries for one resolved checklist, with kit list lines as of as_of."""
+    found = []
+    definitions = {
+        str(pk): str(item)
+        for pk, item in KitDefinition.objects.filter(
+            pk__in=[p.definition_id for p in resolved.placements]
+        ).values_list("pk", "presence_item_id")
+    }
+    for placement in resolved.placements:
+        for line in placement.lines:
+            item = presence_resolved_item(
+                organization_id,
+                resolved,
+                line.requirement_id,
+                definitions[placement.definition_id],
+                as_of,
+            )
+            if item is None:
+                continue
+            unit = line_unit_keys([line.requirement_id])[line.requirement_id]
+            found.append(
+                (order, item, str(resolved.template_version_id), unit, placement.display_order)
+            )
+    return found
+
+
+def _presence_rows(organization_id, vehicle_id, as_of, pin=None):
     """(template order, ResolvedItem, version id, unit key, placement order) per kit list line.
 
     The lines of the vehicle's kit list in force at as_of for each definition a bound template
-    places, as the records stood (resolve_checklist), each as its presence Quantity item.
+    places, as the records stood (resolve_checklist), each as its presence Quantity item. With a
+    pin, the definitions the session's checklist places, counted as a check in it is (as_of).
     """
+    if pin is not None:
+        return _presence_of(organization_id, 0, pin.resolved, as_of)
     found = []
     bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
     templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
@@ -293,27 +404,7 @@ def _presence_rows(organization_id, vehicle_id, as_of):
             )
         except (NoEffectiveVersionError, ResolutionError):
             continue
-        definitions = {
-            str(pk): str(item)
-            for pk, item in KitDefinition.objects.filter(
-                pk__in=[p.definition_id for p in resolved.placements]
-            ).values_list("pk", "presence_item_id")
-        }
-        for placement in resolved.placements:
-            for line in placement.lines:
-                item = presence_resolved_item(
-                    organization_id,
-                    resolved,
-                    line.requirement_id,
-                    definitions[placement.definition_id],
-                    as_of,
-                )
-                if item is None:
-                    continue
-                unit = line_unit_keys([line.requirement_id])[line.requirement_id]
-                found.append(
-                    (order, item, str(resolved.template_version_id), unit, placement.display_order)
-                )
+        found.extend(_presence_of(organization_id, order, resolved, as_of))
     return found
 
 
@@ -493,14 +584,15 @@ def _ordered_rows(organization_id, vehicle_id, placed, obligations):
     return placed
 
 
-def _placements(organization_id, vehicle_id, as_of):
+def _placements(organization_id, vehicle_id, as_of, pin=None):
     """(placed, labels): one entry per checklist row each bound template defines, before any
     obligation is consulted, and the item labels by id. Shared by the full and label-only paths.
 
     An item or kit two checklists both list has one entry per checklist (SPEC 6.0.0 VW-5);
-    callers that read the vehicle as a whole keep one per key with _one_per_key.
+    callers that read the vehicle as a whole keep one per key with _one_per_key. With a pin, the
+    entries are the session's checklist's own (CHK-4).
     """
-    items = _resolved_items(organization_id, vehicle_id, as_of)
+    items = _resolved_items(organization_id, vehicle_id, as_of, pin)
     labels = dict(
         Item.objects.filter(
             organization_id=organization_id, pk__in={entry[1] for entry in items}
@@ -538,7 +630,7 @@ def _placements(organization_id, vehicle_id, as_of):
     # Content of kits placed by definition (issue #129): one row per kit of that definition, in
     # each checklist that places it.
     present = {(row[6], row[2], row[3]) for row in placed}
-    content = _placed_content(organization_id, vehicle_id, as_of)
+    content = _placed_content(organization_id, vehicle_id, as_of, pin)
     placement_order = dict(
         ChecklistKitPlacement.objects.filter(
             pk__in={entry[1].requirement.kit_id for entry in content}
@@ -568,7 +660,7 @@ def _placements(organization_id, vehicle_id, as_of):
             )
     # Kit presence (KDEF-10, KDEF-12): one row per kit list line; its key is the line's unit key.
     for order, resolved, version_id, unit, placement_display in _presence_rows(
-        organization_id, vehicle_id, as_of
+        organization_id, vehicle_id, as_of, pin
     ):
         item_id = str(resolved.requirement.item_id)
         if (version_id, item_id, unit) not in present:
@@ -601,8 +693,12 @@ def _rows(
     *,
     current=False,
     checklist_version_id=None,
+    pin=None,
 ):
-    placed, labels = _placements(organization_id, vehicle_id, as_of)
+    placed, labels = _placements(organization_id, vehicle_id, as_of, pin)
+    if pin is not None:
+        # A session's rows are its pinned version's (CHK-4), even after a newer one governs.
+        checklist_version_id = str(pin.resolved.template_version_id)
     if checklist_version_id is None:
         placed = _one_per_key(placed)
     obligations = _obligation_by_key(
@@ -763,13 +859,23 @@ def vehicle_checklist(
     as_of=None,
     suspension_lookup=None,
     checklist_version_id=None,
+    session=None,
 ):
     """The vehicle's checklist rows for a view and filter, as of an instant (default now).
 
     Without checklist_version_id there is one row per item (and kit) for the whole vehicle. With
     it, the rows are that checklist version's own, including items another checklist also lists
     (SPEC 6.0.0 VW-5), and group progress counts those rows; an unknown version lists nothing.
+
+    With session (an InspectionSession on this vehicle the caller has authorized), the rows are
+    those of the version the session pins, resolved as a check in the session is (SPEC CHK-4,
+    5.7.1): an item a later version removes is still listed and one it adds is not. Each row
+    still shows the vehicle's state for its item as of the instant. Not with checklist_version_id.
     """
+    if session is not None and checklist_version_id is not None:
+        raise ChecklistQueryError(
+            "INVALID_CHECKLIST_VERSION", "give a session or a checklist version, not both", 400
+        )
     if view not in (NORMAL, PRIORITY):
         raise ChecklistQueryError("INVALID_VIEW", "view must be NORMAL or PRIORITY", 400)
     if checklist_version_id is not None:
@@ -786,6 +892,11 @@ def vehicle_checklist(
         raise ChecklistQueryError("INVALID_AS_OF", "as_of must be timezone-aware", 400)
     if not Vehicle.objects.filter(organization_id=organization_id, pk=vehicle_id).exists():
         raise ChecklistQueryError("NOT_FOUND", "vehicle was not found", 404)
+    pin = (
+        None
+        if session is None
+        else _session_pin(organization_id, str(vehicle_id), session, instant)
+    )
     rows = _rows(
         organization_id,
         str(vehicle_id),
@@ -793,6 +904,7 @@ def vehicle_checklist(
         suspension_lookup,
         current=as_of is None,
         checklist_version_id=checklist_version_id,
+        pin=pin,
     )
     group_progress = _group_progress(rows)
     if needs_attention_only:
