@@ -303,12 +303,23 @@ class Live:
                 )
             )
         )
+        # The upgrade handshake shares the request deadline; an open socket then waits for
+        # pushes until it is stopped.
+        deadline = started + site.timeout
+        accepted = False
         try:
             while True:
-                data = await reader.read(READ_SIZE)
+                if accepted:
+                    data = await reader.read(READ_SIZE)
+                else:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        raise TimeoutError
+                    data = await asyncio.wait_for(reader.read(READ_SIZE), left)
                 ws.receive_data(data or None)
                 for event in ws.events():
                     if isinstance(event, AcceptConnection):
+                        accepted = True
                         self.recorder.add("ws_connect", time.monotonic() - started, 101)
                         self.on_push(0)
                     elif isinstance(event, RejectConnection):
@@ -327,6 +338,9 @@ class Live:
                 if not data:
                     self.recorder.count("ws_dropped")
                     return
+        except TimeoutError:
+            self.recorder.count("request_timeout")
+            self.recorder.add("ws_connect", time.monotonic() - started, 0)
         except (OSError, ConnectionError):
             self.recorder.count("ws_dropped")
         finally:

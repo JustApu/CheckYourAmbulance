@@ -157,6 +157,10 @@ class FakeSite:
         return 201, json.dumps({"status": "COMMITTED"}).encode(), []
 
     async def websocket(self, data, reader, writer):
+        if self.stall == SOCKET:
+            await self.release.wait()
+            writer.close()
+            return
         ws = WSConnection(ConnectionType.SERVER)
         ws.receive_data(data)
         accepted = False
@@ -263,6 +267,17 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(asyncio.get_running_loop().time() - started, 2)
         self.assertEqual(browser.recorder.samples[0][2], 0)
         self.assertEqual(browser.recorder.events["request_timeout"], 1)
+
+    async def test_an_unanswered_socket_upgrade_is_a_failed_connect(self):
+        self.fake.stall = SOCKET
+        site = load_client.Site(self.fake.origin, timeout=0.2)
+        recorder = load_client.Recorder()
+        browser = load_client.Browser(site, "synthetic-x", recorder)
+        live = load_client.Live(browser, SOCKET, lambda delay: None, recorder)
+        await asyncio.wait_for(live.run(), 5)
+        self.assertEqual([s[0] for s in recorder.samples], ["ws_connect"])
+        self.assertEqual(recorder.samples[0][2], 0)
+        self.assertEqual(recorder.events["request_timeout"], 1)
 
     async def test_a_stalled_readiness_page_does_not_hang_the_run(self):
         # A supervisor waiting on an unanswered readiness request once kept run() from reporting.
