@@ -505,17 +505,10 @@ def _plan_requirements(plan, source, now, copied_slots):
     is retired. Two that would then share an item and place (18.1 item 8) keep one: the one
     whose own place that is, else the first by id; the other is left out and shown.
     """
-    from cya.checklists.models import Item, ItemRequirementMap, VehicleItemRequirementVersion
+    from cya.checklists.item_requirements import current_or_next
+    from cya.checklists.models import Item, ItemRequirementMap
 
-    chosen = {}
-    for version in VehicleItemRequirementVersion.objects.filter(vehicle=source).order_by(
-        "effective_at", "revision"
-    ):
-        key = str(version.requirement_id)
-        # In effective order: the last one effective by now wins; a scheduled one only when
-        # none is in force, and then the first.
-        if version.effective_at <= now or key not in chosen:
-            chosen[key] = version
+    chosen = current_or_next(str(source.pk), now)
 
     def target(version):
         place = (version.place_kind, str(version.place_slot_id) if version.place_slot_id else None)

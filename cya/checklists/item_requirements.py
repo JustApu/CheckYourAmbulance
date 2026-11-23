@@ -221,6 +221,19 @@ def version_at(requirement_id, at):
     )
 
 
+def current_or_next(vehicle_id, at):
+    """{requirement id: its version in force at `at`, else its first one scheduled after} for
+    every requirement of the vehicle: what a vehicle file or a copy of the vehicle carries."""
+    chosen = {}
+    for version in VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id).order_by(
+        "effective_at", "revision"
+    ):
+        key = str(version.requirement_id)
+        if version.effective_at <= at or key not in chosen:
+            chosen[key] = version
+    return chosen
+
+
 def in_force_here(vehicle_id, item_id, place, at):
     """The vehicle's requirement version for the item in force at `place` at `at`, or None.
 

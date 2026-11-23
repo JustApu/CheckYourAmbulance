@@ -95,18 +95,23 @@ def parse(data, fmt):
 
     The normal form carries schema_version: 1 for a file from before SPEC 5.0.0 (one template,
     its items and a schedule; the legacy path of IMP-7) and 2 for a file with the vehicle's own
-    checklists (cya.kits.vehicle_files_v2).
+    checklists (cya.kits.vehicle_files_v2), 3 for one that also carries its item requirements
+    (cya.kits.vehicle_files_v3, SPEC 6.0.0).
     """
     if fmt not in FORMATS:
         raise FileErrors([f"file: format must be one of {list(FORMATS)}"])
     text = _text(data)
-    from cya.kits import vehicle_files_v2
+    from cya.kits import vehicle_files_v2, vehicle_files_v3
 
     if fmt == "json":
         document = load_json(text)
+        if isinstance(document, dict) and document.get("schema_version") == 3:
+            return vehicle_files_v3.parse_json_document(document)
         if isinstance(document, dict) and document.get("schema_version") == 2:
             return vehicle_files_v2.parse_json_document(document)
         return {**_parse_json(text), "schema_version": SCHEMA_VERSION}
+    if vehicle_files_v3.is_v3_csv(text):
+        return vehicle_files_v3.parse_csv(text)
     if vehicle_files_v2.is_v2_csv(text):
         return vehicle_files_v2.parse_csv(text)
     return {**_parse_csv(text), "schema_version": SCHEMA_VERSION}
@@ -363,6 +368,10 @@ def _json_document(vehicle):
 
 def render(vehicle, fmt):
     """A vehicle file for a vehicle in normal form, as UTF-8 bytes."""
+    if vehicle.get("schema_version") == 3:
+        from cya.kits import vehicle_files_v3
+
+        return vehicle_files_v3.render(vehicle, fmt)
     if vehicle.get("schema_version") == 2:
         from cya.kits import vehicle_files_v2
 

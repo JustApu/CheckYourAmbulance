@@ -108,6 +108,9 @@ class VehiclePlan:
     # is the vehicle's own checklists (cya.kits.vehicle_import_v2.plan_checklists).
     per_vehicle: bool = False
     checklists: list = field(default_factory=list)
+    # SPEC 6.0.0 CHK-11 (issue #256 C4): what publishing the drafts would do to the vehicle's
+    # item requirements, as readable notes; refusals are errors.
+    requirement_notes: list = field(default_factory=list)
 
     def summary(self):
         return {
@@ -257,10 +260,10 @@ def build_plan(organization_id, vehicle, source=""):
     from cya.kits import vehicle_import_v2
 
     plan.per_vehicle = cutover_at(org) is not None
-    if vehicle.get("schema_version", 1) == 2 and not plan.per_vehicle:
+    if vehicle.get("schema_version", 1) in (2, 3) and not plan.per_vehicle:
         errors.append("file: vehicle files with checklists are imported after the cutover")
         return plan
-    if plan.per_vehicle and vehicle.get("schema_version", 1) != 2:
+    if plan.per_vehicle and vehicle.get("schema_version", 1) not in (2, 3):
         vehicle = vehicle_import_v2.legacy_to_v2(org, vehicle, errors)
 
     # Template and the version in force (IMP-7).
@@ -501,6 +504,9 @@ def build_plan(organization_id, vehicle, source=""):
         by_label = context.by_label
         plan.checklists, plan.new_items = vehicle_import_v2.plan_checklists(
             context, vehicle.get("checklists") or [], _check_item
+        )
+        plan.requirement_notes = vehicle_import_v2.requirement_notes(
+            context, plan.checklists, vehicle
         )
         _refuse_retired_assignments(org, found, plan.checklists, retired, now, errors)
     if plan.item_changes and override is not None:
@@ -1223,7 +1229,7 @@ def _vehicle_file_v2(org, vehicle, now):
                     "count": line.required_count,
                 }
             )
-    return {
+    exported = {
         "schema_version": vehicle_files_v2.SCHEMA_VERSION,
         "vin": vehicle.key,
         "display_name": vehicle.display_name,
@@ -1233,6 +1239,16 @@ def _vehicle_file_v2(org, vehicle, now):
         "checklists": vehicle_import_v2.export_checklists(org, vehicle, now, key_of_row),
         "kits": kits,
     }
+    # SPEC 6.0.0 IMP-7: after the item-requirement cutover the file carries the vehicle's item
+    # requirements (schema 3); its checklist items name them.
+    from cya.checklists.item_requirements import has_cutover
+
+    if has_cutover(org):
+        from cya.kits import vehicle_files_v3
+
+        more = vehicle_import_v2.export_requirements(org, vehicle, now, key_of_row)
+        return vehicle_files_v3.from_v2(exported, more)
+    return exported
 
 
 def audited_vehicle_export(*, vehicle_id, fmt, template_id=None, **context):
