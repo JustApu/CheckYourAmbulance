@@ -1,7 +1,8 @@
 """Vehicle item requirements at checklist publication (SPEC 6.0.0 CHK-5, CHK-11; issue #256 C1).
 
-After an organization's item-requirement cutover, publishing a vehicle checklist version links
-each of its item rows outside a kit to the version of the vehicle item requirement it inspects.
+After an organization's item-requirement cutover, publishing a vehicle checklist version maps
+each of its item rows outside a kit to the version of the vehicle item requirement it inspects
+(an append-only item_requirement_map row; kit content is mapped to no requirement).
 In C1 requirement versions are published only this way, by these rules, at the checklist
 version's effective instant E, for an item I kept at place P on vehicle V:
 
@@ -26,7 +27,7 @@ from cya.checklists.models import (
     ChecklistPublication,
     Compartment,
     ItemRequirementCutover,
-    LegacyItemRequirementMap,
+    ItemRequirementMap,
     VehicleItemRequirement,
     VehicleItemRequirementVersion,
     VehicleSystem,
@@ -81,13 +82,9 @@ def _in_force(versions, at):
 
 
 def requirement_of_row(row):
-    """The requirement id a published item row inspects: its own link, else the source-row map."""
-    if row.item_requirement_version_id:
-        return VehicleItemRequirementVersion.objects.values_list("requirement_id", flat=True).get(
-            pk=row.item_requirement_version_id
-        )
+    """The requirement id a published item row inspects, from its map row (None if none)."""
     return (
-        LegacyItemRequirementMap.objects.filter(item_def_id=row.pk)
+        ItemRequirementMap.objects.filter(item_def_id=row.pk)
         .values_list("requirement_id", flat=True)
         .first()
     )
@@ -112,15 +109,7 @@ def _in_force_from(version_id, template_id, at):
 def other_users(requirement_id, template_id, at):
     """Labels of other checklists whose version in force at or after `at` uses the requirement."""
     rows = list(
-        ChecklistItemDef.objects.filter(item_requirement_version__requirement_id=requirement_id)
-        .exclude(checklist_version__template_id=template_id)
-        .values_list(
-            "checklist_version_id",
-            "checklist_version__template_id",
-            "checklist_version__template__label",
-        )
-    ) + list(
-        LegacyItemRequirementMap.objects.filter(requirement_id=requirement_id)
+        ItemRequirementMap.objects.filter(requirement_id=requirement_id)
         .exclude(checklist_version__template_id=template_id)
         .values_list(
             "checklist_version_id",
@@ -163,6 +152,18 @@ class _Writer:
         }
         self.vehicle_id = vehicle_id
 
+    def map(self, row, version):
+        """The append-only link of a published row to its requirement version (or kit content)."""
+        ItemRequirementMap.objects.create(
+            vehicle_id=self.vehicle_id,
+            checklist_version_id=row.checklist_version_id,
+            item_def_id=row.pk,
+            kit_content=version is None,
+            requirement_id=version.requirement_id if version else None,
+            requirement_version_id=version.pk if version else None,
+            **self.evidence,
+        )
+
     def requirement(self, item_id):
         return VehicleItemRequirement.objects.create(
             vehicle_id=self.vehicle_id, item_id=item_id, **self.evidence
@@ -191,16 +192,18 @@ class _Writer:
 def link_rows(*, organization_id, vehicle_id, template_id, rows, effective_at, receipt, actor):
     """Link each row outside a kit to its item requirement version, publishing versions as needed.
 
-    Runs inside publish_template_version's transaction, before the publication row is written
-    (the freeze triggers then keep the links). Raises ItemRequirementError on a refusal.
+    Runs inside publish_template_version's transaction, before the publication row is written.
+    Each row gets an append-only map row: item rows are versioned and the runtime account cannot
+    update them (SPEC 17.7 item 1). Raises ItemRequirementError on a refusal.
     """
     writer = _Writer(organization_id, vehicle_id, receipt, actor)
     previous = _previous_rows(template_id, effective_at)
     for row in rows:
         if row.kit_id is not None:
+            writer.map(row, None)  # kit content keeps its kit definition's requirements
             continue
         version = _resolve(writer, template_id, row, effective_at, previous)
-        ChecklistItemDef.objects.filter(pk=row.pk).update(item_requirement_version_id=version.pk)
+        writer.map(row, version)
 
 
 def _resolve(writer, template_id, row, at, previous):

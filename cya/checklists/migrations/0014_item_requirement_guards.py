@@ -3,9 +3,9 @@
 The four tables are append-only (A) and attributed to a command receipt of the same
 organization, actor and instant:
 
-- requirements and their versions are written when a vehicle checklist version is published
-  (CHECKLIST_PUBLISH) or by the migration (ITEM_REQUIREMENT_CUTOVER);
-- the cutover record and the source-row map only by the migration.
+- requirements, their versions and the item-row map are written when a vehicle checklist
+  version is published (CHECKLIST_PUBLISH) or by the migration (ITEM_REQUIREMENT_CUTOVER);
+- the cutover record only by the migration.
 
 Each version repeats its requirement's vehicle and item (a composite key holds them equal),
 takes the next revision, starts after its requirement's latest version, names a position of
@@ -14,9 +14,11 @@ same vehicle and item is in force at the same place at any instant of its interv
 8, Not placed compared as a value). A version is in force from its effective instant until its
 requirement's next version.
 
-An item row's item_requirement_version must name a version of the same vehicle, item and
-place with equal requirements (AC-42 (1)). After the organization's cutover, a vehicle
-checklist version is published only when each of its rows outside a kit names one.
+A map row links an item row of a vehicle's checklist version to a requirement version of the
+same vehicle, item and place with equal requirements (AC-42 (1)), or records it as kit content
+exactly when the row is in a kit. Item rows are versioned and never updated, so the link is
+this append-only row. After the organization's cutover, a vehicle checklist version is published
+only when each of its rows has a map row.
 """
 
 from hashlib import sha1
@@ -46,7 +48,7 @@ TABLES = {
         PUBLISH_OR_CUTOVER,
     ),
     "item_requirement_cutover": ([], CUTOVER),
-    "legacy_item_requirement_map": (
+    "item_requirement_map": (
         [
             ("vehicle_id", "vehicle"),
             ("checklist_version_id", "checklist_version"),
@@ -54,7 +56,7 @@ TABLES = {
             ("requirement_id", "vehicle_item_requirement"),
             ("requirement_version_id", "vehicle_item_requirement_version"),
         ],
-        CUTOVER,
+        PUBLISH_OR_CUTOVER,
     ),
 }
 COMMON_FKS = [("command_id", "command_receipt"), ("actor_user_id", "user")]
@@ -107,16 +109,25 @@ MAP_EXTRA = f"""
 IF NOT EXISTS (SELECT 1 FROM checklist_item_def d JOIN checklist_version cv
   ON cv.id=d.checklist_version_id JOIN checklist_template t ON t.id=cv.template_id
   WHERE d.id=NEW.item_def_id AND d.checklist_version_id=NEW.checklist_version_id
-  AND t.vehicle_id=NEW.vehicle_id)
- OR (NEW.requirement_id IS NOT NULL AND NOT EXISTS (SELECT 1
+  AND t.vehicle_id=NEW.vehicle_id AND (d.kit_id IS NOT NULL)=(NEW.kit_content=1))
+THEN {signal("a map row names another vehicle or version, or misstates kit content")}; END IF;
+IF NEW.requirement_version_id IS NOT NULL AND NOT EXISTS (SELECT 1
   FROM vehicle_item_requirement_version v JOIN checklist_item_def d ON d.id=NEW.item_def_id
   WHERE v.id=NEW.requirement_version_id AND v.requirement_id=NEW.requirement_id
-  AND v.vehicle_id=NEW.vehicle_id AND v.item_id=d.item_id))
-THEN {signal("a source-row map names another vehicle, version or item")}; END IF;"""
+  AND v.vehicle_id=NEW.vehicle_id AND v.item_id=d.item_id
+  AND v.place_kind=(CASE WHEN d.compartment_id IS NOT NULL THEN 'COMPARTMENT'
+   WHEN d.system_id IS NOT NULL THEN 'SYSTEM' ELSE 'NOT_PLACED' END)
+  AND v.place_slot_id <=> COALESCE(
+   (SELECT c.stable_slot_id FROM compartment c WHERE c.id=d.compartment_id),
+   (SELECT s.stable_slot_id FROM vehicle_system s WHERE s.id=d.system_id))
+  AND v.kind=d.kind AND v.expected_quantity <=> d.expected_quantity
+  AND v.unit <=> d.unit AND JSON_EQUALS(v.allowed_outcomes, d.allowed_outcomes)
+  AND v.expiration_tracked=d.expiration_tracked AND v.instructions=d.instructions)
+THEN {signal("an item row names another requirement than its item and place")}; END IF;"""
 
 EXTRAS = {
     "vehicle_item_requirement_version": VERSION_EXTRA,
-    "legacy_item_requirement_map": MAP_EXTRA,
+    "item_requirement_map": MAP_EXTRA,
 }
 
 
@@ -157,40 +168,6 @@ VALUE_CHECK = (
     'AND JSON_CONTAINS(\'["PASSED","FAILED","UNABLE_TO_INSPECT"]\', allowed_outcomes) '
     "AND JSON_CONTAINS(allowed_outcomes, '\"PASSED\"'))"
 )
-ITEMDEF_FK = (
-    "ALTER TABLE `checklist_item_def` ADD CONSTRAINT `cya_itemdef_requirement_version_org_fk` "
-    f"FOREIGN KEY ({ORG},item_requirement_version_id) "
-    f"REFERENCES `vehicle_item_requirement_version` ({ORG},id) "
-    "ON DELETE RESTRICT ON UPDATE RESTRICT"
-)
-
-# AC-42 (1): a row names only a version of its own vehicle, item and place, with equal
-# requirements. Kit content never names one (CHK-11).
-ITEMDEF_MATCH = """NEW.item_requirement_version_id IS NOT NULL AND (NEW.kit_id IS NOT NULL
- OR NOT EXISTS (SELECT 1 FROM vehicle_item_requirement_version v
-  JOIN checklist_version cv ON cv.id=NEW.checklist_version_id
-  JOIN checklist_template t ON t.id=cv.template_id
-  WHERE v.id=NEW.item_requirement_version_id AND v.vehicle_id=t.vehicle_id
-  AND v.item_id=NEW.item_id
-  AND v.place_kind=(CASE WHEN NEW.compartment_id IS NOT NULL THEN 'COMPARTMENT'
-   WHEN NEW.system_id IS NOT NULL THEN 'SYSTEM' ELSE 'NOT_PLACED' END)
-  AND v.place_slot_id <=> COALESCE(
-   (SELECT c.stable_slot_id FROM compartment c WHERE c.id=NEW.compartment_id),
-   (SELECT s.stable_slot_id FROM vehicle_system s WHERE s.id=NEW.system_id))
-  AND v.kind=NEW.kind AND v.expected_quantity <=> NEW.expected_quantity
-  AND v.unit <=> NEW.unit AND JSON_EQUALS(v.allowed_outcomes, NEW.allowed_outcomes)
-  AND v.expiration_tracked=NEW.expiration_tracked AND v.instructions=NEW.instructions))"""
-ITEMDEF_MESSAGE = "an item row names another requirement than its item and place"
-
-
-def itemdef_guard(suffix, event):
-    return (
-        f"CREATE TRIGGER cya_checklist_item_def_itemreq_{suffix} BEFORE {event} "
-        f"ON checklist_item_def FOR EACH ROW BEGIN IF {ITEMDEF_MATCH} THEN "
-        f"{signal(ITEMDEF_MESSAGE)}; END IF; END"
-    )
-
-
 PUBLICATION_GUARD = f"""CREATE TRIGGER cya_checklist_publication_itemreq_bi BEFORE INSERT
 ON checklist_publication FOR EACH ROW BEGIN
 IF NEW.checklist_version_id IS NOT NULL
@@ -198,7 +175,7 @@ IF NEW.checklist_version_id IS NOT NULL
  AND EXISTS (SELECT 1 FROM checklist_item_def d JOIN checklist_version cv
   ON cv.id=d.checklist_version_id JOIN checklist_template t ON t.id=cv.template_id
   WHERE d.checklist_version_id=NEW.checklist_version_id AND t.vehicle_id IS NOT NULL
-  AND d.kit_id IS NULL AND d.item_requirement_version_id IS NULL)
+  AND NOT EXISTS (SELECT 1 FROM item_requirement_map m WHERE m.item_def_id=d.id))
 THEN {signal("every item row names its item requirement after the cutover")}; END IF;
 END"""
 
@@ -216,14 +193,6 @@ def forward_statements():
         ),
         SAME_REQUIREMENT_FK,
         VALUE_CHECK,
-        key_index(
-            "checklist_item_def",
-            "cya_itemdef_requirement_version_org_fk",
-            f"{ORG},item_requirement_version_id",
-        ),
-        ITEMDEF_FK,
-        itemdef_guard("bi", "INSERT"),
-        itemdef_guard("bu", "UPDATE"),
         PUBLICATION_GUARD,
     ]
 
@@ -231,9 +200,6 @@ def forward_statements():
 def reverse_statements():
     drops = [
         "DROP TRIGGER cya_checklist_publication_itemreq_bi",
-        "DROP TRIGGER cya_checklist_item_def_itemreq_bu",
-        "DROP TRIGGER cya_checklist_item_def_itemreq_bi",
-        "ALTER TABLE `checklist_item_def` DROP FOREIGN KEY `cya_itemdef_requirement_version_org_fk`",
         "ALTER TABLE `vehicle_item_requirement_version` "
         "DROP CONSTRAINT `cya_vehicle_item_requirement_version_outcomes`",
         "ALTER TABLE `vehicle_item_requirement_version` "

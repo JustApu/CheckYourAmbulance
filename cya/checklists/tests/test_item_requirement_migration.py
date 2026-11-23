@@ -14,7 +14,7 @@ from cya.checklists.item_requirement_cutover import (
 from cya.checklists.models import (
     ChecklistItemDef,
     ItemRequirementCutover,
-    LegacyItemRequirementMap,
+    ItemRequirementMap,
     VehicleItemRequirement,
     VehicleItemRequirementVersion,
 )
@@ -38,7 +38,7 @@ class MigrationCase(ItemRequirementCase):
     def nothing_written(self):
         self.assertFalse(ItemRequirementCutover.objects.exists())
         self.assertFalse(VehicleItemRequirement.objects.exists())
-        self.assertFalse(LegacyItemRequirementMap.objects.exists())
+        self.assertFalse(ItemRequirementMap.objects.exists())
 
 
 class ItemRequirementMigrationTests(MigrationCase):
@@ -130,7 +130,7 @@ class ItemRequirementMigrationTests(MigrationCase):
             resolve_item_requirement(self.row(second, self.masks).pk),
         )
         self.assertTrue(
-            LegacyItemRequirementMap.objects.filter(item_def=self.row(first, self.suction)).exists()
+            ItemRequirementMap.objects.filter(item_def=self.row(first, self.suction)).exists()
         )
 
     def test_a_deficiency_on_an_item_kept_in_two_places_is_listed(self):  # AC-42 (5)

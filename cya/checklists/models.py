@@ -364,13 +364,6 @@ class ChecklistItemDef(models.Model):
     expiration_tracked = models.BooleanField(default=False)
     # Reserved: bulk pass is deferred from R1 (SPEC 7.6); the database holds it false.
     bulk_eligible = models.BooleanField(default=False)
-    # SPEC 6.0.0 CHK-5, CHK-11: the vehicle item requirement version this row inspects, set when
-    # a vehicle checklist version is published after the organization's item-requirement
-    # cutover. Null on kit content, on legacy rows and on rows published before the cutover,
-    # which are read through LegacyItemRequirementMap.
-    item_requirement_version = models.ForeignKey(
-        "VehicleItemRequirementVersion", null=True, on_delete=models.PROTECT, related_name="+"
-    )
 
     class Meta:
         db_table = "checklist_item_def"
@@ -823,13 +816,15 @@ class ItemRequirementCutover(CommandRecord):
         return f"ItemRequirementCutover {self.pk}"
 
 
-class LegacyItemRequirementMap(CommandRecord):
-    """A source item row -> its item requirement and version (SPEC 6.0.0 18.3 item 2).
+class ItemRequirementMap(CommandRecord):
+    """An item row of a published vehicle checklist version -> its item requirement and version.
 
-    Keyed by the row of a vehicle checklist version published before the cutover, so an
-    earlier record is resolved through the version and row it pinned, never through its item
-    and place alone. Kit content has no item requirement (CHK-11); its row is recorded as such
-    so that every earlier row still resolves. Append-only and kept for good.
+    SPEC 6.0.0 CHK-5, CHK-11, 18.3 item 2. The migration writes one for every row of a version
+    published before the cutover; from the cutover on, publishing a vehicle checklist version
+    writes one for each of its rows (item rows are versioned and never updated). An earlier
+    record is resolved through the row it pinned, never through its item and place alone. Kit
+    content has no item requirement (CHK-11); its row is recorded as such, so every published
+    row resolves. Append-only and kept for good.
     """
 
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
@@ -846,7 +841,7 @@ class LegacyItemRequirementMap(CommandRecord):
     )
 
     class Meta:
-        db_table = "legacy_item_requirement_map"
+        db_table = "item_requirement_map"
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="itemreqmap_org_id"),
             models.CheckConstraint(
@@ -867,4 +862,4 @@ class LegacyItemRequirementMap(CommandRecord):
         ]
 
     def __str__(self):
-        return f"LegacyItemRequirementMap {self.pk}"
+        return f"ItemRequirementMap {self.pk}"

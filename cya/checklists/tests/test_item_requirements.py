@@ -9,6 +9,7 @@ from cya.checklists.models import (
     ChecklistItemDef,
     ChecklistPublication,
     ItemRequirementCutover,
+    ItemRequirementMap,
     VehicleItemRequirement,
     VehicleItemRequirementVersion,
 )
@@ -66,7 +67,9 @@ class ItemRequirementCase(ChecklistCase):
 
     def requirement(self, version_id, item):
         row = self.rows(version_id)[str(item.pk)]
-        return VehicleItemRequirementVersion.objects.get(pk=row.item_requirement_version_id)
+        return VehicleItemRequirementVersion.objects.get(
+            pk=ItemRequirementMap.objects.get(item_def=row).requirement_version_id
+        )
 
     def masks_spec(self, quantity, **overrides):
         cabinet = str(self.own_row(self.cabinet, self.vehicle).pk)
@@ -88,9 +91,7 @@ class ItemRequirementCase(ChecklistCase):
 class BeforeCutoverTests(ItemRequirementCase):
     def test_rows_stay_unlinked_until_the_item_requirement_cutover(self):
         version = self.publish_checklist(self.a, self.own_items())
-        self.assertTrue(
-            all(r.item_requirement_version_id is None for r in self.rows(version).values())
-        )
+        self.assertFalse(ItemRequirementMap.objects.filter(checklist_version_id=version).exists())
         self.assertFalse(VehicleItemRequirement.objects.exists())
 
 
@@ -103,7 +104,7 @@ class PublicationTests(ItemRequirementCase):
         version = self.publish_checklist(self.a, self.own_items())
         places = {
             str(item): VehicleItemRequirementVersion.objects.get(
-                pk=row.item_requirement_version_id
+                pk=ItemRequirementMap.objects.get(item_def=row).requirement_version_id
             ).place_kind
             for item, row in self.rows(version).items()
         }
@@ -226,7 +227,7 @@ class PublicationTests(ItemRequirementCase):
                 **evidence,
             )
 
-    def test_the_database_refuses_a_row_naming_other_requirements(self):  # AC-42 (1)
+    def test_the_database_refuses_a_map_row_naming_other_requirements(self):  # AC-42 (1)
         from cya.checklists import commands
 
         published = self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec(6)])
@@ -234,12 +235,22 @@ class PublicationTests(ItemRequirementCase):
         draft = commands.save_template_draft(
             template_id=str(self.b.pk), items=[self.masks_spec(4)], **self.context()
         ).body["version_id"]
+        row = ChecklistItemDef.objects.get(checklist_version_id=draft)
         with (
             self.assertRaisesRegex(DatabaseError, "names another requirement"),
             transaction.atomic(),
         ):
-            ChecklistItemDef.objects.filter(checklist_version_id=draft).update(
-                item_requirement_version_id=masks.pk
+            ItemRequirementMap.objects.create(
+                vehicle_id=self.vehicle.pk,
+                checklist_version_id=draft,
+                item_def=row,
+                requirement_id=masks.requirement_id,
+                requirement_version_id=masks.pk,
+                organization_id=masks.organization_id,
+                command_id=masks.command_id,
+                recorded_at=masks.recorded_at,
+                actor_user_id=masks.actor_user_id,
+                actor_roles_at_time=masks.actor_roles_at_time,
             )
 
     def test_the_database_refuses_an_unlinked_publication_after_the_cutover(self):
@@ -266,6 +277,6 @@ class GuardMigrationTests(ItemRequirementCase):
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT COUNT(*) FROM information_schema.TRIGGERS "
-                "WHERE TRIGGER_SCHEMA=DATABASE() AND TRIGGER_NAME='cya_checklist_item_def_itemreq_bu'"
+                "WHERE TRIGGER_SCHEMA=DATABASE() AND TRIGGER_NAME='cya_checklist_publication_itemreq_bi'"
             )
             self.assertEqual(cursor.fetchone()[0], 1)

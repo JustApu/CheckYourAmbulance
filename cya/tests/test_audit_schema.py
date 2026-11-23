@@ -29,7 +29,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "vehicle_item_requirement",
                     "vehicle_item_requirement_version",
                     "item_requirement_cutover",
-                    "legacy_item_requirement_map",
+                    "item_requirement_map",
                     "vehicle_position_key",
                     "roster_snapshot",
                     "roster_member",

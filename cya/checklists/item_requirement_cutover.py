@@ -33,7 +33,7 @@ from cya.checklists.models import (
     ChecklistItemDef,
     ChecklistPublication,
     ItemRequirementCutover,
-    LegacyItemRequirementMap,
+    ItemRequirementMap,
     Vehicle,
     VehicleItemRequirement,
     VehicleItemRequirementVersion,
@@ -302,8 +302,8 @@ def _write(plan, evidence):
             **{name: version.fields[name] for name in FIELDS},
             **evidence,
         )
-    LegacyItemRequirementMap.objects.bulk_create(
-        LegacyItemRequirementMap(
+    ItemRequirementMap.objects.bulk_create(
+        ItemRequirementMap(
             id=new_id(),
             vehicle_id=row.vehicle_id,
             checklist_version_id=row.checklist_version_id,
@@ -359,22 +359,13 @@ def migrate_item_requirements(*, organization_id, actor_id, operation_id):
 
 
 def resolve_item_requirement(item_def_id):
-    """(requirement id, version id) an item row inspects, through its link or the map.
+    """(requirement id, version id) a published item row inspects, from its map row.
 
-    Both are None for kit content and for rows of versions that were never published.
+    Both are None for kit content and for rows of versions published before the cutover's
+    migration or never published.
     """
-    row = (
-        ChecklistItemDef.objects.filter(pk=item_def_id)
-        .values("item_requirement_version_id", "item_requirement_version__requirement_id")
-        .first()
-    )
-    if row and row["item_requirement_version_id"]:
-        return (
-            str(row["item_requirement_version__requirement_id"]),
-            str(row["item_requirement_version_id"]),
-        )
     mapped = (
-        LegacyItemRequirementMap.objects.filter(item_def_id=item_def_id)
+        ItemRequirementMap.objects.filter(item_def_id=item_def_id)
         .values_list("requirement_id", "requirement_version_id")
         .first()
     )
