@@ -24,7 +24,7 @@ from cya.authorization.backend import canonical_id
 from cya.checklists.models import ChecklistTemplate, Vehicle
 from cya.inspections import printable
 from cya.inspections.models import InspectionSession, SessionParticipant
-from cya.inspections.projections import current_state, is_expired
+from cya.inspections.projections import current_state, deadline_passed, is_expired
 from cya.inspections.workflows import report_options
 from cya.obligations.requirements import bound_template_ids
 from cya.odometer.models import OdometerEntry
@@ -158,6 +158,9 @@ def _session_rows(user, vehicle, instant):
                 "opened_at": session.opened_at,
                 "participant": participant,
                 "url": reverse("inspection-session", args=[session.pk]) if participant else None,
+                # SES-8, SES-9: an ended session may be resumed only before its deadline R*.
+                "resume_until": state.resume_deadline_at,
+                "resumable": shown != "OPEN" and not deadline_passed(state, instant),
             }
         )
     return rows
@@ -169,9 +172,10 @@ def _checklists(templates, sessions):
     Each vehicle checklist has at most one session in progress (SPEC 6.3 SES-7). Starting it
     joins that session, so the entry offers Join (or Continue to a participant) instead of Start.
     The command joins the newest in-progress session; sessions is newest first, with the same
-    effective state. A participant's incomplete session is offered for resuming only while none
-    of its checklist is in progress (SES-3). A checklist no longer bound is listed only while it
-    has a session in progress, which anyone may still join if the checklist is active.
+    effective state. A participant's incomplete session is offered for resuming only before its
+    resume deadline (SES-8) and while none of its checklist is in progress (SES-3). A checklist
+    no longer bound is listed only while it has a session in progress, which anyone may still
+    join if the checklist is active.
     """
     entries = {
         t["id"]: {"id": t["id"], "label": t["label"], "bound": True, "joinable": True}
@@ -189,7 +193,12 @@ def _checklists(templates, sessions):
         mine = [row for row in sessions if row["template_id"] == entry["id"]]
         entry["in_progress"] = next((row for row in mine if row["state"] == "OPEN"), None)
         entry["resume"] = next(
-            (row for row in mine if row["participant"] and row["state"] == "INCOMPLETE"), None
+            (
+                row
+                for row in mine
+                if row["participant"] and row["state"] == "INCOMPLETE" and row["resumable"]
+            ),
+            None,
         )
         # The list below links a session once: not again when the entry above already does.
         for row in (entry["in_progress"], entry["resume"]):
@@ -320,6 +329,8 @@ def session(request, session_id):
     now = timezone.now()
     state = current_state(found)
     shown = "INCOMPLETE" if state.state == "OPEN" and is_expired(state, now) else state.state
+    # SES-8: from its deadline R* the session is read-only for everyone; its records stay.
+    past_deadline = deadline_passed(state, now)
     saved = preferences.get_preferences(str(user.organization_id), user.pk)
     template = ChecklistTemplate.objects.filter(
         organization_id=user.organization_id, pk=found.checklist_version.template_id
@@ -332,6 +343,8 @@ def session(request, session_id):
         "time_zone": user.organization.station_zone,
         "checklist_version_id": str(found.checklist_version_id),
         "state": shown,
+        "resume_deadline_at": state.resume_deadline_at.isoformat(),
+        "past_deadline": past_deadline,
         "view": saved["preferred_view"],
         "needs_attention_only": saved["needs_attention_only"],
         "odometer_unit": odometer_unit,
@@ -359,6 +372,8 @@ def session(request, session_id):
         "template_label": template.label if template else "",
         "state": shown,
         "state_label": STATE_LABELS[shown],
+        "resume_deadline": state.resume_deadline_at,
+        "past_deadline": past_deadline,
         "status": _status(user, found.vehicle, now),
         "config": config,
         "report_options": options,

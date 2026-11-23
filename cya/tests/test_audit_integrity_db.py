@@ -212,6 +212,7 @@ class AuditIntegrityTests(TestCase):
             "vehicle_activity_event",  # issue #130: vehicle activity history (SPEC 4.8 CFG-1)
             "vehicle_assignment_event",  # issue #202: vehicle crew assignment (SPEC 15.4)
             "vehicle_assignment_limit",  # issue #202: administrator-set maximum assignment length
+            "session_resume_limit",  # issue #256: administrator-set inspection resume limit
             "checklist_cutover",  # issue #220: SPEC 5.0.0 move to vehicle-owned checklists
             "legacy_checklist_map",  # issue #220: SPEC 5.0.0 migration (18.2)
             "legacy_version_map",  # issue #220: SPEC 5.0.0 migration (18.2)
@@ -336,6 +337,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "vehicle_activity_event",
                         "vehicle_assignment_event",
                         "vehicle_assignment_limit",
+                        "session_resume_limit",
                         "checklist_cutover",
                         "legacy_checklist_map",
                         "legacy_version_map",
@@ -459,6 +461,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "vehicle_activity_event",
                     "vehicle_assignment_event",
                     "vehicle_assignment_limit",
+                    "session_resume_limit",
                     "checklist_cutover",
                     "legacy_checklist_map",
                     "legacy_version_map",

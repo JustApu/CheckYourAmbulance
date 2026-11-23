@@ -89,6 +89,9 @@ MIGRATION_TEST_INPUTS = frozenset(
         "cya/obligations/tests/test_routine_index_migration.py",
         "cya/tests/test_audit_integrity_db.py",
         "cya/tests/test_session_per_checklist_migration.py",
+        # Issue #256 Part E: the resume-limit migration test and the session case it builds on.
+        "cya/tests/test_session_deadline_migration.py",
+        "cya/inspections/tests/test_activity.py",
     }
 )
 # What decides which tests run and how the test database is built: the shared test package and

@@ -561,6 +561,16 @@
         "Supply Officer": "allow",
         "Administrator": "allow"
       }
+    },
+    {
+      "id": "PERM-55",
+      "action": "set_inspection_resume_limit",
+      "by_role": {
+        "Crew": "deny",
+        "Supervisor": "deny",
+        "Supply Officer": "deny",
+        "Administrator": "allow"
+      }
     }
   ]
 }

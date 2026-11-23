@@ -34,7 +34,7 @@
       {% endif %}
       {% if c.resume %}<p class="muted">Your incomplete {{ c.label }} inspection cannot be resumed while this one is in progress.</p>{% endif %}
       {% elif c.resume %}
-      <p><strong>{{ c.label }}:</strong> incomplete · opened <time datetime="{{ c.resume.opened_at.isoformat }}">{{ c.resume.opened_at|station_time }}</time></p>
+      <p><strong>{{ c.label }}:</strong> incomplete · opened <time datetime="{{ c.resume.opened_at.isoformat }}">{{ c.resume.opened_at|station_time }}</time> · can be resumed until <time datetime="{{ c.resume.resume_until.isoformat }}">{{ c.resume.resume_until|station_time }}</time></p>
       <a class="button primary" href="{{ c.resume.url }}">Resume incomplete {{ c.label }} inspection</a>
       {% if c.bound %}<button type="button" class="button start-session" data-template="{{ c.id }}">Start a new {{ c.label }} inspection</button>{% endif %}
       {% else %}

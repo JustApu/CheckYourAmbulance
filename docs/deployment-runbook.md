@@ -406,9 +406,18 @@ and runs after a host reboot. Failed runs of these jobs alert through [operation
   instant (issue #202). Releases before issue #202 part 3 do not have the command;
   the host profiles' unit skips the run on such a release instead of failing.
 - **Session cleanup:** run `manage.py close_inactive_sessions --limit 200` on an
-  operator-selected cadence. It is idempotent and closes at most 200 oldest
-  eligible sessions per pass; sessions are treated as closed after six idle
-  hours even if the job is late. The command exits nonzero if any close fails.
+  operator-selected cadence. It is idempotent and ends at most 200 sessions per
+  pass, earliest end instant first. A session ends at its end instant: six idle
+  hours after its last activity, or its resume deadline (opened_at plus the
+  organization's resume limit, default 6 hours, captured at open) when that comes
+  first (SPEC SES-8, SES-9). Each ending is stamped at that instant, not when the
+  job runs: `AUTO_INCOMPLETE` for inactivity, `DEADLINE_INCOMPLETE` at the
+  deadline. Enforcement never waits for the job: past its end instant a session
+  already reads as ended and refuses checks, and past its deadline it refuses
+  reopen and join. The command prints `closed= at_deadline= skipped= failed=` and
+  exits nonzero if any close fails. `--dry-run` lists the sessions due
+  (`due session=… ends_at=…`, then `due=N`) and writes nothing; use it to check a
+  backlog before the first run after an upgrade.
 
 The scheduler must not make application startup depend on job success. Alert on
 missed or failed runs through the approved operational path; do not silently
