@@ -243,7 +243,14 @@ class PinnedVersionApiTests(PinnedVersionMixin, AttentionCase):
         self.assertEqual(
             (response.status_code, response.json()["code"]), (400, "MALFORMED_REQUEST")
         )
-        response = self.get(f"?session_id={self.session.pk}&checklist_version_id={self.version_id}")
-        self.assertEqual(
-            (response.status_code, response.json()["code"]), (400, "INVALID_CHECKLIST_VERSION")
-        )
+
+    def test_a_session_and_a_version_together_are_malformed(self):
+        unknown = "00000000-0000-4000-8000-000000000000"
+        for session_id in (self.session.pk, unknown):
+            with self.subTest(session_id=session_id):
+                response = self.get(
+                    f"?session_id={session_id}&checklist_version_id={self.version_id}"
+                )
+                self.assertEqual(
+                    (response.status_code, response.json()["code"]), (400, "MALFORMED_REQUEST")
+                )

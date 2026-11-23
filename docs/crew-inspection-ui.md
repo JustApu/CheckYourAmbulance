@@ -57,7 +57,7 @@ Authenticated same-origin JSON (CSRF protection stays on). The command layer aut
 
 Rejections use the common shape: 400 `MALFORMED_REQUEST` (bad or unknown fields, a non-v4 id), 401, 403 `FORBIDDEN` (including a nonparticipant and an unknown session), 409 `SESSION_IN_PROGRESS` (a separate start, or a reopen, while another session of that vehicle checklist is in progress), 409 `SESSION_UNAVAILABLE` (the command refused otherwise: no such active template or vehicle, already open, not open) and the usual 503 codes.
 
-The session screen reads its rows with `GET /api/v1/vehicles/{id}/checklist?session_id={session}`: the rows of the version the session pins (CHK-4), with the vehicle's current state on each. Only a participant of a session on that vehicle gets them; any other session id is 404 `NOT_FOUND`, a malformed one 400 `MALFORMED_REQUEST`, and `session_id` with `checklist_version_id` 400 `INVALID_CHECKLIST_VERSION`.
+The session screen reads its rows with `GET /api/v1/vehicles/{id}/checklist?session_id={session}`: the rows of the version the session pins (CHK-4), with the vehicle's current state on each. Only a participant of a session on that vehicle gets them; any other session id is 404 `NOT_FOUND`, a malformed one 400 `MALFORMED_REQUEST`, and `session_id` with `checklist_version_id` 400 `MALFORMED_REQUEST` before the session is looked up.
 
 ## Checklist screen behavior
 

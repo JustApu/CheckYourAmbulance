@@ -127,6 +127,10 @@ def checklist(request, vehicle_id):
     try:
         if set(request.GET) - CHECKLIST_QUERY:
             raise Rejected(400, "MALFORMED_REQUEST", [("$", "INVALID_FIELDS")])
+        if "session_id" in request.GET and "checklist_version_id" in request.GET:
+            # A session pins its own version, so naming both conflicts; refused before the
+            # session is looked up, whether or not it exists.
+            raise Rejected(400, "MALFORMED_REQUEST", [("$", "INVALID_FIELDS")])
         try:
             vehicle = canonical_id(vehicle_id)
         except ValueError:
