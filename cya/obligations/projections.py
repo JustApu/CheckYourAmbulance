@@ -135,7 +135,26 @@ def _bounds(instant, start, end):
     return start, end
 
 
-def _obligation(row):
+def _mapped_requirements(rows):
+    """{obligation id: requirement id} for pre-cutover NO_KIT obligations whose pinned row is mapped."""
+    from cya.checklists.models import ItemRequirementMap
+
+    by_def = {
+        str(r.requirement_version.item_def_id): str(r.pk)
+        for r in rows
+        if r.kit_key == NO_KIT and r.requirement_version.item_def_id
+    }
+    if not by_def:
+        return {}
+    return {
+        by_def[str(item_def)]: str(requirement)
+        for item_def, requirement in ItemRequirementMap.objects.filter(
+            item_def_id__in=list(by_def), requirement__isnull=False
+        ).values_list("item_def_id", "requirement_id")
+    }
+
+
+def _obligation(row, mapped=None):
     version = row.requirement_version
     return ObligationEvidence(
         str(row.pk),
@@ -158,6 +177,7 @@ def _obligation(row):
         late_limit_at=row.late_limit_at,
         # Only a presence unit key is carried; a kit or NO_KIT follows from kit_instance_id.
         kit_key=None if row.kit_key in (NO_KIT, str(row.kit_instance_id)) else row.kit_key,
+        mapped_requirement_id=(mapped or {}).get(str(row.pk)),
     )
 
 
@@ -836,6 +856,11 @@ def _history_fields(
                 check_unit_key(r, units),
                 str(r.actor_user_id) if r.actor_user_id else None,
                 str(r.item_requirement_version_id) if r.item_requirement_version_id else None,
+                (
+                    requirement_of_version(str(r.item_requirement_version_id))
+                    if r.item_requirement_version_id
+                    else None
+                ),
             )
             for r in rows
         ),
@@ -913,11 +938,7 @@ def load_projection_history(
         .select_related("selected_obligation__requirement_version")
         .order_by("sequence", "id")[: MAX_ROWS + 1]
     )
-    obligations = {
-        str(e.selected_obligation_id): _obligation(e.selected_obligation)
-        for e in events
-        if e.selected_obligation_id is not None
-    }
+    selected = [e.selected_obligation for e in events if e.selected_obligation_id is not None]
     adhoc_rows = Obligation.objects.filter(
         organization_id=organization_id,
         vehicle_id=vehicle_id,
@@ -929,7 +950,9 @@ def load_projection_history(
     adhoc = _bounded(
         adhoc_rows.select_related("requirement_version").order_by("id")[: MAX_ROWS + 1]
     )
-    obligations.update({str(o.pk): _obligation(o) for o in adhoc})
+    mapped = _mapped_requirements(selected + list(adhoc))
+    obligations = {str(o.pk): _obligation(o, mapped) for o in selected}
+    obligations.update({str(o.pk): _obligation(o, mapped) for o in adhoc})
     _bounded(obligations.values())
     ids = tuple(sorted(obligations))
     determinations = _bounded(

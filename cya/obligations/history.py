@@ -16,6 +16,7 @@ class RecordedCheck:
     # SPEC 6.0.0 CHK-11: the item requirement version a loose item's check names (None for a kit,
     # a presence line, or before the cutover); only such a check may take the transition link.
     item_requirement_version_id: str | None = None
+    item_requirement_id: str | None = None  # the requirement of that version
 
 
 @dataclass(frozen=True)
@@ -128,7 +129,8 @@ def replay_checks(history, instant):
         transition = (
             obligation.unit_key == NO_KIT
             and row.kit_key != NO_KIT
-            and row.item_requirement_version_id is not None  # a requirement check only
+            and row.item_requirement_id is not None  # a requirement check only, and of the
+            and row.item_requirement_id == obligation.mapped_requirement_id  # pinned row's own
         )
         if row.item_id != obligation.item_id or (
             row.kit_key != obligation.unit_key and not transition
