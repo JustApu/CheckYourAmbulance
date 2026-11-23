@@ -91,10 +91,22 @@ class SessionApiTests(CrewUiCase):
         self.assertEqual(one["result"], two["result"])
         self.assertEqual(InspectionSession.objects.count(), 1)
 
-    def test_separate_always_opens_another(self):
+    def test_a_separate_start_or_second_reopen_is_refused_with_its_code(self):
+        # SES-7: one session in progress per vehicle checklist.
         first = self.open().json()["result"]["session_id"]
-        second = self.open(separate=True).json()["result"]["session_id"]
-        self.assertNotEqual(first, second)
+        refused = self.open(separate=True)
+        self.assertEqual(
+            (refused.status_code, refused.json()["code"]), (409, "SESSION_IN_PROGRESS")
+        )
+        self.assertEqual(InspectionSession.objects.count(), 1)
+        self.post(f"{SESSIONS}/{first}/end", {"operation_id": str(uuid4())})
+        other, _user, token = self.second_user()
+        second = self.open(other, token).json()["result"]
+        self.assertEqual(second["code"], "SESSION_OPENED")
+        refused = self.post(f"{SESSIONS}/{first}/reopen", {"operation_id": str(uuid4())})
+        self.assertEqual(
+            (refused.status_code, refused.json()["code"]), (409, "SESSION_IN_PROGRESS")
+        )
 
     def test_malformed_requests_are_refused_without_a_write(self):
         before = InspectionSession.objects.count()
@@ -247,7 +259,7 @@ class PageTests(CrewUiCase):
         config = self.config(page)
         self.assertEqual(config["vehicle_id"], str(self.vehicle.pk))
 
-    def test_an_open_inspection_is_explicitly_joinable_and_separate_start_is_explained(self):
+    def test_an_inspection_in_progress_is_joined_not_started_again(self):
         ChecklistTemplate.objects.filter(pk=self.template.pk).update(
             label="Night Shift Vehicle Safety Checklist"
         )
@@ -256,26 +268,49 @@ class PageTests(CrewUiCase):
 
         html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
 
-        self.assertIn("Open inspection: Night Shift Vehicle Safety Checklist", strip_tags(html))
+        self.assertIn("Night Shift Vehicle Safety Checklist: in progress", strip_tags(html))
         self.assertIn('class="button primary join-session"', html)
-        self.assertIn('class="active-inspection"', html)
+        self.assertIn('class="active-inspection checklist-inspection"', html)
         self.assertIn('class="session-row-status"', html)
         self.assertIn("Join Night Shift Vehicle Safety Checklist inspection", html)
         self.assertNotIn(f"/inspection/sessions/{session_id}/", html)
-        self.assertIn("Start a separate inspection", html)
-        self.assertIn("creates a second inspection instead of joining the open one", html)
-        self.assertIn("Start separate Night Shift Vehicle Safety Checklist inspection", html)
+        self.assertNotIn('start-session" data-template', html)
+        self.assertNotIn("Start a separate", html)
 
-    def test_all_open_nonparticipant_rows_explain_that_join_selects_the_latest(self):
+    def test_each_checklist_has_its_own_start_join_or_continue(self):
+        from cya.checklists import commands as checklist_commands
+
+        other_template = ChecklistTemplate.objects.create(
+            organization=self.org, label="Synthetic Oxygen Checklist"
+        )
+        version = checklist_commands.save_template_draft(
+            template_id=str(other_template.pk),
+            items=self.base_items(),
+            **self.context(self.admin),
+        ).body["version_id"]
+        checklist_commands.publish_template_version(version_id=version, **self.context(self.admin))
+        self.bind(self.vehicle, template=other_template, reconcile=False)
+        mine = self.open().json()["result"]["session_id"]
+        html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+        self.assertIn(f"Continue {self.template.label} inspection", html)
+        self.assertIn("Start Synthetic Oxygen Checklist inspection", html)
+        self.assertIn(f'href="/inspection/sessions/{mine}/"', html)
+        # Another crew member starts the second checklist: both are in progress together.
+        other, _user, token = self.second_user()
+        theirs = self.open(other, token, template_id=str(other_template.pk)).json()["result"]
+        self.assertEqual(theirs["code"], "SESSION_OPENED")
+        html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+        self.assertIn(f"Continue {self.template.label} inspection", html)
+        self.assertIn("Join Synthetic Oxygen Checklist inspection", html)
+        self.assertNotIn("Start Synthetic Oxygen Checklist inspection", html)
+
+    def test_an_open_nonparticipant_row_points_to_its_checklists_join(self):
         other, _user, token = self.second_user()
         self.open(other, token)
-        self.open(other, token, separate=True)
 
         html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
 
-        self.assertEqual(
-            html.count("The primary action above joins the latest open inspection."), 2
-        )
+        self.assertEqual(html.count(f"Join it with the {self.template.label} button above."), 1)
 
     def test_a_participant_gets_a_continue_action_and_ended_sessions_are_labeled(self):
         session_id = self.open().json()["result"]["session_id"]
@@ -298,11 +333,24 @@ class PageTests(CrewUiCase):
 
         html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
 
-        self.assertIn("Incomplete inspection:", strip_tags(html))
+        self.assertIn(f"{self.template.label}: incomplete", strip_tags(html))
         self.assertIn(f"Resume incomplete {self.template.label} inspection", strip_tags(html))
         self.assertEqual(html.count(f'href="/inspection/sessions/{session_id}/"'), 1)
-        self.assertIn("Start a new inspection", html)
-        self.assertIn("Your incomplete inspection stays available", html)
+        self.assertIn(f"Start a new {self.template.label} inspection", html)
+
+    def test_an_incomplete_session_is_not_offered_for_resuming_while_another_is_in_progress(self):
+        session_id = self.open().json()["result"]["session_id"]
+        self.post(
+            f"{SESSIONS}/{session_id}/end", {"operation_id": str(uuid4()), "state": "INCOMPLETE"}
+        )
+        other, _user, token = self.second_user()
+        self.open(other, token)
+        html = strip_tags(
+            self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
+        )
+        self.assertIn(f"Join {self.template.label} inspection", html)
+        self.assertNotIn(f"Resume incomplete {self.template.label} inspection", html)
+        self.assertIn("cannot be resumed while this one is in progress", html)
 
     def test_unknown_and_malformed_vehicle_ids_are_404(self):
         for value in (str(uuid4()), "not-a-uuid"):
@@ -432,7 +480,8 @@ class PageTests(CrewUiCase):
     def test_the_vehicle_page_lists_open_sessions_and_own_ended_ones_only(self):
         mine = self.open().json()["result"]["session_id"]
         other, _user, token = self.second_user()
-        theirs = self.open(other, token, separate=True).json()["result"]["session_id"]
+        self.post(f"{SESSIONS}/{mine}/end", {"operation_id": str(uuid4())})
+        theirs = self.open(other, token).json()["result"]["session_id"]
         self.post(f"{SESSIONS}/{theirs}/end", {"operation_id": str(uuid4())}, other, token)
         html = self.client.get(f"/inspection/vehicles/{self.vehicle.pk}/").content.decode()
         self.assertIn(f"/inspection/sessions/{mine}/", html)

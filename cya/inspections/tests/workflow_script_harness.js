@@ -679,6 +679,23 @@ function generic(kind) {
     run.form.fire("submit"); assert.equal(run.posts().length, 0);
   }
   {
+    // A session reads its pinned version's rows by session (SPEC CHK-4, issue #256 Part D), not
+    // by filtering the current rows by version; a verification page has no session.
+    const run = checklist("OPEN");
+    run.context.testUI.reload();
+    const reads = run.requests.filter(r => String(r.url).startsWith("/checklist?"));
+    assert(reads.length > 0);
+    for (const read of reads) {
+      assert(String(read.url).includes("&session_id=session"), read.url);
+      assert(!String(read.url).includes("checklist_version_id"), read.url);
+    }
+    const verification = checklist("OPEN", {verification_for_deficiency_id: "deficiency", session_id: undefined});
+    verification.context.testUI.reload();
+    for (const read of verification.requests.filter(r => String(r.url).startsWith("/checklist?"))) {
+      assert(!String(read.url).includes("session_id"), read.url);
+    }
+  }
+  {
     const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency", session_id: undefined});
     run.context.testUI.setRows([row]); run.context.testUI.startCheck(row, null, "PASSED");
     const first = run.posts()[0];

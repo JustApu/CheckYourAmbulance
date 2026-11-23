@@ -723,8 +723,8 @@ class InspectionScenario:
     def idle_and_history(self):
         session = InspectionSession.objects.get(pk=self.session)
         last_activity = current_state(session).last_activity_at
-        # A separate session remains open throughout: its status cannot erase completed work.
-        never_closed = self.open(self.crew[2], separate=True)
+        # The session is still open: completed work needs no submit or close.
+        expect(current_state(session).state, "OPEN", "session not yet closed")
         expect(self.earliest("suction").state, State.SATISFIED, "unclosed session needs no submit")
         self.clock.set(last_activity + timedelta(hours=5, minutes=59))
         read_session(self.org.pk, self.session)
@@ -755,11 +755,6 @@ class InspectionScenario:
             "crew reopen is audited",
         )
         expect(self.rows(), before, "reopen changes no compliance")
-        expect(
-            current_state(InspectionSession.objects.get(pk=never_closed)).state,
-            "OPEN",
-            "other session was never manually closed",
-        )
         self.verify_history()
 
     def verify_history(self):
