@@ -133,7 +133,7 @@ class ItemRequirementMigrationTests(MigrationCase):
             ItemRequirementMap.objects.filter(item_def=self.row(first, self.suction)).exists()
         )
 
-    def test_a_deficiency_on_an_item_kept_in_two_places_is_listed(self):  # AC-42 (5)
+    def test_a_deficiency_on_an_item_kept_in_two_places_refuses(self):  # AC-42 (5), 18.3 item 2
         from datetime import timedelta
 
         from cya.deficiencies.commands import report_deficiency
@@ -163,9 +163,12 @@ class ItemRequirementMigrationTests(MigrationCase):
             **self.context(self.supervisor),
         )
         plan = plan_item_requirements(str(self.org.pk))
-        self.assertEqual(plan.problems, [])
         self.assertEqual(len(plan.ambiguous_deficiencies), 1)
-        self.assertEqual(self.cutover().body["ambiguous_deficiencies"], 1)  # listed; C3 blocks
+        self.assertEqual(len(plan.problems), 1)  # until its place is assigned (test_places)
+        self.assertIn("ambiguous place", plan.problems[0])
+        with self.assertRaises(ItemRequirementMigrationError):
+            self.cutover()
+        self.nothing_written()
 
     def test_the_command_refuses_and_reports(self):
         self.publish_checklist(self.a, [self.masks_spec(6)])
