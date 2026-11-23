@@ -298,32 +298,23 @@ def _requirements(version, override):
 def _with_item_requirements(requirements, as_of, recorded_before=None):
     """Each row outside a kit with the vehicle item requirement version in force at as_of.
 
-    SPEC 6.0.0 CHK-5, CHK-11: a row names its requirement (its link, or the source-row map for
-    a version published before the cutover); its place and requirements are the requirement
+    SPEC 6.0.0 CHK-5, CHK-11: a row's requirement is in its item_requirement_map row; its place and requirements are the requirement
     version's in force at as_of, so changing a requirement changes it for every checklist from
     its effective instant (AC-42 (4)). Rows of no requirement are returned unchanged.
     """
     from dataclasses import replace
 
-    from cya.checklists.models import LegacyItemRequirementMap, VehicleItemRequirementVersion
+    from cya.checklists.models import ItemRequirementMap, VehicleItemRequirementVersion
 
     ids = [str(r.definition_id) for r in requirements if r.definition_id and not r.kit_id]
     if not ids:
         return requirements
     owner = {
         str(pk): str(requirement)
-        for pk, requirement in ChecklistItemDef.objects.filter(
-            pk__in=ids, item_requirement_version__isnull=False
-        ).values_list("pk", "item_requirement_version__requirement_id")
+        for pk, requirement in ItemRequirementMap.objects.filter(
+            item_def_id__in=ids, requirement__isnull=False
+        ).values_list("item_def_id", "requirement_id")
     }
-    owner.update(
-        {
-            str(pk): str(requirement)
-            for pk, requirement in LegacyItemRequirementMap.objects.filter(
-                item_def_id__in=[i for i in ids if i not in owner], requirement__isnull=False
-            ).values_list("item_def_id", "requirement_id")
-        }
-    )
     if not owner:
         return requirements
     versions = VehicleItemRequirementVersion.objects.filter(

@@ -3,8 +3,7 @@
 After an organization's item-requirement cutover, a row outside a kit is owed per vehicle item
 requirement: its requirement version pins the requirement version in force at the due instant,
 and its kit_key (the stream's unit) is that requirement's id (migration 0018). This guard
-requires the pinned version to belong to the requirement of the pinned item row (its link, or
-the source-row map for a version published before the cutover), to be of the same vehicle and
+requires the pinned version to belong to the requirement of the pinned item row (its item_requirement_map row), to be of the same vehicle and
 item, and the kit_key to be its requirement's id.
 """
 
@@ -20,13 +19,8 @@ def signal(message):
 
 
 def requirement_of_row(column):
-    """The item requirement of an item row: its link, else the source-row map (SQL)."""
-    return (
-        "COALESCE((SELECT dv.requirement_id FROM checklist_item_def d "
-        "JOIN vehicle_item_requirement_version dv ON dv.id=d.item_requirement_version_id "
-        f"WHERE d.id={column}),(SELECT m.requirement_id FROM legacy_item_requirement_map m "
-        f"WHERE m.item_def_id={column}))"
-    )
+    """The item requirement of an item row, from its item_requirement_map row (SQL)."""
+    return f"(SELECT m.requirement_id FROM item_requirement_map m WHERE m.item_def_id={column})"
 
 
 UNIT_CHECK = f"""

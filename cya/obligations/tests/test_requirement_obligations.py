@@ -6,7 +6,11 @@ from uuid import uuid4
 
 from cya.checklists import commands as checklist_commands
 from cya.checklists.item_requirement_cutover import migrate_item_requirements
-from cya.checklists.models import ChecklistItemDef, VehicleItemRequirementVersion
+from cya.checklists.models import (
+    ChecklistItemDef,
+    ItemRequirementMap,
+    VehicleItemRequirementVersion,
+)
 from cya.checklists.overlay import resolve_checklist
 from cya.checklists.tests.support import ALL_OUTCOMES
 from cya.checklists.tests.test_item_requirements import ItemRequirementCase
@@ -47,7 +51,9 @@ class RequirementObligationCase(CutoverCase):
 
     def version_of(self, version_id, item):
         row = ChecklistItemDef.objects.get(checklist_version_id=version_id, item=item)
-        return VehicleItemRequirementVersion.objects.get(pk=row.item_requirement_version_id)
+        return VehicleItemRequirementVersion.objects.get(
+            pk=ItemRequirementMap.objects.get(item_def=row).requirement_version_id
+        )
 
     def publish_requirement(self, requirement_id, **fields):
         base = {
