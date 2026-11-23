@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest import TestCase
+from uuid import NAMESPACE_URL, uuid5
 
 from cya.checks.state import CheckDecision, CheckSnapshot
 from cya.obligations.history import (
@@ -117,6 +118,12 @@ class HistoryEvidenceTests(TestCase):
         bad = replace(history.check_records[1], kit_key="another-kit")
         with self.assertRaisesRegex(ValueError, "kit mismatch"):
             replay_checks(replace(history, check_records=(bad,)), T)
+        # A presence-line unit key is a uuid5 too, like an item requirement id (review on #263):
+        # only a check that names an item requirement version may take the transition link.
+        line_unit = str(uuid5(NAMESPACE_URL, "presence-line"))
+        presence = replace(history.check_records[1], kit_key=line_unit)
+        with self.assertRaisesRegex(ValueError, "kit mismatch"):
+            replay_checks(replace(history, check_records=(presence,)), T)
         with self.assertRaisesRegex(ValueError, "root is missing"):
             replay_checks(
                 replace(history, check_records=(history.check_records[0],)),

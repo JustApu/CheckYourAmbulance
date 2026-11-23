@@ -835,6 +835,7 @@ def _history_fields(
                 str(r.item_id),
                 check_unit_key(r, units),
                 str(r.actor_user_id) if r.actor_user_id else None,
+                str(r.item_requirement_version_id) if r.item_requirement_version_id else None,
             )
             for r in rows
         ),

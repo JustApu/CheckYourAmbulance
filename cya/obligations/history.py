@@ -1,19 +1,10 @@
 """Immutable check/link and deficiency evidence for database-free historical replay."""
 
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
 from cya.checks.state import CheckSnapshot, effective_checks
 from cya.obligations.state import NO_KIT, CheckEvidence, aware
-
-
-def _is_requirement_unit(unit):
-    """Whether a check's unit is an item requirement id (uuid5, SPEC 6.0.0 CHK-11)."""
-    try:
-        return uuid.UUID(unit).version == 5
-    except ValueError:
-        return False
 
 
 @dataclass(frozen=True)
@@ -22,6 +13,9 @@ class RecordedCheck:
     item_id: str
     kit_key: str
     author_user_id: str | None
+    # SPEC 6.0.0 CHK-11: the item requirement version a loose item's check names (None for a kit,
+    # a presence line, or before the cutover); only such a check may take the transition link.
+    item_requirement_version_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,7 +128,7 @@ def replay_checks(history, instant):
         transition = (
             obligation.unit_key == NO_KIT
             and row.kit_key != NO_KIT
-            and _is_requirement_unit(row.kit_key)  # an item requirement, never a kit (uuid4)
+            and row.item_requirement_version_id is not None  # a requirement check only
         )
         if row.item_id != obligation.item_id or (
             row.kit_key != obligation.unit_key and not transition
