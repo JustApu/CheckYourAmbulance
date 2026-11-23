@@ -14,6 +14,8 @@ Implementation notes that differ from or complete the contract text are
 recorded in docs/checklists-implementation.md.
 """
 
+from uuid import UUID, uuid5
+
 from django.db import models
 
 from cya.accounts.fields import IdentityIDField, new_id
@@ -23,6 +25,8 @@ KINDS = ("PRESENCE_CONDITION", "QUANTITY", "MEASUREMENT", "SPECIAL_OBSERVATION",
 # separate issue; it is deliberately not accepted until that rule exists.
 OUTCOMES = ("PASSED", "FAILED", "UNABLE_TO_INSPECT")
 OVERRIDE_ACTIONS = ("ADD", "REMOVE", "REPLACE")
+# Where a vehicle item requirement keeps its stock (SPEC 6.0.0 CHK-11; Not placed is CHK-9).
+PLACE_KINDS = ("COMPARTMENT", "SYSTEM", "NOT_PLACED")
 
 
 def organization_fk():
@@ -659,3 +663,218 @@ class StockingDeviation(models.Model):
 
     def __str__(self):
         return f"StockingDeviation {self.pk}"
+
+
+class CommandRecord(models.Model):
+    """Receipt and actor of an append-only row written by one audited command."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    command = models.ForeignKey(
+        "cya_core.CommandReceipt", on_delete=models.PROTECT, related_name="+"
+    )
+    recorded_at = models.DateTimeField()
+    actor_user = models.ForeignKey("cya_accounts.User", on_delete=models.PROTECT, related_name="+")
+    actor_roles_at_time = models.JSONField(default=list)
+
+    class Meta:
+        abstract = True
+
+
+# Item requirement ids are version-5 UUIDs (kit instance ids are version 4): a requirement id is
+# the unit key of its obligation stream (issue #256 C2), and readers tell a requirement key from
+# a kit key by its version alone, as they do kit presence line keys (cya.kits.presence). The
+# database holds the version (migration 0014, cya_vehicle_item_requirement_v5).
+REQUIREMENT_ID_NAMESPACE = UUID("6a1f3b0e-6c56-5d0e-9a5b-2f6c1d8e4b70")
+
+
+def new_requirement_id():
+    """A fresh, unpredictable item requirement id of UUID version 5."""
+    return str(uuid5(REQUIREMENT_ID_NAMESPACE, new_id()))
+
+
+class VehicleItemRequirement(CommandRecord):
+    """One stock of an item on one vehicle (SPEC 6.0.0 CHK-11). Append-only (A).
+
+    Its identity holds no place: a move publishes a new version of the same requirement, and an
+    item kept in several places at once has one requirement for each place.
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_requirement_id, editable=False)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    item = models.ForeignKey(Item, on_delete=models.PROTECT, related_name="+")
+
+    class Meta:
+        db_table = "vehicle_item_requirement"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="itemreq_org_id"),
+            # Targets of the version's composite keys: same vehicle and item as its requirement.
+            models.UniqueConstraint(
+                fields=["vehicle", "item", "id"], name="itemreq_vehicle_item_id"
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleItemRequirement {self.pk}"
+
+
+class VehicleItemRequirementVersion(CommandRecord):
+    """An effective-dated version of a vehicle item requirement (SPEC 6.0.0 CHK-11). Append-only.
+
+    It is in force from effective_at until its requirement's next version. Its place is a
+    position kind and the position's stable slot id; the slot revision named when it was
+    published is kept for display. Vehicle and item repeat the requirement's (a composite key
+    holds them equal) so that SPEC 18.1 constraint 8 can be checked on insert.
+    """
+
+    requirement = models.ForeignKey(
+        VehicleItemRequirement, on_delete=models.PROTECT, related_name="+"
+    )
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    item = models.ForeignKey(Item, on_delete=models.PROTECT, related_name="+")
+    revision = models.PositiveIntegerField()
+    effective_at = models.DateTimeField()
+    place_kind = models.CharField(max_length=12)
+    place_slot_id = IdentityIDField(null=True)
+    compartment = models.ForeignKey(
+        Compartment, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    system = models.ForeignKey(VehicleSystem, null=True, on_delete=models.PROTECT, related_name="+")
+    instructions = models.CharField(max_length=4000, blank=True)
+    kind = models.CharField(max_length=30)
+    expected_quantity = models.PositiveIntegerField(null=True)
+    unit = models.CharField(max_length=40, null=True)  # noqa: DJ001
+    allowed_outcomes = models.JSONField()
+    expiration_tracked = models.BooleanField(default=False)
+    bulk_eligible = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "vehicle_item_requirement_version"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="itemreqver_org_id"),
+            models.UniqueConstraint(
+                fields=["requirement", "revision"], name="itemreqver_requirement_revision"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(place_kind__in=PLACE_KINDS), name="itemreqver_place_kind"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        place_kind="COMPARTMENT",
+                        place_slot_id__isnull=False,
+                        compartment__isnull=False,
+                        system__isnull=True,
+                    )
+                    | models.Q(
+                        place_kind="SYSTEM",
+                        place_slot_id__isnull=False,
+                        compartment__isnull=True,
+                        system__isnull=False,
+                    )
+                    | models.Q(
+                        place_kind="NOT_PLACED",
+                        place_slot_id__isnull=True,
+                        compartment__isnull=True,
+                        system__isnull=True,
+                    )
+                ),
+                name="itemreqver_place",
+            ),
+            models.CheckConstraint(condition=models.Q(kind__in=KINDS), name="itemreqver_kind"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="QUANTITY", expected_quantity__isnull=False)
+                    | (~models.Q(kind="QUANTITY") & models.Q(expected_quantity__isnull=True))
+                ),
+                name="itemreqver_quantity_by_kind",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        kind__in=["MEASUREMENT", "VEHICLE_READING"],
+                        unit__isnull=False,
+                        unit__regex=r"\S",
+                    )
+                    | (
+                        ~models.Q(kind__in=["MEASUREMENT", "VEHICLE_READING"])
+                        & models.Q(unit__isnull=True)
+                    )
+                ),
+                name="itemreqver_unit_by_kind",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(bulk_eligible=False), name="itemreqver_bulk_reserved"
+            ),
+        ]
+
+    def __str__(self):
+        return f"VehicleItemRequirementVersion {self.pk}"
+
+
+class ItemRequirementCutover(CommandRecord):
+    """The instant an organization moved to vehicle item requirements (SPEC 6.0.0 18.3).
+
+    Append-only, at most one per organization, written by migrate_item_requirements. From it
+    on, publishing a vehicle checklist version links each item row outside a kit to the item
+    requirement version it inspects.
+    """
+
+    class Meta:
+        db_table = "item_requirement_cutover"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="itemreqcut_org_id"),
+            models.UniqueConstraint(fields=["organization"], name="itemreqcut_one_per_org"),
+        ]
+
+    def __str__(self):
+        return f"ItemRequirementCutover {self.pk}"
+
+
+class ItemRequirementMap(CommandRecord):
+    """An item row of a published vehicle checklist version -> its item requirement and version.
+
+    SPEC 6.0.0 CHK-5, CHK-11, 18.3 item 2. The migration writes one for every row of a version
+    published before the cutover; from the cutover on, publishing a vehicle checklist version
+    writes one for each of its rows (item rows are versioned and never updated). An earlier
+    record is resolved through the row it pinned, never through its item and place alone. Kit
+    content has no item requirement (CHK-11); its row is recorded as such, so every published
+    row resolves. Append-only and kept for good.
+    """
+
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="+")
+    checklist_version = models.ForeignKey(
+        ChecklistVersion, on_delete=models.PROTECT, related_name="+"
+    )
+    item_def = models.OneToOneField(ChecklistItemDef, on_delete=models.PROTECT, related_name="+")
+    kit_content = models.BooleanField(default=False)
+    requirement = models.ForeignKey(
+        VehicleItemRequirement, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    requirement_version = models.ForeignKey(
+        VehicleItemRequirementVersion, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        db_table = "item_requirement_map"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="itemreqmap_org_id"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        kit_content=False,
+                        requirement__isnull=False,
+                        requirement_version__isnull=False,
+                    )
+                    | models.Q(
+                        kit_content=True,
+                        requirement__isnull=True,
+                        requirement_version__isnull=True,
+                    )
+                ),
+                name="itemreqmap_target",
+            ),
+        ]
+
+    def __str__(self):
+        return f"ItemRequirementMap {self.pk}"

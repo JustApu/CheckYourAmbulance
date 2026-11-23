@@ -217,6 +217,10 @@ class AuditIntegrityTests(TestCase):
             "legacy_version_map",  # issue #220: SPEC 5.0.0 migration (18.2)
             "legacy_item_def_map",  # issue #220: SPEC 5.0.0 migration (18.2)
             "legacy_position_map",  # issue #220: SPEC 5.0.0 migration (18.2)
+            "vehicle_item_requirement",  # issue #256: SPEC 6.0.0 item requirements (CHK-11, 18.3)
+            "vehicle_item_requirement_version",  # issue #256: SPEC 6.0.0 item requirements (CHK-11, 18.3)
+            "item_requirement_cutover",  # issue #256: SPEC 6.0.0 item requirements (CHK-11, 18.3)
+            "item_requirement_map",  # issue #256: SPEC 6.0.0 item requirements (CHK-11, 18.3)
             "vehicle_position_key",  # issue #220: SPEC 5.0.0 migration (18.2)
             "odometer_threshold",  # issue 79 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/79): administrator-set plausibility threshold revisions
             "notification_requeue",  # issue #224: an administrator sent given-up notification email again
@@ -335,6 +339,10 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "legacy_version_map",
                         "legacy_item_def_map",
                         "legacy_position_map",
+                        "vehicle_item_requirement",
+                        "vehicle_item_requirement_version",
+                        "item_requirement_cutover",
+                        "item_requirement_map",
                         "vehicle_position_key",
                         "seal_event",
                         "seal_substitution",
@@ -452,6 +460,10 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "legacy_version_map",
                     "legacy_item_def_map",
                     "legacy_position_map",
+                    "vehicle_item_requirement",
+                    "vehicle_item_requirement_version",
+                    "item_requirement_cutover",
+                    "item_requirement_map",
                     "vehicle_position_key",
                     "seal_event",
                     "seal_substitution",

@@ -375,6 +375,26 @@ def _active_vehicle_ids(org):
     )
 
 
+def _link_item_requirements(org, owner, version, definitions, effective_at, receipt, actor):
+    """SPEC 6.0.0 CHK-11: link the rows to their vehicle item requirements (item_requirements)."""
+    from cya.checklists import item_requirements
+
+    if not item_requirements.has_cutover(org):
+        return
+    try:
+        item_requirements.link_rows(
+            organization_id=org,
+            vehicle_id=str(owner),
+            template_id=version.template_id,
+            rows=definitions,
+            effective_at=effective_at,
+            receipt=receipt,
+            actor=actor,
+        )
+    except item_requirements.ItemRequirementError as error:
+        raise ChecklistValidationError(str(error)) from error
+
+
 def publish_template_version(*, version_id, effective_at=None, **context):
     """Publish a draft: validate the resolved set, assign effective_at, freeze (CHK-2, CHK-3).
 
@@ -434,6 +454,10 @@ def publish_template_version(*, version_id, effective_at=None, **context):
             # A shared template must fit every active vehicle; a vehicle checklist its own.
             _require_slots(requirements, applies_to if owner else _active_vehicle_ids(org), final)
             _refuse_retired(requirements, applies_to)
+            if owner:
+                _link_item_requirements(
+                    org, owner, version, definitions, final, receipt, current_actor
+                )
             ChecklistPublication.objects.create(
                 id=publication_id,
                 organization_id=org,
