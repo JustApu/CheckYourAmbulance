@@ -616,6 +616,337 @@ The RPO is 15 minutes, RTO 24 hours; provider snapshots alone do not prove eithe
 
 Until it has run, deactivating or reactivating a vehicle is refused. Obligation projections need no rebuild for this release: activity is attached at read time, like operational status.
 
+## Upgrade to SPEC 6.0.0 (issue #256)
+
+[Issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256) implements SPEC 6.0.0:
+item requirements per place, one session in progress per vehicle checklist, and the session
+resume limit. It ships in parts A to F. This section covers the migrations of Parts A to E and
+the item-requirement cutover (SPEC §18.3). Part C4 is still open; see
+[C4 deploy impact](#c4-deploy-impact-placeholder) below. None of it has been rehearsed on a VM.
+Deploying it, or rehearsing it on a VM, needs the owner's explicit go-ahead. The general steps in
+[Upgrade, failure and recovery](#upgrade-failure-and-recovery) and
+[Database setup and migrations](#database-setup-and-migrations) still apply. This section adds
+only what is specific to this release.
+
+### Before the window
+
+1. Confirm that a fresh backup exists and that the restore procedure in
+   [Backup and point-in-time recovery](#backup-and-point-in-time-recovery) works. Several reversals
+   below are refused or lose data. After the cutover, a restore with owner approval (DEP-7) is the
+   only full way back.
+2. The item-requirement cutover needs each organization to have already moved to vehicle-owned
+   checklists (`migrate_vehicle_checklists`, SPEC §18.2). If it has not, its dry run reports
+   `move the organization to vehicle checklists first (SPEC 18.2)`.
+3. Choose a **quiet time** (below), and announce the outage and the paper procedure.
+
+### Quiet time
+
+Deploy when **no inspection is in progress**. Run the cutover in the same quiet time, or in a
+later one.
+
+- **Why the migrations need it.** `cya_inspections 0007` gives every existing session a captured
+  resume limit of 6 hours (SPEC §18.3 item 3). A session's end instant is
+  `E = min(A + 6 h, R*)`, where:
+  - `A` is the last activity;
+  - `R* = max(opened_at + 6 h, A)`.
+
+  So any session opened more than 6 hours before the upgrade reads as **ended from the
+  migration's commit**. This holds even if a crew is still recording into it: their next check
+  is refused with `SESSION_DEADLINE_PASSED`, and they must start a new inspection. Their records
+  are kept. A session opened less than 6 hours before is cut off at its sixth hour, which can be
+  earlier than it would have ended under the old rule.
+- **Why the cutover needs it.** `migrate_item_requirements` takes the organization lock and then
+  locks **every vehicle row of the organization** (`SELECT … FOR UPDATE`) for its whole run.
+  Check recording, session start, join, reopen and end, and checklist publication all take the
+  vehicle lock first, so all of them wait until the run commits or fails. Its duration on real
+  data has not been measured.
+- **Checking it before the window.** The release you are upgrading from has no
+  `close_inactive_sessions --dry-run`. Read the session projection directly, read only, with a DBA
+  or runtime connection on the application database. Times are stored in UTC.
+
+  ```sql
+  SELECT COUNT(*) AS open_sessions,
+         SUM(last_activity_at > UTC_TIMESTAMP() - INTERVAL 6 HOUR) AS active_in_last_6h
+  FROM session_projection WHERE state = 'OPEN';
+  ```
+
+  Wait for `active_in_last_6h` to reach 0, then stop traffic. Sessions still `OPEN` but idle are
+  harmless. After the upgrade the session job ends each one at its own end instant (see post-deploy
+  check 3).
+- **Several sessions of one checklist already open.** If several sessions of one vehicle
+  checklist are open at the upgrade, `cya_inspections 0006` leaves them open. Each finishes under
+  SES-1, SES-8 and SES-9, and none is ended early (SPEC §18.3 item 3). From the upgrade on, a new
+  start joins the session in progress instead (SES-7).
+
+### Order of steps
+
+1. **Stop traffic and the scheduled jobs.** Stop the application and every timer in
+   [Scheduled application jobs](#scheduled-application-jobs), so that no job runs half-way through
+   the schema change.
+2. **Read the plan.** Run `local/venv/bin/python manage.py migrate --plan` and confirm that it
+   lists exactly these migrations (in dependency order, interleaved by app):
+   - `cya_checklists` 0013 to 0015;
+   - `cya_obligations` 0018 and 0019;
+   - `cya_checks` 0015 to 0019;
+   - `cya_seals` 0007 and 0008;
+   - `cya_deficiencies` 0024 to 0027;
+   - `cya_inspections` 0006 and 0007;
+   - C4's migration, once C4 has merged (placeholder below).
+
+   Also confirm that `cya_deficiencies 0023` is shown as applied. Its trigger text did not change in
+   #256, only a helper the reversal test reads (#265).
+3. **Migrate**, as the schema owner: `migrate --noinput`, then `verify_audit_schema`.
+4. **Runtime grants.** The release adds append-only tables, so install their grants:
+   - `session_resume_limit`;
+   - `vehicle_item_requirement`, `vehicle_item_requirement_version`, `item_requirement_cutover`
+     and `item_requirement_map`;
+   - `deficiency_place` and `deficiency_requirement_map`.
+
+   Run `audit_runtime_grants --user … --host … --dry-run`, then apply it. Then run
+   `verify_audit_runtime`, `check --fail-level WARNING` and `check --deploy`, with fresh runtime
+   connections, as in [Database setup and migrations](#database-setup-and-migrations).
+5. **Settle the sessions** (post-deploy check 3) before reopening traffic.
+6. **Reopen traffic and the jobs.** The release works before the cutover: checklist rows,
+   obligations and checks keep their per-item behaviour until it runs.
+7. **Cutover, per organization, in a quiet time** (below). It can be the same window or a later
+   one.
+8. **Post-deploy checks** (below).
+
+### Dry runs
+
+Run each of these first. Each one writes nothing.
+
+| Command | What it reports | Run it |
+|---|---|---|
+| `manage.py migrate --plan` | The migrations that would apply. It is not a rehearsal. | Before step 3. |
+| `manage.py audit_runtime_grants --user <account> --host <account host> --dry-run` | The grants that are missing for the new tables. | Step 4. |
+| `manage.py close_inactive_sessions --dry-run [--limit N]` | One `due session=<id> ends_at=<instant>` line per session at or past its end instant, earliest first, then `due=N`. `--limit` defaults to 200. This command exists only from this release on. | After step 3, before the real run. |
+| `manage.py migrate_item_requirements --organization <org-uuid> --actor-user-id <administrator-uuid> --dry-run` | What the cutover would create (`requirements`, `requirement versions`, `mapped item rows`, `kit content rows`, `ambiguous deficiencies`, `placed deficiencies`). It prints a `problem:` line for each refusal and a `place needed:` line for each deficiency on an item kept in more than one place, saying whether its place is recorded. It exits nonzero if any problem would refuse the run. | Before the cutover. Repeat until it is clean. |
+| `manage.py generate_obligations --organization <org-uuid> --dry-run` | What the next generation would write. After the cutover, rows outside kits are owed per item requirement. | After the cutover. |
+| `manage.py rebuild_obligation_projection --organization <org-uuid> --verify` | Missing or stale projection rows and replay mismatches. It exits nonzero on any. | Post-deploy. |
+
+Problems found by the cutover dry run:
+
+- The dry run lists at most 50 problems (`MAX_PROBLEMS`). Fix them and run it again until it is
+  clean.
+- A **conflict** means two checklists keep the same item at the same place with different
+  requirements. A Supervisor publishes matching versions of the checklists named.
+- A **possible move or split** means a later version moves the item while another checklist still
+  keeps it at the old place. The migration cannot tell which it is, so a Supervisor publishes
+  versions that make it unambiguous.
+- An **ambiguous place** is the blocker below.
+
+### Blocker: deficiencies whose place is ambiguous (#265)
+
+SPEC §18.3 item 2. A deficiency that names an item outside a kit has item set, and kit and
+compartment null. If its vehicle keeps that item in more than one place, the cutover cannot tell
+which stock the deficiency concerns. It refuses the whole migration, writes nothing, and lists the
+deficiency (`problem: ambiguous place, deficiency <id> names …`). It never attaches the deficiency
+to every place.
+
+- **This applies to every status.** Closed and resolved deficiencies block exactly as open ones
+  do. That is the SPEC-literal rule; see the [revisit list](#revisit-before-production).
+- **The fix** is to record the deficiency's place once, with an explanation. The place is a
+  compartment or system of the deficiency's vehicle, or Not placed, where a published checklist of
+  the vehicle keeps the item outside a kit. A Supervisor or Administrator records it through
+  `assign_deficiency_place` (`cya/deficiencies/places.py`, command `DEFICIENCY_PLACE_ASSIGN`).
+- **There is no page, API endpoint or management command for it yet.** It is a Python function,
+  so today it can only be called from `manage.py shell`. It takes the deficiency, place kind,
+  position, explanation, organization and actor ids, an operation id and correlation ids. This is
+  on the [revisit list](#revisit-before-production).
+- **Refusals.** It is refused for a deficiency that is not a loose item (`NOT_A_LOOSE_ITEM`),
+  one that already has a place (`PLACE_ALREADY_ASSIGNED`), a place where no published checklist
+  keeps the item (`PLACE_NOT_KEPT`), and after the organization's cutover (`CUTOVER_DONE`).
+- **What the cutover does with it.** It maps a recorded place to the item requirement kept there
+  when the deficiency was reported, or else to the latest one kept there, and writes
+  `deficiency_requirement_map`. If no requirement is kept there, that is a problem and the
+  cutover refuses.
+
+### The cutover
+
+In the protected runtime environment, as an active Administrator of the organization:
+
+```sh
+local/venv/bin/python manage.py migrate_item_requirements --organization <org-uuid> --actor-user-id <administrator-uuid> --dry-run
+local/venv/bin/python manage.py migrate_item_requirements --organization <org-uuid> --actor-user-id <administrator-uuid>
+```
+
+- It is one audited `ITEM_REQUIREMENT_CUTOVER` command (policy action `import_configuration`),
+  all or nothing. It re-plans under the locks and refuses with nothing written if anything
+  changed.
+- It prints `Operation id <uuid>` before it starts. If the run is interrupted, rerun it with
+  `--operation-id <uuid>`, which replays the first result. Any other run after a successful one
+  is refused.
+- It changes no existing row. Checklist versions, obligations, checks, links and deficiencies
+  stay as they are, and earlier records read through the source-row map (§18.3 item 2).
+- Checks recorded before it are not re-linked (§18.3 item 4). An obligation created before the
+  cutover keeps the per-item unit, and a new check links it only while it is not past its late
+  limit and its pinned row resolves to the same requirement. Obligations generated after the
+  cutover are owed per item requirement.
+- From the cutover on:
+  - publishing a vehicle checklist version links each row to its requirement, and is refused if
+    a row has no map row;
+  - `assign_deficiency_place` is refused (`CUTOVER_DONE`);
+  - deficiency targets, verification scope, suspension and attention are per place for rows
+    recorded after it. Rows recorded before it keep the per-item rule.
+
+### What each migration does to existing rows
+
+"Reverses" says what reversing the migration does on its own, read from its code. CI runs the
+`migration_rollback` tests on synthetic data for the C1 (0014), C3 (deficiencies), D and E
+migrations. Reversal on a populated database has not been rehearsed.
+
+| Migration | Existing rows | Reverses |
+|---|---|---|
+| `cya_checklists 0013_item_requirements` | Creates four tables (`vehicle_item_requirement`, `…_version`, `item_requirement_cutover`, `item_requirement_map`). No existing row changes. | Drops the tables. After a cutover, that discards every requirement and the source-row map. Other apps' later migrations reference them and must be reversed first. |
+| `cya_checklists 0014_item_requirement_guards` | Triggers, keys and indexes only. | Yes. It drops the guards and keeps the per-key indexes, so reapplying works. Tested. |
+| `cya_checklists 0015_item_requirement_publish` | Lets the version guard accept `ITEM_REQUIREMENT_PUBLISH`. | Yes. Restores the 0014 guard. |
+| `cya_obligations 0018_item_requirement_units` | Adds a nullable `requirement_version.item_requirement_version_id` and replaces the `reqversion_kit_key` CHECK. Existing rows stay null and pass the new CHECK. | Before the cutover, yes. After it, re-adding the old CHECK fails on obligation requirement versions keyed by an item requirement, because MariaDB checks existing rows against an added CHECK. |
+| `cya_obligations 0019_item_requirement_unit_guard` | Trigger only. | Yes. Restores the previous trigger. |
+| `cya_checks 0015_link_every_eligible_obligation` | No row changes. Links recorded under a shared-satisfaction rule keep it. **Every new shared-satisfaction rule is refused from now on** (SCH-5: history only). | Yes (#259). |
+| `cya_checks 0016_check_item_requirement` | Adds a nullable `check_record.item_requirement_version_id`. Existing checks stay null. | Drops the column. After the cutover, that discards which requirement each later check inspected. |
+| `cya_checks 0017_item_requirement_link_scope` | Rewrites the check and link insert guards. | Yes. Restores the previous text. |
+| `cya_checks 0018_verification_place` | Rewrites the check insert guard (VER-3 per place). | Yes. Restores 0017's text. |
+| `cya_checks 0019_check_session_deadline` | Rewrites the check insert guard: no check into a session at or after `R*`. | Yes. Restores 0018's text. Tested. |
+| `cya_seals 0007_inspection_item_requirement` | Adds a nullable `seal_inspection_item.item_requirement_version_id`. | Drops the column. Data loss after the cutover, as for checks 0016. |
+| `cya_seals 0008_item_requirement_link_scope` | Rewrites the seal inspection link guards. | Yes. Restores the previous text. |
+| `cya_deficiencies 0024_deficiency_place` and `0025_deficiency_place_guards` | Creates `deficiency_place` and its guards. No existing row changes. | Drops the table, which discards every recorded place. |
+| `cya_deficiencies 0026_item_requirement_places` | Adds a nullable `item_requirement_version_id` to `deficiency`, `deficiency_affected_item`, `verification_scope_row`, `deficiency_scope_expansion` and `check_suspension`, and creates `deficiency_requirement_map`. Existing rows stay null and keep their per-item meaning. | Drops the columns and the table. Reached only once 0027 has reversed. |
+| `cya_deficiencies 0027_item_requirement_place_guards` | Keys, indexes and triggers only. | **Refused** while `deficiency_requirement_map` has a row or any of the five tables has a row naming a requirement version (`cannot reverse per-place deficiency guards while rows name a place`). In practice that is from the cutover on, whenever a deficiency had a recorded place or anything was reported per place. |
+| `cya_inspections 0006_one_session_per_checklist` | Trigger only. Parallel sessions already open are left open. | Yes. Restores 0005's trigger. Tested. |
+| `cya_inspections 0007_session_resume_limit` | Creates `session_resume_limit` (empty, so every organization uses the 6 h default). Adds `inspection_session.resume_limit_hours = 6` to every existing session (§18.3 item 3). Adds `session_projection.ends_at`, filled by one `UPDATE` from each projection row's own `last_activity_at`. Adds `DEADLINE_INCOMPLETE` to the event CHECKs and rewrites the session and session-event insert guards. | **Refused while any `DEADLINE_INCOMPLETE` event exists** (`a session ended at its resume deadline; reversing would discard that record`). Otherwise it drops the table, both columns and the new event type, and restores 0006's triggers. Tested. |
+
+### Rollback limits
+
+- **Code and schema go back together, or not at all.** Pre-6.0.0 code cannot open a session on
+  the 6.0.0 schema: it does not write `resume_limit_hours`, which is NOT NULL with no default, and
+  the insert guard requires it. The old session job writes `AUTO_INCOMPLETE` at `A + 6 h`, which
+  the new guard refuses whenever the deadline comes first. Do not run old code against the
+  migrated schema.
+- **The session rollback window closes at the first deadline ending.** `cya_inspections 0007`
+  refuses to reverse once the session job has recorded a `DEADLINE_INCOMPLETE`. With the 6 h
+  default, any session that is still being worked on when it reaches its sixth hour ends that
+  way. Expect the first job run after the upgrade, or after reopening, to close the window.
+- **The per-place rollback window closes at the cutover.** `cya_deficiencies 0027` refuses to
+  reverse while any row names a place. `cya_obligations 0018` cannot reverse once obligations are
+  keyed per requirement. Reversing the checklist, check and seal migrations would discard
+  requirement data. After an organization's cutover, treat Parts C1 to C3 as not reversible.
+- **Before the cutover and before any `DEADLINE_INCOMPLETE`**, every #256 migration reverses on
+  synthetic data. Reverse in dependency order with `migrate <app> <previous migration>`:
+  - first `cya_inspections` to 0005 and `cya_checks` to 0014;
+  - then `cya_deficiencies` to 0023, `cya_seals` to 0006 and `cya_obligations` to 0017;
+  - last `cya_checklists` to 0012.
+
+  Rehearse it on a copy first, as for every reversal.
+- **Otherwise** the way back is a restore with owner approval (DEP-7), which loses the writes
+  accepted since the backup.
+
+### Post-deploy checks
+
+1. `verify_audit_schema` (schema owner), then `verify_audit_runtime`,
+   `check --fail-level WARNING` and `check --deploy` (runtime), all clean as in
+   [Database setup and migrations](#database-setup-and-migrations).
+2. `migrate --plan` lists nothing left to apply.
+3. **Sessions.**
+   1. Run `close_inactive_sessions --dry-run`. The `due=` line counts the sessions already past
+      their end instant, including every session the upgrade ended.
+   2. Run `close_inactive_sessions --limit 200` until it reports `closed=0` and `failed=0`. Each
+      ending is stamped at its end instant, not the run time. `at_deadline=` counts the
+      `DEADLINE_INCOMPLETE` endings, and the first one closes the
+      [session rollback window](#rollback-limits).
+   3. Run `--dry-run` again: `due=0`.
+   4. Re-enable the session timer.
+4. **Resume limit.** As an Administrator, open `/administration/inspection-sessions/`. It shows the
+   current limit: 6 hours, since no revision exists yet. Change it only if the organization wants a different limit (1 to 24 whole hours, SES-8).
+   The new limit applies only to sessions opened after the change.
+5. **Crew smoke test** on a synthetic or test vehicle:
+   - a start opens a session, and a second start of the same checklist joins it (SES-7);
+   - the session page shows its "Ends by" time;
+   - an ended session past its deadline is read-only and offers no Reopen.
+6. **After each cutover:**
+   - the cutover dry run now reports `the organization has already moved to item requirements`
+     and exits nonzero. That is expected;
+   - `generate_obligations --organization <org-uuid> --dry-run` runs without errors;
+   - `rebuild_obligation_projection --organization <org-uuid> --verify` exits 0. If it reports
+     stale rows, rebuild as in
+     [Obligation projection rebuild and comparison](#obligation-projection-rebuild-and-comparison)
+     before relying on the dashboards;
+   - a Supervisor publishes a trivial new version of one test vehicle checklist, and it is
+     accepted.
+
+### C4 deploy impact (placeholder)
+
+> **To be completed after Part C4 ([#269](https://github.com/JustApu/CheckYourAmbulance/pull/269))
+> merges.** C4 is still changing the checklist editor, vehicle files, vehicle duplication and
+> CFG-2 position retirement. Its plan, under Codex review and subject to change, includes:
+>
+> - a migration `cya_checklists 0016` that lets the item-requirement guards accept
+>   `VEHICLE_DUPLICATE`;
+> - possibly vehicle file schema 3 (a `requirements` section), with import still accepting v1
+>   and v2;
+> - a position-retirement refusal while an item requirement keeps an item there.
+>
+> When C4 merges, this subsection must record:
+>
+> - its migrations, their effect on existing rows and their reversal;
+> - whether files exported before the upgrade still import;
+> - any order constraint relative to the cutover;
+> - its post-deploy checks;
+> - any additions to the revisit list.
+>
+> Until then this section does not cover C4.
+
+### Revisit before production
+
+The owner said on 2026-11-23 that all current data is test data. Several #256 choices are
+therefore SPEC-literal or liberal in ways that cost nothing now but matter with real records.
+Decide each one before the first production upgrade:
+
+1. **Every status blocks the cutover (#265).** Closed and resolved deficiencies on an item kept
+   in several places block it too, so a long history means many places to assign by hand. One
+   option is to exempt closed ones; that needs a SPEC decision, because §18.3 item 2 sets no
+   status limit.
+2. **No interface for `assign_deficiency_place`.** Today it can only be called from
+   `manage.py shell`. A production cutover needs at least a management command, or a page,
+   that takes the deficiency and place, with a dry run.
+3. **The fallback for a recorded place.** A recorded place maps to the requirement kept there
+   when the deficiency was reported, or else to the latest one kept there. Confirm that the
+   fallback is acceptable for real history, or refuse instead.
+4. **A 6-hour captured limit on every existing session** (§18.3 item 3, SPEC-mandated). Combined
+   with `R* = max(R, A)`, every session older than 6 hours ends at the upgrade. With real crews
+   this needs the quiet time above, or an owner decision to accept cut-off inspections.
+5. **The `ends_at` backfill.** It is computed by SQL from each projection row's own
+   `last_activity_at`, not recomputed from history (the Part E design proposed a
+   `fold_session` recompute). The job re-reads history before any close, so a stale row only
+   offers a session early. Still, consider rebuilding every session projection from history in
+   production. `rebuild_session_projection` exists as a function, but there is no management
+   command for it.
+6. **Reversal guards.** Only `cya_inspections 0007` (any `DEADLINE_INCOMPLETE`) and
+   `cya_deficiencies 0027` (rows naming a place) refuse a lossy reverse. The checklist, check,
+   seal and `deficiency_place` reversals drop requirement data with no check. Add guards, or mark
+   these migrations irreversible, before production.
+7. **Shared-satisfaction rules frozen** (`cya_checks 0015`, SCH-5). Existing rules stay as
+   history and no new rule can be made. Confirm that no production organization relies on adding
+   rules.
+8. **Pre-cutover obligations stay per item** (§18.3 item 4). Late links to them work only until
+   their late limit. Confirm that the cutover timing does not strand obligations due near it.
+9. **The cutover locks every vehicle of the organization** for its whole run, and its duration on
+   real data is unmeasured. Measure it on a copy of production-sized data and plan the quiet
+   time from that.
+10. **No timing for the schema changes.** Each column added to `check_record`,
+    `requirement_version`, `seal_inspection_item`, the five deficiency tables,
+    `inspection_session` and `session_projection` may rebuild its table. None has been timed on a
+    populated copy, unlike issue #80's migrations above. Rehearse on a copy and record the
+    timings here.
+11. **The captured-limit race.** The `inspection_session` insert guard requires the captured
+    limit to equal the organization's current one. If an Administrator changes the limit at the
+    same moment a session opens, the open fails as unavailable (503) and must be retried.
+    Acceptable for now, but confirm.
+12. **Pre-upgrade parallel sessions.** Several sessions of one checklist that were open together
+    before the upgrade are left to finish (`cya_inspections 0006`, SPEC-mandated). Check for any
+    on the production data before the upgrade, and decide whether to end them by hand first.
+13. **C4's choices**, once it merges (placeholder above).
+
 ## Backup and point-in-time recovery
 
 [issue #7](https://github.com/JustApu/CheckYourAmbulance/issues/7) Parts A and B; SPEC DEP-6–DEP-9. Rehearsed on 2026-11-03
