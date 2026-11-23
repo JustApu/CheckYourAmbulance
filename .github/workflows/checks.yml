@@ -28,7 +28,10 @@ permissions:
 
 concurrency:
   # Keep manual fallback runs isolated from push/pull_request runs for the same ref.
-  group: checks-${{ github.event_name }}-${{ github.ref }}
+  # A pull_request `synchronize` run never runs the checks (it only guards a push to a ready PR),
+  # so it has its own group: a push registered just after the PR was marked ready must not
+  # cancel the ready_for_review run that does (#258 merged with no Django run that way).
+  group: checks-${{ github.event_name }}-${{ github.ref }}${{ github.event.action == 'synchronize' && '-synchronize' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -63,6 +66,22 @@ jobs:
       # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, from the release's checksums file.
       GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     steps:
+      - name: Require the run to test the PR's current head
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          # A PR marked ready before GitHub registered the last push starts this run on the old
+          # head. Fail visibly instead of reporting checks of a commit that is no longer the PR.
+          current="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)"
+          if [ "$current" != "$EVENT_HEAD" ]; then
+            printf '::error::This run tests %s but the PR head is now %s. Return the PR to draft and mark it ready again.\n' "$EVENT_HEAD" "$current"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
