@@ -199,6 +199,25 @@ def _activity(row):
     )
 
 
+def requirement_streams(by_key):
+    """{item id: [unit keys that are item requirement ids]} among (item, unit) keys.
+
+    Requirement ids are uuid5 (cya.checklists.item_requirements.new_requirement_id), as are kit
+    presence line unit keys, so only uuid5 units are looked up, and nothing is read otherwise.
+    """
+    candidates = {unit for _item, unit in by_key if unit != NO_KIT and uuid.UUID(unit).version == 5}
+    if not candidates:
+        return {}
+    from cya.checklists.models import VehicleItemRequirement
+
+    found = {}
+    for pk, item in VehicleItemRequirement.objects.filter(pk__in=candidates).values_list(
+        "pk", "item_id"
+    ):
+        found.setdefault(str(item), []).append(str(pk))
+    return found
+
+
 def stored_suspensions(*, organization_id, vehicle_id, obligation_ids, as_of):
     """Supervisor check suspensions known at as_of for the requested obligations (SPEC 8.9).
 
@@ -235,13 +254,20 @@ def stored_suspensions(*, organization_id, vehicle_id, obligation_ids, as_of):
     ended = {str(r.prior_suspension_id): r.recorded_at for r in rows if r.action == "END"}
     # A suspension of a kit presence line covers that line's obligations only (KDEF-12).
     units = line_unit_keys({r.kit_requirement_id for r in rows if r.kit_requirement_id})
+    # A suspension of an item outside a kit (NO_KIT, no line) is per item until deficiencies are
+    # per place (issue #256 C3): it covers every item requirement stream of that item too.
+    streams = requirement_streams(by_key)
     result = []
     for row in rows:
         if row.action != "START":
             continue
         end = ended.get(str(row.pk))
         key = units[str(row.kit_requirement_id)] if row.kit_requirement_id else row.instance_key
-        for obligation_id, recorded_at, grace_at in by_key.get((str(row.item_id), key), ()):
+        keys = [key]
+        if key == NO_KIT and not row.kit_requirement_id:
+            keys += streams.get(str(row.item_id), [])
+        covered = [entry for k in keys for entry in by_key.get((str(row.item_id), k), ())]
+        for obligation_id, recorded_at, grace_at in covered:
             # In force at some min(T, G) with T at or after the obligation was recorded.
             if row.recorded_at <= grace_at and (end is None or end > min(recorded_at, grace_at)):
                 result.append(

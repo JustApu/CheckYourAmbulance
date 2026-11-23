@@ -210,3 +210,80 @@ class PlannerTransitionTests(RequirementObligationCase):
             if str(o.item_id) == str(self.suction.pk) and o.due_at == later
         ]
         self.assertEqual([o.kit_key for o in effective], [str(requirement)])
+
+
+class ReaderConsistencyTests(RequirementObligationCase):
+    """After the cutover the crew rows and per-item suspensions follow the requirement streams."""
+
+    def setUp(self):
+        super().setUp()
+        self.record_item_cutover()
+        self.publish_checklist(self.a, [self.suction_spec()])
+        self.publish_checklist(
+            self.b, [self.suction_spec(compartment_id=None, system_id=self.system_row())]
+        )
+        self.generate()
+        self.due = self.at(days=2, hours=6)
+
+    def suction_rows(self, as_of):
+        from cya.attention.checklist import vehicle_checklist
+
+        rows = vehicle_checklist(str(self.org.pk), str(self.vehicle.pk), as_of=as_of).rows
+        return [r for r in rows if r.item_id == str(self.suction.pk)]
+
+    def test_each_place_is_its_own_row_with_its_obligation(self):
+        (one,) = self.obligations_of(self.suction, self.due)[:1]
+        rows = self.suction_rows(one.early_at)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len({r.item_requirement_id for r in rows}), 2)
+        self.assertTrue(all(r.kit_id is None for r in rows))
+        self.assertTrue(all(r.obligation_state is not None for r in rows))
+
+    def test_a_per_item_suspension_suspends_every_place(self):
+        from datetime import timedelta
+
+        from cya.deficiencies.commands import report_deficiency
+        from cya.deficiencies.models import DeficiencyCategory, DeficiencyEvent
+        from cya.deficiencies.severity import ensure_default_severities
+        from cya.deficiencies.suspension import suspend_checks
+        from cya.obligations.projections import stored_suspensions
+
+        ensure_default_severities(self.org.pk, self.now - timedelta(days=1))
+        category = DeficiencyCategory.objects.create(
+            organization=self.org,
+            stable_category_id=str(uuid4()),
+            revision=1,
+            label="Synthetic mechanical",
+            supply_related=False,
+            effective_at=self.now - timedelta(days=1),
+        )
+        deficiency = report_deficiency(
+            vehicle_id=str(self.vehicle.pk),
+            target={"item_id": str(self.suction.pk)},
+            category_id=category.stable_category_id,
+            severity="HIGH",
+            summary="Synthetic summary",
+            description="Synthetic description of what is wrong.",
+            **self.context(self.supervisor),
+        ).body["deficiency_id"]
+        suspend_checks(
+            deficiency_id=deficiency,
+            expected_event_id=str(
+                DeficiencyEvent.objects.filter(deficiency_id=deficiency).latest("sequence").pk
+            ),
+            items=[{"item_id": str(self.suction.pk)}],
+            **self.context(self.supervisor),
+        )
+        later = self.at(days=3, hours=6)
+        ids = [str(o.pk) for o in self.obligations_of(self.suction, later)]
+        self.assertEqual(len(ids), 2)  # one per place
+        suspended = {
+            e.obligation_id
+            for e in stored_suspensions(
+                organization_id=str(self.org.pk),
+                vehicle_id=str(self.vehicle.pk),
+                obligation_ids=ids,
+                as_of=later,
+            )
+        }
+        self.assertEqual(suspended, set(ids))

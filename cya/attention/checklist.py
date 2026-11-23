@@ -112,6 +112,9 @@ class ChecklistRow:
     # A kit presence row (SPEC 2.0.0 KDEF-10, KDEF-12): the kit list line a count is recorded
     # against; kit_id is then None and expected_quantity is the line's exact count.
     kit_requirement_id: str | None = None
+    # SPEC 6.0.0 CHK-11: the item requirement of a loose item's row after the cutover (one
+    # stock in one place); with the item it identifies the row.
+    item_requirement_id: str | None = None
     # SPEC 5.0.0 CHK-9: a checklist item with no position. It is still due and checked, and is
     # listed under "Not placed", never under a compartment or system.
     not_placed: bool = False
@@ -171,6 +174,15 @@ def _first_resolved_items(organization_id, vehicle_id, as_of):
     for order, item_id, item, version_id in _resolved_items(organization_id, vehicle_id, as_of):
         chosen.setdefault(item_id, (order, item, version_id))
     return chosen
+
+
+def _is_kit(unit, requirement):
+    """Whether a row's unit is a kit instance (not a presence line or an item requirement)."""
+    return bool(
+        unit
+        and requirement.source != PRESENCE_SOURCE
+        and str(unit) != str(getattr(requirement, "item_requirement_id", None) or "")
+    )
 
 
 def _one_per_key(placed):
@@ -471,7 +483,8 @@ def _ordered_rows(organization_id, vehicle_id, placed, obligations):
                 len(placed),
                 (row.requirement.display_order,),
                 obligation.item_id,
-                obligation.kit_instance_id,
+                obligation.kit_instance_id
+                or (obligation.kit_key if pin.item_requirement_version_id else None),
                 pin.kit_instance.label if pin.kit_instance_id else None,
                 row,
                 str(pin.publication.checklist_version_id),
@@ -516,8 +529,11 @@ def _placements(organization_id, vehicle_id, as_of):
                     )
                 )
         else:
+            # SPEC 6.0.0 CHK-11: after the cutover a loose item's row is keyed by its item
+            # requirement, the unit of its obligation stream (None before it).
+            unit = getattr(requirement, "item_requirement_id", None)
             placed.append(
-                (order, (requirement.display_order,), item_id, None, None, resolved, version_id)
+                (order, (requirement.display_order,), item_id, unit, None, resolved, version_id)
             )
     # Content of kits placed by definition (issue #129): one row per kit of that definition, in
     # each checklist that places it.
@@ -625,8 +641,10 @@ def _rows(
             ChecklistRow(
                 item_id=item_id,
                 item_label=labels.get(item_id, ""),
-                # A presence row's internal key is its line's unit key, never a kit.
-                kit_id=str(kit_id) if kit_id and requirement.source != PRESENCE_SOURCE else None,
+                # A presence row's internal key is its line's unit key, never a kit, and a
+                # loose item's is its item requirement (SPEC 6.0.0 CHK-11).
+                kit_id=str(kit_id) if _is_kit(kit_id, requirement) else None,
+                item_requirement_id=getattr(requirement, "item_requirement_id", None),
                 kit_label=kit_label,
                 definition_id=str(requirement.definition_id),
                 kind=requirement.kind,
@@ -845,12 +863,20 @@ def _adhoc_keys_missing(organization_id, vehicle_id, as_of, placed):
             routine=False,
             recorded_at__lte=as_of,
         )
-        .values_list("item_id", "kit_instance_id")
+        .values_list(
+            "item_id",
+            "kit_instance_id",
+            "kit_key",
+            "requirement_version__item_requirement_version_id",
+        )
         .distinct()[: ADHOC_KEY_LIMIT + 1]
     )
     if len(found) > ADHOC_KEY_LIMIT:
         return True
-    return any((str(item), str(kit) if kit else NO_KIT) not in keys for item, kit in found)
+    return any(
+        (str(item), str(kit) if kit else (str(unit) if version else NO_KIT)) not in keys
+        for item, kit, unit, version in found
+    )
 
 
 def vehicle_label_rows(organization_id, vehicle_id):
@@ -876,7 +902,7 @@ def vehicle_label_rows(organization_id, vehicle_id):
         LabelRow(
             item_id=item_id,
             item_label=labels.get(item_id, ""),
-            kit_id=str(kit_id) if kit_id else None,
+            kit_id=str(kit_id) if _is_kit(kit_id, resolved.requirement) else None,
             kit_label=kit_label,
             kind=resolved.requirement.kind,
             compartment_id=str(resolved.compartment_id) if resolved.compartment_id else None,
