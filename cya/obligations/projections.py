@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import UTC, timedelta
+from functools import lru_cache
 from itertools import islice
 
 from django.db import connection
@@ -309,11 +310,32 @@ class _Units:
                     self.units.add(unit)
                     self.lines.setdefault(unit, []).append(str(pk))
                     self.unit_of[str(pk)] = unit
+        # SPEC 6.0.0 CHK-11: an item requirement's stream is keyed by its id (a uuid4 like a kit
+        # id), so it is one only if a requirement has that id; its checks name a version of it.
+        others = {k[2] for k in keys if k[2] != NO_KIT and k[2] not in self.units}
+        self.requirements = set()
+        self.versions = {}  # requirement id -> its version ids
+        if others:
+            from cya.checklists.models import VehicleItemRequirementVersion
 
-    def key(self, vehicle_id, item_id, kit_id, kit_requirement_id):
-        """A check row's key: its kit, its presence line's unit key, or NO_KIT."""
+            for pk, requirement in VehicleItemRequirementVersion.objects.filter(
+                requirement_id__in=others
+            ).values_list("pk", "requirement_id"):
+                self.requirements.add(str(requirement))
+                self.versions.setdefault(str(requirement), []).append(str(pk))
+
+    def key(
+        self, vehicle_id, item_id, kit_id, kit_requirement_id, item_requirement_version_id=None
+    ):
+        """A check row's key: its kit, presence line, item requirement, or NO_KIT."""
         if kit_id:
             return _key(vehicle_id, item_id, kit_id)
+        if item_requirement_version_id:
+            return (
+                str(vehicle_id),
+                str(item_id),
+                requirement_of_version(item_requirement_version_id),
+            )
         unit = self.unit_of.get(str(kit_requirement_id)) if kit_requirement_id else None
         return (str(vehicle_id), str(item_id), unit or NO_KIT)
 
@@ -329,11 +351,19 @@ def _exact_keys(keys, units):
                 kit_requirement_id__in=units.lines.get(kit_key, ()),
             )
             continue
+        if kit_key in units.requirements:
+            condition |= Q(
+                vehicle_id=vehicle_id,
+                item_id=item_id,
+                item_requirement_version_id__in=units.versions.get(kit_key, ()),
+            )
+            continue
         condition |= Q(
             vehicle_id=vehicle_id,
             item_id=item_id,
             kit_id=None if kit_key == NO_KIT else kit_key,
             kit_requirement_id=None,
+            item_requirement_version_id=None,
         )
     return condition
 
@@ -397,8 +427,25 @@ def _newest_older_by_key(organization_id, keys, lower, units=None):
         )
         if newest is not None:
             found[(vehicle_id, item_id, unit)] = newest
+    # An item requirement's key (SPEC 6.0.0 CHK-11): one indexed lookup each, like a line's.
+    for vehicle_id, item_id, unit in sorted(k for k in keys if k[2] in units.requirements):
+        newest = (
+            CheckRecord.objects.filter(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                item_id=item_id,
+                item_requirement_version_id__in=units.versions.get(unit, ()),
+                recorded_at__lte=lower,
+            )
+            .order_by("-recorded_at")
+            .values_list("recorded_at", flat=True)
+            .first()
+        )
+        if newest is not None:
+            found[(vehicle_id, item_id, unit)] = newest
+    special = units.units | units.requirements
     for kitted in (False, True):
-        group = sorted(k for k in keys if k[2] not in units.units and (k[2] != NO_KIT) == kitted)
+        group = sorted(k for k in keys if k[2] not in special and (k[2] != NO_KIT) == kitted)
         for start in range(0, len(group), LOOKUP_CHUNK):
             chunk = group[start : start + LOOKUP_CHUNK]
             width = 3 if kitted else 2
@@ -408,6 +455,7 @@ def _newest_older_by_key(organization_id, keys, lower, units=None):
                 "c.kit_id = k.kit_id"
                 if kitted
                 else "c.kit_id IS NULL AND c.kit_requirement_id IS NULL"
+                " AND c.item_requirement_version_id IS NULL"
             )
             sql = (
                 "SELECT k.vehicle_id, k.item_id, "
@@ -458,9 +506,14 @@ def _attention_roots(organization_id, keys, since, instant, limit):
             recorded_at__lte=instant,
         )
         .order_by("recorded_at", "id")
-        .values_list("root_check_id", "vehicle_id", "item_id", "kit_id", "kit_requirement_id")[
-            : limit + 1
-        ],
+        .values_list(
+            "root_check_id",
+            "vehicle_id",
+            "item_id",
+            "kit_id",
+            "kit_requirement_id",
+            "item_requirement_version_id",
+        )[: limit + 1],
         limit,
     )
     roots = {str(root) for root, *key in recent if units.key(*key) in keys}
@@ -495,13 +548,14 @@ def _attention_roots(organization_id, keys, since, instant, limit):
                 "item_id",
                 "kit_id",
                 "kit_requirement_id",
+                "item_requirement_version_id",
                 "recorded_at",
             )[: limit + 1],
             limit,
         )
         seen = set()
-        for pk, root, vehicle_id, item_id, kit_id, kit_requirement_id, recorded_at in window:
-            key = units.key(vehicle_id, item_id, kit_id, kit_requirement_id)
+        for pk, root, vehicle_id, item_id, kit_id, line, version, recorded_at in window:
+            key = units.key(vehicle_id, item_id, kit_id, line, version)
             if key not in unresolved:
                 continue
             by_root = older_chains.setdefault(key, {})
@@ -706,12 +760,27 @@ def _database_history(organization_id, vehicle_id, obligations, since, instant):
     ]
 
 
+@lru_cache(maxsize=4096)
+def requirement_of_version(version_id):
+    """The item requirement of a requirement version (append-only, so cacheable)."""
+    from cya.checklists.models import VehicleItemRequirementVersion
+
+    return str(
+        VehicleItemRequirementVersion.objects.values_list("requirement_id", flat=True).get(
+            pk=version_id
+        )
+    )
+
+
 def check_unit_key(row, units):
-    """A check's stream key: its kit, its presence line's unit key (KDEF-12), or NO_KIT."""
+    """A check's stream key: its kit, presence line unit key (KDEF-12), item requirement
+    (SPEC 6.0.0 CHK-11), or NO_KIT."""
     if row.kit_id:
         return str(row.kit_id)
     if getattr(row, "kit_requirement_id", None):
         return units[str(row.kit_requirement_id)]
+    if getattr(row, "item_requirement_version_id", None):
+        return requirement_of_version(str(row.item_requirement_version_id))
     return NO_KIT
 
 

@@ -119,7 +119,13 @@ def replay_checks(history, instant):
         obligation = obligations.get(link.obligation_id)
         if obligation is None:
             raise ValueError("check link has no exported obligation")
-        if (row.item_id, row.kit_key) != (obligation.item_id, obligation.unit_key):
+        # The transition of SPEC 6.0.0 18.3 item 4: a check of an item requirement may complete
+        # an obligation created before the cutover, which keeps NO_KIT; the link guard
+        # (cya_checks 0017) allowed it only for the same requirement and item.
+        transition = obligation.unit_key == NO_KIT and row.kit_key != NO_KIT
+        if row.item_id != obligation.item_id or (
+            row.kit_key != obligation.unit_key and not transition
+        ):
             raise ValueError("check link item or kit mismatch")
         checks.append(
             CheckEvidence(
