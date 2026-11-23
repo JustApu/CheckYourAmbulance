@@ -310,9 +310,10 @@ class _Units:
                     self.units.add(unit)
                     self.lines.setdefault(unit, []).append(str(pk))
                     self.unit_of[str(pk)] = unit
-        # SPEC 6.0.0 CHK-11: an item requirement's stream is keyed by its id (a uuid4 like a kit
-        # id), so it is one only if a requirement has that id; its checks name a version of it.
-        others = {k[2] for k in keys if k[2] != NO_KIT and k[2] not in self.units}
+        # SPEC 6.0.0 CHK-11: an item requirement's stream is keyed by its id, a uuid5 like a line's
+        # unit key (cya.checklists.item_requirements.new_requirement_id) and never a kit's uuid4,
+        # so only a uuid5 key that is not a line can be one, and ordinary keys cost no query.
+        others = candidates - self.units
         self.requirements = set()
         self.versions = {}  # requirement id -> its version ids
         if others:
