@@ -181,3 +181,26 @@ class TransitionTests(RequirementObligationCase):
         for other in others:
             theirs = choose_links(self.check_of(other.pk), recorded_at=due)
             self.assertNotIn(str(legacy.pk), {str(link["obligation"].pk) for link in theirs})
+
+
+class PlannerTransitionTests(RequirementObligationCase):
+    def test_future_pre_cutover_obligations_move_to_the_requirement_stream(self):
+        a = self.publish_checklist(self.a, [self.suction_spec()])
+        self.generate()
+        later = self.at(days=3, hours=6)
+        self.assertTrue(self.obligations_of(self.suction, later).filter(kit_key=NO_KIT).exists())
+        migrate_item_requirements(
+            organization_id=str(self.org.pk), actor_id=str(self.admin.pk), operation_id=str(uuid4())
+        )
+        self.publish_checklist(self.a, [self.suction_spec()])  # re-published after the cutover
+        self.generate()
+        row = ChecklistItemDef.objects.get(checklist_version_id=a, item=self.suction)
+        from cya.checklists.item_requirement_cutover import resolve_item_requirement
+
+        requirement, _version = resolve_item_requirement(row.pk)
+        effective = [
+            o
+            for o in self.obligations()
+            if str(o.item_id) == str(self.suction.pk) and o.due_at == later
+        ]
+        self.assertEqual([o.kit_key for o in effective], [str(requirement)])
