@@ -938,10 +938,13 @@ Decide each one before the first production upgrade:
     `inspection_session` and `session_projection` may rebuild its table. None has been timed on a
     populated copy, unlike issue #80's migrations above. Rehearse on a copy and record the
     timings here.
-11. **The captured-limit race.** The `inspection_session` insert guard requires the captured
-    limit to equal the organization's current one. If an Administrator changes the limit at the
-    same moment a session opens, the open fails as unavailable (503) and must be retried.
-    Acceptable for now, but confirm.
+11. **The resume-limit lock invariant.** A session open takes the organization row in share mode
+    before it reads the limit, and setting the limit takes the same row exclusively. So a change
+    waits for every open in flight, and the next open captures the new value
+    (`test_a_change_waits_for_an_open_in_flight_and_the_next_open_sees_it`). The `inspection_session`
+    insert guard, which requires the captured limit to equal the current one, is only a backstop
+    for a writer that skips the command. Nothing to decide here. Any future writer of
+    `inspection_session` or `session_resume_limit` must keep this lock order.
 12. **Pre-upgrade parallel sessions.** Several sessions of one checklist that were open together
     before the upgrade are left to finish (`cya_inspections 0006`, SPEC-mandated). Check for any
     on the production data before the upgrade, and decide whether to end them by hand first.
