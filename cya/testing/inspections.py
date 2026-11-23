@@ -40,6 +40,7 @@ from cya.inspections.commands import (
 )
 from cya.inspections.models import InspectionSession, SessionEvent
 from cya.inspections.projections import current_state, read_session
+from cya.inspections.resume_limit import set_resume_limit
 from cya.kits.commands import add_kit_instance, record_kit_assignment
 from cya.obligations.commands import bind_requirement
 from cya.obligations.generation import run_generation
@@ -193,6 +194,10 @@ class InspectionScenario:
             effective_at=self.start,
         )
         self.clock.set(self.start + timedelta(hours=5, minutes=45))
+        # This scenario exercises the six-hour inactivity close (SES-1, SES-6). With the default
+        # 6-hour resume limit an Open session reaches its deadline first (SES-8), so the session
+        # here gets a 24-hour limit; the deadline has its own tests (test_session_deadline).
+        set_resume_limit(hours=24, **self.context())
 
     def add_kit(self, label):
         return add_kit_instance(

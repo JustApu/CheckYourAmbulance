@@ -13,17 +13,24 @@ from cya.checks.commands import CheckError
 from cya.checks.models import CheckRecord
 from cya.checks.tests.support import CheckCase
 from cya.core.models import AuditEvent
-from cya.inspections import commands
+from cya.inspections import commands, projections, resume_limit
 from cya.inspections.commands import SessionError, auto_close_inactive_sessions, auto_close_session
 from cya.inspections.models import InspectionSession, SessionEvent, SessionProjection
-from cya.inspections.projections import current_state, fold_session, read_session
+from cya.inspections.projections import current_state, fold_session, read_session, resume_deadline
 from cya.obligations.tests.support import Clock
 
 HOUR = timedelta(hours=1)
 
 
 class ActivityCase(CheckCase):
-    """A published checklist, a controllable server clock and helpers for sessions with checks."""
+    """A published checklist, a controllable server clock and helpers for sessions with checks.
+
+    These tests are about the inactivity limit (SES-1), so the organization's resume limit is
+    24 hours: with the default 6 hours an Open session always reaches its deadline before its
+    inactivity limit (SES-8). The deadline tests set their own limit.
+    """
+
+    resume_limit_hours = 24
 
     def setUp(self):
         super().setUp()
@@ -31,7 +38,12 @@ class ActivityCase(CheckCase):
         patcher = mock.patch("django.utils.timezone.now", side_effect=self.clock)
         patcher.start()
         self.addCleanup(patcher.stop)
+        if self.resume_limit_hours is not None:
+            self.set_resume_limit(self.resume_limit_hours)
         self.session_id = self.open().body["session_id"]
+
+    def set_resume_limit(self, hours):
+        return resume_limit.set_resume_limit(hours=hours, **self.context(self.admin))
 
     def open(self, *, actor=None, vehicle=None, **kw):
         return commands.open_or_join_session(
@@ -73,7 +85,9 @@ class PersistedActivityTests(ActivityCase):
         projection = SessionProjection.objects.get(session_id=self.session_id)
         self.assertEqual(projection.last_activity_at, row.recorded_at)
         self.advance(hours=5, minutes=30)  # 10.5 h after open, 5.5 h after the check
-        self.assertEqual(self.close_job(), {"closed": 0, "skipped": 0, "failed": 0})
+        self.assertEqual(
+            self.close_job(), {"closed": 0, "at_deadline": 0, "skipped": 0, "failed": 0}
+        )
         self.assertEqual(self.state().state, "OPEN")
         self.assertGreater(row.recorded_at, opened_at)
 
@@ -114,11 +128,15 @@ class PersistedActivityTests(ActivityCase):
         self.assertEqual((audit.outcome, audit.actor_user_id), ("SUCCEEDED", None))
 
     def test_the_job_is_idempotent_and_leaves_a_session_that_is_not_due(self):
-        self.assertEqual(self.close_job(), {"closed": 0, "skipped": 0, "failed": 0})
+        self.assertEqual(
+            self.close_job(), {"closed": 0, "at_deadline": 0, "skipped": 0, "failed": 0}
+        )
         self.advance(hours=7)
         self.assertEqual(self.close_job()["closed"], 1)
         before = len(self.events())
-        self.assertEqual(self.close_job(), {"closed": 0, "skipped": 0, "failed": 0})
+        self.assertEqual(
+            self.close_job(), {"closed": 0, "at_deadline": 0, "skipped": 0, "failed": 0}
+        )
         self.assertEqual(len(self.events()), before)
         with self.assertRaises(SessionError):
             auto_close_session(organization_id=str(self.org.pk), session_id=self.session_id)
@@ -169,7 +187,10 @@ class PersistedActivityTests(ActivityCase):
             rebuilt.last_activity_at,
         )
         # history alone (no checks) would put the clock earlier: the check is what moved it
-        self.assertLess(fold_session(self.events()).last_activity_at, rebuilt.last_activity_at)
+        self.assertLess(
+            fold_session(self.events(), deadline=resume_deadline(session)).last_activity_at,
+            rebuilt.last_activity_at,
+        )
 
 
 class CheckInSessionTests(ActivityCase):
@@ -285,7 +306,9 @@ class CheckInSessionTests(ActivityCase):
             last_activity_at=self.now - HOUR
         )  # a stale cache claims the session is long idle
         self.advance(hours=2)  # +7 h: idle 2 h in truth
-        self.assertEqual(self.close_job(), {"closed": 0, "skipped": 1, "failed": 0})
+        self.assertEqual(
+            self.close_job(), {"closed": 0, "at_deadline": 0, "skipped": 1, "failed": 0}
+        )
         self.assertEqual(self.state().state, "OPEN")
 
     def test_a_check_racing_the_close_loses_cleanly_when_the_close_commits_first(self):
@@ -353,7 +376,7 @@ class DatabaseGuardTests(ActivityCase):
 
     def test_the_auto_close_instant_must_be_the_last_activity_plus_six_hours(self):
         self.advance(hours=5, minutes=30)
-        with mock.patch.object(commands, "INACTIVITY", timedelta(hours=5)):
+        with mock.patch.object(projections, "INACTIVITY", timedelta(hours=5)):
             self.refused(
                 "auto-close instant",
                 lambda: auto_close_session(
@@ -385,7 +408,7 @@ class DatabaseGuardTests(ActivityCase):
         self.advance(hours=7)
         out = StringIO()
         call_command("close_inactive_sessions", stdout=out)
-        self.assertEqual(out.getvalue().strip(), "closed=1 skipped=0 failed=0")
+        self.assertEqual(out.getvalue().strip(), "closed=1 at_deadline=0 skipped=0 failed=0")
         for bad in (0, 10_001):
             with self.subTest(bad), self.assertRaises(ValueError):
                 auto_close_inactive_sessions(limit=bad)
