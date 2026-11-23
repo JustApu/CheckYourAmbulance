@@ -354,3 +354,161 @@ class RequirementDuplicationTests(DuplicationTests):  # SPEC 6.0.0 CFG-4; issue 
         before = len(self.requirements_of(body["vehicle_id"]))
         publish_template_version(version_id=str(draft.pk), **self.context())
         self.assertEqual(len(self.requirements_of(body["vehicle_id"])), before)
+
+
+@override_settings(**real_collaborator_settings())
+class RequirementEditorTests(KitCase):  # SPEC 6.0.0 CHK-11, AC-42 (1), (4); issue #256 C4
+    def setUp(self):
+        super().setUp()
+        self.record_cutover()
+        self.record_item_cutover()
+        self.harness = RoleHttpHarness(organization=self.org)
+        self.client_, _ = self.harness.sign_in("supervisor")
+        self.first = self.vehicle_checklist(label="First")
+        self.second = self.vehicle_checklist(label="Second")
+        for checklist in (self.first, self.second):
+            self.publish_checklist(checklist, self.own_items())
+        self.cabinet_row = str(self.own_row(self.cabinet, self.vehicle).pk)
+
+    csrf = ChecklistScreenTests.csrf
+    post = ChecklistScreenTests.post
+
+    def masks_spec(self, quantity):
+        return self.spec(
+            self.masks,
+            20,
+            kind="QUANTITY",
+            expected_quantity=quantity,
+            compartment_id=self.cabinet_row,
+        )
+
+    def draft(self, checklist, items):
+        from cya.checklists.commands import save_template_draft
+
+        return save_template_draft(
+            template_id=str(checklist.pk), items=items, **self.context()
+        ).body["version_id"]
+
+    def masks_version(self):
+        from cya.checklists.models import VehicleItemRequirementVersion
+
+        return (
+            VehicleItemRequirementVersion.objects.filter(vehicle=self.vehicle, item=self.masks)
+            .order_by("-effective_at")
+            .first()
+        )
+
+    def versions(self):
+        from cya.checklists.models import VehicleItemRequirementVersion
+
+        return VehicleItemRequirementVersion.objects.filter(vehicle=self.vehicle).count()
+
+    def test_the_preview_names_a_shared_requirement_a_draft_would_change(self):  # AC-42 (1)
+        from cya.operations.templates import publication_impact
+
+        items = [i for i in self.own_items() if i["item_id"] != str(self.masks.pk)]
+        draft = self.draft(self.second, [*items, self.masks_spec(4)])
+        impact = publication_impact(str(self.org.pk), draft)
+        self.assertTrue(impact.refused)
+        self.assertTrue(
+            any("First inspect it there with other requirements" in r for r in impact.blocking),
+            impact.blocking,
+        )
+        third = self.vehicle_checklist(label="Third")
+        mine = self.draft(third, [self.spec(self.siren, 30, compartment_id=self.cabinet_row)])
+        lines = publication_impact(str(self.org.pk), mine).requirements
+        self.assertEqual(len(lines), 1)
+        self.assertIn("Synthetic siren at", lines[0])
+        self.assertIn("a new item requirement", lines[0])
+
+    def test_an_edit_from_a_published_version_keeps_a_requirement_edited_since(self):
+        from cya.checklists.commands import (
+            publish_item_requirement_version,
+            publish_template_version,
+        )
+
+        current = self.masks_version()
+        publish_item_requirement_version(
+            requirement_id=str(current.requirement_id),
+            kind="QUANTITY",
+            allowed_outcomes=current.allowed_outcomes,
+            instructions=current.instructions,
+            expected_quantity=8,
+            compartment_id=self.cabinet_row,
+            **self.context(),
+        )
+        latest = ChecklistVersion.objects.filter(template=self.first).order_by("-revision").first()
+        saved = self.post(
+            f"{LIST}{self.first.pk}/items/{self.suction.pk}/",
+            base_revision=str(latest.revision),
+            place=f"COMPARTMENT:{self.cabinet_row}",
+            kind="PRESENCE_CONDITION",
+            instructions="Synthetic.",
+            display_order="15",
+            **{"outcome-FAILED": "on", "outcome-UNABLE_TO_INSPECT": "on"},
+        )
+        self.assertEqual(saved.status_code, 302, saved.content.decode()[:2000])
+        draft = ChecklistVersion.objects.filter(template=self.first).order_by("-revision").first()
+        masks = ChecklistItemDef.objects.get(checklist_version=draft, item=self.masks)
+        self.assertEqual(masks.expected_quantity, 8)
+        before = self.versions()
+        publish_template_version(version_id=str(draft.pk), **self.context())
+        self.assertEqual(self.versions(), before)  # every row uses its requirement (a)
+
+    def test_a_new_row_takes_the_requirement_at_the_chosen_place_only(self):
+        third = self.vehicle_checklist(label="Third")
+        posted = {
+            "base_revision": "0",
+            "kind": "QUANTITY",
+            "expected_quantity": "99",
+            "instructions": "Typed.",
+            "item_id": str(self.masks.pk),
+            "use_requirement": "on",
+        }
+        page = self.client_.get(f"{LIST}{third.pk}/items/new/")
+        self.assertContains(page, 'name="use_requirement" checked')
+        saved = self.post(
+            f"{LIST}{third.pk}/items/new/", place=f"COMPARTMENT:{self.cabinet_row}", **posted
+        )
+        self.assertEqual(saved.status_code, 302, saved.content.decode()[:2000])
+        row = ChecklistItemDef.objects.get(checklist_version__template=third, item=self.masks)
+        self.assertEqual(row.expected_quantity, 6)  # the cabinet's requirement
+        fourth = self.vehicle_checklist(label="Fourth")
+        self.post(f"{LIST}{fourth.pk}/items/new/", place="NOT_PLACED", **posted)
+        row = ChecklistItemDef.objects.get(checklist_version__template=fourth, item=self.masks)
+        self.assertEqual(row.expected_quantity, 99)  # no masks requirement Not placed: as typed
+
+    def test_the_item_form_says_who_shares_the_requirement(self):
+        page = self.client_.get(f"{LIST}{self.first.pk}/items/{self.masks.pk}/")
+        self.assertContains(page, 'id="shared-requirement"')
+        self.assertContains(page, "that Second also inspect")
+
+    def test_the_requirements_page_lists_and_changes_a_requirement(self):  # AC-42 (4)
+        url = f"/administration/vehicles/{self.vehicle.pk}/item-requirements/"
+        page = self.client_.get(url)
+        self.assertContains(page, "Synthetic masks")
+        self.assertContains(page, "First, Second")
+        current = self.masks_version()
+        form = self.client_.get(f"{url}?edit={current.requirement_id}")
+        self.assertContains(form, "Change Synthetic masks")
+        saved = self.post(
+            f"{url}?edit={current.requirement_id}",
+            requirement_id=str(current.requirement_id),
+            place=f"COMPARTMENT:{self.cabinet_row}",
+            kind="QUANTITY",
+            expected_quantity="8",
+            instructions=current.instructions,
+            when="now",
+            **{"outcome-FAILED": "on", "outcome-UNABLE_TO_INSPECT": "on"},
+        )
+        self.assertEqual(saved.status_code, 302, saved.content.decode()[:2000])
+        changed = self.masks_version()
+        self.assertEqual(
+            (changed.requirement_id, changed.revision, changed.expected_quantity),
+            (current.requirement_id, current.revision + 1, 8),
+        )
+
+    def test_crew_cannot_open_the_requirements_page(self):
+        crew, _ = self.harness.sign_in("crew")
+        page = crew.get(f"/administration/vehicles/{self.vehicle.pk}/item-requirements/")
+        self.assertEqual(page.status_code, 403)

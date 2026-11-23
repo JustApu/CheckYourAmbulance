@@ -6,7 +6,7 @@
 
 <div class="kit-library">
 {% if vehicle_checklist %}
-<p><a href="{% url 'checklist-templates' %}">All checklists</a> · {{ template.label }} · Vehicle {{ template.vehicle.display_name }}{% if not template.active %} · Inactive{% endif %} · <a href="{% url 'vehicle-bindings' template.vehicle_id %}">Schedule assignments</a></p>
+<p><a href="{% url 'checklist-templates' %}">All checklists</a> · {{ template.label }} · Vehicle {{ template.vehicle.display_name }}{% if not template.active %} · Inactive{% endif %} · <a href="{% url 'vehicle-bindings' template.vehicle_id %}">Schedule assignments</a>{% if can_publish %} · <a href="{% url 'vehicle-item-requirements' template.vehicle_id %}">Item requirements</a>{% endif %}</p>
 <p>This checklist belongs to {{ template.vehicle.display_name }} only. Items are placed in its own compartments and systems, or left Not placed: a Not placed item is still checked.</p>
 {% else %}
 <p><a href="{% url 'checklist-templates' %}">All templates</a> · {{ template.label }} · Key {{ template.key|default:"not set" }}{% if not template.active %} · Inactive{% endif %}</p>
@@ -26,6 +26,11 @@
   {% for label, changes in impact.changed %}<li>Changed: {{ label }} ({{ changes|join:", " }})</li>{% endfor %}
 </ul>
 {% else %}<p>No item differs from the version in force.</p>{% endif %}
+{% if impact.requirements %}
+<h3>Item requirements</h3>
+<p>These change the vehicle's item requirements, which every checklist of the vehicle that inspects the item in that place shares.</p>
+<ul id="impact-requirements">{% for line in impact.requirements %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
 <h3>Vehicles</h3>
 {% if impact.vehicles %}
 <ul id="impact-vehicles">

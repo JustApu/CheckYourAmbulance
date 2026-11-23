@@ -1,0 +1,70 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}
+<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p><a href="{% url 'checklist-templates' %}">All checklists</a> · Vehicle {{ vehicle.display_name }}</p>
+<p>An item requirement is one stock of an item on this vehicle, kept in one place at a time, with what a check of it requires. Every checklist of the vehicle that inspects the item in that place shares it. Changing it here publishes a new version: from the time you choose, every one of those checklists uses the new values or place. Earlier checks and obligations keep what they recorded.</p>
+{% if not uses_requirements %}<p>Item requirements start when the organization moves to them (migrate_item_requirements). Until then each checklist keeps its own values.</p>{% endif %}
+
+{% if rows %}
+<table id="item-requirements">
+  <thead><tr><th scope="col">Item</th><th scope="col">Place</th><th scope="col">Requires</th><th scope="col">Inspected by</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.item }}</td>
+    <td>{{ row.place }}</td>
+    <td>{{ row.summary }} (revision {{ row.revision }}{% if not row.in_force %}, takes effect {{ row.effective_at|date:"Y-m-d H:i" }}{% endif %}){% for later in row.later %}<br>Then revision {{ later.revision }} from {{ later.effective_at|date:"Y-m-d H:i" }}: {{ later.place }}, {{ later.summary }}{% endfor %}</td>
+    <td>{% if row.checklists %}{{ row.checklists|join:", " }}{% else %}No checklist{% endif %}</td>
+    <td><a href="?edit={{ row.requirement_id }}#edit-heading">Change</a></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if more %}<p>Only the first {{ list_limit }} item requirements are listed.</p>{% endif %}
+{% else %}<p>This vehicle has no item requirements yet. Publishing one of its checklists creates them.</p>{% endif %}
+
+{% if edit %}
+<section aria-labelledby="edit-heading">
+<h2 id="edit-heading">Change {{ edit.item }} (now revision {{ edit.revision }})</h2>
+{% if edit.checklists %}<p>Inspected by {{ edit.checklists|join:", " }}. The change applies to all of them.</p>{% endif %}
+<p>Each checklist keeps listing the item; a draft that still has the old values is refused when published, until it is edited to match.</p>
+<form method="post" class="admin-form" aria-label="Change {{ edit.item }}">
+  {% csrf_token %}
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <input type="hidden" name="requirement_id" value="{{ edit.requirement_id }}">
+  <p><label for="req-place">Where it is</label><br>
+  <select id="req-place" name="place" required>
+    <option value="{{ not_placed }}"{% if edit.form.place == not_placed %} selected{% endif %}>Not placed (still checked; listed under Not placed)</option>
+    {% for place in edit.places %}<option value="{{ place.value }}"{% if edit.form.place == place.value %} selected{% endif %}>{{ place.label }}</option>{% endfor %}
+  </select></p>
+  <p><label for="req-kind">Check</label><br>
+  <select id="req-kind" name="kind" required>
+    {% for code, label in kinds %}<option value="{{ code }}"{% if edit.form.kind == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select></p>
+  <p><label for="req-quantity">Expected quantity (Quantity only)</label><br>
+  <input id="req-quantity" name="expected_quantity" value="{{ edit.form.expected_quantity|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*"></p>
+  <p><label for="req-unit">Unit (Measurement and Vehicle reading only)</label><br>
+  <input id="req-unit" name="unit" value="{{ edit.form.unit|default:'' }}" maxlength="40"></p>
+  <p><label for="req-instructions">Instructions</label><br>
+  <textarea id="req-instructions" name="instructions" rows="4" maxlength="4000">{{ edit.form.instructions|default:'' }}</textarea></p>
+  <fieldset><legend>Outcomes the crew may record</legend>
+    <p>Passed is always allowed.</p>
+    {% for code, label in optional_outcomes %}<label><input type="checkbox" name="outcome-{{ code }}"{% if code in edit.form.outcomes %} checked{% endif %}> {{ label }}</label><br>{% endfor %}
+  </fieldset>
+  <p><label><input type="checkbox" name="expiration_tracked"{% if edit.form.expiration_tracked %} checked{% endif %}> Record an expiration date</label></p>
+  <fieldset><legend>When it takes effect</legend>
+    <p><label><input type="radio" name="when" value="now"{% if when != "at" %} checked{% endif %}> Now</label><br>
+    <label><input type="radio" name="when" value="at"{% if when == "at" %} checked{% endif %}> At</label>
+    <label for="req-at" class="visually-hidden">Date and time ({{ zone }})</label>
+    <input id="req-at" type="datetime-local" name="at" value="{{ at }}"> ({{ zone }})</p>
+  </fieldset>
+  <p><button type="submit" class="button primary">Publish the change</button> <a class="button" href="{% url 'vehicle-item-requirements' vehicle.pk %}">Cancel</a></p>
+</form>
+</section>
+{% endif %}
+</div>
+{% endblock %}

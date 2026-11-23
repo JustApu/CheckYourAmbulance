@@ -210,6 +210,28 @@ def link_rows(*, organization_id, vehicle_id, template_id, rows, effective_at, r
         writer.map(row, version)
 
 
+def version_at(requirement_id, at):
+    """The requirement's version in force at `at` (the latest effective by then), or None."""
+    return (
+        VehicleItemRequirementVersion.objects.filter(
+            requirement_id=requirement_id, effective_at__lte=at
+        )
+        .order_by("-effective_at")
+        .first()
+    )
+
+
+def in_force_here(vehicle_id, item_id, place, at):
+    """The vehicle's requirement version for the item in force at `place` at `at`, or None.
+
+    At most one exists (18.1 item 8). Only the given place is looked at: an item kept in several
+    places has one requirement for each, and none of the others stands in for this one.
+    """
+    versions = VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id, item_id=item_id)
+    found = [v for v in _in_force(versions, at).values() if _version_place(v) == tuple(place)]
+    return found[0] if found else None
+
+
 def plan_rows(*, vehicle_id, template_id, rows, effective_at):
     """{row id: RowPlan} for the rows outside a kit, read only: what link_rows would do.
 
