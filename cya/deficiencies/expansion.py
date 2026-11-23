@@ -29,7 +29,7 @@ from cya.checklists.models import Vehicle
 from cya.core.audit_commands import Plan, run_command
 from cya.deficiencies import notices, service
 from cya.deficiencies.commands import _authorizer, _lock_for_change, _operation_id, publish_changed
-from cya.deficiencies.effects import MAX_SCOPE_ROWS, NO_KIT_KEY
+from cya.deficiencies.effects import MAX_SCOPE_ROWS
 from cya.deficiencies.models import (
     Deficiency,
     DeficiencyEvent,
@@ -55,7 +55,12 @@ MAX_ITEMS = 50  # items one expansion may name
 
 
 def parse_items(value):
-    """[(item_id, kit_instance_id or None)] from 1 to MAX_ITEMS distinct {item_id, kit_instance_id?}."""
+    """[(item_id, kit_instance_id or None, item_requirement_id or None)] from 1 to MAX_ITEMS
+    distinct {item_id, kit_instance_id?, item_requirement_id?}.
+
+    item_requirement_id names the place of an item kept in more than one place outside a kit
+    (SPEC 6.0.0 VER-3, SUS-2); it never comes with a kit instance.
+    """
     if not isinstance(value, list) or not 0 < len(value) <= MAX_ITEMS:
         raise service.malformed("items", f"items is a list of 1 to {MAX_ITEMS} entries")
     parsed = []
@@ -64,38 +69,66 @@ def parse_items(value):
         if not isinstance(entry, dict) or not {"item_id"} <= set(entry) <= {
             "item_id",
             "kit_instance_id",
+            "item_requirement_id",
         }:
-            raise service.malformed(path, "an entry is {item_id, kit_instance_id?}")
+            raise service.malformed(
+                path, "an entry is {item_id, kit_instance_id?, item_requirement_id?}"
+            )
         item_id = service.canonical(entry["item_id"], f"{path}.item_id")
         kit = entry.get("kit_instance_id")
         kit = None if kit is None else service.canonical(kit, f"{path}.kit_instance_id")
-        parsed.append((item_id, kit))
+        place = entry.get("item_requirement_id")
+        place = None if place is None else service.canonical(place, f"{path}.item_requirement_id")
+        if kit is not None and place is not None:
+            raise service.malformed(path, "an entry names a kit instance or a place, not both")
+        parsed.append((item_id, kit, place))
     if len(set(parsed)) != len(parsed):
         raise service.malformed("items", "items must not repeat")
     return parsed
 
 
+def items_digest(items):
+    """The digest form of parsed items; a place is included only when one is named."""
+    return sorted(
+        [item_id, kit or "", *([place] if place else [])] for item_id, kit, place in items
+    )
+
+
+def item_body(row):
+    """The response form of one resolved ScopeRow."""
+    body = {"item_id": row.item_id, "kit_instance_id": row.kit_id}
+    if row.item_requirement_id:
+        body["item_requirement_id"] = row.item_requirement_id
+    return body
+
+
 def resolve_items(organization_id, vehicle_id, items, now):
-    """(item, definition, kit or None) for each named item, checked against today's checklist.
+    """A service.ScopeRow for each named item, checked against today's checklist.
 
     The item must be required by the vehicle's current checklists; a kit-defined item names one of
-    its active physical kit instances on the vehicle, and any other item names none.
+    its active physical kit instances on the vehicle, and any other item names none. An item
+    outside a kit kept in more than one place names its item requirement (422 PLACE_REQUIRED).
     """
     current = service._effective_items(organization_id, vehicle_id, now)
     placed = service._effective_placed(organization_id, vehicle_id, now)
     resolved = []
-    for index, (item_id, kit_id) in enumerate(items):
+    for index, (item_id, kit_id, place) in enumerate(items):
         content = service.placed_entry(placed, item_id, kit_id)
         if content is not None:  # content of a kit placed by definition (issue #129)
-            resolved.append((item_id, str(content.requirement.definition_id), kit_id))
+            resolved.append(service._row_of(content, kit_id))
             continue
-        entry = current.get(item_id)
-        if entry is None:
+        entries = service.item_entries(current, item_id)
+        if not entries:
             raise DeficiencyError(
                 "ITEM_NOT_IN_CHECKLIST",
                 "the item is not on the vehicle's current checklist",
                 path=f"items[{index}].item_id",
             )
+        loose = [e for e in entries if not e.requirement.kit_id]
+        if kit_id is not None or not loose:
+            entry = next((e for e in entries if e.requirement.kit_id), entries[0])
+        else:
+            entry = service.loose_place(loose, place, f"items[{index}].item_requirement_id")
         kits = {str(k) for k, _label in entry.kits}
         if entry.requirement.kit_id and kit_id not in kits:
             raise DeficiencyError(
@@ -109,7 +142,13 @@ def resolve_items(organization_id, vehicle_id, items, now):
                 "only a kit item names a kit instance",
                 path=f"items[{index}].kit_instance_id",
             )
-        resolved.append((item_id, str(entry.requirement.definition_id), kit_id))
+        if entry.requirement.kit_id and place is not None:
+            raise DeficiencyError(
+                "PLACE_NOT_KEPT",
+                "a kit item has no item requirement",
+                path=f"items[{index}].item_requirement_id",
+            )
+        resolved.append(service._row_of(entry, kit_id))
     return resolved
 
 
@@ -166,8 +205,8 @@ def _expanded_revision(organization_id, deficiency_id, resolved):
     """(next revision, newest rows to repeat), refusing an item already in the newest revision."""
     previous, carried = _newest_rows(organization_id, deficiency_id)
     present = {(str(r.item_id), r.instance_key) for r in carried}
-    for index, (item_id, _definition, kit_id) in enumerate(resolved):
-        if (item_id, kit_id or NO_KIT_KEY) in present:
+    for index, row in enumerate(resolved):
+        if (row.item_id, row.instance_key) in present:
             raise DeficiencyError(
                 "ALREADY_IN_SCOPE",
                 "the item and kit are already in the verification scope",
@@ -187,13 +226,14 @@ def _expansion_rows(resolved, *, organization_id, deficiency_id, event, receipt,
             organization_id=organization_id,
             deficiency_id=deficiency_id,
             event=event,
-            item_id=item_id,
-            **content_columns(definition_id),
-            kit_instance_id=kit_id,
-            instance_key=kit_id or NO_KIT_KEY,
+            item_id=row.item_id,
+            **content_columns(row.definition_id),
+            kit_instance_id=row.kit_id,
+            item_requirement_version_id=row.item_requirement_version_id,
+            instance_key=row.instance_key,
             **service.stamp(receipt, current),
         )
-        for item_id, definition_id, kit_id in resolved
+        for row in resolved
     ]
     DeficiencyScopeExpansion.objects.bulk_create(rows)
     return rows
@@ -209,12 +249,21 @@ def _append_revision(
             str(r.item_id),
             str(r.definition_id or r.kit_definition_item_id or r.kit_requirement_id),
             r.kit_instance_id,
+            r.item_requirement_version_id,
+            r.instance_key,
             r.required_after,
         )
         for r in carried
     ] + [
-        (item_id, definition_id, kit_id, receipt.recorded_at)
-        for item_id, definition_id, kit_id in resolved
+        (
+            row.item_id,
+            row.definition_id,
+            row.kit_id,
+            row.item_requirement_version_id,
+            row.instance_key,
+            receipt.recorded_at,
+        )
+        for row in resolved
     ]
     VerificationScopeRow.objects.bulk_create(
         VerificationScopeRow(
@@ -225,14 +274,20 @@ def _append_revision(
             item_id=item_id,
             **content_columns(definition_id),
             kit_instance_id=kit_id,
-            instance_key=str(kit_id) if kit_id else NO_KIT_KEY,
+            item_requirement_version_id=version_id,
+            instance_key=instance_key,
             required_after=required_after,
             scope_revision=revision,
             **service.stamp(receipt, current),
         )
-        for scope_id, (item_id, definition_id, kit_id, required_after) in zip(
-            scope_ids, specs, strict=True
-        )
+        for scope_id, (
+            item_id,
+            definition_id,
+            kit_id,
+            version_id,
+            instance_key,
+            required_after,
+        ) in zip(scope_ids, specs, strict=True)
     )
 
 
@@ -371,10 +426,7 @@ def _run(
             "deficiency_id": deficiency_id,
             "event_id": event_id,
             "status": to_status,
-            "items": [
-                {"item_id": item_id, "kit_instance_id": kit_id}
-                for item_id, _definition, kit_id in resolved
-            ],
+            "items": [item_body(row) for row in resolved],
             "assignee_id": None if projection.assignee_id is None else str(projection.assignee_id),
         }
         if expanding:
@@ -396,7 +448,7 @@ def _run(
                     "status": to_status,
                     "scope_revision": revision,
                     "scope_row_ids": sorted(scope_ids),
-                    "item_ids": sorted({item_id for item_id, _d, _k in resolved}),
+                    "item_ids": sorted({row.item_id for row in resolved}),
                 },
             },
             recorded_at=now,
@@ -411,7 +463,7 @@ def _run(
                 "deficiency_id": deficiency_id,
                 "expected_event_id": expected_event_id,
                 "explanation": explanation,
-                "items": sorted([item_id, kit or ""] for item_id, kit in items),
+                "items": items_digest(items),
                 "deadline": deadline.isoformat() if deadline else None,
             }
         ),

@@ -245,7 +245,7 @@ class MigrationBlockTests(PlaceCase):
         body = self.cutover().body
         self.assertEqual((body["ambiguous_deficiencies"], body["placed_deficiencies"]), (1, 1))
         requirement = next(
-            r for r in plan.requirements if r.id == plan.deficiency_requirements[deficiency_id]
+            r for r in plan.requirements if r.id == plan.deficiency_requirements[deficiency_id][2]
         )
         self.assertEqual([v.place[0] for v in requirement.versions], ["SYSTEM"])
 
@@ -255,7 +255,7 @@ class MigrationBlockTests(PlaceCase):
         self.assign(cabinet)
         self.assign(lights, "SYSTEM")
         mapped = plan_item_requirements(str(self.org.pk)).deficiency_requirements
-        self.assertNotEqual(mapped[cabinet], mapped[lights])
+        self.assertNotEqual(mapped[cabinet][2], mapped[lights][2])
 
     def test_a_deficiency_on_an_item_kept_in_one_place_needs_no_assignment(self):
         self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec(6)])

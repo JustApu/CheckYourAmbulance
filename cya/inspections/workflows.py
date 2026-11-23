@@ -301,7 +301,12 @@ def verification_scope(deficiency):
     revision = query.aggregate(newest=Max("scope_revision"))["newest"]
     rows = bounded(
         query.filter(scope_revision=revision)
-        .select_related("item", "kit_instance")
+        .select_related(
+            "item",
+            "kit_instance",
+            "item_requirement_version__compartment",
+            "item_requirement_version__system",
+        )
         .order_by("item_id", "instance_key"),
         2000,
     )

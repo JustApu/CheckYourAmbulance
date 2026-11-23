@@ -12,7 +12,7 @@
 <p>{{ deficiency.description }}</p>
 <p>Reported by {{ deficiency.reporter.display_name }} at {{ deficiency.reported_at|station_time }}</p>
 <dl class="deficiency-facts">
-<dt>Affected scope</dt><dd>{% if deficiency.item %}{{ deficiency.item.label }}{% if deficiency.kit %} · {{ deficiency.kit.label }}{% endif %}{% elif deficiency.kit %}Kit: {{ deficiency.kit.label }}{% elif deficiency.compartment %}Compartment: {{ deficiency.compartment.label }}{% else %}Whole vehicle{% endif %}</dd>
+<dt>Affected scope</dt><dd>{% if deficiency.item %}{{ deficiency.item.label }}{% if deficiency.kit %} · {{ deficiency.kit.label }}{% elif place %} · {{ place }}{% endif %}{% elif deficiency.kit %}Kit: {{ deficiency.kit.label }}{% elif deficiency.compartment %}Compartment: {{ deficiency.compartment.label }}{% else %}Whole vehicle{% endif %}</dd>
 <dt>Assignee</dt><dd>{{ assignee.display_name|default:"Unassigned" }}</dd>
 <dt>Deadline</dt><dd>{% if deadline.base_deadline %}{{ deadline.base_deadline|station_time }}{% else %}Not set{% endif %}</dd>
 <dt>Governing deadline</dt><dd>{% if deadline.governing_deadline %}{{ deadline.governing_deadline|station_time }}{% else %}Not set{% endif %}{% if deadline.overdue %} · Overdue{% endif %}</dd>
@@ -29,7 +29,7 @@
 <h3>Complete the verification checks</h3>
 <p>Each outstanding item and physical kit needs its own verification Pass. A routine Pass does not verify this repair.</p>
 <p>{{ verification_progress.verified }} of {{ verification_progress.total }} checks verified.</p>
-<ul>{% for row in scope %}<li>{{ row.item.label }}{% if row.kit_instance %} — {{ row.kit_instance.label }}{% endif %}: {% if row.satisfied %}Verified{% else %}Outstanding{% endif %} · after {{ row.required_after|station_time:"seconds" }}</li>{% endfor %}</ul>
+<ul>{% for row in scope %}<li>{{ row.item.label }}{% if row.kit_instance %} — {{ row.kit_instance.label }}{% elif row.item_requirement_version %} — {{ row.item_requirement_version.compartment.label|default:row.item_requirement_version.system.label|default:"Not placed" }}{% endif %}: {% if row.satisfied %}Verified{% else %}Outstanding{% endif %} · after {{ row.required_after|station_time:"seconds" }}</li>{% endfor %}</ul>
 <a class="button primary" href="{% url 'deficiency-verification' deficiency.pk %}">Perform verification checks</a>
 {% elif can_record_repair %}
 <form class="panel workflow-write" data-kind="repair" data-url="{{ config.correction_url }}" data-expected-event="{{ config.expected_event_id }}"{% if can_close_empty_scope %} data-can-close-empty="1"{% endif %}>

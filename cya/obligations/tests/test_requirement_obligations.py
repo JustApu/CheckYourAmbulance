@@ -279,51 +279,5 @@ class ReaderConsistencyTests(RequirementObligationCase):
         self.assertTrue(all(r.kit_id is None for r in rows))
         self.assertTrue(all(r.obligation_state is not None for r in rows))
 
-    def test_a_per_item_suspension_suspends_every_place(self):
-        from datetime import timedelta
-
-        from cya.deficiencies.commands import report_deficiency
-        from cya.deficiencies.models import DeficiencyCategory, DeficiencyEvent
-        from cya.deficiencies.severity import ensure_default_severities
-        from cya.deficiencies.suspension import suspend_checks
-        from cya.obligations.projections import stored_suspensions
-
-        ensure_default_severities(self.org.pk, self.now - timedelta(days=1))
-        category = DeficiencyCategory.objects.create(
-            organization=self.org,
-            stable_category_id=str(uuid4()),
-            revision=1,
-            label="Synthetic mechanical",
-            supply_related=False,
-            effective_at=self.now - timedelta(days=1),
-        )
-        deficiency = report_deficiency(
-            vehicle_id=str(self.vehicle.pk),
-            target={"item_id": str(self.suction.pk)},
-            category_id=category.stable_category_id,
-            severity="HIGH",
-            summary="Synthetic summary",
-            description="Synthetic description of what is wrong.",
-            **self.context(self.supervisor),
-        ).body["deficiency_id"]
-        suspend_checks(
-            deficiency_id=deficiency,
-            expected_event_id=str(
-                DeficiencyEvent.objects.filter(deficiency_id=deficiency).latest("sequence").pk
-            ),
-            items=[{"item_id": str(self.suction.pk)}],
-            **self.context(self.supervisor),
-        )
-        later = self.at(days=3, hours=6)
-        ids = [str(o.pk) for o in self.obligations_of(self.suction, later)]
-        self.assertEqual(len(ids), 2)  # one per place
-        suspended = {
-            e.obligation_id
-            for e in stored_suspensions(
-                organization_id=str(self.org.pk),
-                vehicle_id=str(self.vehicle.pk),
-                obligation_ids=ids,
-                as_of=later,
-            )
-        }
-        self.assertEqual(suspended, set(ids))
+    # A per-item suspension recorded before the cutover still suspends every place, and one
+    # recorded after it suspends one place: cya.deficiencies.tests.test_per_place (C3).

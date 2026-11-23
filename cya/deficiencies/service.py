@@ -7,11 +7,18 @@ deficiency is locked through its deficiency_lock row, and several are locked sor
 """
 
 from datetime import datetime
+from typing import NamedTuple
 
 from django.utils import timezone
 
 from cya.authorization.backend import canonical_id
-from cya.checklists.models import ChecklistTemplate, Compartment, KitInstance, VehicleSystem
+from cya.checklists.models import (
+    ChecklistTemplate,
+    Compartment,
+    KitInstance,
+    VehicleItemRequirementVersion,
+    VehicleSystem,
+)
 from cya.checklists.overlay import (
     NoEffectiveVersionError,
     ResolutionError,
@@ -29,6 +36,7 @@ from cya.deficiencies.models import (
     DeficiencyLink,
     DeficiencyLock,
     DeficiencyProjection,
+    DeficiencyRequirementMap,
     DeficiencyScopeExpansion,
 )
 from cya.deficiencies.severity import resolve_severity
@@ -55,6 +63,7 @@ MAX_DEPENDENCY_EVENTS = 5000
 MAX_PROGRESS_NOTES = 5000
 MAX_DEADLINE_EVENTS = 5000
 MAX_SUSPENSIONS_IN_FORCE = 200  # check suspensions one deficiency may hold at once (SPEC 8.9)
+NO_KIT_KEY = "00000000-0000-0000-0000-000000000000"  # the instance key of a per-item row
 
 
 class DeficiencyError(ValueError):
@@ -224,11 +233,14 @@ def insert_deficiency(
     assignee_id=None,
     deadline=None,
     operation_ordinal=0,
+    item_requirement_version_id=None,
 ):
     """Create the header, its lock, scope snapshot, initial Open event and projection.
 
-    affected is a list of (item_id, definition_id) pairs. Returns the header. The projection is
-    written last because it points at the event it summarizes.
+    affected is a list of (item_id, definition_id) pairs, or (item_id, definition_id,
+    item_requirement_version_id) triples for rows outside a kit that name their place (SPEC 6.0.0
+    8.1). item_requirement_version_id is the place of an item target outside a kit. Returns the
+    header. The projection is written last because it points at the event it summarizes.
     """
     validate_transition(None, OPEN)
     fields_of_command = stamp(receipt, current)
@@ -247,15 +259,17 @@ def insert_deficiency(
         item_id=item_id,
         kit_id=kit_id,
         compartment_id=compartment_id,
+        item_requirement_version_id=item_requirement_version_id,
         **fields_of_command,
     )
     DeficiencyLock.objects.create(organization_id=organization_id, deficiency=header)
-    for scope_item_id, definition_id in affected:
+    for scope_item_id, definition_id, *place in affected:
         DeficiencyAffectedItem.objects.create(
             organization_id=organization_id,
             deficiency=header,
             item_id=scope_item_id,
             **content_columns(definition_id),
+            item_requirement_version_id=place[0] if place else None,
             **fields_of_command,
         )
     event = DeficiencyEvent.objects.create(
@@ -395,8 +409,75 @@ def _effective_items(organization_id, vehicle_id, now):
                     deviation_id=item.deviation_id,
                     kits=tuple((kit.kit_id, labels[kit.kit_id]) for kit in active),
                 )
-            items.setdefault(str(requirement.item_id), item)
+            items.setdefault(entry_key(requirement), item)
     return items
+
+
+def entry_key(requirement):
+    """(item_id, item requirement id or None): one entry per stock of the item (CHK-11).
+
+    After the organization's item-requirement cutover a row outside a kit names its item
+    requirement, so an item kept in two places has two entries (SPEC 6.0.0 7.5, 8.1). A row with
+    none (a kit row, or any row before the cutover) keys by its item alone, the first template by
+    id winning, as before.
+    """
+    return (str(requirement.item_id), requirement.item_requirement_id)
+
+
+def item_entries(items, item_id):
+    """The entries of _effective_items for one item, first template first."""
+    return [entry for (item, _place), entry in items.items() if item == str(item_id)]
+
+
+def loose_place(entries, item_requirement_id, path):
+    """The entry outside a kit an item target, expansion or suspension names (SPEC 6.0.0 8.1).
+
+    item_requirement_id chooses the place; without one, an item kept in more than one place is
+    refused (PLACE_REQUIRED) and otherwise the first entry is taken, as before the cutover.
+    Returns None when the item has no entry.
+    """
+    if item_requirement_id is not None:
+        for entry in entries:
+            if entry.requirement.item_requirement_id == item_requirement_id:
+                return entry
+        raise DeficiencyError(
+            "PLACE_NOT_KEPT",
+            "the vehicle's current checklists do not keep the item at that place",
+            path=path,
+        )
+    places = {
+        e.requirement.item_requirement_id for e in entries if e.requirement.item_requirement_id
+    }
+    if len(places) > 1:
+        raise DeficiencyError(
+            "PLACE_REQUIRED",
+            "the item is kept in more than one place: name its item_requirement_id",
+            path=path,
+        )
+    return entries[0] if entries else None
+
+
+def deficiency_requirement(organization_id, deficiency):
+    """The item requirement id an item-target deficiency concerns, or None (per item).
+
+    The header's version first (reported after the cutover), else the cutover's map for a
+    deficiency whose place a Supervisor recorded before it (SPEC 18.3 item 2). None keeps the
+    per-item meaning of a deficiency reported before the cutover.
+    """
+    if deficiency.item_requirement_version_id:
+        return str(
+            VehicleItemRequirementVersion.objects.values_list("requirement_id", flat=True).get(
+                pk=deficiency.item_requirement_version_id
+            )
+        )
+    mapped = (
+        DeficiencyRequirementMap.objects.filter(
+            organization_id=organization_id, deficiency_id=deficiency.pk
+        )
+        .values_list("requirement_id", flat=True)
+        .first()
+    )
+    return str(mapped) if mapped else None
 
 
 def _effective_placed(organization_id, vehicle_id, now):
@@ -446,6 +527,12 @@ def parse_target(target):
     keys = set(target)
     if keys == {"item_id"}:
         return "item", canonical(target["item_id"], "target.item_id")
+    if keys == {"item_id", "item_requirement_id"}:
+        # One stock of the item: the place an item kept in several places is reported for.
+        return "item", (
+            canonical(target["item_id"], "target.item_id"),
+            canonical(target["item_requirement_id"], "target.item_requirement_id"),
+        )
     if keys == {"compartment_id"}:
         return "compartment", canonical(target["compartment_id"], "target.compartment_id")
     if keys == {"kit_id"}:
@@ -464,16 +551,27 @@ def parse_target(target):
 def resolve_scope(organization_id, vehicle_id, target, now):
     """Server-resolved header targets and affected-item snapshot for an independent report.
 
-    Returns ({item_id, compartment_id}, [(item_id, definition_id)]). An empty scope is refused:
-    a deficiency that affects nothing could never be verified.
+    Returns ({item_id, kit_id, compartment_id, item_requirement_version_id}, [(item_id,
+    definition_id, item_requirement_version_id or None)]). An item target outside a kit names the
+    item requirement (place) it concerns: the one given, or the only one the item has (SPEC 6.0.0
+    8.1); its version is the one in force now. An empty scope is refused: a deficiency that
+    affects nothing could never be verified.
     """
     kind, value = target
     items = _effective_items(organization_id, vehicle_id, now)
-    header = {"item_id": None, "kit_id": None, "compartment_id": None}
+    header = {
+        "item_id": None,
+        "kit_id": None,
+        "compartment_id": None,
+        "item_requirement_version_id": None,
+    }
     if kind == "item":
-        match = items.get(value)
+        item_id, place = value if isinstance(value, tuple) else (value, None)
+        match = loose_place(item_entries(items, item_id), place, "target.item_requirement_id")
         selected = [match] if match is not None else []
-        header["item_id"] = value
+        header["item_id"] = item_id
+        if match is not None and not match.requirement.kit_id:
+            header["item_requirement_version_id"] = match.requirement.item_requirement_version_id
     elif kind == "compartment":
         row = Compartment.objects.filter(
             organization_id=organization_id, vehicle_id=vehicle_id, pk=value
@@ -532,17 +630,65 @@ def resolve_scope(organization_id, vehicle_id, target, now):
             path="target",
         )
     affected = sorted(
-        (str(i.requirement.item_id), str(i.requirement.definition_id)) for i in selected
+        (
+            (
+                str(i.requirement.item_id),
+                str(i.requirement.definition_id),
+                None if i.requirement.kit_id else i.requirement.item_requirement_version_id,
+            )
+            for i in selected
+        ),
+        key=lambda row: (row[0], row[1], row[2] or ""),
     )
     return header, affected
 
 
+class ScopeRow(NamedTuple):
+    """One correction-time scope row (VER-3): an item, its definition and its unit.
+
+    The unit is the physical kit instance, else the item requirement (one stock of the item in one
+    place, SPEC 6.0.0 CHK-11) with the version in force, else nothing: the all-zero key, which
+    stands for every place of the item (a deficiency reported before the cutover without a place).
+    """
+
+    item_id: str
+    definition_id: str
+    kit_id: str | None
+    item_requirement_id: str | None = None
+    item_requirement_version_id: str | None = None
+
+    @property
+    def unit(self):
+        return self.kit_id or self.item_requirement_id
+
+    @property
+    def instance_key(self):
+        return self.unit or NO_KIT_KEY
+
+
+def _row_of(entry, kit_id=None):
+    """The ScopeRow of a resolved checklist entry, in one kit instance or outside a kit."""
+    requirement = entry.requirement
+    if kit_id is not None or requirement.kit_id:
+        return ScopeRow(str(requirement.item_id), str(requirement.definition_id), kit_id)
+    return ScopeRow(
+        str(requirement.item_id),
+        str(requirement.definition_id),
+        None,
+        requirement.item_requirement_id,
+        requirement.item_requirement_version_id,
+    )
+
+
 def correction_scope(organization_id, deficiency, now):
-    """Resolve correction-time rows as (item, definition, physical kit instance or None).
+    """Resolve correction-time rows as ScopeRows (item, definition, kit instance or place).
 
     Vehicle-system scope intentionally uses the report-time affected-item rows. Kit and
     compartment scopes use today's effective checklist and assignments; an item added after
-    reporting is therefore included. An item in two physical kits produces two rows.
+    reporting is therefore included. An item in two physical kits produces two rows. An item
+    target outside a kit is the item requirement it concerns, at its place today (a moved stock
+    stays the same stock); without one (reported before the cutover, no place recorded) it is the
+    item's first entry, keyed per item as before (SPEC 6.0.0 VER-3).
     """
     current = _effective_items(organization_id, str(deficiency.vehicle_id), now)
     placed = _effective_placed(organization_id, str(deficiency.vehicle_id), now)
@@ -558,10 +704,10 @@ def correction_scope(organization_id, deficiency, now):
             requirement = item.requirement
             if requirement.kit_id and slot_of_reference_kit(requirement.kit_id) == slot:
                 if any(kit_id == str(kit.pk) for kit_id, _label in item.kits):
-                    selected.append((item, requirement.definition_id, str(kit.pk)))
+                    selected.append(_row_of(item, str(kit.pk)))
         for item in placed:
             if any(kit_id == str(kit.pk) for kit_id, _label in item.kits):
-                selected.append((item, item.requirement.definition_id, str(kit.pk)))
+                selected.append(_row_of(item, str(kit.pk)))
     elif deficiency.compartment_id:
         target = Compartment.objects.filter(
             organization_id=organization_id,
@@ -582,42 +728,48 @@ def correction_scope(organization_id, deficiency, now):
             if slots.get(str(item.compartment_id)) != target.stable_slot_id:
                 continue
             if item.requirement.kit_id:
-                selected.extend(
-                    (item, item.requirement.definition_id, kit_id) for kit_id, _label in item.kits
-                )
+                selected.extend(_row_of(item, kit_id) for kit_id, _label in item.kits)
             else:
-                selected.append((item, item.requirement.definition_id, None))
+                selected.append(_row_of(item))
         for item in placed:
             if slots.get(str(item.compartment_id)) == target.stable_slot_id:
-                selected.extend(
-                    (item, item.requirement.definition_id, kit_id) for kit_id, _label in item.kits
-                )
+                selected.extend(_row_of(item, kit_id) for kit_id, _label in item.kits)
     elif deficiency.item_id:
-        item = current.get(str(deficiency.item_id))
+        entries = item_entries(current, deficiency.item_id)
+        place = deficiency_requirement(organization_id, deficiency)
+        if place is not None:
+            # The stock the deficiency concerns, wherever it is kept today (SPEC 6.0.0 8.1).
+            entries = [e for e in entries if e.requirement.item_requirement_id == place]
+        item = entries[0] if entries else None
         if item is not None:
             if item.requirement.kit_id:
-                selected.extend(
-                    (item, item.requirement.definition_id, kit_id) for kit_id, _label in item.kits
+                selected.extend(_row_of(item, kit_id) for kit_id, _label in item.kits)
+            elif place is None:
+                # Per item (reported before the cutover, no place recorded): the all-zero key.
+                requirement = item.requirement
+                selected.append(
+                    ScopeRow(str(requirement.item_id), str(requirement.definition_id), None)
                 )
             else:
-                selected.append((item, item.requirement.definition_id, None))
+                selected.append(_row_of(item))
         for item in placed:
             if item.requirement.item_id == str(deficiency.item_id):
-                selected.extend(
-                    (item, item.requirement.definition_id, kit_id) for kit_id, _label in item.kits
-                )
+                selected.extend(_row_of(item, kit_id) for kit_id, _label in item.kits)
     else:
         reported = list(
             DeficiencyAffectedItem.objects.filter(
                 organization_id=organization_id, deficiency_id=deficiency.pk
-            ).select_related("definition", "kit_definition_item__version")
+            ).select_related(
+                "definition", "kit_definition_item__version", "item_requirement_version"
+            )
         )
         for affected in reported:
+            item_id = str(affected.item_id)
             # The report-time definition is part of the immutable affected-item snapshot. Keep
             # that definition even if later publications remove or re-place the item.
             if affected.kit_requirement_id:
                 # A kit presence line (KDEF-12): the line's presence item itself, no kit.
-                selected.append((affected, str(affected.kit_requirement_id), None))
+                selected.append(ScopeRow(item_id, str(affected.kit_requirement_id), None))
             elif affected.kit_definition_item_id:
                 # Placed kit content: every active kit on the vehicle with that definition now.
                 definition_id = affected.kit_definition_item.version.definition_id
@@ -630,7 +782,7 @@ def correction_scope(organization_id, deficiency, now):
                     ),
                 ).values_list("pk", flat=True)
                 selected.extend(
-                    (affected, str(affected.kit_definition_item_id), str(kit)) for kit in own
+                    ScopeRow(item_id, str(affected.kit_definition_item_id), str(kit)) for kit in own
                 )
             elif affected.definition.kit_id:
                 slot = slot_of_reference_kit(affected.definition.kit_id)
@@ -639,22 +791,34 @@ def correction_scope(organization_id, deficiency, now):
                     if slot
                     else ()
                 )
-                selected.extend((affected, str(affected.definition_id), kit.kit_id) for kit in kits)
+                selected.extend(
+                    ScopeRow(item_id, str(affected.definition_id), kit.kit_id) for kit in kits
+                )
+            elif affected.item_requirement_version_id:
+                # The place recorded with the report (SPEC 6.0.0 8.1).
+                selected.append(
+                    ScopeRow(
+                        item_id,
+                        str(affected.definition_id),
+                        None,
+                        str(affected.item_requirement_version.requirement_id),
+                        str(affected.item_requirement_version_id),
+                    )
+                )
             else:
-                selected.append((affected, str(affected.definition_id), None))
+                selected.append(ScopeRow(item_id, str(affected.definition_id), None))
     rows = {}
-    for item, definition_id, kit_id in selected:
-        item_id = str(item.requirement.item_id if hasattr(item, "requirement") else item.item_id)
-        rows[(item_id, str(definition_id), kit_id)] = None
+    for row in selected:
+        rows.setdefault((row.item_id, row.definition_id, row.unit), row)
     # Supervisor expansions stay with the deficiency (VER-3, amendment 1.22.0): each expanded item
     # joins, resolved like the rest of the correction-time scope, unless the scope above already
-    # holds the same item and instance.
-    present = {(item_id, kit_id) for item_id, _definition, kit_id in rows}
-    for item_id, definition_id, kit_id in _expansions(organization_id, deficiency, current, placed):
-        if (item_id, kit_id) not in present:
-            rows[(item_id, definition_id, kit_id)] = None
-            present.add((item_id, kit_id))
-    return sorted(rows, key=lambda row: (row[0], row[1], row[2] or ""))
+    # holds the same item and unit.
+    present = {(row.item_id, row.unit) for row in rows.values()}
+    for row in _expansions(organization_id, deficiency, current, placed):
+        if (row.item_id, row.unit) not in present:
+            rows[(row.item_id, row.definition_id, row.unit)] = row
+            present.add((row.item_id, row.unit))
+    return sorted(rows.values(), key=lambda row: (row.item_id, row.definition_id, row.unit or ""))
 
 
 def placed_entry(placed, item_id, kit_id):
@@ -670,38 +834,49 @@ def placed_entry(placed, item_id, kit_id):
 
 
 def _expansions(organization_id, deficiency, current, placed=()):
-    """(item, definition, kit or None) of the deficiency's supervisor expansions that apply now.
+    """ScopeRows of the deficiency's supervisor expansions that apply now.
 
     Like every correction-time row (VER-3), an expanded pair is resolved against today's checklist
     and kit placement: the item must still be required on the vehicle, with its current definition,
     and a kit instance must still hold that item there (active, in the slot the definition names).
-    A kit moved elsewhere or retired therefore drops out instead of blocking the correction.
+    A kit moved elsewhere or retired therefore drops out instead of blocking the correction. An
+    expansion that names an item requirement follows that stock to its place today, and drops out
+    when no checklist keeps it any more (SPEC 6.0.0 VER-3).
     """
     rows = list(
         DeficiencyScopeExpansion.objects.filter(
             organization_id=organization_id, deficiency_id=deficiency.pk
         )
         .order_by("recorded_at", "pk")
-        .values_list("item_id", "kit_instance_id")[: MAX_EXPANSIONS + 1]
+        .values_list("item_id", "kit_instance_id", "item_requirement_version__requirement_id")[
+            : MAX_EXPANSIONS + 1
+        ]
     )
     if len(rows) > MAX_EXPANSIONS:
         raise DeficiencyError(
             "CONFIGURATION_UNAVAILABLE", "the scope expansions are too many to use", status=503
         )
     applicable = []
-    for item_id, kit_id in rows:
+    for item_id, kit_id, place in rows:
         content = placed_entry(placed, item_id, kit_id)
         if content is not None:
-            applicable.append((str(item_id), str(content.requirement.definition_id), str(kit_id)))
+            applicable.append(_row_of(content, str(kit_id)))
             continue
-        entry = current.get(str(item_id))
+        if place is not None:
+            entry = current.get((str(item_id), str(place)))
+            if entry is not None:
+                applicable.append(_row_of(entry))
+            continue
+        entries = item_entries(current, item_id)
+        entry = entries[0] if entries else None
         if entry is None:
             continue
         kits = {str(k) for k, _label in entry.kits}
         kit = None if kit_id is None else str(kit_id)
         if (kit is None) != (not entry.requirement.kit_id) or (kit is not None and kit not in kits):
             continue
-        applicable.append((str(item_id), str(entry.requirement.definition_id), kit))
+        requirement = entry.requirement
+        applicable.append(ScopeRow(str(item_id), str(requirement.definition_id), kit))
     return applicable
 
 
@@ -792,6 +967,7 @@ def end_suspensions(receipt, current, *, organization_id, event):
             kit_definition_item_id=start.kit_definition_item_id,
             kit_requirement_id=start.kit_requirement_id,
             kit_instance_id=start.kit_instance_id,
+            item_requirement_version_id=start.item_requirement_version_id,
             instance_key=start.instance_key,
             action="END",
             deficiency_event=event,

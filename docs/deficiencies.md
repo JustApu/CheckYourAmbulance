@@ -893,6 +893,35 @@ effects or none, and the operation id makes the call idempotent. Verify with the
   stable slot, or Not placed) where a published checklist of the vehicle keeps the item outside a
   kit. The item-requirement migration refuses while such a deficiency has no place; see
   [the item-requirement migration](checklists-implementation.md).
+- **Per place after the item-requirement cutover** (SPEC 6.0.0 §7.5, §8.1, VER-3, SUS-2; issue
+  #256 C3). An item outside a kit kept in two places is two item requirements (two stocks).
+  - **Columns.** `deficiency`, `deficiency_affected_item`, `verification_scope_row`,
+    `deficiency_scope_expansion` and `check_suspension` gain a nullable `item_requirement_version`
+    (the place's version). A scope, expansion or suspension row with one keys its `instance_key` by
+    the requirement id: the key is the kit instance, else the item requirement, else the all-zero
+    UUID, in every reader and trigger. Migrations: `cya_deficiencies` 0026/0027, `cya_checks` 0018.
+  - **Target.** A failed check's deficiency names the check's version. `report_deficiency` takes
+    `{item_id, item_requirement_id?}`; an item kept in more than one place needs
+    `item_requirement_id` (422 `PLACE_REQUIRED`), and one kept in one place takes that place. The
+    expansion and suspension `items` entries take `item_requirement_id` by the same rule; it never
+    comes with a kit instance, and it enters the request digest only when given.
+  - **Attention.** A row that names a place applies to that requirement's rows only, so a failure
+    or deficiency in one place never puts the other place into attention (`DeficiencyFact.item_units`,
+    `cya/deficiencies/place_units.py`). The place comes from the joins the readers already run.
+  - **Verification.** `correction_scope` returns `ScopeRow`s. An item target follows its
+    requirement to where it is kept today. A verification check counts for the row of its unit
+    (`_verification_plan`, `satisfied_scope_rows`, the check guard and the event guard).
+  - **Suspension.** A suspension of a place covers that requirement's stream only
+    (`stored_suspensions`, `_page_suspensions`, `refresh`).
+  - **Before the cutover.** Rows recorded before the cutover name no place and keep the per-item
+    rule: an all-zero scope row is met by a check of the item at any place outside a kit, and an
+    all-zero suspension covers every requirement stream of the item. A deficiency whose place a
+    Supervisor recorded (`deficiency_place`) is mapped by the cutover to the requirement kept there
+    in the append-only `deficiency_requirement_map`; readers take the header's version first and
+    this map otherwise. `assign_deficiency_place` is refused after the cutover (422 `CUTOVER_DONE`).
+  - **Pages.** The report, expand, add-verification and suspend forms list an item kept in more than
+    one place once per place, with the place in the label; the deficiency page shows the place, and
+    the verification page lists the row of each place.
 - `deficiency.severity_version_id` (a reference to the level revision) replaces a literal severity column; the contract's `severity` is read through it (`code`).
 - `deficiency_event` gains `decision` and `request_event_id` ([issue #150](https://github.com/JustApu/CheckYourAmbulance-archive/issues/150)), set only on `EXTENSION_DECIDED`; the contract's `proposed_deadline` is written by `EXTENSION_REQUESTED` and `deficiency_age_rule` is new (the contract has no age table; DEF-6 requires one).
 - `deficiency_scope_expansion` is new ([issue #156](https://github.com/JustApu/CheckYourAmbulance-archive/issues/156)); the contract's `verification_scope_row` note "expansion appends, never shrinks past evidence" is implemented by the expansion revision and the closure guard.

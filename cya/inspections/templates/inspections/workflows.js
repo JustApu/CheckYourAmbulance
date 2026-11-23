@@ -143,6 +143,7 @@
       body.items = Array.prototype.map.call(form.querySelectorAll('[name="items"]:checked'), function (e) {
         var parts = e.value.split(":"), entry = {item_id: parts[0]};
         if (parts[1]) { entry.kit_instance_id = parts[1]; }
+        if (parts[2]) { entry.item_requirement_id = parts[2]; }
         return entry;
       });
       if (!body.items.length) { throw new Error("Choose at least one item."); }
@@ -188,6 +189,7 @@
         var targetKey = {item: "item_id", kit: "kit_id", compartment: "compartment_id"}[parts[0]];
         if (!targetKey || !parts[1]) { throw new Error("Choose a valid affected scope."); }
         body.target = {}; body.target[targetKey] = parts[1];
+        if (parts[0] === "item" && parts[2]) { body.target.item_requirement_id = parts[2]; }
       }
       body.category_id = required(value(form, "category_id"), "Choose a category.");
       var severity = form.querySelector('[name="severity"]:checked');

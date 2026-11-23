@@ -8,7 +8,11 @@ red for that kit only. An item outside a kit uses the NO_KIT key.
 
 A deficiency applies to the items in its scope snapshot. When it names a kit instance it applies
 to that instance only; when it names none (an independent report on an item that sits in several
-kits) it applies to every instance of the item, so the state errs towards red.
+kits) it applies to every instance of the item, so the state errs towards red. An item outside a
+kit whose deficiency row names an item requirement (one stock of the item in one place, SPEC 6.0.0
+7.5) is evaluated for that requirement's key only: a failure in one place never makes the same item
+in another place need attention. A row recorded before the cutover names none and keeps the
+per-item rule.
 """
 
 from dataclasses import dataclass
@@ -38,6 +42,13 @@ class DeficiencyFact:
     status: str
     item_ids: frozenset
     kit_key: str = NO_KIT  # NO_KIT: not tied to one kit instance
+    # (item_id, item requirement id) pairs of rows that name their place (SPEC 6.0.0 7.5); such an
+    # item is not in item_ids, and the deficiency applies to that requirement's key only.
+    item_units: frozenset = frozenset()
+
+    @property
+    def all_item_ids(self):
+        return self.item_ids | {item_id for item_id, _unit in self.item_units}
 
 
 @dataclass(frozen=True)
@@ -54,6 +65,8 @@ class Attention:
 
 
 def applies(deficiency, item_id, kit_key):
+    if (item_id, kit_key) in deficiency.item_units:
+        return True
     if item_id not in deficiency.item_ids:
         return False
     return deficiency.kit_key == NO_KIT or deficiency.kit_key == kit_key

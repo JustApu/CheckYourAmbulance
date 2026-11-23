@@ -26,6 +26,7 @@ from cya.deficiencies.models import (
     DeficiencyEvent,
     DeficiencyProjection,
 )
+from cya.deficiencies.place_units import affected_unit, with_place
 from cya.deficiencies.transitions import ACTIVE_STATUSES
 from cya.kits.presence import line_unit_keys
 from cya.obligations.state import NO_KIT
@@ -149,17 +150,26 @@ def deficiency_facts(organization_id, vehicle_id, as_of=None):
         statuses = _deficiency_rows_as_of(organization_id, vehicle_id, _aware(as_of, "as_of"))
     if not statuses:
         return []
-    kits = dict(
-        Deficiency.objects.filter(organization_id=organization_id, pk__in=statuses).values_list(
-            "pk", "kit_id"
-        )
-    )
-    items, presence_lines = {}, {}
+    kits, places = {}, {}
+    for pk, kit_id, item_id, place in with_place(
+        Deficiency.objects.filter(organization_id=organization_id, pk__in=statuses),
+        None if as_of is None else _aware(as_of, "as_of"),
+    ).values_list("pk", "kit_id", "item_id", "place_requirement_id"):
+        kits[pk] = kit_id
+        if place:
+            places[str(pk)] = (str(item_id), str(place))
+    items, units, presence_lines = {}, {}, {}
     scope = DeficiencyAffectedItem.objects.filter(
         organization_id=organization_id, deficiency_id__in=statuses
-    ).values_list("deficiency_id", "item_id", "kit_requirement_id")
-    for deficiency_id, item_id, line in scope:
-        items.setdefault(str(deficiency_id), set()).add(str(item_id))
+    ).values_list(
+        "deficiency_id", "item_id", "kit_requirement_id", "item_requirement_version__requirement_id"
+    )
+    for deficiency_id, item_id, line, requirement_id in scope:
+        unit = affected_unit(places.get(str(deficiency_id)), str(item_id), line, requirement_id)
+        if unit:
+            units.setdefault(str(deficiency_id), set()).add((str(item_id), unit))
+        else:
+            items.setdefault(str(deficiency_id), set()).add(str(item_id))
         if line:
             presence_lines[str(deficiency_id)] = str(line)
     # A deficiency for a kit presence line applies to that line only (KDEF-12).
@@ -170,6 +180,7 @@ def deficiency_facts(organization_id, vehicle_id, as_of=None):
             status,
             frozenset(items.get(pk, ())),
             str(kits[pk]) if kits.get(pk) else line_units.get(presence_lines.get(pk, ""), NO_KIT),
+            frozenset(units.get(pk, ())),
         )
         for pk, status in sorted(statuses.items())
     ]

@@ -328,21 +328,30 @@ def satisfied_scope_rows(organization_id, deficiency_id, rows, excluding_root_id
     )
     if excluding_root_id is not None:
         checks = checks.exclude(root_check_id=excluding_root_id)
-    seen = {}
-    values = checks.values_list("item_id", "kit_id", "recorded_at")
-    for count, (item_id, kit_id, recorded_at) in enumerate(
+    seen, loose = {}, {}
+    values = checks.values_list(
+        "item_id", "kit_id", "item_requirement_version__requirement_id", "recorded_at"
+    )
+    for count, (item_id, kit_id, requirement_id, recorded_at) in enumerate(
         values[: MAX_VERIFICATION_CHECKS + 1], start=1
     ):
         if count > MAX_VERIFICATION_CHECKS:
             raise DeficiencyError(
                 "CONFIGURATION_UNAVAILABLE", "verification history is too large", status=503
             )
-        seen.setdefault((str(item_id), str(kit_id or NO_KIT_KEY)), []).append(recorded_at)
-    return {
-        row.pk
-        for row in rows
-        if any(at > row.required_after for at in seen.get((str(row.item_id), row.instance_key), ()))
-    }
+        # The check's unit: its kit, else its item requirement (SPEC 6.0.0 VER-3), else NO_KIT.
+        unit = str(kit_id or requirement_id or NO_KIT_KEY)
+        seen.setdefault((str(item_id), unit), []).append(recorded_at)
+        if not kit_id:
+            loose.setdefault(str(item_id), []).append(recorded_at)
+
+    def passes(row):
+        if row.instance_key == NO_KIT_KEY and row.item_requirement_version_id is None:
+            # A per-item row: met by a check of the item at any place outside a kit.
+            return loose.get(str(row.item_id), ())
+        return seen.get((str(row.item_id), row.instance_key), ())
+
+    return {row.pk for row in rows if any(at > row.required_after for at in passes(row))}
 
 
 def decide_verification_reopen(status, chain_counted, still_satisfied):

@@ -95,7 +95,8 @@ class ItemRequirementPlan:
     maps: list = field(default_factory=list)
     problems: list = field(default_factory=list)
     ambiguous_deficiencies: list = field(default_factory=list)
-    # deficiency id -> requirement id, for each deficiency whose place is recorded (18.3 item 2).
+    # deficiency id -> (vehicle id, item id, requirement id, version id), for each deficiency
+    # whose place is recorded (18.3 item 2); the cutover writes deficiency_requirement_map rows.
     deficiency_requirements: dict = field(default_factory=dict)
 
     def problem(self, text):
@@ -213,18 +214,21 @@ class _Vehicle:
 
 
 def _requirement_at_place(requirements, place, instant):
-    """The requirement kept at `place` at `instant`, else the latest one ever kept there."""
+    """(requirement, version) kept at `place` at `instant`, else the latest one ever kept there."""
     for requirement in requirements:
         current = requirement.at(instant)
         if current is not None and current.place == place:
-            return requirement
+            return requirement, current
     kept = [
-        (version.effective_at, requirement)
+        (version.effective_at, requirement, version)
         for requirement in requirements
         for version in requirement.versions
         if version.place == place
     ]
-    return max(kept, key=lambda pair: pair[0])[1] if kept else None
+    if not kept:
+        return None
+    _at, requirement, version = max(kept, key=lambda entry: entry[0])
+    return requirement, version
 
 
 def _ambiguous_deficiencies(plan, vehicles):
@@ -278,11 +282,17 @@ def _ambiguous_deficiencies(plan, vehicles):
             recorded.place_kind,
             None if recorded.place_slot_id is None else str(recorded.place_slot_id),
         )
-        requirement = _requirement_at_place(requirements, place, deficiency.reported_at)
-        if requirement is None:
+        found = _requirement_at_place(requirements, place, deficiency.reported_at)
+        if found is None:
             plan.problem(f"{what}: no checklist keeps the item at the place recorded for it")
             continue
-        plan.deficiency_requirements[str(deficiency.pk)] = requirement.id
+        requirement, version = found
+        plan.deficiency_requirements[str(deficiency.pk)] = (
+            str(deficiency.vehicle_id),
+            str(deficiency.item_id),
+            requirement.id,
+            version.id,
+        )
 
 
 def plan_item_requirements(organization_id):
@@ -374,6 +384,24 @@ def _write(plan, evidence):
             **evidence,
         )
         for row in plan.maps
+    )
+    from cya.deficiencies.models import DeficiencyRequirementMap
+
+    # SPEC 18.3 item 2, issue #256 C3: a deficiency whose place a Supervisor recorded concerns
+    # the requirement kept there from now on (attention, verification and suspension per place).
+    DeficiencyRequirementMap.objects.bulk_create(
+        DeficiencyRequirementMap(
+            id=new_id(),
+            deficiency_id=deficiency_id,
+            vehicle_id=vehicle_id,
+            item_id=item_id,
+            requirement_id=requirement_id,
+            requirement_version_id=version_id,
+            **evidence,
+        )
+        for deficiency_id, (vehicle_id, item_id, requirement_id, version_id) in sorted(
+            plan.deficiency_requirements.items()
+        )
     )
 
 

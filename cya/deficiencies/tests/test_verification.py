@@ -413,6 +413,7 @@ class ScopeTests(VerificationBase):
                 pk=r.pk,
                 item_id=r.item_id,
                 instance_key=r.instance_key,
+                item_requirement_version_id=r.item_requirement_version_id,
                 required_after=r.required_after,
                 scope_revision=2,
                 correction_event_id=other_correction,

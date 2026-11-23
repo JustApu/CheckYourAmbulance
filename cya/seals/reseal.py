@@ -412,9 +412,16 @@ def reseal(
                         category=problem["category"],
                         severity=problem["severity"],
                         fields=problem["fields"],
-                        affected=[(row.scope.item_id, row.scope.definition_id)],
+                        affected=[
+                            (
+                                row.scope.item_id,
+                                row.scope.definition_id,
+                                row.scope.item_requirement_version_id,
+                            )
+                        ],
                         item_id=row.scope.item_id,
                         kit_id=row.scope.kit_id,
+                        item_requirement_version_id=row.scope.item_requirement_version_id,
                     )
                     DeficiencyEvidence.objects.create(
                         **stamp,

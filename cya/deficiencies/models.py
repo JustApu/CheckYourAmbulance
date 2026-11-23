@@ -301,6 +301,17 @@ class Deficiency(Evidence):
         "cya_checklists.Compartment", null=True, on_delete=models.PROTECT, related_name="+"
     )
 
+    # The item requirement version (one stock of the item in one place, SPEC 6.0.0 CHK-11) of an item target outside a kit;
+    # null for a kit, a kit presence line, or a row recorded before the organization's cutover
+    # (issue #256 C3). Enforced by migration 0027's organization key.
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
+
     class Meta:
         db_table = "deficiency"
         constraints = [
@@ -364,6 +375,17 @@ class DeficiencyAffectedItem(Evidence):
     # A kit presence line (SPEC 2.0.0 KDEF-12); enforced by migration 0021's organization key.
     kit_requirement = models.ForeignKey(
         "cya_kits.VehicleKitRequirement",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
+
+    # The item requirement version (one stock of the item in one place, SPEC 6.0.0 CHK-11) of an affected row outside a kit;
+    # null for a kit, a kit presence line, or a row recorded before the organization's cutover
+    # (issue #256 C3). Enforced by migration 0027's organization key.
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
         null=True,
         on_delete=models.PROTECT,
         related_name="+",
@@ -446,6 +468,17 @@ class VerificationScopeRow(Evidence):
     required_after = models.DateTimeField()
     scope_revision = models.PositiveIntegerField()
 
+    # The item requirement version (one stock of the item in one place, SPEC 6.0.0 CHK-11) of a scope row outside a kit; instance_key is then its requirement;
+    # null for a kit, a kit presence line, or a row recorded before the organization's cutover
+    # (issue #256 C3). Enforced by migration 0027's organization key.
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
+
     class Meta:
         db_table = "verification_scope_row"
         constraints = [
@@ -527,6 +560,17 @@ class DeficiencyScopeExpansion(Evidence):
         "cya_checklists.KitInstance", null=True, on_delete=models.PROTECT, related_name="+"
     )
     instance_key = models.CharField(max_length=36, db_collation="ascii_bin")
+
+    # The item requirement version (one stock of the item in one place, SPEC 6.0.0 CHK-11) of an expanded row outside a kit; instance_key is its requirement;
+    # null for a kit, a kit presence line, or a row recorded before the organization's cutover
+    # (issue #256 C3). Enforced by migration 0027's organization key.
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
 
     class Meta:
         db_table = "deficiency_scope_expansion"
@@ -619,6 +663,17 @@ class CheckSuspension(Evidence):
     )
     prior_suspension = models.OneToOneField(
         "self", null=True, on_delete=models.PROTECT, related_name="+"
+    )
+
+    # The item requirement version (one stock of the item in one place, SPEC 6.0.0 CHK-11) of a suspended row outside a kit; instance_key is its requirement;
+    # null for a kit, a kit presence line, or a row recorded before the organization's cutover
+    # (issue #256 C3). Enforced by migration 0027's organization key.
+    item_requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
     )
 
     class Meta:
@@ -1446,3 +1501,38 @@ class DeficiencyPlace(Evidence):
 
     def __str__(self):
         return f"DeficiencyPlace {self.deficiency_id}"
+
+
+class DeficiencyRequirementMap(Evidence):
+    """A deficiency recorded before the item-requirement cutover -> the requirement of its place.
+
+    SPEC 6.0.0 18.3 item 2, issue #256 C3. A loose-item deficiency whose place a Supervisor
+    recorded (deficiency_place) concerns the item requirement kept there; the header cannot be
+    changed, so migrate_item_requirements records it here, once per deficiency, in its
+    ITEM_REQUIREMENT_CUTOVER command. Readers take the header's item_requirement_version first and
+    this row otherwise; a loose-item deficiency with neither keeps concerning every place of its
+    item (the per-item rule before the cutover). Append-only (A).
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    deficiency = models.OneToOneField(Deficiency, on_delete=models.PROTECT, related_name="+")
+    vehicle = models.ForeignKey(
+        "cya_checklists.Vehicle", on_delete=models.PROTECT, related_name="+"
+    )
+    item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    requirement = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirement", on_delete=models.PROTECT, related_name="+"
+    )
+    requirement_version = models.ForeignKey(
+        "cya_checklists.VehicleItemRequirementVersion", on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        db_table = "deficiency_requirement_map"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="defreqmap_org_id"),
+        ]
+
+    def __str__(self):
+        return f"DeficiencyRequirementMap {self.deficiency_id}"

@@ -76,9 +76,8 @@ def seal_blockers(
             rows = service.correction_scope(organization_id, deficiency, at)
             if len(rows) > MAX_LOCK_ROWS:
                 raise SealLockError("deficiency scope is too large")
-            has_open |= any(
-                (str(item), str(kit) if kit else None) in pairs for item, _, kit in rows
-            )
+            # A seal pair is (item, kit or None): a place outside a kit is the item's None.
+            has_open |= any((str(row[0]), str(row[2]) if row[2] else None) in pairs for row in rows)
         suspensions = service.suspensions_in_force(organization_id, deficiency_id)
         for row in suspensions:
             if row.kit_requirement_id is not None:
@@ -87,7 +86,10 @@ def seal_blockers(
             else:
                 has_suspension |= (
                     str(row.item_id),
-                    None if row.instance_key == NO_KIT_KEY else str(row.instance_key),
+                    None
+                    if row.instance_key == NO_KIT_KEY
+                    or getattr(row, "item_requirement_version_id", None)
+                    else str(row.instance_key),
                 ) in pairs
         if has_open and has_suspension:
             break

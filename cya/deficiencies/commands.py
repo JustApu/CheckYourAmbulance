@@ -234,6 +234,7 @@ def report_deficiency(
                 item_id=header["item_id"],
                 kit_id=header["kit_id"],
                 compartment_id=header["compartment_id"],
+                item_requirement_version_id=header["item_requirement_version_id"],
                 assignee_id=assignee_id,
                 deadline=deadline,
             )
@@ -840,17 +841,18 @@ def record_correction(*, deficiency_id, expected_event_id, **context):
                 **service.stamp(receipt, current),
             )
             rows = []
-            for scope_id, (item_id, definition_id, kit_id) in zip(scope_ids, scope, strict=True):
+            for scope_id, row in zip(scope_ids, scope, strict=True):
                 rows.append(
                     VerificationScopeRow(
                         id=scope_id,
                         organization_id=organization_id,
                         deficiency=deficiency,
                         correction_event=event,
-                        item_id=item_id,
-                        **content_columns(definition_id),
-                        kit_instance_id=kit_id,
-                        instance_key=kit_id or "00000000-0000-0000-0000-000000000000",
+                        item_id=row.item_id,
+                        **content_columns(row.definition_id),
+                        kit_instance_id=row.kit_id,
+                        item_requirement_version_id=row.item_requirement_version_id,
+                        instance_key=row.instance_key,
                         required_after=receipt.recorded_at,
                         scope_revision=revision,
                         **service.stamp(receipt, current),
