@@ -210,11 +210,21 @@ def _resolve(writer, template_id, row, at, previous):
         VehicleItemRequirementVersion.objects.filter(vehicle_id=writer.vehicle_id, item_id=item_id)
     )
     later = [v for v in versions if v.effective_at > at]
-    if later:
-        raise ItemRequirementError(
-            f"item {item_id} has a requirement version published for a later instant; "
-            "publish this checklist at or after it"
-        )
+
+    def refuse_later(requirement_id=None, new_place=None):
+        """Versions are appended in effective order (migration 0014): a version at `at` can
+        follow neither its own requirement's later version nor, at a new place, another
+        requirement's later version there (18.1 item 8). Unrelated places are not blocked."""
+        if any(
+            (requirement_id is not None and str(v.requirement_id) == str(requirement_id))
+            or (new_place is not None and _version_place(v) == new_place)
+            for v in later
+        ):
+            raise ItemRequirementError(
+                f"item {item_id} has a requirement version published for a later instant "
+                "here; publish this checklist at or after it"
+            )
+
     current = _in_force(versions, at)
     here = [v for v in current.values() if _version_place(v) == place]
     if here:
@@ -227,6 +237,7 @@ def _resolve(writer, template_id, row, at, previous):
                 f"item {item_id} at this place has other requirements in "
                 f"{', '.join(users)}; publish matching requirements"
             )
+        refuse_later(requirement_id=version.requirement_id)
         return writer.version(version.requirement_id, item_id, at, row)  # (b)
     before = previous.get(item_id)
     moved = requirement_of_row(before) if before is not None else None
@@ -235,5 +246,7 @@ def _resolve(writer, template_id, row, at, previous):
         and str(moved) in {str(k) for k in current}
         and not other_users(moved, template_id, at)
     ):
+        refuse_later(requirement_id=moved, new_place=place)
         return writer.version(moved, item_id, at, row)  # (c)
+    refuse_later(new_place=place)
     return writer.version(writer.requirement(item_id).pk, item_id, at, row)  # (d)

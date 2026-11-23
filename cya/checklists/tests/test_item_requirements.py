@@ -170,6 +170,30 @@ class PublicationTests(ItemRequirementCase):
             1,
         )
 
+    def test_a_later_version_at_another_place_does_not_block(self):  # review 6015890478
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        later = timezone.now() + timedelta(days=2)
+        self.publish_checklist(self.a, [self.suction_spec()], effective_at=later)
+        system = str(self.own_row(self.system, self.vehicle).pk)
+        version = self.publish_checklist(
+            self.b, [self.suction_spec(compartment_id=None, system_id=system)]
+        )
+        self.assertEqual(self.requirement(version, self.suction).place_kind, "SYSTEM")
+        self.assertEqual(VehicleItemRequirement.objects.count(), 2)
+
+    def test_a_later_version_at_the_same_place_still_refuses(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        later = timezone.now() + timedelta(days=2)
+        self.publish_checklist(self.a, [self.suction_spec()], effective_at=later)
+        with self.assertRaisesRegex(ChecklistValidationError, "later instant here"):
+            self.publish_checklist(self.b, [self.suction_spec()])
+
     def test_the_database_keeps_one_requirement_per_item_and_place(self):  # 18.1 item 8
         version = self.publish_checklist(self.a, [self.suction_spec()])
         existing = self.requirement(version, self.suction)
