@@ -54,8 +54,8 @@ EXPECTED = (vehicle_rules.VehicleError, KeyRuleError, ValueError)
 CONFIGURATION_LINKS = (
     ("vehicle-bindings", "Checklist assignments", "bind_unbind_template"),
     ("vehicle-positions", "Compartments and systems", "manage_vehicle_positions"),
-    ("vehicle-kit-list", "Kit list", "manage_vehicle_kit_lists"),
-    ("vehicle-kit-instances", "Kit instances", "manage_kit_assignment"),
+    ("kit-instance-inventory", "Physical kit inventory", "manage_kit_assignment"),
+    ("vehicle-kit-instances", "Assign physical kits", "manage_kit_assignment"),
 )
 
 
