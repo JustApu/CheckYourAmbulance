@@ -85,19 +85,19 @@ ADMINISTRATION_LINKS = (
     (
         "kit-definitions",
         "Kit definitions",
-        "create, edit, duplicate, publish and deactivate kit definitions.",
+        "Define what each kit type contains; create, edit, duplicate, publish and deactivate it.",
         "manage_kit_definitions",
     ),
     (
         "kit-list-vehicles",
-        "Kit lists",
-        "Set the kit types, compartments and expected counts this vehicle should carry. This does not add physical kits.",
+        "Expected kit inventory",
+        "Set the expected kit counts and compartments used to check each vehicle.",
         "manage_vehicle_kit_lists",
     ),
     (
         "kit-instance-vehicles",
-        "Kit instances",
-        "Create labeled physical kits and assign or move them to vehicles and compartments.",
+        "Physical kits",
+        "Create individual labeled kits and assign or move them to vehicles and compartments.",
         "manage_kit_assignment",
     ),
     (
