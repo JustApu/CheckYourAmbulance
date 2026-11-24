@@ -996,6 +996,7 @@ def record_check(
                 _pinned_session(organization_id, actor, shape),
                 shape["kit_id"],
                 shape["kit_requirement_id"],
+                shape["kit_presence"],
             )
         )
         shape["derived"] = shape["outcome"] is None
