@@ -15,8 +15,11 @@ PHYSICAL_CHECK = """IF NOT EXISTS (
  JOIN checklist_publication cp ON cp.checklist_version_id=pl.checklist_version_id
  JOIN kit_definition d ON d.id=kd.definition_id
  JOIN kit_assignment_event e ON e.id=NEW.kit_event_id
- WHERE kd.kit_id=NEW.kit_instance_id AND pl.id=NEW.placement_id
- AND cp.id=NEW.publication_id AND d.presence_item_id=NEW.item_id
+ WHERE kd.kit_id=NEW.kit_instance_id AND kd.organization_id=NEW.organization_id
+ AND pl.id=NEW.placement_id AND pl.organization_id=NEW.organization_id
+ AND cp.id=NEW.publication_id AND cp.organization_id=NEW.organization_id
+ AND d.organization_id=NEW.organization_id AND e.organization_id=NEW.organization_id
+ AND d.presence_item_id=NEW.item_id
  AND e.kit_id=NEW.kit_instance_id AND e.vehicle_id=NEW.vehicle_id
  AND e.active=1 AND e.compartment_id IS NOT NULL)
 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='physical kit presence requirement mismatch'; END IF;
@@ -28,7 +31,9 @@ PHYSICAL_EVENT = """IF NEW.kit_presence THEN
   JOIN kit_instance_definition kd ON kd.kit_id=e.kit_id
   JOIN checklist_kit_placement pl ON pl.definition_id=kd.definition_id
   JOIN kit_definition d ON d.id=kd.definition_id
-  WHERE e.id=NEW.kit_event_id AND e.kit_id=NEW.kit_instance_id
+  WHERE e.id=NEW.kit_event_id AND e.organization_id=NEW.organization_id
+  AND e.kit_id=NEW.kit_instance_id AND kd.organization_id=NEW.organization_id
+  AND pl.organization_id=NEW.organization_id AND d.organization_id=NEW.organization_id
   AND e.vehicle_id=NEW.vehicle_id AND e.active=1 AND e.compartment_id IS NOT NULL
   AND pl.id=NEW.placement_id AND d.presence_item_id=NEW.item_id)
  THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='physical kit assignment does not match its presence item'; END IF;
