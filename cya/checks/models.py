@@ -47,6 +47,7 @@ class CheckRecord(Evidence):
         db_constraint=False,
     )
     # A kit presence check: the kit list line it counted (SPEC 2.0.0 KDEF-12, section 7.2).
+    kit_presence = models.BooleanField(default=False)
     kit_requirement = models.ForeignKey(
         "cya_kits.VehicleKitRequirement",
         null=True,
@@ -124,19 +125,28 @@ class CheckRecord(Evidence):
                         item_def__isnull=False,
                         kit_definition_item__isnull=True,
                         kit_requirement__isnull=True,
+                        kit_presence=False,
                     )
                     | models.Q(
                         item_def__isnull=True,
                         kit_definition_item__isnull=False,
                         kit__isnull=False,
                         kit_requirement__isnull=True,
+                        kit_presence=False,
                     )
-                    # A kit presence check names the kit list line it counted (KDEF-12).
                     | models.Q(
                         item_def__isnull=True,
                         kit_definition_item__isnull=True,
                         kit__isnull=True,
                         kit_requirement__isnull=False,
+                        kit_presence=False,
+                    )
+                    | models.Q(
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit__isnull=False,
+                        kit_requirement__isnull=True,
+                        kit_presence=True,
                     )
                 ),
                 name="check_content_source",
