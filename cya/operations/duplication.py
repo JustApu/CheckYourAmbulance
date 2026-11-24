@@ -384,7 +384,10 @@ def plan_vehicle_copy(organization_id, source_vehicle_id, now=None):
     from cya.checklists.ownership import cutover_at
 
     if cutover_at(org) is not None:
-        return _plan_own_checklists(plan, org, source, now, lines, copied_slots)
+        # After adopting assignment-based physical kit inventory, legacy expected-count
+        # lists are retained only as historical evidence and are not copied to new vehicles.
+        plan.kit_list_in_force = False
+        return _plan_own_checklists(plan, org, source, now, [], copied_slots)
     plan.bindings = _bindings_now(org, str(source.pk), now)
     candidates = []  # (template_id, override, [(entry, definition)])
     for template_id in sorted({t for t, _slot in plan.bindings}):
