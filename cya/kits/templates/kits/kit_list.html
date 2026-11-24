@@ -13,8 +13,8 @@
 <p>Revision {{ in_force.revision }}.</p>
 <div class="table-scroll" role="region" aria-labelledby="in-force-heading" tabindex="0">
 <table aria-labelledby="in-force-heading">
-  <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required</th></tr></thead>
-  <tbody>{% for line in in_force_lines %}<tr><td>{{ line.definition }}</td><td>{{ line.compartment }}</td><td>{{ line.required_count }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required count</th><th scope="col">Order (lowest first)</th></tr></thead>
+  <tbody>{% for line in in_force_lines %}<tr><td>{{ line.definition }}</td><td>{{ line.compartment }}</td><td>{{ line.required_count }}</td><td>{{ line.display_order }}</td></tr>{% endfor %}</tbody>
 </table>
 </div>
 {% else %}<p>No kit list is in force.</p>{% endif %}
@@ -45,6 +45,7 @@
 {% if not editable %}
 <p id="too-long">This list has {{ line_count }} line{{ line_count|pluralize }}. This page can edit at most {{ max_rows }} lines, so it is shown but not offered for editing; saving part of it would drop the rest. An Administrator can change it by importing a vehicle file.</p>
 {% else %}
+<p><strong>Required count</strong> is how many instances of that kit the vehicle should carry in that compartment. Inspections compare the count present there with this number. <strong>Order</strong> controls the display sequence; lower numbers appear first.</p>
 <p>Saving replaces the draft with exactly these lines. Leave a row's kit and compartment empty to skip it, or tick Remove.</p>
 <form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="edit-heading" class="admin-form">
   {% csrf_token %}
@@ -53,7 +54,7 @@
   <input type="hidden" name="rows" value="{{ rows|length }}">
   <div class="table-scroll" role="region" aria-label="Kit list lines" tabindex="0">
   <table aria-label="Kit list lines">
-    <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required</th><th scope="col">Order</th><th scope="col">Remove</th></tr></thead>
+    <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required count</th><th scope="col">Order (lowest first)</th><th scope="col">Remove</th></tr></thead>
     <tbody>
     {% for row in rows %}
       <tr>
