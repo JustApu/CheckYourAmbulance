@@ -8,22 +8,20 @@ check history is copied.
 """
 
 import logging
-import uuid
 from urllib.parse import urlencode
 
-from django.http import Http404, HttpResponseRedirect
+from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods
 
-from cya.authorization.policy import permitted
-from cya.checklists.models import KitInstance, Vehicle
+from cya.checklists.models import KitInstance
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
 from cya.kits import positions as position_rules
 from cya.kits.commands import KitError, record_kit_assignment
-from cya.kits.models import KitDefinition, KitInstanceDefinition
+from cya.kits.models import KitInstanceDefinition
 from cya.kits.views import UNAVAILABLE, _context_ids
 from cya.shell import navigation
 
@@ -92,12 +90,9 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None):
             "kit_id", "definition__label"
         )
     )
-    # Issue #235 E1: when no kit type or compartment can be chosen, the page says so and links
-    # to the page that adds one, if this person may open it.
     roles = navigation.roles_for(user)
     context = {
         "title": f"Physical kit assignments: {vehicle.display_name}",
-        "can_manage_definitions": permitted("manage_kit_definitions", str(user.pk), roles),
         "can_manage_positions": permitted("manage_vehicle_positions", str(user.pk), roles),
 
         "vehicle": vehicle,
@@ -106,19 +101,11 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None):
             {"id": str(k.pk), "label": k.label, "definition": stock_definitions.get(k.pk, "(no kit type)")}
             for k in stock
         ],
-        "definitions": list(
-            KitDefinition.objects.filter(organization_id=org, active=True).order_by("label", "key")
-        ),
         "compartments": [
             row
             for row, _key in position_rules.positions(org, str(vehicle.pk), "COMPARTMENT")
             if not row.retired
         ],
-        "vehicles": list(
-            Vehicle.objects.filter(organization_id=org)
-            .order_by("-active", "display_name", "id")
-            .values("id", "display_name")[: admin_pages.LIST_LIMIT]
-        ),
         "form": prefill,
         "add_operation_id": admin_pages.new_operation_id(),
         "errors": errors or [],
@@ -182,30 +169,6 @@ def _return_to_stock(request, user, vehicle):
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "stock"}))
 
 
-def _return_to_stock(request, user, vehicle):
-    operation_id = admin_pages.operation_id_from(request)
-    kit_id = request.POST.get("kit_id", "")
-    if operation_id is None:
-        return _page(request, user, vehicle, status=400, errors=["the form was not valid; try again"])
-    try:
-        record_kit_assignment(
-            kit_id=kit_id,
-            active=True,
-            **{**_context_ids(user), "operation_id": operation_id},
-        )
-    except (KitError, ValueError) as error:
-        return _page(request, user, vehicle, status=400, errors=[str(error)])
-    except CommandDenied:
-        return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(request, user, vehicle, status=409, errors=["this form was already used; try again"])
-    except UNAVAILABLE as error:
-        logger.error("kit return to stock unavailable (%s)", type(error).__name__)
-        return _page(request, user, vehicle, status=503, errors=["the change could not be completed; nothing was changed. Try again."])
-    url = reverse("vehicle-kit-instances", args=[vehicle.pk])
-    return HttpResponseRedirect(url + "?" + urlencode({"saved": "stock"}))
-
-
 @never_cache
 @require_http_methods(["GET", "POST"])
 def vehicle_kit_instances(request, vehicle_id):
@@ -222,21 +185,3 @@ def vehicle_kit_instances(request, vehicle_id):
         return _return_to_stock(request, user, vehicle)
     return _page(request, user, vehicle, status=400, errors=["the request was not valid"])
 
-
-@never_cache
-@require_GET
-def duplicate(request):
-    """CFG-5: open the chosen vehicle's add form with the source's definition and a label."""
-    allowed, refused = admin_pages.allowed(request, ACTION, DENIAL)
-    if refused:
-        return refused
-    user, _roles = allowed
-    try:
-        vehicle_id = str(uuid.UUID(request.GET.get("vehicle", "")))
-    except ValueError:
-        raise Http404("no such vehicle") from None
-    target = admin_pages.vehicle_of(user, vehicle_id)
-    query = urlencode(
-        {"definition": request.GET.get("definition", ""), "label": request.GET.get("label", "")}
-    )
-    return HttpResponseRedirect(reverse("kit-instance-inventory") + "?" + query + "#create-kit-heading")
