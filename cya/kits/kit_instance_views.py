@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 ACTION = "manage_kit_assignment"
 DENIAL = "MANAGE_KIT_ASSIGNMENT"
-SAVED = {"add": "Kit added."}
+SAVED = {"add": "Physical kit assigned."}
 
 
 @never_cache
@@ -44,8 +44,8 @@ def vehicles(request):
     return admin_pages.vehicle_choice(
         request,
         user,
-        title="Kit instances",
-        intro="Choose a vehicle to see and add its kits.",
+        title="Physical kit assignments",
+        intro="Choose a vehicle to see the individual physical kit units assigned to it.",
         url_name="vehicle-kit-instances",
     )
 
@@ -86,9 +86,10 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None):
     # to the page that adds one, if this person may open it.
     roles = navigation.roles_for(user)
     context = {
-        "title": f"Kits: {vehicle.display_name}",
+        "title": f"Physical kit assignments: {vehicle.display_name}",
         "can_manage_definitions": permitted("manage_kit_definitions", str(user.pk), roles),
         "can_manage_positions": permitted("manage_vehicle_positions", str(user.pk), roles),
+        "can_manage_kit_lists": permitted("manage_vehicle_kit_lists", str(user.pk), roles),
         "vehicle": vehicle,
         "kits": _kits(org, vehicle),
         "definitions": list(
