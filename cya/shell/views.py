@@ -97,7 +97,7 @@ ADMINISTRATION_LINKS = (
     (
         "kit-instance-vehicles",
         "Kit instances",
-        "Record the physical kits assigned to vehicles, and add, move or duplicate an instance.",
+        "Create labeled physical kits and assign or move them to vehicles and compartments.",
         "manage_kit_assignment",
     ),
     (
@@ -129,7 +129,7 @@ ADMINISTRATION_GROUPS = (
         "kits",
         "Kits",
         "What each kit holds, which kits each vehicle carries, and the shared library.",
-        ("kit-definitions", "kit-list-vehicles", "kit-instance-vehicles", "kit-library"),
+        ("kit-definitions", "kit-instance-vehicles", "kit-list-vehicles", "kit-library"),
     ),
     (
         "system",
