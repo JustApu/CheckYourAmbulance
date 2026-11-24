@@ -69,7 +69,7 @@ def line_unit_keys(kit_requirement_ids):
 
 
 PRESENCE_SOURCE = "KIT_PRESENCE"  # a requirement whose definition_id is a kit list line
-INSTANCE_PRESENCE_SOURCE = "KIT_INSTANCE_PRESENCE"
+INSTANCE_PRESENCE_SOURCE = "KIT_INSTANCE_PRESENCE"  # one assigned physical unit, keyed by kit id
 
 
 def instance_presence_resolved_item(organization_id, resolved, placement, kit_id, item_id):
