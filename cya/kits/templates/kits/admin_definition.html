@@ -58,8 +58,8 @@
 <p>Revision {{ in_force.version.revision }}, in force since {{ in_force.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</p>
 <div class="table-scroll" role="region" aria-labelledby="in-force-heading" tabindex="0">
 <table aria-labelledby="in-force-heading">
-  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th></tr></thead>
-  <tbody>{% for row in in_force_rows %}<tr><td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.kind_label }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes_text }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th><th scope="col">Expiration</th></tr></thead>
+  <tbody>{% for row in in_force_rows %}<tr><td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.kind_label }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes_text }}</td><td>{% if row.expiration_tracked %}Tracked{% else %}Not tracked{% endif %}</td></tr>{% endfor %}</tbody>
 </table>
 </div>
 {% else %}<p>No version of this kit definition is in force.</p>{% endif %}
@@ -79,13 +79,13 @@
 {% if edit_rows %}
 <div class="table-scroll" role="region" aria-labelledby="edit-heading" tabindex="0">
 <table aria-labelledby="edit-heading">
-  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th><th scope="col">Change</th></tr></thead>
+  <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col">Check</th><th scope="col">Outcomes</th><th scope="col">Expiration</th><th scope="col">Change</th></tr></thead>
   <tbody>
   {% for row in edit_rows %}
     <tr>
-      <td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.kind_label }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes_text }}</td>
+      <td>{{ row.display_order }}</td><td>{{ row.label }}</td><td>{{ row.kind_label }}{% if row.target %}: {{ row.target }}{% endif %}</td><td>{{ row.outcomes_text }}</td><td>{% if row.expiration_tracked %}Tracked{% else %}Not tracked{% endif %}</td>
       <td>
-        <a href="{% url 'kit-definition-content' definition.pk row.item_id %}" aria-label="Edit {{ row.label }}">Edit</a>
+        <a class="button" href="{% url 'kit-definition-content' definition.pk row.item_id %}" aria-label="Edit {{ row.label }}">Edit</a>
         <form method="post" action="{% url 'kit-definition' definition.pk %}">
           {% csrf_token %}
           <input type="hidden" name="stage" value="remove">
