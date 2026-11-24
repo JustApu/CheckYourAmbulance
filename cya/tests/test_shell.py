@@ -84,6 +84,21 @@ class StationTimeFilterTests(SimpleTestCase):
             )
 
 
+class StationTimeLabelTests(SimpleTestCase):
+    """Station time is the only zone shown, so no screen labels it (owner, 2026-11-24)."""
+
+    def test_no_template_or_script_labels_a_time_as_station_time(self):
+        root = pathlib.Path(__file__).resolve().parents[1]
+        found = []
+        for path in sorted(root.rglob("*")):
+            if path.suffix not in {".html", ".js", ".txt"} or "tests" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for match in re.finditer(r"\(station time|in station time\.|\}\} station time", text):
+                found.append(f"{path.relative_to(root)}: {match.group(0)}")
+        self.assertEqual(found, [])
+
+
 class OrganizationTimezoneMiddlewareTests(TestCase):
     def test_station_zone_is_activated_and_anonymous_requests_reset_to_utc(self):
         middleware = OrganizationTimezoneMiddleware(

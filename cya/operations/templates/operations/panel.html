@@ -23,7 +23,7 @@
 <label><input type="checkbox" name="inspection_item" value="{{ item.item_id }}" data-kit="{{ item.kit_id|default_if_none:'' }}"> {{ item.item_label }}{% if item.kit_label %} · {{ item.kit_label }}{% endif %}</label>
 {% endfor %}
 </fieldset>
-<label>Due at (station time) <input type="datetime-local" name="due_at" required></label>
+<label>Due at <input type="datetime-local" name="due_at" required></label>
 <label>Explanation <textarea name="explanation" maxlength="4000" required></textarea></label>
 <p>Checks are required from now until the due time, with no extra grace. Each kit instance is separate.</p>
 <button type="submit" class="button primary">Require inspection</button>

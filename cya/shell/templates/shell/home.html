@@ -3,7 +3,7 @@
 {% load station_time %}
 {% block head %}{% if home %}<style>{% include "inspections/inspection.css" %}</style>{% endif %}{% endblock %}
 {% block page_heading %}{% if home %}<h1>{{ home.greeting.text }}</h1>
-<p class="home-when">{{ home.greeting.now|date:"l, F j" }} · {{ home.greeting.now|time:"H:i" }} station time</p>{% else %}<h1>{{ title }}</h1>{% endif %}{% endblock %}
+<p class="home-when">{{ home.greeting.now|date:"l, F j" }} · {{ home.greeting.now|time:"H:i" }}</p>{% else %}<h1>{{ title }}</h1>{% endif %}{% endblock %}
 {% block content %}
 {% if not home %}
 {% if cya_menu %}

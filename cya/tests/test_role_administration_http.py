@@ -119,7 +119,7 @@ class RoleAdministrationHttpTests(TransactionTestCase):
             expected_time = station_time(grant.recorded_at, "seconds")
         self.assertContains(
             history,
-            '<th scope="col">When (station time)</th>',
+            '<th scope="col">When</th>',
             html=True,
         )
         self.assertContains(history, expected_time)
