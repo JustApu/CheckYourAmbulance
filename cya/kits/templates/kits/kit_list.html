@@ -8,16 +8,16 @@
 <div class="kit-library">
 <p><a href="{% url 'kit-list-vehicles' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} · Inactive{% endif %}</p>
 
-<h2 id="in-force-heading">In force</h2>
+<h2 id="in-force-heading">Expected kit inventory in force</h2>
 {% if in_force %}
 <p>Revision {{ in_force.revision }}.</p>
 <div class="table-scroll" role="region" aria-labelledby="in-force-heading" tabindex="0">
 <table aria-labelledby="in-force-heading">
-  <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required count</th><th scope="col">Order (lowest first)</th></tr></thead>
+  <thead><tr><th scope="col">Kit type</th><th scope="col">Compartment</th><th scope="col">Required count</th><th scope="col">Order (lowest first)</th></tr></thead>
   <tbody>{% for line in in_force_lines %}<tr><td>{{ line.definition }}</td><td>{{ line.compartment }}</td><td>{{ line.required_count }}</td><td>{{ line.display_order }}</td></tr>{% endfor %}</tbody>
 </table>
 </div>
-{% else %}<p>No kit list is in force.</p>{% endif %}
+{% else %}<p>No expected kit inventory is in force.</p>{% endif %}
 {% if scheduled %}
 <h3>Scheduled</h3>
 <ul>{% for p in scheduled %}<li>Revision {{ p.version.revision }} takes effect {{ p.effective_at|date:"Y-m-d H:i" }} ({{ zone }}).</li>{% endfor %}</ul>
@@ -41,11 +41,12 @@
 </form>
 {% endif %}
 
-<h2 id="edit-heading">{% if draft %}Edit the draft{% else %}Start a draft{% endif %}</h2>
+<h2 id="edit-heading">{% if draft %}Edit expected inventory draft{% else %}Set expected kit inventory{% endif %}</h2>
 {% if not editable %}
 <p id="too-long">This list has {{ line_count }} line{{ line_count|pluralize }}. This page can edit at most {{ max_rows }} lines, so it is shown but not offered for editing; saving part of it would drop the rest. An Administrator can change it by importing a vehicle file.</p>
 {% else %}
-<p id="kit-list-order-help"><strong>Required count</strong> is how many instances of that kit the vehicle should carry in that compartment. Inspections compare the count present there with this number. <strong>Order</strong> controls the display sequence; lower numbers appear first. You can drag rows to reorder them or enter order numbers directly.</p>
+<p>This page sets the expected stock for this vehicle; it does not create or assign physical kit units. To record the actual labeled kits assigned to the vehicle, use <a href="{% url 'vehicle-kit-instances' vehicle.pk %}">Physical kit assignments</a>.</p>
+<p id="kit-list-order-help"><strong>Required count</strong> is how many instances of that kit type the vehicle should carry in that compartment. Inspections compare the count present there with this number. <strong>Order</strong> controls the display sequence; lower numbers appear first. You can drag rows to reorder them or enter order numbers directly.</p>
 <p>Saving replaces the draft with exactly these lines. Leave a row's kit and compartment empty to skip it, or tick Remove.</p>
 <form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="edit-heading" class="admin-form">
   {% csrf_token %}
@@ -54,7 +55,7 @@
   <input type="hidden" name="rows" value="{{ rows|length }}">
   <div class="table-scroll" role="region" aria-label="Kit list lines" aria-describedby="kit-list-order-help" tabindex="0">
   <table aria-label="Kit list lines">
-    <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required count</th><th scope="col">Order (lowest first)</th><th scope="col">Remove</th></tr></thead>
+    <thead><tr><th scope="col">Kit type</th><th scope="col">Compartment</th><th scope="col">Required count</th><th scope="col">Order (lowest first)</th><th scope="col">Remove</th></tr></thead>
     <tbody id="kit-list-lines">
     {% for row in rows %}
       <tr draggable="true" data-kit-list-row>
