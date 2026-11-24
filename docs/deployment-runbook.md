@@ -621,7 +621,8 @@ Until it has run, deactivating or reactivating a vehicle is refused. Obligation 
 [Issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256) implements SPEC 6.0.0:
 item requirements per place, one session in progress per vehicle checklist, and the session
 resume limit. It ships in parts A to F. This section covers the migrations of Parts A to E, including
-C4 ([C4 deploy impact](#c4-deploy-impact)), and the item-requirement cutover (SPEC §18.3). None of it has been rehearsed on a VM.
+C4 ([C4 deploy impact](#c4-deploy-impact)), and the item-requirement cutover (SPEC §18.3). It was first run on the Ubuntu 26.04 test host, on synthetic data, on 2026-11-24 ([test-host run](#test-host-run-2026-11-24-utc)).
+No production upgrade has been done.
 Deploying it, or rehearsing it on a VM, needs the owner's explicit go-ahead. The general steps in
 [Upgrade, failure and recovery](#upgrade-failure-and-recovery) and
 [Database setup and migrations](#database-setup-and-migrations) still apply. This section adds
@@ -682,7 +683,7 @@ later one.
 1. **Stop traffic and the scheduled jobs.** Stop the application and every timer in
    [Scheduled application jobs](#scheduled-application-jobs), so that no job runs half-way through
    the schema change.
-2. **Read the plan.** Run `local/venv/bin/python manage.py migrate --plan` and confirm that it
+2. **Read the plan.** As the schema owner, run `local/venv/bin/python manage.py migrate --plan` and confirm that it
    lists exactly these migrations (in dependency order, interleaved by app):
    - `cya_checklists` 0013 to 0016;
    - `cya_obligations` 0018 and 0019;
@@ -843,9 +844,13 @@ migrations. Reversal on a populated database has not been rehearsed.
 ### Post-deploy checks
 
 1. `verify_audit_schema` (schema owner), then `verify_audit_runtime`,
-   `check --fail-level WARNING` and `check --deploy` (runtime), all clean as in
-   [Database setup and migrations](#database-setup-and-migrations).
-2. `migrate --plan` lists nothing left to apply.
+   `check --fail-level WARNING` and `check --deploy` (runtime), as in
+   [Database setup and migrations](#database-setup-and-migrations). All are clean, except that
+   `check --deploy` still reports `security.W005` and `security.W021` while HSTS subdomains and
+   preload are off. Any other warning must be resolved.
+2. As the **schema owner**, `migrate --plan` lists nothing left to apply. Run it with owner
+   credentials: the runtime account has no access to the `django_migrations` table, so in
+   runtime mode the command lists every migration as unapplied.
 3. **Sessions.**
    1. Run `close_inactive_sessions --dry-run`. The `due=` line counts the sessions already past
       their end instant, including every session the upgrade ended.
@@ -941,6 +946,35 @@ C4 post-deploy checks, after a cutover, on a test vehicle:
 - an export is schema 3, and previewing that file back for the same vehicle reports no
   requirement changes;
 - a duplication preview counts `item_requirements`.
+
+### Test-host run, 2026-11-24 UTC
+
+Main `ace9604` on the Ubuntu 26.04 test host (MariaDB 11.8), synthetic data, one organization,
+following the steps above. The owner approved the upgrade and the cutover.
+
+- **Before:** no session had been active in the last 6 hours; 11 sessions were still `OPEN`
+  but idle since 2026-11-10 to 2026-11-20. A full database dump was taken first.
+- **Plan and migrations:** the owner's `migrate --plan` listed exactly the migrations in
+  [Order of steps](#order-of-steps); 19 applied. `verify_audit_schema` verified 71 append-only
+  and 75 command-guarded tables. Grants were reapplied; `verify_audit_runtime` and
+  `check --fail-level WARNING` were clean, and `check --deploy` reported only W005 and W021.
+- **Sessions:** `close_inactive_sessions --dry-run` listed 11 due; the real run reported
+  `closed=11 at_deadline=8 skipped=0 failed=0`, a second run `closed=0`, and the dry run then
+  `due=0`. The 8 `DEADLINE_INCOMPLETE` endings closed the
+  [session rollback window](#rollback-limits), as expected.
+- **Cutover:** the dry run was clean (750 requirements, 750 versions, 750 mapped item rows,
+  0 ambiguous or placed deficiencies) and the real run created the same. Afterwards the dry run
+  refused with `the organization has already moved to item requirements`;
+  `rebuild_obligation_projection --verify` reported 0 different.
+- **Obligations:** the host had no generation timer, so a backlog had built up since
+  2026-11-19. `generate_obligations` wrote 6,750 selections in 45 units with 0 failed, and
+  `--verify` then reported 11,250 rows verified, 0 different. Obligations due from 2026-11-20 are
+  keyed per item requirement. Those due 2026-11-17 to 2026-11-19 came from an earlier checklist
+  publication whose rows the cutover did not map, so they keep the per-item key, as designed.
+  The `cya-obligations` and `cya-sessions` timers were then installed and added to the
+  monitor's job list.
+- **Not yet checked:** the browser checks that need a signed-in user (crew smoke test, resume
+  limit page, C4 checks, and a trivial checklist publication).
 
 ### Revisit before production
 
