@@ -8,6 +8,14 @@ latest = import_module("cya.obligations.migrations.0019_item_requirement_unit_gu
 kit_presence = import_module("cya.obligations.migrations.0016_kit_presence_requirements")
 content_sources = import_module("cya.obligations.migrations.0015_kit_content_requirements")
 
+
+def refuse_reverse_with_presence_requirements(apps, schema_editor):
+    Version = apps.get_model("cya_obligations", "RequirementVersion")
+    if Version.objects.filter(kit_presence=True).exists():
+        raise RuntimeError(
+            "cannot reverse physical kit-presence requirements while append-only requirements exist"
+        )
+
 PHYSICAL_CHECK = """IF NOT EXISTS (
  SELECT 1 FROM kit_instance_definition kd
  JOIN checklist_kit_placement pl ON pl.definition_id=kd.definition_id
@@ -41,17 +49,25 @@ ELSE
 
 
 def version_trigger():
-    original_content = content_sources.CONTENT_CHECK
-    original_instance = content_sources.KIT_CONTENT_INSTANCE_CHECK
-    content_sources.CONTENT_CHECK = (
-        "IF NEW.kit_presence THEN\n" + PHYSICAL_CHECK + "ELSE\n" + original_content + "END IF;\n"
-    )
-    content_sources.KIT_CONTENT_INSTANCE_CHECK = PHYSICAL_EVENT + original_instance + "END IF;\n"
-    try:
-        return latest.version_trigger()
-    finally:
-        content_sources.CONTENT_CHECK = original_content
-        content_sources.KIT_CONTENT_INSTANCE_CHECK = original_instance
+    sql = latest.version_trigger()
+    for old, wrapped in (
+        (
+            content_sources.CONTENT_CHECK,
+            "IF NEW.kit_presence THEN\n"
+            + PHYSICAL_CHECK
+            + "ELSE\n"
+            + content_sources.CONTENT_CHECK
+            + "END IF;\n",
+        ),
+        (
+            content_sources.KIT_CONTENT_INSTANCE_CHECK,
+            PHYSICAL_EVENT + content_sources.KIT_CONTENT_INSTANCE_CHECK + "END IF;\n",
+        ),
+    ):
+        if sql.count(old) != 1:
+            raise ValueError("physical kit presence source-check text moved")
+        sql = sql.replace(old, wrapped)
+    return sql
 
 
 SOURCE = models.Q(
@@ -114,4 +130,5 @@ class Migration(migrations.Migration):
                 latest.version_trigger(),
             ],
         ),
+        migrations.RunPython(migrations.RunPython.noop, refuse_reverse_with_presence_requirements),
     ]

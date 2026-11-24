@@ -189,6 +189,7 @@ def _return_to_stock(request, user, vehicle):
         record_kit_assignment(
             kit_id=kit_id,
             active=True,
+            expected_vehicle_id=str(vehicle.pk),
             **{**_context_ids(user), "operation_id": operation_id},
         )
     except (KitError, ValueError) as error:

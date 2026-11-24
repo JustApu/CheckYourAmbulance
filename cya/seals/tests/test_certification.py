@@ -5,8 +5,13 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 
 from cya.kits.seal_rules import CertifiedKitCount
-from cya.seals.certification import CertifiedItem, certification_refusal, stored_certification
-from cya.seals.scope import ScopeItem, ScopeKitLine
+from cya.seals.certification import (
+    CertifiedItem,
+    CertifiedKitPresence,
+    certification_refusal,
+    stored_certification,
+)
+from cya.seals.scope import ScopeItem, ScopeKitLine, ScopeKitPresence
 
 
 class SealCertificationTests(SimpleTestCase):
@@ -44,6 +49,33 @@ class SealCertificationTests(SimpleTestCase):
         )
         self.assertEqual(
             certification_refusal(self.scope, self.items, [], [self.count]), "KIT_SCOPE_CHANGED"
+        )
+
+    def test_cabinet_certification_requires_each_assigned_kit_to_be_present(self):
+        current = (ScopeKitPresence("kit", "assignment", "presence-item"),)
+        certified = (CertifiedKitPresence("kit", "assignment", "presence-item", 1),)
+        self.assertIsNone(
+            certification_refusal(
+                self.scope,
+                self.items,
+                [self.line],
+                [self.count],
+                current_presence=current,
+                certified_presence=certified,
+            )
+        )
+        self.assertEqual(
+            certification_refusal(
+                self.scope,
+                self.items,
+                [self.line],
+                [self.count],
+                current_presence=current,
+                certified_presence=(
+                    CertifiedKitPresence("kit", "assignment", "presence-item", 0),
+                ),
+            ),
+            "KIT_PRESENCE_CHANGED",
         )
 
     def test_mismatch_cannot_substitute_but_nested_certification_is_supported(self):

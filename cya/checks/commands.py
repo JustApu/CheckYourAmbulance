@@ -367,7 +367,16 @@ def _resolved_item(
 
         for placement in resolved.placements:
             presence = instance_presence_resolved_item(
-                organization_id, resolved, placement, kit_id, item_id
+                organization_id,
+                resolved,
+                placement,
+                kit_id,
+                item_id,
+                compartment_labels={},
+                as_of=session.opened_at if pinned else now,
+                recorded_before=(
+                    session.recorded_at + timedelta(microseconds=1) if pinned else None
+                ),
             )
             if presence is not None:
                 return presence
@@ -1045,6 +1054,16 @@ def record_check(
             )
         session = _session_for_check(organization_id, actor, shape, version, now)
         chosen_kit = chosen_kit_id(item.requirement.kit_id is not None, item.kits, shape["kit_id"])
+        kit_assignment_event_id = (
+            getattr(item.requirement, "kit_event_id", None) if shape["kit_presence"] else None
+        )
+        if shape["kit_presence"] and kit_assignment_event_id is None:
+            raise CheckError(
+                "KIT_ASSIGNMENT_UNAVAILABLE",
+                "the physical kit assignment is unavailable; refresh and try again",
+                status=409,
+                path="kit_id",
+            )
         check_id = new_id()
         # SPEC 6.0.0 CHK-11, 7.2: the requirement version of the row shown, for an item
         # outside a kit after the item-requirement cutover (None otherwise).
@@ -1059,6 +1078,7 @@ def record_check(
             vehicle_id=shape["vehicle_id"],
             item_id=shape["item_id"],
             kit_id=chosen_kit,
+            kit_assignment_event_id=kit_assignment_event_id,
             kit_requirement_id=shape["kit_requirement_id"],
             kit_presence=shape["kit_presence"],
             item_requirement_version_id=item_version,
@@ -1154,6 +1174,7 @@ def record_check(
                 **content_source(item.requirement),
                 checklist_version_id=version.pk if version else None,
                 item_requirement_version_id=item_version,
+                kit_assignment_event_id=kit_assignment_event_id,
                 kit_id=chosen_kit,
                 session=session,
                 basis_check_id=shape["basis_check_id"],
@@ -1522,6 +1543,7 @@ def correct_check(
             vehicle_id=root.vehicle_id,
             item_id=root.item_id,
             kit_id=root.kit_id,
+            kit_assignment_event_id=root.kit_assignment_event_id,
             kit_requirement_id=root.kit_requirement_id,
             checklist_version_id=root.checklist_version_id,
             item_requirement_version_id=root.item_requirement_version_id,
@@ -1554,6 +1576,7 @@ def correct_check(
                 kit_definition_item_id=root.kit_definition_item_id,
                 kit_requirement_id=root.kit_requirement_id,
                 kit_presence=root.kit_presence,
+                kit_assignment_event_id=root.kit_assignment_event_id,
                 checklist_version_id=root.checklist_version_id,
                 item_requirement_version_id=root.item_requirement_version_id,
                 kit_id=root.kit_id,

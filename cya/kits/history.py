@@ -26,6 +26,7 @@ class ActiveKit:
     kit_id: str
     since_event_id: str
     since_at: datetime  # the run's first event takes effect (TIME-1a: an open window is not owed)
+    assignment_event_id: str  # the latest event, including an in-vehicle compartment move
 
 
 def _in_slot(event, vehicle_id, slot_id):
@@ -65,7 +66,7 @@ def active_kits(organization_id, vehicle_id, slot_id, at, recorded_before=None):
             if not _in_slot(event, vehicle_id, slot_id):
                 break
             run = event
-        found.append(ActiveKit(kit_id, str(run.pk), run.effective_at))
+        found.append(ActiveKit(kit_id, str(run.pk), run.effective_at, str(chain[-1].pk)))
     return tuple(sorted(found, key=lambda k: k.kit_id))
 
 
@@ -105,7 +106,7 @@ def active_kits_on_vehicle(organization_id, vehicle_id, at, recorded_before=None
             if not _on_vehicle(event, vehicle_id):
                 break
             run = event
-        found.append(ActiveKit(kit_id, str(run.pk), run.effective_at))
+        found.append(ActiveKit(kit_id, str(run.pk), run.effective_at, str(chain[-1].pk)))
     return tuple(sorted(found, key=lambda k: k.kit_id))
 
 

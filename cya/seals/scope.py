@@ -11,6 +11,7 @@ from cya.kits.history import slot_of_reference_kit
 from cya.kits.kit_lists import kit_list_effective_at
 from cya.kits.models import (
     KitAssignmentEvent,
+    KitDefinition,
     KitDefinitionItem,
     KitInstanceDefinition,
     VehicleKitRequirement,
@@ -51,6 +52,13 @@ class ScopeKitLine:
     definition_id: str
     required_count: int
     assignments: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class ScopeKitPresence:
+    kit_id: str
+    assignment_event_id: str
+    item_id: str
 
 
 def _bounded(query):
@@ -302,4 +310,50 @@ def resolve_kit_lines(organization_id, vehicle_id, slot_id, instant, assignments
             tuple(sorted(by_definition.get(str(line.definition_id), ()))),
         )
         for line in lines
+    )
+
+
+def resolve_kit_presence(organization_id, vehicle_id, assignments, instant):
+    """Resolve the presence item and assignment event for each defined physical unit."""
+    if instant.utcoffset() is None or len(assignments) > MAX_SCOPE:
+        raise SealScopeError("invalid or oversized physical kit presence scope")
+    from cya.kits.models import KitDefinition
+
+    mappings = _bounded(
+        KitInstanceDefinition.objects.filter(
+            organization_id=organization_id,
+            kit_id__in=assignments,
+            recorded_at__lte=instant,
+        ).order_by("kit_id")
+    )
+    by_kit = {str(row.kit_id): str(row.definition_id) for row in mappings}
+    definitions = {
+        str(pk): str(item_id)
+        for pk, item_id in KitDefinition.objects.filter(
+            organization_id=organization_id, pk__in=set(by_kit.values())
+        ).values_list("pk", "presence_item_id")
+    }
+    if set(definitions) != set(by_kit.values()):
+        raise SealScopeError("a physical kit definition is unavailable")
+    placed_definitions = set()
+    templates = ChecklistTemplate.objects.filter(
+        organization_id=organization_id,
+        pk__in=bound_template_ids(organization_id, vehicle_id, instant),
+    ).order_by("pk")
+    for template in _bounded(templates):
+        try:
+            resolved = resolve_checklist(
+                organization_id=organization_id,
+                vehicle_id=vehicle_id,
+                template_id=template.pk,
+                as_of=instant,
+                recorded_before=instant + timedelta(microseconds=1),
+            )
+        except (NoEffectiveVersionError, ResolutionError) as error:
+            raise SealScopeError("a bound checklist cannot be resolved") from error
+        placed_definitions.update(str(row.definition_id) for row in resolved.placements)
+    return tuple(
+        ScopeKitPresence(kit, str(assignments[kit][1]), definitions[by_kit[kit]])
+        for kit in sorted(by_kit)
+        if by_kit[kit] in placed_definitions
     )

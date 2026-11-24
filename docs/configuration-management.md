@@ -38,7 +38,6 @@ Existing actions cover the rest:
 - `draft_edit_template` and `publish_template`: templates;
 - `manage_kit_definitions`: kit definitions;
 - `manage_kit_assignment`: kit instances, including CFG-5;
-- `manage_vehicle_kit_lists`: kit lists;
 - `set_configuration_keys`: VINs and keys (Administrator only).
 
 Part 5b opens the Administration section to Supervisors, and part 5c to Supply Officers, who may manage kit instances (`manage_kit_assignment`). The landing page lists only the pages the user may open, and each page checks its own action on the server: role administration stays Administrator-only, and import stays with `import_configuration`. On a vehicle's kit page, when there is no active kit type or the vehicle has no compartment, the add form is replaced by a note saying what is missing and that a Supervisor or Administrator adds it, linking to Kit definitions or the vehicle's Compartments and systems page for someone who may open it (issue #235 E1).
@@ -203,7 +202,7 @@ Each part is one PR, except part 5, which is three (owner decision 2026-11-15, t
      - the Supervisor access above;
      - per vehicle, add, rename, reorder and retire compartments and systems (`cya/kits/position_views.py`);
      - retiring previews what blocks it, or asks for confirmation (CFG-6).
-   - **5c, kit lists and kit instances** (`cya/kits/kit_list_views.py`, `cya/kits/kit_instance_views.py`):
+   - **5c, assigned kit instances** (`cya/kits/kit_instance_views.py`):
      - a vehicle's kit list in force, any publication scheduled for later, and its draft;
      - saving a whole new draft. The editor holds at most as many lines as one form can carry (Django's `DATA_UPLOAD_MAX_NUMBER_FIELDS`, 198 lines by default). A longer list is shown but not offered for editing, and a malformed or partial save is refused, so a save never replaces the draft with part of it;
      - publishing now, or at a station-local date and time (a time skipped by a clock change is refused). Only these two choices are accepted;

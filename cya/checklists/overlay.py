@@ -66,6 +66,8 @@ class Requirement:
     # row's own (CHK-5). None before the organization's item-requirement cutover.
     item_requirement_id: str | None = None
     item_requirement_version_id: str | None = None
+    # Assignment run pinned by a physical kit-presence requirement.
+    kit_event_id: str | None = None
 
 
 @dataclass(frozen=True)

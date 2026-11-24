@@ -256,7 +256,9 @@ def add_kit_instance(*, label, vehicle_id=None, compartment_id=None, definition_
     return _execute(context, ADD_COMMAND, request, build, lambda body: body["vehicle_ids"])
 
 
-def record_kit_assignment(*, kit_id, active, vehicle_id=None, compartment_id=None, **context):
+def record_kit_assignment(
+    *, kit_id, active, vehicle_id=None, compartment_id=None, expected_vehicle_id=None, **context
+):
     """Move a kit instance to a compartment of a vehicle (active), or deactivate it (not on any).
 
     Deactivating names no vehicle or compartment. Re-activating or moving names both. A move
@@ -264,6 +266,8 @@ def record_kit_assignment(*, kit_id, active, vehicle_id=None, compartment_id=Non
     """
     org = context["organization_id"]
     canonical_id(kit_id)
+    if expected_vehicle_id is not None:
+        canonical_id(expected_vehicle_id)
     if type(active) is not bool:
         raise KitError("active must be true or false")
     if active and (vehicle_id is None) != (compartment_id is None):
@@ -296,6 +300,10 @@ def record_kit_assignment(*, kit_id, active, vehicle_id=None, compartment_id=Non
         )
         if prior.pk != previous.pk:
             raise KitError("kit instance changed while locking; retry")
+        if expected_vehicle_id is not None and (
+            not prior.active or str(prior.vehicle_id or "") != expected_vehicle_id
+        ):
+            raise KitError("kit instance is not assigned to this vehicle")
         same = (prior.active, str(prior.vehicle_id or ""), str(prior.compartment_id or "")) == (
             active,
             vehicle_id or "",
@@ -351,4 +359,6 @@ def record_kit_assignment(*, kit_id, active, vehicle_id=None, compartment_id=Non
         "vehicle_id": vehicle_id,
         "compartment_id": compartment_id,
     }
+    if expected_vehicle_id is not None:
+        request["expected_vehicle_id"] = expected_vehicle_id
     return _execute(context, ASSIGN_COMMAND, request, build, lambda body: body["vehicle_ids"])

@@ -67,7 +67,6 @@ POLICY = MappingProxyType(
         "manage_kit_definitions": ("deny", "allow", "deny", "allow"),
         "import_configuration": ("deny", "deny", "deny", "allow"),
         "export_configuration": ("deny", "allow", "deny", "allow"),
-        "manage_vehicle_kit_lists": ("deny", "allow", "deny", "allow"),
         "set_configuration_keys": ("deny", "deny", "deny", "allow"),
         "manage_vehicle_positions": ("deny", "allow", "deny", "allow"),
         "manage_vehicles": ("deny", "allow", "deny", "allow"),

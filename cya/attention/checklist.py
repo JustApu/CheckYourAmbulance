@@ -418,6 +418,26 @@ def _presence_rows(organization_id, vehicle_id, as_of, pin=None):
             },
         ).values_list("pk", "presence_item_id")
     }
+    from cya.kits.history import active_kits_on_vehicle
+
+    assignment_events = {
+        kit.kit_id: kit
+        for kit in active_kits_on_vehicle(
+            organization_id, vehicle_id, as_of, recorded_before=as_of + timedelta(microseconds=1)
+        )
+    }
+    compartment_ids = {
+        str(kit[2])
+        for _, resolved, _ in resolved_rows
+        for placement in resolved.placements
+        for kit in placement.kits
+        if kit[2]
+    }
+    compartment_labels = dict(
+        Compartment.objects.filter(
+            organization_id=organization_id, pk__in=compartment_ids
+        ).values_list("pk", "label")
+    )
     for order, resolved, version_id in resolved_rows:
         for placement in resolved.placements:
             item_id = presence_ids.get(str(placement.definition_id))
@@ -425,7 +445,15 @@ def _presence_rows(organization_id, vehicle_id, as_of, pin=None):
                 continue
             for kit_id, label, _compartment in placement.kits:
                 row = instance_presence_resolved_item(
-                    organization_id, resolved, placement, kit_id, item_id
+                    organization_id,
+                    resolved,
+                    placement,
+                    kit_id,
+                    item_id,
+                    compartment_labels=compartment_labels,
+                    as_of=as_of,
+                    recorded_before=as_of + timedelta(microseconds=1),
+                    assignment_events=assignment_events,
                 )
                 if row is not None:
                     found.append(

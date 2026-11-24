@@ -274,7 +274,7 @@ def verify_seal(
     from cya.seals.blockers import seal_blockers
     from cya.seals.links import LinkTarget, persist_substitution_links, plan_links
     from cya.seals.locking import lock_seal_inputs, require_item_locks
-    from cya.seals.scope import resolve_kit_lines, resolve_scope
+    from cya.seals.scope import resolve_kit_lines, resolve_kit_presence, resolve_scope
     from cya.seals.verification import current_certification
 
     organization_id = context["organization_id"]
@@ -318,6 +318,7 @@ def verify_seal(
             if slot_id is not None
             else ()
         )
+        kit_presence = resolve_kit_presence(organization_id, vehicle_id, assignments, now)
         definitions = {
             str(row.pk): str(row.presence_item_id)
             for row in KitDefinition.objects.filter(
@@ -327,9 +328,12 @@ def verify_seal(
         if len(definitions) != len({line.definition_id for line in lines}):
             raise SealError("a covered kit definition is unavailable")
         require_item_locks(scope, item_locks)
+        if any(row.item_id not in item_locks for row in kit_presence):
+            raise SealError("a kit-presence item lock is unavailable")
         if any(definitions[line.definition_id] not in item_locks for line in lines):
             raise SealError("a kit-presence item lock is unavailable")
         covered = {item.key for item in scope}
+        covered.update((row.item_id, row.kit_id) for row in kit_presence)
         presence_lines = {(definitions[line.definition_id], line.line_id) for line in lines}
         open_deficiency, suspended = seal_blockers(
             organization_id,
@@ -383,6 +387,7 @@ def verify_seal(
             LinkTarget(definitions[line.definition_id], kit_requirement_id=line.line_id)
             for line in lines
         )
+        targets.extend(LinkTarget(row.item_id, row.kit_id) for row in kit_presence)
         planned = plan_links(organization_id, vehicle_id, targets, recorded_at=now)
         substitution_id = new_id()
         count = sum(len(links) for _, links in planned)

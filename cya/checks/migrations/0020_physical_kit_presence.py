@@ -8,6 +8,14 @@ latest = import_module("cya.checks.migrations.0019_check_session_deadline")
 presence = import_module("cya.checks.migrations.0013_kit_presence_checks")
 content_checks = import_module("cya.checks.migrations.0012_kit_content_checks")
 
+
+def refuse_reverse_with_presence_checks(apps, schema_editor):
+    Check = apps.get_model("cya_checks", "CheckRecord")
+    if Check.objects.filter(kit_presence=True).exists():
+        raise RuntimeError(
+            "cannot reverse physical kit-presence checks while append-only check evidence exists"
+        )
+
 PHYSICAL_CHECK = """IF NOT EXISTS (
  SELECT 1 FROM kit_instance_definition kd
  JOIN checklist_kit_placement pl ON pl.definition_id=kd.definition_id
@@ -42,18 +50,23 @@ SOURCE_KIT_CHECK = (
 
 
 def check_trigger():
-    old_content = content_checks.CONTENT_CHECK
-    old_kit = content_checks.KIT_CONTENT_CHECK
-    old_predecessor = presence.PREDECESSOR_NEW
-    content_checks.CONTENT_CHECK = SOURCE_CHECK + old_content + "END IF;\n"
-    content_checks.KIT_CONTENT_CHECK = SOURCE_KIT_CHECK + old_kit + "END IF;\n"
-    presence.PREDECESSOR_NEW = old_predecessor + " AND p.kit_presence=NEW.kit_presence"
-    try:
-        return latest.check_trigger()
-    finally:
-        content_checks.CONTENT_CHECK = old_content
-        content_checks.KIT_CONTENT_CHECK = old_kit
-        presence.PREDECESSOR_NEW = old_predecessor
+    sql = latest.check_trigger()
+    for old, wrapped in (
+        (content_checks.CONTENT_CHECK, SOURCE_CHECK + content_checks.CONTENT_CHECK + "END IF;\n"),
+        (
+            content_checks.KIT_CONTENT_CHECK,
+            SOURCE_KIT_CHECK + content_checks.KIT_CONTENT_CHECK + "END IF;\n",
+        ),
+    ):
+        if sql.count(old) != 1:
+            raise ValueError("physical kit presence source-check text moved")
+        sql = sql.replace(old, wrapped)
+    if sql.count(presence.PREDECESSOR_NEW) != 1:
+        raise ValueError("physical kit presence predecessor text moved")
+    return sql.replace(
+        presence.PREDECESSOR_NEW,
+        presence.PREDECESSOR_NEW + " AND p.kit_presence=NEW.kit_presence",
+    )
 
 
 SOURCE = models.Q(
@@ -112,4 +125,5 @@ class Migration(migrations.Migration):
                 latest.check_trigger(),
             ],
         ),
+        migrations.RunPython(migrations.RunPython.noop, refuse_reverse_with_presence_checks),
     ]

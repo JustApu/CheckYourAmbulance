@@ -134,7 +134,7 @@
     });
   }
   function inspectionForm(subject, data, startId) {
-    var form = element("form"), fields = [], nested = {}, counts = {};
+    var form = element("form"), fields = [], nested = {}, counts = {}, presenceChecks = {};
     data.kit_lines.forEach(function (line) {
       var group = element("fieldset"), legend = element("legend", "Count kits: " + line.label);
       group.appendChild(legend); form.appendChild(group);
@@ -158,6 +158,40 @@
         function committed(result) {
           counts[line.line_id] = result.check_id; count.disabled = true; record.disabled = true;
           status.textContent = "Kit count recorded.";
+        }
+        function conflict(result) {
+          var newest = result.newest_check;
+          if (!newest || !newest.check_id) { show("A newer check exists. Refresh before continuing."); return; }
+          status.textContent = "Another crew member recorded a newer check. You may also record your count.";
+          group.appendChild(button("Record my count too", function () {
+            payload.acknowledges_check_id = newest.check_id; send("check", payload, committed, conflict);
+          }));
+        }
+        send("check", payload, committed, conflict);
+      });
+      group.appendChild(record);
+    });
+    data.kit_presence.forEach(function (kit) {
+      var group = element("fieldset"), legend = element("legend", "Confirm kit present: " + kit.kit_label);
+      group.appendChild(legend); form.appendChild(group);
+      var count = field(group, "Fresh count (target 1)", "number", false);
+      count.min = "0"; count.max = "1"; count.step = "1";
+      var deficiency = deficiencyFields(group), status = element("p"); group.appendChild(status);
+      var record = button("Record presence", function () {
+        if (count.value !== "0" && count.value !== "1") {
+          show("Enter 1 if the assigned kit is present, or 0 if it is missing."); return;
+        }
+        var quantity = Number(count.value), payload = {vehicle_id: config.vehicle_id,
+          item_id: kit.item_id, kit_id: kit.kit_id, kit_presence: true, purpose: "ROUTINE", quantity: quantity};
+        if (quantity !== 1) {
+          if (!deficiency.category.value || !deficiency.severity.value || !deficiency.summary.value.trim() ||
+              !deficiency.description.value.trim()) { show("Complete the problem details for the missing kit."); return; }
+          payload.deficiency = {create: {category_id: deficiency.category.value, severity: deficiency.severity.value,
+            summary: deficiency.summary.value, description: deficiency.description.value}};
+        }
+        function committed(result) {
+          presenceChecks[kit.kit_id] = result.check_id; count.disabled = true; record.disabled = true;
+          status.textContent = "Kit presence recorded.";
         }
         function conflict(result) {
           var newest = result.newest_check;
@@ -252,10 +286,14 @@
       if (data.kit_lines.some(function (line) { return !counts[line.line_id]; })) {
         show("Record a fresh count for every kit line before resealing."); return;
       }
+      if (data.kit_presence.some(function (kit) { return !presenceChecks[kit.kit_id]; })) {
+        show("Record a fresh presence check for every assigned physical kit before resealing."); return;
+      }
       send("reseal", Object.assign(subjectFields(subject), {marking: marking.value,
         inspected_attestation: fresh.checked, written_attestation: written.checked, observations: observations,
         start_operation_id: startId, nested_substitution_ids: Object.keys(nested).map(function (id) { return nested[id].id; }),
-        kit_count_checks: data.kit_lines.map(function (line) { return {line_id: line.line_id, check_id: counts[line.line_id]}; })}));
+        kit_count_checks: data.kit_lines.map(function (line) { return {line_id: line.line_id, check_id: counts[line.line_id]}; }),
+        kit_presence_checks: data.kit_presence.map(function (kit) { return {kit_id: kit.kit_id, check_id: presenceChecks[kit.kit_id]}; })}));
     });
   }
   function load() {

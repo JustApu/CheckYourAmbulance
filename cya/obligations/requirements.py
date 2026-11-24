@@ -301,53 +301,33 @@ def _definition_version(organization_id, definition_id, due_at, recorded_before)
     return str(latest) if latest else None
 
 
-def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at, recorded_before=None):
-    """Instances of the placed definition owed for this inspection (TIME-1a, KDEF-3, KDEF-4).
-
-    Every instance with the placed definition that is on the vehicle at D, in any compartment
-    (SPEC 2.0.0 KDEF-4), read from the assignment history like any kit item (not cut off at the
-    freeze instant). An instance whose stay on the vehicle began after the window opened waits
-    for the next due instant.
-    """
-    kits = [
-        kit
-        for kit in active_kits_on_vehicle(
-            organization_id, vehicle_id, due_at, recorded_before=recorded_before
-        )
-        if kit.since_at < early_at
-    ]
-    if not kits:
-        return []
-    having = set(
-        KitInstanceDefinition.objects.filter(
-            kit_id__in=[k.kit_id for k in kits], definition_id=placement.definition_id
-        ).values_list("kit_id", flat=True)
-    )
-    return [kit for kit in kits if kit.kit_id in {str(k) for k in having}]
-
-
 def _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before):
     """No new inspection expectations come from the legacy expected-count list.
 
     Historical list-based obligations and checks remain stored and readable. Future kit contents
-    are generated per physical unit from assignment history in _placed_kits.
+    are generated per physical unit from the assignment history below.
     """
     return []
 
 
 def _presence_items(
-    organization_id, vehicle_id, occurrence, publication, resolved, placement, _lines, context
+    organization_id,
+    vehicle_id,
+    occurrence,
+    publication,
+    resolved,
+    placement,
+    _lines,
+    context,
+    assigned_kits,
 ):
     """One expected presence check for each assigned physical kit in a placed definition.
 
     The requirement stream follows the kit instance and its uninterrupted assignment event. Stock
     kits are not on the vehicle history and therefore create no expectation.
     """
-    due_at, recorded_before, conditional = context
-    assigned = _placed_kits(
-        organization_id, vehicle_id, placement, due_at, occurrence.early_at, recorded_before
-    )
-    for kit in assigned:
+    _due_at, _recorded_before, conditional = context
+    for kit in assigned_kits:
         item_id = str(placement.definition.presence_item_id)
         pin = {
             "binding": occurrence.binding_id,
@@ -393,7 +373,25 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
         checklist_version_id=resolved.template_version_id
     ).order_by("display_order", "id")
     lines = _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before)
+    assigned = [
+        kit
+        for kit in active_kits_on_vehicle(
+            organization_id, vehicle_id, due_at, recorded_before=recorded_before
+        )
+        if kit.since_at < occurrence.early_at
+    ]
+    definitions_by_kit = defaultdict(set)
+    if assigned:
+        for kit_id, definition_id in KitInstanceDefinition.objects.filter(
+            organization_id=organization_id, kit_id__in=[kit.kit_id for kit in assigned]
+        ).values_list("kit_id", "definition_id"):
+            definitions_by_kit[str(kit_id)].add(str(definition_id))
     for placement in placements:
+        kits = [
+            kit
+            for kit in assigned
+            if str(placement.definition_id) in definitions_by_kit[kit.kit_id]
+        ]
         yield from _presence_items(
             organization_id,
             vehicle_id,
@@ -403,15 +401,13 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
             placement,
             lines,
             context,
+            kits,
         )
         version_id = _definition_version(
             organization_id, placement.definition_id, due_at, recorded_before
         )
         if version_id is None:
             continue  # nothing published yet for D: nothing to inspect
-        kits = _placed_kits(
-            organization_id, vehicle_id, placement, due_at, occurrence.early_at, recorded_before
-        )
         if not kits:
             continue
         contents = KitDefinitionItem.objects.filter(version_id=version_id).order_by(
