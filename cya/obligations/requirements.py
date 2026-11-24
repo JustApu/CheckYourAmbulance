@@ -327,15 +327,12 @@ def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at):
 
 
 def _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before):
-    """The lines of the vehicle's kit list in force at D, as the records stood (KDEF-9)."""
-    version = kit_list_effective_at(organization_id, vehicle_id, due_at, recorded_before)
-    if version is None:
-        return []
-    return list(
-        VehicleKitRequirement.objects.filter(version=version)
-        .select_related("compartment", "definition")
-        .order_by("display_order", "id")
-    )
+    """No new inspection expectations come from the legacy expected-count list.
+
+    Historical list-based obligations and checks remain stored and readable. Future kit contents
+    are generated per physical unit from assignment history in _placed_kits.
+    """
+    return []
 
 
 def _presence_items(
