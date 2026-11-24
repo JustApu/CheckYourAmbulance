@@ -91,13 +91,13 @@ ADMINISTRATION_LINKS = (
     (
         "kit-list-vehicles",
         "Kit lists",
-        "edit and publish the kits each vehicle must carry.",
+        "Set the kit types, compartments and expected counts this vehicle should carry. This does not add physical kits.",
         "manage_vehicle_kit_lists",
     ),
     (
         "kit-instance-vehicles",
         "Kit instances",
-        "add a kit to a vehicle, or duplicate one.",
+        "Record the physical kits assigned to vehicles, and add, move or duplicate an instance.",
         "manage_kit_assignment",
     ),
     (
