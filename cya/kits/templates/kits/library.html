@@ -33,7 +33,6 @@
 <form method="post" action="{% url 'kit-library' %}">
   {% csrf_token %}
   <input type="hidden" name="stage" value="confirm">
-  <input type="hidden" name="format" value="{{ carried.format }}">
   <input type="hidden" name="base_token" value="{{ carried.base_token }}">
   <input type="hidden" name="operation_id" value="{{ carried.operation_id }}">
   <input type="hidden" name="data" value="{{ carried.data }}">
@@ -45,9 +44,7 @@
   {% csrf_token %}
   <input type="hidden" name="stage" value="preview">
   <p><label for="library-file">Kit-library file</label><br><input id="library-file" type="file" name="library" accept=".json,.csv,application/json,text/csv" required></p>
-  <fieldset><legend>Format</legend>
-  {% for fmt in formats %}<label><input type="radio" name="format" value="{{ fmt }}"{% if forloop.first %} checked{% endif %}> {{ fmt|upper }}</label> {% endfor %}
-  </fieldset>
+  <p>The file format is detected automatically from the uploaded file.</p>
   <p><button type="submit" class="button">Preview import</button></p>
 </form>
 {% endif %}
