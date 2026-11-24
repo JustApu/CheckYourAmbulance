@@ -207,6 +207,7 @@ class RequirementVersion(Evidence):
         db_constraint=False,
     )
     # A kit presence requirement's kit list line (SPEC 2.0.0 KDEF-10, KDEF-12).
+    kit_presence = models.BooleanField(default=False)
     kit_requirement = models.ForeignKey(
         "cya_kits.VehicleKitRequirement",
         null=True,
