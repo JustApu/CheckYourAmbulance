@@ -98,7 +98,11 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None):
         "vehicle": vehicle,
         "kits": _kits(org, vehicle),
         "stock_kits": [
-            {"id": str(k.pk), "label": k.label, "definition": stock_definitions.get(k.pk, "(no kit type)")}
+            {
+                "id": str(k.pk),
+                "label": k.label,
+                "definition": stock_definitions.get(k.pk, "(no kit type)"),
+            }
             for k in stock
         ],
         "compartments": [
@@ -121,9 +125,23 @@ def _assign(request, user, vehicle):
         "compartment_id": request.POST.get("compartment_id", ""),
     }
     if operation_id is None:
-        return _page(request, user, vehicle, status=400, errors=["the form was not valid; try again"], form=form)
+        return _page(
+            request,
+            user,
+            vehicle,
+            status=400,
+            errors=["the form was not valid; try again"],
+            form=form,
+        )
     if not form["kit_id"] or not form["compartment_id"]:
-        return _page(request, user, vehicle, status=400, errors=["choose a physical kit and compartment"], form=form)
+        return _page(
+            request,
+            user,
+            vehicle,
+            status=400,
+            errors=["choose a physical kit and compartment"],
+            form=form,
+        )
     try:
         record_kit_assignment(
             kit_id=form["kit_id"],
@@ -137,10 +155,24 @@ def _assign(request, user, vehicle):
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
     except OperationConflict:
-        return _page(request, user, vehicle, status=409, errors=["this form was already used for a different change; try again"], form=form)
+        return _page(
+            request,
+            user,
+            vehicle,
+            status=409,
+            errors=["this form was already used for a different change; try again"],
+            form=form,
+        )
     except UNAVAILABLE as error:
         logger.error("kit assignment unavailable (%s)", type(error).__name__)
-        return _page(request, user, vehicle, status=503, errors=["the change could not be completed; nothing was changed. Try again."], form=form)
+        return _page(
+            request,
+            user,
+            vehicle,
+            status=503,
+            errors=["the change could not be completed; nothing was changed. Try again."],
+            form=form,
+        )
     url = reverse("vehicle-kit-instances", args=[vehicle.pk])
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "assign"}))
 
@@ -149,7 +181,9 @@ def _return_to_stock(request, user, vehicle):
     operation_id = admin_pages.operation_id_from(request)
     kit_id = request.POST.get("kit_id", "")
     if operation_id is None:
-        return _page(request, user, vehicle, status=400, errors=["the form was not valid; try again"])
+        return _page(
+            request, user, vehicle, status=400, errors=["the form was not valid; try again"]
+        )
     try:
         record_kit_assignment(
             kit_id=kit_id,
@@ -161,10 +195,18 @@ def _return_to_stock(request, user, vehicle):
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
     except OperationConflict:
-        return _page(request, user, vehicle, status=409, errors=["this form was already used; try again"])
+        return _page(
+            request, user, vehicle, status=409, errors=["this form was already used; try again"]
+        )
     except UNAVAILABLE as error:
         logger.error("kit return to stock unavailable (%s)", type(error).__name__)
-        return _page(request, user, vehicle, status=503, errors=["the change could not be completed; nothing was changed. Try again."])
+        return _page(
+            request,
+            user,
+            vehicle,
+            status=503,
+            errors=["the change could not be completed; nothing was changed. Try again."],
+        )
     url = reverse("vehicle-kit-instances", args=[vehicle.pk])
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "stock"}))
 
