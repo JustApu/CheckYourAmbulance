@@ -21,7 +21,7 @@
   <p><button type="submit" class="button">Create kit in stock</button></p>
 </form>
 {% else %}
-<p>No active kit types are available. Add one in <a href="{% url 'kit-definitions' %}">Kit definitions</a> first.</p>
+<p>No active kit types are available. {% if can_manage_definitions %}Add one in <a href="{% url 'kit-definitions' %}">Kit definitions</a>{% else %}A Supervisor or Administrator adds kit types in Kit definitions{% endif %} first.</p>
 {% endif %}
 
 <h2 id="stock-heading">Unassigned physical kits</h2>

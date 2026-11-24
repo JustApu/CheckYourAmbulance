@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from cya.checklists.models import KitInstance, Vehicle
 from cya.core.models import AuditEvent
+from cya.kits.commands import add_kit_instance
 from cya.kits import kit_list_views
 from cya.kits.definitions import (
     create_kit_definition,
@@ -20,6 +21,7 @@ from cya.kits.definitions import (
 from cya.kits.kit_list_views import _effective_at
 from cya.kits.kit_lists import KitListError
 from cya.kits.models import (
+    KitAssignmentEvent,
     KitInstanceDefinition,
     VehicleKitListPublication,
     VehicleKitListVersion,
@@ -242,39 +244,67 @@ class KitInstancePageTests(KitAdminCase):
     def setUp(self):
         super().setUp()
         self.client_, _ = self.harness.sign_in("officer")  # a Supply Officer may manage kits
+        self.inventory_url = "/administration/kit-instances/"
         self.url = f"/administration/kit-instances/{self.vehicle.pk}/"
 
     def test_crew_is_refused(self):
         client, _ = self.harness.sign_in("crew")
-        self.assertEqual(client.get("/administration/kit-instances/").status_code, 403)
+        self.assertEqual(client.get(self.inventory_url).status_code, 403)
         self.assertEqual(client.get(self.url).status_code, 403)
 
-    def test_a_supply_officer_adds_a_kit_with_its_type(self):
+    def test_a_supply_officer_creates_a_kit_in_stock_then_assigns_it(self):
         added = self.post(
             self.client_,
-            self.url,
-            stage="add",
+            self.inventory_url,
+            stage="create",
             definition_id=self.definition,
-            compartment_id=str(self.cabinet.pk),
             label="Synthetic jump kit 1",
         )
         self.assertEqual(added.status_code, 302)
         kit = KitInstance.objects.get(label="Synthetic jump kit 1")
-        self.assertEqual((kit.vehicle_id, kit.compartment_id), (self.vehicle.pk, self.cabinet.pk))
+        self.assertIsNone(kit.vehicle_id)
+        self.assertIsNone(kit.compartment_id)
         self.assertEqual(
             str(KitInstanceDefinition.objects.get(kit=kit).definition_id), self.definition
         )
-        page = self.client_.get(added["Location"])
+        page = self.client_.get(self.inventory_url)
         self.assertContains(page, "Synthetic jump kit 1")
-        # Issue #176: the add form and the duplicate-to-vehicle select use the admin field style.
-        self.assertContains(page, 'aria-labelledby="add-heading" class="admin-form"')
-        self.assertContains(page, 'kit-instances/duplicate/" class="admin-form"')
-        missing = self.post(
+        self.assertContains(page, 'aria-labelledby="create-kit-heading" class="admin-form"')
+
+        assignment_page = self.client_.get(self.url)
+        self.assertContains(assignment_page, "Assign a physical kit from stock")
+        self.assertContains(assignment_page, "Synthetic jump kit 1 — Synthetic jump kit")
+        assigned = self.post(
             self.client_,
             self.url,
-            stage="add",
-            definition_id="",
+            stage="assign",
+            kit_id=str(kit.pk),
             compartment_id=str(self.cabinet.pk),
+        )
+        self.assertEqual(assigned.status_code, 302)
+        kit.refresh_from_db()
+        self.assertEqual((kit.vehicle_id, kit.compartment_id), (self.vehicle.pk, self.cabinet.pk))
+        self.assertEqual(
+            list(
+                KitAssignmentEvent.objects.filter(kit=kit)
+                .order_by("sequence")
+                .values_list("active", "vehicle_id", "compartment_id")
+            ),
+            [(True, None, None), (True, self.vehicle.pk, self.cabinet.pk)],
+        )
+
+        returned = self.post(self.client_, self.url, stage="stock", kit_id=str(kit.pk))
+        self.assertEqual(returned.status_code, 302)
+        kit.refresh_from_db()
+        self.assertIsNone(kit.vehicle_id)
+        self.assertIsNone(kit.compartment_id)
+        self.assertEqual(KitAssignmentEvent.objects.filter(kit=kit).count(), 3)
+
+        missing = self.post(
+            self.client_,
+            self.inventory_url,
+            stage="create",
+            definition_id="",
             label="No type",
         )
         self.assertContains(missing, "choose the kit type", status_code=400)
@@ -284,29 +314,27 @@ class KitInstancePageTests(KitAdminCase):
         set_kit_definition_active(
             definition_id=self.definition, active=False, **self.context(self.supervisor)
         )
-        page = self.client_.get(self.url)
-        self.assertContains(page, "A kit can't be added to this vehicle yet.")
-        self.assertContains(
-            page,
-            "<li>There are no kit types. A Supervisor or Administrator adds them in "
-            "Kit definitions.</li>",
-            html=True,
-        )
-        self.assertNotContains(page, 'name="stage" value="add"')
+        page = self.client_.get(self.inventory_url)
+        self.assertContains(page, "No active kit types are available.")
+        self.assertContains(page, "A Supervisor or Administrator adds kit types in Kit definitions")
         self.assertNotContains(page, 'href="/administration/kit-definitions/"')
         supervisor, _ = self.harness.sign_in("supervisor")
         self.assertContains(
-            supervisor.get(self.url),
+            supervisor.get(self.inventory_url),
             '<a href="/administration/kit-definitions/">Kit definitions</a>',
         )
 
     def test_with_no_compartment_the_page_says_who_adds_one(self):
         bare = Vehicle.objects.create(organization=self.org, display_name="Synthetic bare")
         url = f"/administration/kit-instances/{bare.pk}/"
+        add_kit_instance(
+            label="Synthetic stock kit",
+            definition_id=self.definition,
+            **self.context(self.supervisor),
+        )
         page = self.client_.get(url)
         self.assertContains(page, "This vehicle has no compartments.")
-        self.assertNotContains(page, "There are no kit types.")
-        self.assertNotContains(page, 'name="stage" value="add"')
+        self.assertNotContains(page, 'name="stage" value="assign"')
         self.assertNotContains(page, f'href="/administration/positions/{bare.pk}/"')
         supervisor, _ = self.harness.sign_in("supervisor")
         self.assertContains(
@@ -326,31 +354,20 @@ class KitInstancePageTests(KitAdminCase):
             with self.subTest(operation_id=other):
                 response = self.post(
                     self.client_,
-                    self.url,
-                    stage="add",
+                    self.inventory_url,
+                    stage="create",
                     definition_id=self.definition,
-                    compartment_id=str(self.cabinet.pk),
                     label="Synthetic jump kit 2",
                     operation_id=other,
                 )
                 self.assertEqual(response.status_code, 400)
         self.assertFalse(KitInstance.objects.filter(label="Synthetic jump kit 2").exists())
 
-    def test_duplicate_opens_the_target_vehicles_form_with_the_type_filled_in(self):
-        target = self.vehicle_b
-        response = self.client_.get(
-            "/administration/kit-instances/duplicate/",
-            {"vehicle": str(target.pk), "definition": self.definition, "label": "Kit (copy)"},
-        )
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(f"/administration/kit-instances/{target.pk}/", response["Location"])
-        form = self.client_.get(response["Location"].split("#")[0])
-        self.assertContains(form, f'value="{self.definition}" selected')
-        self.assertContains(form, 'value="Kit (copy)"')
-        bad = self.client_.get(
-            "/administration/kit-instances/duplicate/", {"vehicle": "not-a-vehicle"}
-        )
-        self.assertEqual(bad.status_code, 404)
+    def test_assignment_starts_with_a_vehicle_choice(self):
+        chooser = self.client_.get("/administration/kit-instances/vehicles/")
+        self.assertEqual(chooser.status_code, 200)
+        self.assertContains(chooser, f'href="{self.url}"')
+        self.assertContains(chooser, self.vehicle.display_name)
 
 
 @override_settings(**real_collaborator_settings())

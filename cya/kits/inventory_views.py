@@ -13,12 +13,14 @@ from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
+from cya.authorization.policy import permitted
 from cya.checklists.models import KitInstance
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
 from cya.kits.commands import KitError, add_kit_instance
 from cya.kits.models import KitDefinition, KitInstanceDefinition
 from cya.kits.views import UNAVAILABLE, _context_ids
+from cya.shell import navigation
 
 logger = logging.getLogger(__name__)
 ACTION = "manage_kit_assignment"
@@ -45,6 +47,9 @@ def _page(request, user, *, status=200, errors=None, form=None):
         "kits/kit_inventory.html",
         {
             "title": "Physical kit inventory",
+            "can_manage_definitions": permitted(
+                "manage_kit_definitions", str(user.pk), navigation.roles_for(user)
+            ),
             "definitions": list(
                 KitDefinition.objects.filter(organization_id=org, active=True).order_by("label")
             ),

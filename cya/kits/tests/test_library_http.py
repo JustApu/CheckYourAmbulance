@@ -65,7 +65,6 @@ class KitLibraryHttpTests(TransactionTestCase):
             {
                 "csrfmiddlewaretoken": self.token(client),
                 "stage": "preview",
-                "format": fmt,
                 "library": upload,
             },
         )
@@ -108,6 +107,8 @@ class KitLibraryHttpTests(TransactionTestCase):
         preview = self.preview(library())
         self.assertEqual(preview.status_code, 200)
         self.assertContains(preview, "1 kit to create")
+        self.assertContains(preview, "Jump kit")
+        self.assertNotContains(preview, "jump-kit")
         self.assertContains(preview, "New items: Masks")
         self.assertEqual((Item.objects.count(), AuditEvent.objects.count()), before)
         fields = self.confirm_fields(preview)
@@ -119,8 +120,37 @@ class KitLibraryHttpTests(TransactionTestCase):
         self.assertEqual(KitDefinitionVersion.objects.get(definition__key="jump-kit").revision, 1)
         landing = self.admin_client.get(done["Location"])
         self.assertContains(landing, "Imported as drafts: 1 created")
-        self.assertContains(landing, "jump-kit")
+        self.assertContains(landing, "Jump kit")
+        self.assertNotContains(landing, "jump-kit")
         self.assertContains(landing, "Not published")
+
+    def test_csv_is_detected_and_the_filename_extension_does_not_choose_the_parser(self):
+        csv_data = library_files.render(
+            [
+                {
+                    "key": "jump-kit",
+                    "label": "Jump kit",
+                    "contents": [
+                        {
+                            "item": "Masks",
+                            "kind": "QUANTITY",
+                            "expected_quantity": 6,
+                            "unit": None,
+                            "allowed_outcomes": ["PASSED", "FAILED"],
+                            "expiration_tracked": False,
+                            "instructions": "",
+                        }
+                    ],
+                }
+            ],
+            "csv",
+        )
+        preview = self.preview(csv_data, fmt="json")
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, "1 kit to create")
+        done = self.confirm(self.confirm_fields(preview))
+        self.assertEqual(done.status_code, 302)
+        self.assertEqual(KitDefinitionVersion.objects.get(definition__key="jump-kit").revision, 1)
 
     def test_a_stale_or_tampered_confirmation_is_refused(self):
         fields = self.confirm_fields(self.preview(library()))
@@ -158,12 +188,12 @@ class KitLibraryHttpTests(TransactionTestCase):
             {
                 "csrfmiddlewaretoken": self.token(self.admin_client),
                 "stage": "preview",
-                "format": "json",
             },
         )
         self.assertEqual(missing.status_code, 400)
-        wrong_format = self.preview(library(), fmt="xlsx")
-        self.assertEqual(wrong_format.status_code, 400)
+        mismatched_extension = self.preview(library(), fmt="csv")
+        self.assertEqual(mismatched_extension.status_code, 200)
+        self.assertContains(mismatched_extension, "1 kit to create")
         unknown_stage = self.admin_client.post(
             URL, {"csrfmiddlewaretoken": self.token(self.admin_client), "stage": "other"}
         )
@@ -183,6 +213,8 @@ class KitLibraryHttpTests(TransactionTestCase):
         self.assertEqual(self.admin_client.get(URL + "export.xlsx").status_code, 404)
 
     def test_the_import_form_uses_the_admin_field_style(self):
-        # Issue #176: the file field and format choice use the full-size admin field style.
+        # Issue #176: the file field uses the full-size admin field style; format is automatic.
         page = self.admin_client.get(URL)
         self.assertContains(page, 'enctype="multipart/form-data" class="admin-form"')
+        self.assertContains(page, "The file format is detected automatically")
+        self.assertNotContains(page, 'name="format"')

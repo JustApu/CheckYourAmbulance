@@ -21,10 +21,10 @@
 <p id="import-summary">{{ plan.summary.created }} kit{{ plan.summary.created|pluralize }} to create, {{ plan.summary.changed }} to change (as a new draft), {{ plan.summary.unchanged }} unchanged; {{ plan.summary.new_items }} new item{{ plan.summary.new_items|pluralize }}.</p>
 <div class="table-scroll" role="region" aria-label="Import preview" tabindex="0">
 <table aria-label="Import preview">
-  <thead><tr><th scope="col">Kit key</th><th scope="col">Label</th><th scope="col">Result</th><th scope="col">Contents</th></tr></thead>
+  <thead><tr><th scope="col">Label</th><th scope="col">Result</th><th scope="col">Contents</th></tr></thead>
   <tbody>
   {% for kit in plan.kits %}
-    <tr><td>{{ kit.key }}</td><td>{{ kit.label }}{% if kit.label_changed %} (label changes){% endif %}</td><td>{% if kit.action == "CREATE" %}Create{% elif kit.action == "CHANGE" %}New draft revision{% else %}Unchanged{% endif %}</td><td>{{ kit.contents|length }}</td></tr>
+    <tr><td>{{ kit.label }}{% if kit.label_changed %} (label changes){% endif %}</td><td>{% if kit.action == "CREATE" %}Create{% elif kit.action == "CHANGE" %}New draft revision{% else %}Unchanged{% endif %}</td><td>{{ kit.contents|length }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -54,10 +54,10 @@
 {% if definitions %}
 <div class="table-scroll" role="region" aria-label="Kit definitions" tabindex="0">
 <table aria-label="Kit definitions">
-  <thead><tr><th scope="col">Key</th><th scope="col">Label</th><th scope="col">Latest revision</th><th scope="col">In force (station time)</th><th scope="col">Status</th></tr></thead>
+  <thead><tr><th scope="col">Label</th><th scope="col">Latest revision</th><th scope="col">In force (station time)</th><th scope="col">Status</th></tr></thead>
   <tbody>
   {% for d in definitions %}
-    <tr><td>{{ d.key }}</td><td>{{ d.label }}</td><td>{{ d.latest_revision|default:"none" }}</td><td>{% if d.published_revision %}Revision {{ d.published_revision }} from {{ d.published_effective_at|station_time }}{% else %}Not published{% endif %}</td><td>{% if d.active %}Active{% else %}Inactive{% endif %}</td></tr>
+    <tr><td>{{ d.label }}</td><td>{{ d.latest_revision|default:"none" }}</td><td>{% if d.published_revision %}Revision {{ d.published_revision }} from {{ d.published_effective_at|station_time }}{% else %}Not published{% endif %}</td><td>{% if d.active %}Active{% else %}Inactive{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

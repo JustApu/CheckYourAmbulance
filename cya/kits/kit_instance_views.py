@@ -16,6 +16,7 @@ from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods
 
+from cya.authorization.policy import permitted
 from cya.checklists.models import KitInstance
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
