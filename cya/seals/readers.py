@@ -194,6 +194,7 @@ def inspection_scope(organization_id, vehicle_id, kind, subject_id, *, at=None):
                 "kit_id": row.kit_id,
                 "assignment_event_id": row.assignment_event_id,
                 "item_id": row.item_id,
+                "checklist_version_id": row.checklist_version_id,
                 "kit_label": kit_labels[row.kit_id],
                 "label": presence_labels[row.item_id],
             }

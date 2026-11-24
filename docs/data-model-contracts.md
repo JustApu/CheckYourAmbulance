@@ -326,19 +326,19 @@ edge follows INV-7; other transitions follow approved §8.2.
 | `seal_inspection` | A | reseal event, optional break and start receipt, fresh-entry and written-marking attestations |
 | `seal_inspection_item` | A | inspection, item, optional kit, content source, outcome, fresh count, expiration and measurement as applicable; unique physical item per inspection; item_requirement_version_id? ref (SPEC 6.0.0 CHK-11: a loose item's requirement version; its links follow the requirement's stream like a check's) |
 | `seal_inspection_obligation` | A | inspected item and obligation, with shared-satisfaction evidence when applicable |
-| `seal_inspection_kit_count` | A | inspection, kit-list line, attributed fresh check and count; unique inspection/line |
+| `seal_inspection_kit_count` | A | legacy inspection, kit-list line, attributed fresh check and count; unique inspection/line; retained for historical records |
+| `seal_inspection_kit_presence` | A | inspection, assigned kit, exact assignment event, presence item, attributed fresh check and count (0 or 1); unique inspection/kit |
 | `seal_inspection_kit_instance` | A | certified count, kit and assignment event |
 | `seal_inspection_kit_verification` | A | inspection, nested kit and its seal substitution |
 | `seal_substitution` | A | vehicle, reseal event, entered marking and intact attestation |
 | `seal_substitution_obligation` | A | substitution, obligation and item scope, with conditional/shared-satisfaction evidence when applicable |
 
 Seal commands serialize on the vehicle and lock current scope, item and deficiency
-inputs. A full inspection covers each current physical item and every cabinet kit-list
-line. Quantity items require fresh counts and expiration-tracked items require dates;
-untracked contents do not. A cabinet line's ordinary presence check must be made by
-the inspecting actor after the inspection start and remain effective at reseal.
-For an unbound kit type this check has no checklist version and creates no routine
-obligation. A mismatch opens a deficiency atomically while allowing reseal. The
+inputs. A full inspection covers each current physical item and assigned physical-kit
+presence obligations in the cabinet. Quantity items require fresh counts and expiration-tracked items require dates;
+untracked contents do not. A physical kit presence check must be made by the inspecting
+actor after the inspection start and remain effective at reseal, and is pinned to the
+assignment event. Legacy kit-list line counts remain as historical records. A mismatch opens a deficiency atomically while allowing reseal. The
 seal expiration is the earliest tracked date, including verified nested kit seals;
 if none is tracked it is marked no expiration. Substitution requires an intact,
 matching, unexpired seal, no pending audit or blocking deficiency, and current

@@ -3,7 +3,7 @@
 from django.db import migrations, models
 from django.db.models.deletion import PROTECT
 
-from cya.accounts.fields import IdentityIDField, new_id, UUID_PATTERN
+from cya.accounts.fields import IdentityIDField, UUID_PATTERN, new_id
 
 ROLE_CODES = '["CREW","EMT","SUPERVISOR","SUPPLY_OFFICER","ADMINISTRATOR"]'
 TABLE = "seal_inspection_kit_presence"
@@ -123,8 +123,8 @@ class Migration(migrations.Migration):
                     f"ALTER TABLE `{TABLE}` ADD CONSTRAINT `cya_{TABLE}_{column}_org_fk` FOREIGN KEY (organization_id,{column}) REFERENCES `{parent}` (organization_id,id) ON DELETE RESTRICT ON UPDATE RESTRICT"
                     for column, parent in FKS
                 ],
-                f"CREATE TRIGGER cya_{TABLE}_bu BEFORE UPDATE ON `{TABLE}` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='append-only table'",
-                f"CREATE TRIGGER cya_{TABLE}_bd BEFORE DELETE ON `{TABLE}` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='append-only table'",
+                f"CREATE TRIGGER cya_{TABLE}_bu BEFORE UPDATE ON `{TABLE}` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'append-only table'",
+                f"CREATE TRIGGER cya_{TABLE}_bd BEFORE DELETE ON `{TABLE}` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'append-only table'",
                 insert_guard(),
             ],
             reverse_sql=[

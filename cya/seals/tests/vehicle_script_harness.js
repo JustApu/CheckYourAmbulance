@@ -107,7 +107,7 @@ function page(subject, deferSubjects = false, canRequestAudit = false) {
       result: {start_operation_id: "start"}})});
     await tick(); await tick();
     const get = p.requests[2];
-    get.resolve({ok: true, json: async () => ({kit_lines: [], items: [{item_id: "item", kit_id: "kit",
+    get.resolve({ok: true, json: async () => ({kit_lines: [], kit_presence: [], items: [{item_id: "item", kit_id: "kit",
       label: "Supply", kit_label: "Sample", kind: "QUANTITY", expected_quantity: 2,
       expiration_tracked: true, unit: null}]})});
     await tick(); await tick();
@@ -130,7 +130,7 @@ function page(subject, deferSubjects = false, canRequestAudit = false) {
     p.requests[1].resolve({status: 200, json: async () => ({status: "COMMITTED",
       result: {start_operation_id: "start"}})});
     await tick(); await tick();
-    p.requests[2].resolve({ok: true, json: async () => ({kit_lines: [], items: [{item_id: "item", kit_id: "kit",
+    p.requests[2].resolve({ok: true, json: async () => ({kit_lines: [], kit_presence: [], items: [{item_id: "item", kit_id: "kit",
       label: "Supply", kit_label: "Nested", kind: "QUANTITY", expected_quantity: 2,
       expiration_tracked: true, unit: null}]})});
     await tick(); await tick();
@@ -153,7 +153,7 @@ function page(subject, deferSubjects = false, canRequestAudit = false) {
     p.requests[1].resolve({status: 200, json: async () => ({status: "COMMITTED",
       result: {start_operation_id: "start"}})});
     await tick(); await tick();
-    p.requests[2].resolve({ok: true, json: async () => ({items: [], kit_lines: [{line_id: "line",
+    p.requests[2].resolve({ok: true, json: async () => ({items: [], kit_presence: [], kit_lines: [{line_id: "line",
       label: "Kit", item_id: "presence", required_count: 1, checklist_version_id: "version"}]})});
     await tick(); await tick();
     const form = find(p.elements["seal-form"], n => n.tag === "form");
@@ -179,7 +179,7 @@ function page(subject, deferSubjects = false, canRequestAudit = false) {
     p.requests[1].resolve({status: 200, json: async () => ({status: "COMMITTED",
       result: {start_operation_id: "start"}})});
     await tick(); await tick();
-    p.requests[2].resolve({ok: true, json: async () => ({items: [], kit_lines: [{line_id: "line",
+    p.requests[2].resolve({ok: true, json: async () => ({items: [], kit_presence: [], kit_lines: [{line_id: "line",
       label: "Unbound kit", item_id: "presence", required_count: 1, checklist_version_id: null}]})});
     await tick(); await tick();
     const form = find(p.elements["seal-form"], n => n.tag === "form");

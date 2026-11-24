@@ -326,7 +326,7 @@ def _presence_items(
     The requirement stream follows the kit instance and its uninterrupted assignment event. Stock
     kits are not on the vehicle history and therefore create no expectation.
     """
-    _due_at, _recorded_before, conditional = context
+    due_at, _recorded_before, conditional = context
     for kit in assigned_kits:
         item_id = str(placement.definition.presence_item_id)
         pin = {

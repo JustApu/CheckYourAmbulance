@@ -158,7 +158,6 @@ class CheckRecord(Evidence):
                         kit__isnull=False,
                         kit_requirement__isnull=True,
                         kit_presence=True,
-                        kit_assignment_event__isnull=False,
                     )
                 ),
                 name="check_content_source",

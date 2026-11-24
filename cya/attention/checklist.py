@@ -38,7 +38,7 @@ from django.utils import timezone
 from cya.attention.facts import deficiency_facts, latest_effective_checks
 from cya.attention.state import Attention, applies, attention_states, latest_checks
 from cya.authorization.backend import canonical_id
-from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
+from cya.checklists.models import ChecklistTemplate, Compartment, Item, KitInstance, Vehicle
 from cya.checklists.overlay import (
     NoEffectiveVersionError,
     ResolutionError,

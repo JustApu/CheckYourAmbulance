@@ -182,7 +182,8 @@
           show("Enter 1 if the assigned kit is present, or 0 if it is missing."); return;
         }
         var quantity = Number(count.value), payload = {vehicle_id: config.vehicle_id,
-          item_id: kit.item_id, kit_id: kit.kit_id, kit_presence: true, purpose: "ROUTINE", quantity: quantity};
+          item_id: kit.item_id, kit_id: kit.kit_id, checklist_version_id: kit.checklist_version_id,
+          kit_presence: true, purpose: "ROUTINE", quantity: quantity};
         if (quantity !== 1) {
           if (!deficiency.category.value || !deficiency.severity.value || !deficiency.summary.value.trim() ||
               !deficiency.description.value.trim()) { show("Complete the problem details for the missing kit."); return; }

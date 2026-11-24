@@ -1,17 +1,9 @@
-"""Audited commands for vehicle kit lists (SPEC 4.6 KDEF-9, issue #129).
+"""Compatibility readers and history commands for legacy vehicle kit lists.
 
-A vehicle's kit list states the exact number of instances of each kit definition the vehicle
-should carry in each compartment slot. It is versioned like a checklist (CHK-2, CHK-3): every
-save inserts the next draft revision with its complete set of lines, a publication freezes one
-revision at an effective instant never earlier than the publication, and one vehicle's
-publications are strictly ordered by effective instant. An empty list is allowed: it says the
-vehicle should carry no kits.
-
-All commands need the policy action manage_vehicle_kit_lists (Supervisors and Administrators,
-SPEC 3.3) and run through cya.core.audit_commands.run_command; do not wrap them in a
-transaction. The vehicle row is locked FOR UPDATE first, so concurrent saves get distinct
-revisions and publishes are ordered; publishing then locks the listed definitions in id order so
-a concurrent deactivation cannot slip between the check and the publication.
+SPEC 7.0.0 retires kit lists as a current expected-count or administration workflow. These
+audited commands remain for compatibility with historical records and import/duplication paths;
+the Administration UI exposes no kit-list editor. The historical rows are not used to generate
+new expectations. Assignment-based physical kits define current vehicle inventory.
 """
 
 from datetime import datetime
@@ -33,7 +25,9 @@ from cya.kits.models import (
     VehicleKitRequirement,
 )
 
-ACTION = "manage_vehicle_kit_lists"
+# Legacy history writes use the current kit-assignment authority. There is no separate
+# manage_vehicle_kit_lists permission after SPEC 7.0.0.
+ACTION = "manage_kit_assignment"
 DRAFT_COMMAND = "VEHICLE_KIT_LIST_DRAFT"
 PUBLISH_COMMAND = "VEHICLE_KIT_LIST_PUBLISH"
 LINE_FIELDS = frozenset({"definition_id", "compartment_id", "required_count", "display_order"})

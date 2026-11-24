@@ -59,6 +59,7 @@ class ScopeKitPresence:
     kit_id: str
     assignment_event_id: str
     item_id: str
+    checklist_version_id: str
 
 
 def _bounded(query):
@@ -317,8 +318,6 @@ def resolve_kit_presence(organization_id, vehicle_id, assignments, instant):
     """Resolve the presence item and assignment event for each defined physical unit."""
     if instant.utcoffset() is None or len(assignments) > MAX_SCOPE:
         raise SealScopeError("invalid or oversized physical kit presence scope")
-    from cya.kits.models import KitDefinition
-
     mappings = _bounded(
         KitInstanceDefinition.objects.filter(
             organization_id=organization_id,
@@ -335,7 +334,7 @@ def resolve_kit_presence(organization_id, vehicle_id, assignments, instant):
     }
     if set(definitions) != set(by_kit.values()):
         raise SealScopeError("a physical kit definition is unavailable")
-    placed_definitions = set()
+    placed_definition_versions = {}
     templates = ChecklistTemplate.objects.filter(
         organization_id=organization_id,
         pk__in=bound_template_ids(organization_id, vehicle_id, instant),
@@ -351,9 +350,17 @@ def resolve_kit_presence(organization_id, vehicle_id, assignments, instant):
             )
         except (NoEffectiveVersionError, ResolutionError) as error:
             raise SealScopeError("a bound checklist cannot be resolved") from error
-        placed_definitions.update(str(row.definition_id) for row in resolved.placements)
+        for row in resolved.placements:
+            placed_definition_versions.setdefault(
+                str(row.definition_id), str(resolved.template_version_id)
+            )
     return tuple(
-        ScopeKitPresence(kit, str(assignments[kit][1]), definitions[by_kit[kit]])
+        ScopeKitPresence(
+            kit,
+            str(assignments[kit][1]),
+            definitions[by_kit[kit]],
+            placed_definition_versions[by_kit[kit]],
+        )
         for kit in sorted(by_kit)
-        if by_kit[kit] in placed_definitions
+        if by_kit[kit] in placed_definition_versions
     )
