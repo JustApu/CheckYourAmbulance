@@ -141,7 +141,11 @@ def _resolved_items(organization_id, vehicle_id, instant):
                 as_of=instant,
                 recorded_before=instant + timedelta(microseconds=1),
             )
-        except (NoEffectiveVersionError, ResolutionError) as error:
+        except NoEffectiveVersionError:
+            # A scheduled binding can precede its first effective version. It contributes no
+            # presence target at this instant, matching obligation generation and the checklist.
+            continue
+        except ResolutionError as error:
             raise SealScopeError("a bound checklist cannot be resolved") from error
         for item in resolved.items:
             chosen.setdefault(
