@@ -52,7 +52,7 @@ class SealCertificationTests(SimpleTestCase):
         )
 
     def test_cabinet_certification_requires_each_assigned_kit_to_be_present(self):
-        current = (ScopeKitPresence("kit", "assignment", "presence-item"),)
+        current = (ScopeKitPresence("kit", "assignment", "presence-item", "version"),)
         certified = (CertifiedKitPresence("kit", "assignment", "presence-item", 1),)
         self.assertIsNone(
             certification_refusal(

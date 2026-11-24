@@ -203,6 +203,7 @@ class AuditIntegrityTests(TestCase):
             "seal_inspection_item",  # issue #131: attributed per-item inspection observations
             "seal_inspection_obligation",  # issue #131: explicit inspected-obligation evidence
             "seal_inspection_kit_count",  # issue #131: cabinet kit-list-line counts
+            "seal_inspection_kit_presence",
             "seal_inspection_kit_instance",  # issue #131: kit instances certified by a cabinet count
             "seal_inspection_kit_verification",  # issue #131: nested kit-seal verification evidence
             "kit_definition_publication",  # issue #129: publication of a kit definition version
@@ -357,6 +358,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "seal_inspection_item",
                         "seal_inspection_obligation",
                         "seal_inspection_kit_count",
+                        "seal_inspection_kit_presence",
                         "seal_inspection_kit_instance",
                         "seal_inspection_kit_verification",
                         "kit_definition_publication",
@@ -481,6 +483,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "seal_inspection_item",
                     "seal_inspection_obligation",
                     "seal_inspection_kit_count",
+                    "seal_inspection_kit_presence",
                     "seal_inspection_kit_instance",
                     "seal_inspection_kit_verification",
                     "kit_definition_publication",
