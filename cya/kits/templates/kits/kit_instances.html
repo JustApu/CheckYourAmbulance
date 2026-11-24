@@ -8,7 +8,7 @@
 <p><a href="{% url 'kit-instance-vehicles' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} · Inactive{% endif %}</p>
 
 <h2 id="kits-heading">Physical kits assigned to this vehicle</h2>
-<p>Each assigned physical kit is part of this vehicle's expected inventory until its assignment ends. An assigned kit that is absent during an inspection can be reported missing.</p>
+<p>Each assigned physical kit is part of this vehicle's expected inventory until you return it to stock. Inspections check that physical unit's kit contents.</p>
 {% if kits %}
 <div class="table-scroll" role="region" aria-labelledby="kits-heading" tabindex="0">
 <table aria-labelledby="kits-heading" data-sortable data-filter-label="Filter kits on this vehicle">
