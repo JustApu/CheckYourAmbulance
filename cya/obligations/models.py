@@ -321,14 +321,25 @@ class RequirementVersion(Evidence):
                         placement__isnull=False,
                         kit_instance__isnull=False,
                         kit_requirement__isnull=True,
+                        kit_presence=False,
                     )
-                    # A kit presence requirement (KDEF-12): the line and the placement.
+                    # Legacy kit-list presence rows remain available for historical records.
                     | models.Q(
                         item_def__isnull=True,
                         kit_definition_item__isnull=True,
                         placement__isnull=False,
                         kit_instance__isnull=True,
                         kit_requirement__isnull=False,
+                        kit_presence=False,
+                    )
+                    # Physical presence rows pin the assigned unit and checklist placement.
+                    | models.Q(
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=True,
+                        placement__isnull=False,
+                        kit_instance__isnull=False,
+                        kit_requirement__isnull=True,
+                        kit_presence=True,
                     )
                 ),
                 name="reqversion_content_source",
