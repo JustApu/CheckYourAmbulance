@@ -345,9 +345,6 @@ def _presence_items(
     kits are not on the vehicle history and therefore create no expectation.
     """
     due_at, recorded_before, conditional = context
-    contents = active_kits_on_vehicle(
-        organization_id, vehicle_id, due_at, recorded_before=recorded_before
-    )
     assigned = _placed_kits(
         organization_id, vehicle_id, placement, due_at, occurrence.early_at, recorded_before
     )
@@ -357,7 +354,7 @@ def _presence_items(
             "binding": occurrence.binding_id,
             "conditional": conditional.get(item_id),
             "kit_presence": kit.kit_id,
-            "kit_assignment": kit.event_id,
+            "kit_assignment": kit.since_event_id,
             "placement": str(placement.pk),
             "override": resolved.override_version_id,
             "publication": str(publication.pk),
