@@ -710,9 +710,7 @@ def correction_scope(organization_id, deficiency, now):
             if any(kit_id == str(kit.pk) for kit_id, _label in item.kits):
                 selected.append(_row_of(item, str(kit.pk)))
         definition_id = (
-            KitInstanceDefinition.objects.filter(
-                organization_id=organization_id, kit_id=kit.pk
-            )
+            KitInstanceDefinition.objects.filter(organization_id=organization_id, kit_id=kit.pk)
             .values_list("definition_id", flat=True)
             .first()
         )

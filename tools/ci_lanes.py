@@ -78,6 +78,8 @@ MIGRATION_TEST_INPUTS = frozenset(
         "cya/kits/tests/support.py",
         "cya/obligations/tests/test_adhoc_migrations.py",
         "cya/obligations/tests/test_generation.py",
+        "cya/obligations/tests/test_kit_placements.py",
+        "cya/obligations/tests/test_kit_presence.py",
         "cya/obligations/tests/test_kits.py",
         "cya/obligations/tests/test_late_window_migration.py",
         "cya/obligations/tests/test_projection_digest_migration.py",

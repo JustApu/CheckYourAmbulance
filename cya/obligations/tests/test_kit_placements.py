@@ -430,11 +430,7 @@ class PlacedKitCheckTests(PlacedKitCase):
             str(c.item_id): str(c.pk)
             for c in KitDefinitionItem.objects.filter(version_id=self.kit_version)
         }
-        placed = {
-            (r.item_id, r.kit_id): r
-            for r in rows
-            if r.kit_id and r.item_id in contents
-        }
+        placed = {(r.item_id, r.kit_id): r for r in rows if r.kit_id and r.item_id in contents}
         self.assertEqual(set(placed), {(item, kit) for item in contents for kit in (first, second)})
         for (item, _kit), row in placed.items():
             self.assertEqual(row.definition_id, contents[item])
