@@ -1464,9 +1464,7 @@ def correct_check(
             content = SimpleNamespace(
                 kind="QUANTITY",
                 unit=None,
-                expected_quantity=(
-                    1 if root.kit_presence else root.kit_requirement.required_count
-                ),
+                expected_quantity=1 if root.kit_presence else root.kit_requirement.required_count,
                 allowed_outcomes=("PASSED", "FAILED", "UNABLE_TO_INSPECT"),
             )
             deviation = None

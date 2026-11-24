@@ -868,20 +868,24 @@ def _expansions(organization_id, deficiency, current, placed=()):
         )
     applicable = []
     for item_id, kit_id, place in rows:
-        if kit_id and KitInstance.objects.filter(
-            organization_id=organization_id,
-            pk=kit_id,
-            vehicle_id=deficiency.vehicle_id,
-            active=True,
-        ).exists() and KitDefinition.objects.filter(
-            organization_id=organization_id,
-            pk__in=KitInstanceDefinition.objects.filter(
-                organization_id=organization_id, kit_id=kit_id
-            ).values("definition_id"),
-            presence_item_id=item_id,
-        ).exists():
-            applicable.append(ScopeRow(str(item_id), None, str(kit_id)))
-            continue
+        if kit_id:
+            active_kit = KitInstance.objects.filter(
+                organization_id=organization_id,
+                pk=kit_id,
+                vehicle_id=deficiency.vehicle_id,
+                active=True,
+            ).exists()
+            if active_kit:
+                definition_id = KitInstanceDefinition.objects.filter(
+                    organization_id=organization_id, kit_id=kit_id
+                ).values_list("definition_id", flat=True).first()
+                if definition_id and KitDefinition.objects.filter(
+                    organization_id=organization_id,
+                    pk=definition_id,
+                    presence_item_id=item_id,
+                ).exists():
+                    applicable.append(ScopeRow(str(item_id), None, str(kit_id)))
+                    continue
         content = placed_entry(placed, item_id, kit_id)
         if content is not None:
             applicable.append(_row_of(content, str(kit_id)))

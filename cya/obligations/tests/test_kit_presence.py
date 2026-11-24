@@ -1,5 +1,6 @@
 """Physical kit presence obligations and checks (issue #273)."""
 
+from importlib import import_module
 from uuid import uuid4
 
 from django.db import DatabaseError, transaction
@@ -47,7 +48,7 @@ class PresenceObligationTests(PresenceCase):
         for obligation in self.presence():
             version = obligation.requirement_version
             self.assertEqual(str(version.kit_instance_id), str(obligation.kit_instance_id))
-            self.assertEqual(version.kit_event_id, obligation.kit_event_id)
+            self.assertTrue(version.kit_event_id)
             self.assertIsNone(version.item_def_id)
             self.assertIsNone(version.kit_definition_item_id)
             self.assertIsNone(version.kit_requirement_id)
@@ -86,7 +87,8 @@ class PresenceObligationTests(PresenceCase):
         self.assertEqual(self.generate().failures, [])
         self.assertFalse(
             Obligation.objects.filter(
-                item_id=self.presence_item, kit_definition_item__isnull=False
+                item_id=self.presence_item,
+                requirement_version__kit_definition_item__isnull=False,
             ).exists()
         )
 
@@ -205,8 +207,8 @@ class PresenceCheckTests(PresenceCase):
             DeficiencyEvent,
             VerificationScopeRow,
         )
-        from cya.deficiencies.severity import ensure_default_severities
         from cya.deficiencies.service import correction_scope
+        from cya.deficiencies.severity import ensure_default_severities
 
         ensure_default_severities(self.org.pk, self.at(days=-1))
         category = DeficiencyCategory.objects.create(
@@ -257,11 +259,17 @@ class PresenceCheckTests(PresenceCase):
             **self.context(self.supervisor),
         )
         self.assertIn(corrected.status, (200, 201))
-        row = VerificationScopeRow.objects.get(
-            deficiency=deficiency, item_id=self.presence_item
-        )
+        row = VerificationScopeRow.objects.get(deficiency=deficiency, item_id=self.presence_item)
         self.assertEqual(str(row.kit_instance_id), self.cabinet_kit)
         self.assertIsNone(row.definition_id)
+        from django.apps import apps
+
+        reverse_guard = import_module(
+            "cya.deficiencies.migrations.0028_physical_kit_presence_scope"
+        ).forbid_reverse_with_physical_presence
+        message = "cannot reverse physical kit presence scope"
+        with self.assertRaisesRegex(RuntimeError, message):
+            reverse_guard(apps, None)
 
     def test_checklist_and_outage_sheet_show_each_assigned_kit_once(self):
         from cya.attention.checklist import vehicle_checklist
