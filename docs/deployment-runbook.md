@@ -620,9 +620,8 @@ Until it has run, deactivating or reactivating a vehicle is refused. Obligation 
 
 [Issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256) implements SPEC 6.0.0:
 item requirements per place, one session in progress per vehicle checklist, and the session
-resume limit. It ships in parts A to F. This section covers the migrations of Parts A to E and
-the item-requirement cutover (SPEC §18.3). Part C4 is still open; see
-[C4 deploy impact](#c4-deploy-impact-placeholder) below. None of it has been rehearsed on a VM.
+resume limit. It ships in parts A to F. This section covers the migrations of Parts A to E, including
+C4 ([C4 deploy impact](#c4-deploy-impact)), and the item-requirement cutover (SPEC §18.3). None of it has been rehearsed on a VM.
 Deploying it, or rehearsing it on a VM, needs the owner's explicit go-ahead. The general steps in
 [Upgrade, failure and recovery](#upgrade-failure-and-recovery) and
 [Database setup and migrations](#database-setup-and-migrations) still apply. This section adds
@@ -685,13 +684,12 @@ later one.
    the schema change.
 2. **Read the plan.** Run `local/venv/bin/python manage.py migrate --plan` and confirm that it
    lists exactly these migrations (in dependency order, interleaved by app):
-   - `cya_checklists` 0013 to 0015;
+   - `cya_checklists` 0013 to 0016;
    - `cya_obligations` 0018 and 0019;
    - `cya_checks` 0015 to 0019;
    - `cya_seals` 0007 and 0008;
    - `cya_deficiencies` 0024 to 0027;
    - `cya_inspections` 0006 and 0007;
-   - C4's migration, once C4 has merged (placeholder below).
 
    Also confirm that `cya_deficiencies 0023` is shown as applied. Its trigger text did not change in
    #256, only a helper the reversal test reads (#265).
@@ -793,7 +791,7 @@ local/venv/bin/python manage.py migrate_item_requirements --organization <org-uu
 ### What each migration does to existing rows
 
 "Reverses" says what reversing the migration does on its own, read from its code. CI runs the
-`migration_rollback` tests on synthetic data for the C1 (0014), C3 (deficiencies), D and E
+`migration_rollback` tests on synthetic data for the C1 and C4 (0013 to 0016), C3 (deficiencies), D and E
 migrations. Reversal on a populated database has not been rehearsed.
 
 | Migration | Existing rows | Reverses |
@@ -801,6 +799,7 @@ migrations. Reversal on a populated database has not been rehearsed.
 | `cya_checklists 0013_item_requirements` | Creates four tables (`vehicle_item_requirement`, `…_version`, `item_requirement_cutover`, `item_requirement_map`). No existing row changes. | Drops the tables. After a cutover, that discards every requirement and the source-row map. Other apps' later migrations reference them and must be reversed first. |
 | `cya_checklists 0014_item_requirement_guards` | Triggers, keys and indexes only. | Yes. It drops the guards and keeps the per-key indexes, so reapplying works. Tested. |
 | `cya_checklists 0015_item_requirement_publish` | Lets the version guard accept `ITEM_REQUIREMENT_PUBLISH`. | Yes. Restores the 0014 guard. |
+| `cya_checklists 0016_item_requirement_duplicate` (C4) | Lets the requirement and version guards accept `VEHICLE_DUPLICATE`. Triggers only. | Yes. Restores the 0015 and 0014 guards. Tested. |
 | `cya_obligations 0018_item_requirement_units` | Adds a nullable `requirement_version.item_requirement_version_id` and replaces the `reqversion_kit_key` CHECK. Existing rows stay null and pass the new CHECK. | Before the cutover, yes. After it, re-adding the old CHECK fails on obligation requirement versions keyed by an item requirement, because MariaDB checks existing rows against an added CHECK. |
 | `cya_obligations 0019_item_requirement_unit_guard` | Trigger only. | Yes. Restores the previous trigger. |
 | `cya_checks 0015_link_every_eligible_obligation` | No row changes. Links recorded under a shared-satisfaction rule keep it. **Every new shared-satisfaction rule is refused from now on** (SCH-5: history only). | Yes (#259). |
@@ -874,27 +873,74 @@ migrations. Reversal on a populated database has not been rehearsed.
    - a Supervisor publishes a trivial new version of one test vehicle checklist, and it is
      accepted.
 
-### C4 deploy impact (placeholder)
+### C4 deploy impact
 
-> **To be completed after Part C4 ([#269](https://github.com/JustApu/CheckYourAmbulance/pull/269))
-> merges.** C4 is still changing the checklist editor, vehicle files, vehicle duplication and
-> CFG-2 position retirement. Its plan, under Codex review and subject to change, includes:
->
-> - a migration `cya_checklists 0016` that lets the item-requirement guards accept
->   `VEHICLE_DUPLICATE`;
-> - possibly vehicle file schema 3 (a `requirements` section), with import still accepting v1
->   and v2;
-> - a position-retirement refusal while an item requirement keeps an item there.
->
-> When C4 merges, this subsection must record:
->
-> - its migrations, their effect on existing rows and their reversal;
-> - whether files exported before the upgrade still import;
-> - any order constraint relative to the cutover;
-> - its post-deploy checks;
-> - any additions to the revisit list.
->
-> Until then this section does not cover C4.
+Part C4 ([#269](https://github.com/JustApu/CheckYourAmbulance/pull/269), merged as 964ec40)
+carries item requirements into the checklist editor, vehicle files, vehicle duplication and
+position retirement. It adds one migration. Everything else it changes is application code.
+Except for the CFG-2 rule and the v2 import check below, its behaviour starts only at an
+organization's item-requirement cutover.
+
+- **Migration `cya_checklists 0016_item_requirement_duplicate`.**
+  - It regenerates the insert guards of `vehicle_item_requirement` and
+    `vehicle_item_requirement_version`, so that they also accept a `VEHICLE_DUPLICATE` receipt.
+    Every other check of those guards is unchanged.
+  - It is triggers only, so no existing row changes. It applies with the other migrations, with
+    no order constraint relative to the cutover.
+  - It reverses: the reverse restores the 0015 version guard and the 0014 requirement guard.
+    CI's `migration_rollback` test reverses `cya_checklists` from 0013 to the leaf, so it covers
+    0016.
+  - A reverse after a duplicated vehicle got copied requirements leaves those rows in place.
+    The restored guards judge only new inserts.
+- **Vehicle files.** Export is schema 3 once the organization has cut over to item
+  requirements, with a `requirements` list and checklist items that name requirements. Before
+  the cutover, export is schema 2 as before. Import accepts schemas 1, 2 and 3, and still writes
+  checklist **drafts** only. It never publishes a requirement version.
+  - **Files exported before the upgrade still import.**
+  - One new refusal applies with or without the cutover. A **schema 2 file whose checklists give
+    one item at one place different values** is refused at preview: a vehicle has one item
+    requirement per item and place, so those drafts could never both be published. A pre-6.0.0
+    export of a vehicle whose checklists disagreed about a shared item hits this refusal. Edit the
+    file so the values match, or remove one of the checklists, and preview again.
+  - For an existing vehicle after the cutover, the preview's "Item requirements" notes say which
+    requirements the drafts would add or change. They flag a change that a checklist outside
+    the file also inspects: publishing that draft is refused until the requirement itself is
+    changed on the item requirements page.
+- **Duplication** (CFG-4). After the cutover, a duplicated vehicle also gets a copy of each
+  source item requirement, written under the `VEHICLE_DUPLICATE` receipt that 0016 allows:
+  - each copy gets a new id;
+  - its one version takes effect at the copy's creation;
+  - its place is remapped by stable slot.
+
+  A requirement in a retired position is copied as Not placed. If the item already has a Not
+  placed requirement, only one is kept, and the preview lists the other as left out. The result
+  adds `item_requirements`, the number copied. Before the cutover, duplication is unchanged.
+- **Position retirement** (CFG-2). A compartment or system can no longer be retired while an
+  item requirement version in force now, or published for a later instant, keeps an item
+  there. This holds even when no checklist inspects that requirement any more. Before
+  retiring the position, move the requirement: publish a version at another place, or Not
+  placed. Before the cutover no requirements exist, so nothing changes.
+- **New page `/administration/vehicles/<vehicle>/item-requirements/`** (policy action
+  `publish_template`, linked from a vehicle checklist's page).
+  - It lists each item requirement with its version in force or first scheduled, any later
+    versions, its place and values, and the checklists that inspect it.
+  - Changing a requirement publishes a new version through `publish_item_requirement_version`,
+    now or at a station-local time.
+  - This page is the **way out of the rule (b) deadlock**. When checklists that share a
+    requirement each need it changed, none of their drafts may change it alone (AC-42 (1)):
+    each publication is refused because the other checklist still uses the old values. Edit the
+    requirement here, and both drafts then link to it under rule (a).
+- **The editor.** A fresh draft from a published version takes each row's place and values from
+  its requirement's latest version, so it never reverts a requirement edited since. The
+  publication preview lists requirement changes, moves and refusals. A draft saved before a
+  requirement edit is kept as saved, and the preview flags it.
+
+C4 post-deploy checks, after a cutover, on a test vehicle:
+
+- the item requirements page lists its requirements;
+- an export is schema 3, and previewing that file back for the same vehicle reports no
+  requirement changes;
+- a duplication preview counts `item_requirements`.
 
 ### Revisit before production
 
@@ -948,7 +994,17 @@ Decide each one before the first production upgrade:
 12. **Pre-upgrade parallel sessions.** Several sessions of one checklist that were open together
     before the upgrade are left to finish (`cya_inspections 0006`, SPEC-mandated). Check for any
     on the production data before the upgrade, and decide whether to end them by hand first.
-13. **C4's choices**, once it merges (placeholder above).
+13. **C4's choices.** #269 flagged none of its choices as test-data only. Confirm these product
+    behaviours against real configuration:
+    - a schema 2 file whose checklists disagree about an item at one place is refused, so some
+      pre-6.0.0 exports need hand editing before they import;
+    - a requirement no checklist inspects any more still blocks retiring its position, and is
+      still exported and duplicated. It can be moved, to another place or Not placed, but no
+      command ends one;
+    - when duplication maps two requirements of one item to Not placed, it keeps one and only
+      reports the other;
+    - a duplicated vehicle's requirements start at the copy's creation and do not copy the
+      source's history or scheduled versions.
 
 ## Backup and point-in-time recovery
 
