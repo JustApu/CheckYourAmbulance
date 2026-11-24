@@ -173,24 +173,30 @@ def _definition(org, definition_id):
     return definition
 
 
-def add_kit_instance(*, label, vehicle_id, compartment_id, definition_id=None, **context):
-    """Add a new kit instance in a compartment of a vehicle, active from now.
+def add_kit_instance(
+    *, label, vehicle_id=None, compartment_id=None, definition_id=None, **context
+):
+    """Create an active physical kit, unassigned in stock or assigned to a compartment.
 
     definition_id names the kit definition the instance has, fixed for its life (SPEC 4.6
     KDEF-3). It is optional while checklists still place kits by slot (KDEF-8); an instance
-    without one has no kit definition.
+    without one has no kit definition. With no vehicle or compartment, the kit is active stock.
     """
     org = context["organization_id"]
-    canonical_id(vehicle_id)
-    canonical_id(compartment_id)
+    if (vehicle_id is None) != (compartment_id is None):
+        raise KitError("choose both a vehicle and compartment, or neither")
+    if vehicle_id is not None:
+        canonical_id(vehicle_id)
+        canonical_id(compartment_id)
     if definition_id is not None:
         canonical_id(definition_id)
     if not isinstance(label, str) or not label.strip() or len(label) > MAX_LABEL:
         raise KitError(f"label must be nonblank text of at most {MAX_LABEL} characters")
 
     def build(actor):
-        vehicle = _lock_vehicles(org, [vehicle_id])[vehicle_id]
-        _placement(org, vehicle, compartment_id)
+        vehicles = _lock_vehicles(org, [vehicle_id]) if vehicle_id is not None else {}
+        if vehicle_id is not None:
+            _placement(org, vehicles[vehicle_id], compartment_id)
         definition = _definition(org, definition_id) if definition_id is not None else None
         kit_id, event_id = new_id(), new_id()
 
@@ -231,7 +237,7 @@ def add_kit_instance(*, label, vehicle_id, compartment_id, definition_id=None, *
             "kit_id": kit_id,
             "event_id": event_id,
             "sequence": 1,
-            "vehicle_ids": [vehicle_id],
+            "vehicle_ids": [vehicle_id] if vehicle_id is not None else [],
         }
         if definition is not None:
             # The receipt records the definition as creation intent; the database accepts a
@@ -262,10 +268,12 @@ def record_kit_assignment(*, kit_id, active, vehicle_id=None, compartment_id=Non
     canonical_id(kit_id)
     if type(active) is not bool:
         raise KitError("active must be true or false")
-    if active:
+    if active and (vehicle_id is None) != (compartment_id is None):
+        raise KitError("choose both a vehicle and compartment, or neither")
+    if active and vehicle_id is not None:
         canonical_id(vehicle_id)
         canonical_id(compartment_id)
-    elif vehicle_id is not None or compartment_id is not None:
+    elif not active and (vehicle_id is not None or compartment_id is not None):
         raise KitError("a deactivated kit is on no vehicle or compartment")
 
     def build(actor):
@@ -297,7 +305,7 @@ def record_kit_assignment(*, kit_id, active, vehicle_id=None, compartment_id=Non
         )
         if same:
             raise KitError("kit instance is already in that state")
-        if active:
+        if active and vehicle_id is not None:
             _placement(org, vehicles[vehicle_id], compartment_id)
         event_id = new_id()
         sequence = prior.sequence + 1
