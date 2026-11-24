@@ -6,6 +6,16 @@ zero, one or several instances of it; **each instance owes its own obligation**,
 of several identical kits never satisfies the others. SPEC and the
 [contracts](data-model-contracts.md) win if they disagree with this page.
 
+## Physical-kit presence (issue #273)
+
+Current expectations are generated per assigned physical kit, not from editable vehicle kit-list
+counts. A checklist placement selects the kit definition to inspect; the vehicle's append-only
+assignment history selects the physical instances expected. Each presence obligation pins the
+kit instance and the assignment event that began its current vehicle assignment. The crew row is
+shown under that unit's label, expects quantity 1, and records a zero count when the unit is
+missing. Unassigned stock creates no vehicle obligation. Legacy kit-list obligations and checks
+remain available for historical records.
+
 ## What exists
 
 | Piece | Where |
