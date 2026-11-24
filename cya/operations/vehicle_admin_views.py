@@ -46,7 +46,7 @@ SAVED = {
     "deactivated": "Vehicle deactivated. It owes no routine inspection from now on.",
     "reactivated": "Vehicle reactivated. Routine inspections are owed again from now on.",
     "duplicated": (
-        "Vehicle duplicated. The copy is inactive; its kit list and overrides are drafts."
+        "Vehicle duplicated. The copy is inactive; its configuration is a draft."
     ),
 }
 EXPECTED = (vehicle_rules.VehicleError, KeyRuleError, ValueError)
