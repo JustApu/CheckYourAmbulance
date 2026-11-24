@@ -167,11 +167,6 @@ urlpatterns = [
         name="kit-instance-vehicles",
     ),
     path(
-        "administration/kit-instances/duplicate/",
-        kit_instance_views.duplicate,
-        name="kit-instance-duplicate",
-    ),
-    path(
         "administration/kit-instances/<uuid:vehicle_id>/",
         kit_instance_views.vehicle_kit_instances,
         name="vehicle-kit-instances",
