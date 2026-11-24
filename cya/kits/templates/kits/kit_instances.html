@@ -12,8 +12,8 @@
 {% if kits %}
 <div class="table-scroll" role="region" aria-labelledby="kits-heading" tabindex="0">
 <table aria-labelledby="kits-heading" data-sortable data-filter-label="Filter kits on this vehicle">
-  <thead><tr><th scope="col">Physical kit label</th><th scope="col">Kit type</th><th scope="col">Current compartment</th></tr></thead>
-  <tbody>{% for kit in kits %}<tr><td>{{ kit.label }}</td><td>{{ kit.definition|default:"(no kit type)" }}</td><td>{{ kit.compartment }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th scope="col">Physical kit label</th><th scope="col">Kit type</th><th scope="col">Current compartment</th><th scope="col">Change</th></tr></thead>
+  <tbody>{% for kit in kits %}<tr><td>{{ kit.label }}</td><td>{{ kit.definition|default:"(no kit type)" }}</td><td>{{ kit.compartment }}</td><td><form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}">{% csrf_token %}<input type="hidden" name="stage" value="stock"><input type="hidden" name="kit_id" value="{{ kit.id }}"><input type="hidden" name="operation_id" value="{{ kit.operation_id }}"><button type="submit" class="button">Return to stock</button></form></td></tr>{% endfor %}</tbody>
 </table>
 </div>
 {% else %}<p>No physical kits are assigned to this vehicle.</p>{% endif %}
