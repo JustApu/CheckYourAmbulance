@@ -280,9 +280,9 @@ class KitInstanceDefinition(Evidence):
 class ChecklistKitPlacement(models.Model):
     """A kit definition a checklist version inspects on its schedule (SPEC 4.6 KDEF-4).
 
-    Names no compartment and no count: where and how many instances a vehicle should carry come
-    from its kit list (VehicleKitRequirement, KDEF-9). Frozen with its checklist version once
-    published (migration 0007).
+    Names no compartment and no count. Assignment history determines which physical instances
+    the vehicle is expected to carry; the placement selects which definition the checklist
+    inspects. Frozen with its checklist version once published (migration 0007).
     """
 
     id = IdentityIDField(primary_key=True, default=new_id, editable=False)
