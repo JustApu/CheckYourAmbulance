@@ -17,7 +17,6 @@ from cya.kits import (
     definition_admin_views,
     inventory_views,
     kit_instance_views,
-    kit_list_views,
     position_views,
     vehicle_views,
 )
@@ -156,12 +155,6 @@ urlpatterns = [
         "administration/kit-definitions/<uuid:definition_id>/duplicate/",
         definition_admin_views.duplicate,
         name="kit-definition-duplicate",
-    ),
-    path("administration/kit-lists/", kit_list_views.vehicles, name="kit-list-vehicles"),
-    path(
-        "administration/kit-lists/<uuid:vehicle_id>/",
-        kit_list_views.vehicle_kit_list,
-        name="vehicle-kit-list",
     ),
     path(
         "administration/kit-instances/",
