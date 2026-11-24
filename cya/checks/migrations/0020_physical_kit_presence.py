@@ -4,7 +4,7 @@ from importlib import import_module
 
 from django.db import migrations, models
 
-latest = import_module("cya.checks.migrations.0017_item_requirement_link_scope")
+latest = import_module("cya.checks.migrations.0019_check_session_deadline")
 presence = import_module("cya.checks.migrations.0013_kit_presence_checks")
 content_checks = import_module("cya.checks.migrations.0012_kit_content_checks")
 
@@ -89,7 +89,10 @@ SOURCE = models.Q(
 
 
 class Migration(migrations.Migration):
-    dependencies = [("cya_checks", "0017_item_requirement_link_scope")]
+    dependencies = [
+        ("cya_checks", "0019_check_session_deadline"),
+        ("cya_kits", "0018_active_unassigned_kits"),
+    ]
 
     operations = [
         migrations.AddField(

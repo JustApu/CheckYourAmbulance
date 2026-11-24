@@ -44,7 +44,7 @@ For committed content, obtain the ID from the repository root with `git rev-pars
 | [/docs/ci-routing.md](docs/ci-routing.md) | `44aaea23e0db4d882b99c48ad264d92cfa8ee724` | Non-normative |
 | [/docs/model-efficiency.md](docs/model-efficiency.md) | `9abf40f5511a0c4996bfd78c5ca0c11f9900e476` | Non-normative |
 | [/CONTRIBUTING.md](CONTRIBUTING.md) | `19686957a368d938f53c6818e58c65fc9fe11092` | Non-normative |
-| [/docs/deployment-runbook.md](docs/deployment-runbook.md) | `0379f54812fc3d520162010113c52acc46d30403` | Non-normative |
+| [/docs/deployment-runbook.md](docs/deployment-runbook.md) | `fbf052e6c9bf210aa47b0c81c0ee2053d7ec4734` | Non-normative |
 
 ## Model and reasoning efficiency
 

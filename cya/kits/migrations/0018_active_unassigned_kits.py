@@ -9,7 +9,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    dependencies = [("cya_kits", "0012_vehicle_import_guards")]
+    dependencies = [("cya_kits", "0017_vehicle_position_key_writers")]
 
     operations = [
         migrations.RemoveConstraint(

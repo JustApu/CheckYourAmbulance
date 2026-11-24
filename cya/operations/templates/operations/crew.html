@@ -40,7 +40,7 @@
   <input type="hidden" name="stage" value="assign"><input type="hidden" name="vehicle_id" value="{{ vehicle.pk }}">
   <input type="hidden" name="operation_id" value="{{ crew_self_operation_id }}">
   <div class="crew-fields">
-    <div class="crew-field"><label for="crew-self-until">Until (station time)</label>
+    <div class="crew-field"><label for="crew-self-until">Until</label>
     <input id="crew-self-until" name="until" type="time" required></div>
     <div class="crew-field"><label for="crew-self-until-date">End date</label>
     <input id="crew-self-until-date" name="until_date" type="date" value="{{ crew_today }}" required></div>
@@ -61,7 +61,7 @@
       <option value="">Choose a person</option>
       {% for person in crew_people %}<option value="{{ person.id }}">{{ person.name }}{% if person.note %} ({{ person.note }}, moves them){% endif %}</option>{% endfor %}
     </select></div>
-    <div class="crew-field"><label for="crew-add-until">Until (station time)</label>
+    <div class="crew-field"><label for="crew-add-until">Until</label>
     <input id="crew-add-until" name="until" type="time" required></div>
     <div class="crew-field"><label for="crew-add-until-date">End date</label>
     <input id="crew-add-until-date" name="until_date" type="date" value="{{ crew_today }}" required></div>
@@ -69,7 +69,7 @@
   </div>
 </form>
 {% endif %}
-<p class="muted">Dates and times are station time. An assignment can end at most {{ crew_limit }} hours ahead; for an overnight shift, set tomorrow's date. Anyone can inspect any vehicle, assigned or not.</p>
+<p class="muted">An assignment can end at most {{ crew_limit }} hours ahead; for an overnight shift, set tomorrow's date. Anyone can inspect any vehicle, assigned or not.</p>
 
 {% if crew_history %}
 <details class="crew-history"><summary>Crew history</summary>

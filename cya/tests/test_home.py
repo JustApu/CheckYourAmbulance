@@ -48,7 +48,8 @@ class HomeScreenTests(CrewUiCase):
     def test_crew_home_greets_and_offers_one_primary_action(self):
         html = self.page()
         self.assertRegex(html, r"<h1>Good (morning|afternoon|evening)")
-        self.assertIn("station time", html)
+        # The day and time, with no zone label (owner, 2026-11-24).
+        self.assertRegex(html, r'<p class="home-when">\w+, \w+ \d+ · \d\d:\d\d</p>')
         self.assertEqual(html.count('class="button primary"'), 1)
         self.assertIn('href="/inspection/">Start an inspection</a>', html)
         for heading in ("Due today", "Open problems"):
