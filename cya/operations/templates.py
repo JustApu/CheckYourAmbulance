@@ -427,20 +427,23 @@ def minimum_publish_instant(template_id, now=None):
 
 
 def refresh_specs(organization_id, template, version, specs):
-    """Specs of a published base version, each row outside a kit taking its requirement's
-    values and place in force at the draft's minimum publish instant (issue #256 C4).
+    """Specs of a published base version, each row outside a kit taking the values and place
+    of its requirement's latest version, in force or scheduled (issue #256 C4).
 
     A published row keeps the values it recorded, while its requirement may have been edited
     since (CHK-5: reads follow the requirement). A new draft starting from it would otherwise
-    revert that edit, or be refused. A saved draft is kept as saved; the preview calls out
-    where it differs. Specs are returned unchanged before the item-requirement cutover.
+    revert that edit, or be refused. The latest version, not the one in force now, is the
+    baseline: a draft published after a scheduled version then uses it (rule (a)) instead of
+    publishing the older values over it as a new version (rule (b)). Published before that
+    instant, such a row is refused (a version cannot precede a later one), as the preview
+    says. A saved draft is kept as saved; the preview calls out where it differs. Specs are
+    returned unchanged before the item-requirement cutover.
     """
     from cya.checklists import item_requirements as rules
     from cya.checklists.models import ItemRequirementMap
 
     if template.vehicle_id is None or not rules.has_cutover(organization_id):
         return specs
-    at = minimum_publish_instant(template.pk)
     mapped = {
         str(item): requirement
         for item, requirement in ItemRequirementMap.objects.filter(
@@ -450,7 +453,7 @@ def refresh_specs(organization_id, template, version, specs):
     refreshed = []
     for spec in specs:
         requirement = mapped.get(str(spec["item_id"])) if spec["kit_id"] is None else None
-        current = rules.version_at(requirement, at) if requirement else None
+        current = rules.latest_version(requirement) if requirement else None
         if current is not None:
             spec = {
                 **spec,

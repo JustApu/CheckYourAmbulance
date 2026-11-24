@@ -455,6 +455,70 @@ class RequirementEditorTests(KitCase):  # SPEC 6.0.0 CHK-11, AC-42 (1), (4); iss
         publish_template_version(version_id=str(draft.pk), **self.context())
         self.assertEqual(self.versions(), before)  # every row uses its requirement (a)
 
+    def draft_after_scheduled_masks(self):
+        """First alone inspects the masks; masks quantity 8 is scheduled in 30 days; then an
+        edit of another item starts a fresh draft of First from its published version."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from cya.checklists.commands import publish_item_requirement_version
+
+        self.publish_checklist(
+            self.second, [i for i in self.own_items() if i["item_id"] != str(self.masks.pk)]
+        )
+        current = self.masks_version()
+        scheduled = timezone.now() + timedelta(days=30)
+        publish_item_requirement_version(
+            requirement_id=str(current.requirement_id),
+            kind="QUANTITY",
+            allowed_outcomes=current.allowed_outcomes,
+            instructions=current.instructions,
+            expected_quantity=8,
+            compartment_id=self.cabinet_row,
+            effective_at=scheduled,
+            **self.context(),
+        )
+        latest = ChecklistVersion.objects.filter(template=self.first).order_by("-revision").first()
+        saved = self.post(
+            f"{LIST}{self.first.pk}/items/{self.suction.pk}/",
+            base_revision=str(latest.revision),
+            place=f"COMPARTMENT:{self.cabinet_row}",
+            kind="PRESENCE_CONDITION",
+            instructions="Synthetic.",
+            display_order="15",
+            **{"outcome-FAILED": "on", "outcome-UNABLE_TO_INSPECT": "on"},
+        )
+        self.assertEqual(saved.status_code, 302, saved.content.decode()[:2000])
+        draft = ChecklistVersion.objects.filter(template=self.first).order_by("-revision").first()
+        masks = ChecklistItemDef.objects.get(checklist_version=draft, item=self.masks)
+        self.assertEqual(masks.expected_quantity, 8)  # the scheduled version is the baseline
+        return draft, scheduled
+
+    def test_a_fresh_draft_published_after_a_scheduled_requirement_keeps_it(self):
+        from datetime import timedelta
+
+        from cya.checklists.commands import publish_template_version
+
+        draft, scheduled = self.draft_after_scheduled_masks()
+        before, revision = self.versions(), self.masks_version().revision
+        publish_template_version(
+            version_id=str(draft.pk), effective_at=scheduled + timedelta(days=1), **self.context()
+        )
+        self.assertEqual(self.versions(), before)  # rule (a): no new version reverts quantity 8
+        latest = self.masks_version()
+        self.assertEqual((latest.revision, latest.expected_quantity), (revision, 8))
+
+    def test_a_fresh_draft_published_before_a_scheduled_requirement_is_refused(self):
+        from cya.checklists.commands import publish_template_version
+        from cya.checklists.validation import ChecklistValidationError
+
+        draft, _scheduled = self.draft_after_scheduled_masks()
+        before = self.versions()
+        with self.assertRaisesRegex(ChecklistValidationError, "later instant here"):
+            publish_template_version(version_id=str(draft.pk), **self.context())
+        self.assertEqual(self.versions(), before)
+
     def test_a_new_row_takes_the_requirement_at_the_chosen_place_only(self):
         third = self.vehicle_checklist(label="Third")
         posted = {

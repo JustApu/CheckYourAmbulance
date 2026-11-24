@@ -221,6 +221,15 @@ def version_at(requirement_id, at):
     )
 
 
+def latest_version(requirement_id):
+    """The requirement's latest version, in force or scheduled, or None."""
+    return (
+        VehicleItemRequirementVersion.objects.filter(requirement_id=requirement_id)
+        .order_by("-effective_at", "-revision")
+        .first()
+    )
+
+
 def current_or_next(vehicle_id, at):
     """{requirement id: its version in force at `at`, else its first one scheduled after} for
     every requirement of the vehicle: what a vehicle file or a copy of the vehicle carries."""
