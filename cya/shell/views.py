@@ -89,15 +89,15 @@ ADMINISTRATION_LINKS = (
         "manage_kit_definitions",
     ),
     (
-        "kit-list-vehicles",
-        "Expected kit inventory",
-        "Set the expected kit counts and compartments used to check each vehicle.",
-        "manage_vehicle_kit_lists",
+        "kit-instance-inventory",
+        "Physical kit inventory",
+        "Create and label individual physical kits before assigning them to a vehicle.",
+        "manage_kit_assignment",
     ),
     (
         "kit-instance-vehicles",
-        "Physical kits",
-        "Create individual labeled kits and assign or move them to vehicles and compartments.",
+        "Assign physical kits",
+        "Assign an existing physical kit from stock to a vehicle and compartment.",
         "manage_kit_assignment",
     ),
     (
@@ -128,8 +128,8 @@ ADMINISTRATION_GROUPS = (
     (
         "kits",
         "Kits",
-        "What each kit holds, which kits each vehicle carries, and the shared library.",
-        ("kit-definitions", "kit-instance-vehicles", "kit-list-vehicles", "kit-library"),
+        "Define kit contents, create physical units, assign them to vehicles, then use the shared library.",
+        ("kit-definitions", "kit-instance-inventory", "kit-instance-vehicles", "kit-library"),
     ),
     (
         "system",
