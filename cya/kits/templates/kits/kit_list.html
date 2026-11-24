@@ -45,19 +45,19 @@
 {% if not editable %}
 <p id="too-long">This list has {{ line_count }} line{{ line_count|pluralize }}. This page can edit at most {{ max_rows }} lines, so it is shown but not offered for editing; saving part of it would drop the rest. An Administrator can change it by importing a vehicle file.</p>
 {% else %}
-<p><strong>Required count</strong> is how many instances of that kit the vehicle should carry in that compartment. Inspections compare the count present there with this number. <strong>Order</strong> controls the display sequence; lower numbers appear first.</p>
+<p id="kit-list-order-help"><strong>Required count</strong> is how many instances of that kit the vehicle should carry in that compartment. Inspections compare the count present there with this number. <strong>Order</strong> controls the display sequence; lower numbers appear first. You can drag rows to reorder them or enter order numbers directly.</p>
 <p>Saving replaces the draft with exactly these lines. Leave a row's kit and compartment empty to skip it, or tick Remove.</p>
 <form method="post" action="{% url 'vehicle-kit-list' vehicle.pk %}" aria-labelledby="edit-heading" class="admin-form">
   {% csrf_token %}
   <input type="hidden" name="stage" value="draft">
   <input type="hidden" name="operation_id" value="{{ draft_operation_id }}">
   <input type="hidden" name="rows" value="{{ rows|length }}">
-  <div class="table-scroll" role="region" aria-label="Kit list lines" tabindex="0">
+  <div class="table-scroll" role="region" aria-label="Kit list lines" aria-describedby="kit-list-order-help" tabindex="0">
   <table aria-label="Kit list lines">
     <thead><tr><th scope="col">Kit</th><th scope="col">Compartment</th><th scope="col">Required count</th><th scope="col">Order (lowest first)</th><th scope="col">Remove</th></tr></thead>
-    <tbody>
+    <tbody id="kit-list-lines">
     {% for row in rows %}
-      <tr>
+      <tr draggable="true" data-kit-list-row>
         <td><select id="def-{{ forloop.counter0 }}" aria-label="Kit, line {{ forloop.counter }}"{% if row.note %} aria-describedby="note-{{ forloop.counter0 }}"{% endif %} name="line-{{ forloop.counter0 }}-definition">
             <option value="">(none)</option>
             {% for d in definitions %}<option value="{{ d.pk }}"{% if row.definition_id == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
@@ -66,16 +66,71 @@
             <option value="">(none)</option>
             {% for c in compartments %}<option value="{{ c.pk }}"{% if row.compartment_id == c.pk|stringformat:"s" %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
           </select></td>
-        <td><input id="count-{{ forloop.counter0 }}" aria-label="Required count, line {{ forloop.counter }}" name="line-{{ forloop.counter0 }}-count" value="{{ row.required_count|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*" size="3"></td>
-        <td><input id="order-{{ forloop.counter0 }}" aria-label="Order, line {{ forloop.counter }}" name="line-{{ forloop.counter0 }}-order" value="{{ row.display_order|default_if_none:'' }}" inputmode="numeric" pattern="[0-9]*" size="3"></td>
+        <td><input type="number" id="count-{{ forloop.counter0 }}" aria-label="Required count, line {{ forloop.counter }}" name="line-{{ forloop.counter0 }}-count" value="{{ row.required_count|default_if_none:'' }}" min="1" max="{{ max_count }}" step="1" size="3"></td>
+        <td><input type="number" id="order-{{ forloop.counter0 }}" aria-label="Order, line {{ forloop.counter }}" name="line-{{ forloop.counter0 }}-order" value="{{ row.display_order|default_if_none:'' }}" min="0" max="{{ max_count }}" step="1" size="3"></td>
         <td><input type="checkbox" name="line-{{ forloop.counter0 }}-remove" aria-label="Remove line {{ forloop.counter }}"{% if row.remove %} checked{% endif %}></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
+  <p><span id="kit-list-order-status" role="status"></span></p>
   <p><button type="submit" class="button">Save draft</button></p>
 </form>
 {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const body = document.getElementById("kit-list-lines");
+  if (!body) return;
+  const status = document.getElementById("kit-list-order-status");
+  let dragged = null;
+
+  function filledRows() {
+    return Array.from(body.querySelectorAll("tr[data-kit-list-row]")).filter(function (row) {
+      const selects = row.querySelectorAll("select");
+      return selects.length === 2 && selects[0].value && selects[1].value;
+    });
+  }
+
+  function setOrderFromRows() {
+    filledRows().forEach(function (row, index) {
+      const order = row.querySelector('input[name$="-order"]');
+      if (order) order.value = String(index + 1);
+    });
+  }
+
+  body.addEventListener("dragstart", function (event) {
+    const row = event.target.closest("tr[data-kit-list-row]");
+    if (!row) return;
+    dragged = row;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", "kit-list-line");
+  });
+
+  body.addEventListener("dragover", function (event) {
+    if (!dragged) return;
+    const target = event.target.closest("tr[data-kit-list-row]");
+    if (!target || target === dragged) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const bounds = target.getBoundingClientRect();
+    body.insertBefore(dragged, event.clientY < bounds.top + bounds.height / 2 ? target : target.nextSibling);
+  });
+
+  body.addEventListener("drop", function (event) {
+    if (!dragged) return;
+    event.preventDefault();
+    setOrderFromRows();
+    if (status) status.textContent = "Kit lines reordered. Save the draft to keep this order.";
+  });
+
+  body.addEventListener("dragend", function () {
+    dragged = null;
+  });
+})();
+</script>
 {% endblock %}
