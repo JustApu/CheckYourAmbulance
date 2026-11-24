@@ -96,9 +96,7 @@ def stored_certification(organization_id, seal_event):
         ).order_by("kit_id")
     )
     presence = tuple(
-        CertifiedKitPresence(
-            str(row.kit_id), str(row.assignment_id), str(row.item_id), row.count
-        )
+        CertifiedKitPresence(str(row.kit_id), str(row.assignment_id), str(row.item_id), row.count)
         for row in presence_rows
     )
     nested = _bounded(
@@ -183,10 +181,7 @@ def certification_refusal(
         )
         if result is not None:
             return result
-    current = {
-        (row.kit_id, row.assignment_event_id, row.item_id)
-        for row in current_presence
-    }
+    current = {(row.kit_id, row.assignment_event_id, row.item_id) for row in current_presence}
     recorded = {}
     for row in certified_presence:
         if not isinstance(row, CertifiedKitPresence) or row.kit_id in recorded:
@@ -194,9 +189,6 @@ def certification_refusal(
         recorded[row.kit_id] = (row.assignment_event_id, row.item_id, row.count)
     if set(recorded) != {kit_id for kit_id, _event, _item in current}:
         return "KIT_SCOPE_CHANGED"
-    if any(
-        recorded[kit_id] != (event_id, item_id, 1)
-        for kit_id, event_id, item_id in current
-    ):
+    if any(recorded[kit_id] != (event_id, item_id, 1) for kit_id, event_id, item_id in current):
         return "KIT_PRESENCE_CHANGED"
     return None

@@ -103,8 +103,9 @@ def validate_kit_presence(organization_id, vehicle_id, actor_id, kits, selection
         raise ValueError("physical kit presence checks require a started inspection")
     checks = {
         str(row.pk): row
-        for row in CheckRecord.objects.filter(organization_id=organization_id, pk__in=used)
-        .select_related("root_check")
+        for row in CheckRecord.objects.filter(
+            organization_id=organization_id, pk__in=used
+        ).select_related("root_check")
     }
     if set(checks) != used:
         raise ValueError("a physical kit presence check is unavailable")

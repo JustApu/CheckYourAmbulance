@@ -71,9 +71,7 @@ class SealCertificationTests(SimpleTestCase):
                 [self.line],
                 [self.count],
                 current_presence=current,
-                certified_presence=(
-                    CertifiedKitPresence("kit", "assignment", "presence-item", 0),
-                ),
+                certified_presence=(CertifiedKitPresence("kit", "assignment", "presence-item", 0),),
             ),
             "KIT_PRESENCE_CHANGED",
         )

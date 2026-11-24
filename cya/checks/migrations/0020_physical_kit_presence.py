@@ -16,6 +16,7 @@ def refuse_reverse_with_presence_checks(apps, schema_editor):
             "cannot reverse physical kit-presence checks while append-only check evidence exists"
         )
 
+
 PHYSICAL_CHECK = """IF NOT EXISTS (
  SELECT 1 FROM kit_instance_definition kd
  JOIN checklist_kit_placement pl ON pl.definition_id=kd.definition_id

@@ -3,7 +3,7 @@
 from django.db import migrations, models
 from django.db.models.deletion import PROTECT
 
-from cya.accounts.fields import IdentityIDField, UUID_PATTERN, new_id
+from cya.accounts.fields import UUID_PATTERN, IdentityIDField, new_id
 
 ROLE_CODES = '["CREW","EMT","SUPERVISOR","SUPPLY_OFFICER","ADMINISTRATOR"]'
 TABLE = "seal_inspection_kit_presence"
@@ -90,30 +90,87 @@ class Migration(migrations.Migration):
             fields=[
                 ("recorded_at", models.DateTimeField()),
                 ("actor_roles_at_time", models.JSONField(default=list)),
-                ("id", IdentityIDField(default=new_id, editable=False, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    IdentityIDField(
+                        default=new_id, editable=False, primary_key=True, serialize=False
+                    ),
+                ),
                 ("count", models.PositiveIntegerField()),
-                ("actor_user", models.ForeignKey(on_delete=PROTECT, related_name="+", to="cya_accounts.user")),
-                ("assignment", models.ForeignKey(db_constraint=False, on_delete=PROTECT, related_name="+", to="cya_kits.kitassignmentevent")),
-                ("check_record", models.ForeignKey(db_constraint=False, on_delete=PROTECT, related_name="+", to="cya_checks.checkrecord")),
-                ("command", models.ForeignKey(on_delete=PROTECT, related_name="+", to="cya_core.commandreceipt")),
-                ("inspection", models.ForeignKey(on_delete=PROTECT, related_name="+", to="cya_seals.sealinspection")),
-                ("item", models.ForeignKey(on_delete=PROTECT, related_name="+", to="cya_checklists.item")),
-                ("kit", models.ForeignKey(on_delete=PROTECT, related_name="+", to="cya_checklists.kitinstance")),
-                ("organization", models.ForeignKey(on_delete=PROTECT, related_name="+", to="cya_accounts.organization")),
+                (
+                    "actor_user",
+                    models.ForeignKey(
+                        on_delete=PROTECT, related_name="+", to="cya_accounts.user"
+                    ),
+                ),
+                (
+                    "assignment",
+                    models.ForeignKey(
+                        db_constraint=False,
+                        on_delete=PROTECT,
+                        related_name="+",
+                        to="cya_kits.kitassignmentevent",
+                    ),
+                ),
+                (
+                    "check_record",
+                    models.ForeignKey(
+                        db_constraint=False,
+                        on_delete=PROTECT,
+                        related_name="+",
+                        to="cya_checks.checkrecord",
+                    ),
+                ),
+                (
+                    "command",
+                    models.ForeignKey(
+                        on_delete=PROTECT, related_name="+", to="cya_core.commandreceipt"
+                    ),
+                ),
+                (
+                    "inspection",
+                    models.ForeignKey(
+                        on_delete=PROTECT, related_name="+", to="cya_seals.sealinspection"
+                    ),
+                ),
+                (
+                    "item",
+                    models.ForeignKey(
+                        on_delete=PROTECT, related_name="+", to="cya_checklists.item"
+                    ),
+                ),
+                (
+                    "kit",
+                    models.ForeignKey(
+                        on_delete=PROTECT, related_name="+", to="cya_checklists.kitinstance"
+                    ),
+                ),
+                (
+                    "organization",
+                    models.ForeignKey(
+                        on_delete=PROTECT, related_name="+", to="cya_accounts.organization"
+                    ),
+                ),
             ],
             options={"db_table": TABLE},
         ),
         migrations.AddConstraint(
             model_name="sealinspectionkitpresence",
-            constraint=models.UniqueConstraint(fields=("organization", "id"), name="sealkitpresence_org_id"),
+            constraint=models.UniqueConstraint(
+                fields=("organization", "id"), name="sealkitpresence_org_id"
+            ),
         ),
         migrations.AddConstraint(
             model_name="sealinspectionkitpresence",
-            constraint=models.UniqueConstraint(fields=("inspection", "kit"), name="sealkitpresence_kit"),
+            constraint=models.UniqueConstraint(
+                fields=("inspection", "kit"), name="sealkitpresence_kit"
+            ),
         ),
         migrations.AddConstraint(
             model_name="sealinspectionkitpresence",
-            constraint=models.CheckConstraint(condition=models.Q(count__in=[0, 1]), name="sealkitpresence_count"),
+            constraint=models.CheckConstraint(
+                condition=models.Q(count__in=[0, 1]), name="sealkitpresence_count"
+            ),
         ),
         migrations.RunSQL(
             [

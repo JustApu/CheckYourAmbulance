@@ -119,9 +119,11 @@ def instance_presence_resolved_item(
         kit_event_id=run.assignment_event_id,
     )
     if compartment_id not in compartment_labels:
-        compartment_labels[compartment_id] = Compartment.objects.filter(
-            organization_id=organization_id, pk=compartment_id
-        ).values_list("label", flat=True).first()
+        compartment_labels[compartment_id] = (
+            Compartment.objects.filter(organization_id=organization_id, pk=compartment_id)
+            .values_list("label", flat=True)
+            .first()
+        )
     return ResolvedItem(
         requirement=requirement,
         compartment_id=compartment_id,

@@ -319,7 +319,9 @@ class SealInspectionKitPresence(Evidence):
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="sealkitpresence_org_id"),
             models.UniqueConstraint(fields=["inspection", "kit"], name="sealkitpresence_kit"),
-            models.CheckConstraint(condition=models.Q(count__in=[0, 1]), name="sealkitpresence_count"),
+            models.CheckConstraint(
+                condition=models.Q(count__in=[0, 1]), name="sealkitpresence_count"
+            ),
         ]
 
 
