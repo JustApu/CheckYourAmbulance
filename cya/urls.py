@@ -15,6 +15,7 @@ from cya.inspections import views as inspection_views
 from cya.inspections import workflow_views
 from cya.kits import (
     definition_admin_views,
+    inventory_views,
     kit_instance_views,
     kit_list_views,
     position_views,
@@ -164,6 +165,11 @@ urlpatterns = [
     ),
     path(
         "administration/kit-instances/",
+        inventory_views.inventory,
+        name="kit-instance-inventory",
+    ),
+    path(
+        "administration/kit-instances/vehicles/",
         kit_instance_views.vehicles,
         name="kit-instance-vehicles",
     ),
