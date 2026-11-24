@@ -1,67 +1,48 @@
 {% extends "shell/base.html" %}
 {% block main_class %} class="main-wide"{% endblock %}
 {% block content %}
-{% if saved %}{% include "shell/save_state.html" with state="saved" %}
-<p role="status">{{ saved }}</p>{% endif %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}<p role="status">{{ saved }}</p>{% endif %}
 {% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
 
 <div class="kit-library">
 <p><a href="{% url 'kit-instance-vehicles' %}">All vehicles</a> · {{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} · Inactive{% endif %}</p>
 
 <h2 id="kits-heading">Physical kits assigned to this vehicle</h2>
+<p>Each assigned physical kit is part of this vehicle's expected inventory until its assignment ends. An assigned kit that is absent during an inspection can be reported missing.</p>
 {% if kits %}
 <div class="table-scroll" role="region" aria-labelledby="kits-heading" tabindex="0">
 <table aria-labelledby="kits-heading" data-sortable data-filter-label="Filter kits on this vehicle">
-  <thead><tr><th scope="col">Physical kit label</th><th scope="col">Kit type</th><th scope="col">Current compartment</th><th scope="col" data-nosort>Duplicate</th></tr></thead>
-  <tbody>
-  {% for kit in kits %}
-    <tr>
-      <td>{{ kit.label }}</td><td>{{ kit.definition|default:"(no kit type)" }}</td><td>{{ kit.compartment }}</td>
-      <td>{% if kit.definition_id %}
-        <form method="get" action="{% url 'kit-instance-duplicate' %}" class="admin-form">
-          <input type="hidden" name="definition" value="{{ kit.definition_id }}">
-          <input type="hidden" name="label" value="{{ kit.label }} (copy)">
-          <select name="vehicle" aria-label="Vehicle for a copy of {{ kit.label }}">
-            {% for v in vehicles %}<option value="{{ v.id }}"{% if v.id == vehicle.pk %} selected{% endif %}>{{ v.display_name }}</option>{% endfor %}
-          </select>
-          <button type="submit" class="button" aria-label="Create another physical kit based on {{ kit.label }}">Create another physical kit…</button>
-        </form>{% endif %}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
+  <thead><tr><th scope="col">Physical kit label</th><th scope="col">Kit type</th><th scope="col">Current compartment</th></tr></thead>
+  <tbody>{% for kit in kits %}<tr><td>{{ kit.label }}</td><td>{{ kit.definition|default:"(no kit type)" }}</td><td>{{ kit.compartment }}</td></tr>{% endfor %}</tbody>
 </table>
 </div>
-{% else %}{% include "shell/empty_state.html" with message="No physical kit units are assigned to this vehicle." action_url="#add-heading" action_label="Assign a physical kit" %}{% endif %}
+{% else %}<p>No physical kits are assigned to this vehicle.</p>{% endif %}
 
-<h2 id="add-heading">Assign a physical kit to this vehicle</h2>
-<p>This creates a record for one actual kit unit and assigns it to this vehicle and compartment. Use its identifying label (for example, Drug Box 1). It does not set how many units the vehicle is expected to carry.</p>
-{% if can_manage_kit_lists %}<p>Expected counts are set in <a href="{% url 'vehicle-kit-list' vehicle.pk %}">Expected kit inventory</a>.</p>{% else %}<p>Expected counts are managed separately in Kit lists.</p>{% endif %}
-{% if not definitions or not compartments %}
-<div class="banner" id="add-unavailable"><div>
-  <p>A physical kit can't be assigned to this vehicle yet.</p>
-  <ul>
-    {% if not definitions %}<li>There are no kit types. A Supervisor or Administrator adds them in {% if can_manage_definitions %}<a href="{% url 'kit-definitions' %}">Kit definitions</a>{% else %}Kit definitions{% endif %}.</li>{% endif %}
-    {% if not compartments %}<li>This vehicle has no compartments. A Supervisor or Administrator adds them in {% if can_manage_positions %}<a href="{% url 'vehicle-positions' vehicle.pk %}">Compartments and systems</a>{% else %}Compartments and systems{% endif %}.</li>{% endif %}
-  </ul>
-</div></div>
-{% else %}
-<form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}" aria-labelledby="add-heading" class="admin-form">
+<h2 id="assign-heading">Assign a physical kit from stock</h2>
+<p>Creating a labeled physical kit and assigning it to a vehicle are separate steps. <a href="{% url 'kit-instance-inventory' %}">Create or view physical kits in stock</a>.</p>
+{% if stock_kits and compartments %}
+<form method="post" action="{% url 'vehicle-kit-instances' vehicle.pk %}" aria-labelledby="assign-heading" class="admin-form">
   {% csrf_token %}
-  <input type="hidden" name="stage" value="add">
+  <input type="hidden" name="stage" value="assign">
   <input type="hidden" name="operation_id" value="{{ add_operation_id }}">
-  <p><label for="add-definition">Physical kit type</label><br>
-  <select id="add-definition" name="definition_id" required>
-    <option value="">(choose)</option>
-    {% for d in definitions %}<option value="{{ d.pk }}"{% if form.definition_id == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
-  </select></p>
-  <p><label for="add-compartment">Current compartment</label><br>
-  <select id="add-compartment" name="compartment_id" required>
-    <option value="">(choose)</option>
-    {% for c in compartments %}<option value="{{ c.pk }}"{% if form.compartment_id == c.pk|stringformat:"s" %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
-  </select></p>
-  <p><label for="add-label">Physical kit label</label><br><input id="add-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
-  <p><button type="submit" class="button">Create and assign physical kit</button></p>
+  <p><label for="assign-kit">Physical kit</label><br>
+    <select id="assign-kit" name="kit_id" required>
+      <option value="">(choose)</option>
+      {% for kit in stock_kits %}<option value="{{ kit.id }}"{% if form.kit_id == kit.id %} selected{% endif %}>{{ kit.label }} — {{ kit.definition }}</option>{% endfor %}
+    </select>
+  </p>
+  <p><label for="assign-compartment">Vehicle compartment</label><br>
+    <select id="assign-compartment" name="compartment_id" required>
+      <option value="">(choose)</option>
+      {% for compartment in compartments %}<option value="{{ compartment.pk }}"{% if form.compartment_id == compartment.pk|stringformat:"s" %} selected{% endif %}>{{ compartment.label }}</option>{% endfor %}
+    </select>
+  </p>
+  <p><button type="submit" class="button">Assign physical kit</button></p>
 </form>
+{% elif not stock_kits %}
+<p>No unassigned kits are in stock. Create a physical kit first.</p>
+{% elif not compartments %}
+<p>This vehicle has no compartment. Add one in {% if can_manage_positions %}<a href="{% url 'vehicle-positions' vehicle.pk %}">Compartments and systems</a>{% else %}Compartments and systems{% endif %} before assigning a kit.</p>
 {% endif %}
 </div>
 {% endblock %}
