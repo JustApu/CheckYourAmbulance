@@ -2,7 +2,6 @@
 
 from importlib import import_module
 
-import django.db.models.deletion
 from django.db import migrations, models
 
 latest = import_module("cya.obligations.migrations.0019_item_requirement_unit_guard")
@@ -39,10 +38,14 @@ PHYSICAL_EVENT = """IF NEW.kit_presence THEN
  THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='physical kit assignment does not match its presence item'; END IF;
 ELSE
 """
+
+
 def version_trigger():
     original_content = content_sources.CONTENT_CHECK
     original_instance = content_sources.KIT_CONTENT_INSTANCE_CHECK
-    content_sources.CONTENT_CHECK = "IF NEW.kit_presence THEN\n" + PHYSICAL_CHECK + "ELSE\n" + original_content + "END IF;\n"
+    content_sources.CONTENT_CHECK = (
+        "IF NEW.kit_presence THEN\n" + PHYSICAL_CHECK + "ELSE\n" + original_content + "END IF;\n"
+    )
     content_sources.KIT_CONTENT_INSTANCE_CHECK = PHYSICAL_EVENT + original_instance + "END IF;\n"
     try:
         return latest.version_trigger()
@@ -50,20 +53,42 @@ def version_trigger():
         content_sources.CONTENT_CHECK = original_content
         content_sources.KIT_CONTENT_INSTANCE_CHECK = original_instance
 
+
 SOURCE = models.Q(
-    models.Q(item_def__isnull=False, kit_definition_item__isnull=True,
-             kit_requirement__isnull=True, placement__isnull=True, kit_presence=False),
-    models.Q(item_def__isnull=True, kit_definition_item__isnull=False,
-             kit_instance__isnull=False, kit_requirement__isnull=True,
-             placement__isnull=False, kit_presence=False),
-    models.Q(item_def__isnull=True, kit_definition_item__isnull=True,
-             kit_instance__isnull=True, kit_requirement__isnull=False,
-             placement__isnull=False, kit_presence=False),
-    models.Q(item_def__isnull=True, kit_definition_item__isnull=True,
-             kit_instance__isnull=False, kit_requirement__isnull=True,
-             placement__isnull=False, kit_presence=True),
+    models.Q(
+        item_def__isnull=False,
+        kit_definition_item__isnull=True,
+        kit_requirement__isnull=True,
+        placement__isnull=True,
+        kit_presence=False,
+    ),
+    models.Q(
+        item_def__isnull=True,
+        kit_definition_item__isnull=False,
+        kit_instance__isnull=False,
+        kit_requirement__isnull=True,
+        placement__isnull=False,
+        kit_presence=False,
+    ),
+    models.Q(
+        item_def__isnull=True,
+        kit_definition_item__isnull=True,
+        kit_instance__isnull=True,
+        kit_requirement__isnull=False,
+        placement__isnull=False,
+        kit_presence=False,
+    ),
+    models.Q(
+        item_def__isnull=True,
+        kit_definition_item__isnull=True,
+        kit_instance__isnull=False,
+        kit_requirement__isnull=True,
+        placement__isnull=False,
+        kit_presence=True,
+    ),
     _connector="OR",
 )
+
 
 class Migration(migrations.Migration):
     dependencies = [("cya_obligations", "0019_item_requirement_unit_guard")]

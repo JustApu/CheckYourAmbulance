@@ -49,7 +49,13 @@ from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
 from cya.kits.models import ChecklistKitPlacement, KitDefinition
 from cya.kits.placements import placed_items
-from cya.kits.presence import INSTANCE_PRESENCE_SOURCE, PRESENCE_SOURCE, instance_presence_resolved_item, line_unit_keys, presence_resolved_item
+from cya.kits.presence import (
+    INSTANCE_PRESENCE_SOURCE,
+    PRESENCE_SOURCE,
+    instance_presence_resolved_item,
+    line_unit_keys,
+    presence_resolved_item,
+)
 from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.requirements import bound_template_ids
@@ -407,7 +413,9 @@ def _presence_rows(organization_id, vehicle_id, as_of, pin=None):
         str(pk): str(item)
         for pk, item in KitDefinition.objects.filter(
             organization_id=organization_id,
-            pk__in={p.definition_id for _, resolved, _ in resolved_rows for p in resolved.placements},
+            pk__in={
+                p.definition_id for _, resolved, _ in resolved_rows for p in resolved.placements
+            },
         ).values_list("pk", "presence_item_id")
     }
     for order, resolved, version_id in resolved_rows:

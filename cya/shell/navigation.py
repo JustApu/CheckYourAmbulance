@@ -76,6 +76,7 @@ TABS = (
     Tab("vehicles", "Vehicles", "vehicles", "status", ("/status/", "/fleet/"), ALL_ROLES),
 )
 
+
 def roles_for(user):
     """The user's role names, or an empty set if unknown (fail closed)."""
     lookup = getattr(settings, "CYA_ROLE_LOOKUP", None)

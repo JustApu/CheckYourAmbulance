@@ -25,12 +25,21 @@ PHYSICAL_KIT_CHECK = """IF NEW.kit_presence AND NEW.kit_id IS NULL THEN
  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='physical kit presence check must name a kit';
 END IF;
 """
-SOURCE_CHECK = """IF NEW.kit_presence THEN
-""" + PHYSICAL_CHECK + """ELSE
+SOURCE_CHECK = (
+    """IF NEW.kit_presence THEN
 """
-SOURCE_KIT_CHECK = """IF NEW.kit_presence THEN
-""" + PHYSICAL_KIT_CHECK + """ELSE
+    + PHYSICAL_CHECK
+    + """ELSE
 """
+)
+SOURCE_KIT_CHECK = (
+    """IF NEW.kit_presence THEN
+"""
+    + PHYSICAL_KIT_CHECK
+    + """ELSE
+"""
+)
+
 
 def check_trigger():
     old_content = content_checks.CONTENT_CHECK
@@ -46,17 +55,38 @@ def check_trigger():
         content_checks.KIT_CONTENT_CHECK = old_kit
         presence.PREDECESSOR_NEW = old_predecessor
 
+
 SOURCE = models.Q(
-    models.Q(item_def__isnull=False, kit_definition_item__isnull=True,
-             kit_requirement__isnull=True, kit_presence=False),
-    models.Q(item_def__isnull=True, kit_definition_item__isnull=False,
-             kit__isnull=False, kit_requirement__isnull=True, kit_presence=False),
-    models.Q(item_def__isnull=True, kit_definition_item__isnull=True,
-             kit__isnull=True, kit_requirement__isnull=False, kit_presence=False),
-    models.Q(item_def__isnull=True, kit_definition_item__isnull=True,
-             kit__isnull=False, kit_requirement__isnull=True, kit_presence=True),
+    models.Q(
+        item_def__isnull=False,
+        kit_definition_item__isnull=True,
+        kit_requirement__isnull=True,
+        kit_presence=False,
+    ),
+    models.Q(
+        item_def__isnull=True,
+        kit_definition_item__isnull=False,
+        kit__isnull=False,
+        kit_requirement__isnull=True,
+        kit_presence=False,
+    ),
+    models.Q(
+        item_def__isnull=True,
+        kit_definition_item__isnull=True,
+        kit__isnull=True,
+        kit_requirement__isnull=False,
+        kit_presence=False,
+    ),
+    models.Q(
+        item_def__isnull=True,
+        kit_definition_item__isnull=True,
+        kit__isnull=False,
+        kit_requirement__isnull=True,
+        kit_presence=True,
+    ),
     _connector="OR",
 )
+
 
 class Migration(migrations.Migration):
     dependencies = [("cya_checks", "0017_item_requirement_link_scope")]

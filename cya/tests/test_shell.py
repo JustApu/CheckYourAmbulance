@@ -168,8 +168,10 @@ class NavigationTests(ShellTestCase):
             with self.subTest(role=role):
                 client = self.client_for(self.make_user(str(index), [role]))
                 nav = self.nav(client.get("/"))
-                self.assertRegex(nav, r'<a href="/administration/"[^>]*>.*?<span>Administration</span>')
-                self.assertNotRegex(nav, r'<span>Kits</span>')
+                self.assertRegex(
+                    nav, r'<a href="/administration/"[^>]*>.*?<span>Administration</span>'
+                )
+                self.assertNotRegex(nav, r"<span>Kits</span>")
 
     def test_legacy_emt_constant_aliases_crew(self):
         self.assertEqual(navigation.EMT, navigation.CREW)
@@ -243,7 +245,8 @@ class NavigationTests(ShellTestCase):
             ["Vehicles", "Compartments and systems", "Checklist templates", "Vehicle files"],
         )
         self.assertEqual(
-            titles["kits"], ["Kit definitions", "Physical kits", "Expected kit inventory", "Kit library"]
+            titles["kits"],
+            ["Kit definitions", "Physical kits", "Expected kit inventory", "Kit library"],
         )
         self.assertEqual(
             titles["system"], ["Outgoing mail", "Crew assignments", "Inspection sessions"]

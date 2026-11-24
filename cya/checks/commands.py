@@ -360,7 +360,9 @@ def _resolved_item(
         )
     if kit_presence:
         if kit_id is None:
-            raise CheckError("KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id")
+            raise CheckError(
+                "KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id"
+            )
         from cya.kits.presence import instance_presence_resolved_item
 
         for placement in resolved.placements:
@@ -892,7 +894,9 @@ def record_check(
         raise CheckError("MALFORMED_REQUEST", "kit_presence must be a boolean", path="kit_presence")
     shape["kit_presence"] = kit_presence
     if kit_presence and kit_id is None:
-        raise CheckError("KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id")
+        raise CheckError(
+            "KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id"
+        )
     if kit_presence and kit_requirement_id is not None:
         raise CheckError("MALFORMED_REQUEST", "choose one presence source", path="kit_presence")
     shape["kit_requirement_id"] = _optional_id(kit_requirement_id, "kit_requirement_id")

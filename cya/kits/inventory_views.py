@@ -29,8 +29,9 @@ DENIAL = "MANAGE_KIT_ASSIGNMENT"
 
 def _inventory(org):
     kits = list(
-        KitInstance.objects.filter(organization_id=org, active=True, vehicle__isnull=True)
-        .order_by("label", "id")
+        KitInstance.objects.filter(organization_id=org, active=True, vehicle__isnull=True).order_by(
+            "label", "id"
+        )
     )
     names = dict(
         KitInstanceDefinition.objects.filter(kit__in=kits).values_list(
@@ -54,7 +55,8 @@ def _page(request, user, *, status=200, errors=None, form=None):
                 KitDefinition.objects.filter(organization_id=org, active=True).order_by("label")
             ),
             "kits": _inventory(org),
-            "form": form or {
+            "form": form
+            or {
                 "definition_id": request.POST.get(
                     "definition_id", request.GET.get("definition", "")
                 ),
@@ -109,7 +111,9 @@ def inventory(request):
     except UNAVAILABLE as error:
         logger.error("kit stock creation unavailable (%s)", type(error).__name__)
         return _page(
-            request, user, status=503,
+            request,
+            user,
+            status=503,
             errors=["the change could not be completed; nothing was changed. Try again."],
             form=form,
         )

@@ -83,8 +83,9 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None):
         "compartment_id": request.POST.get("compartment_id", ""),
     }
     stock = list(
-        KitInstance.objects.filter(organization_id=org, active=True, vehicle__isnull=True)
-        .order_by("label", "id")
+        KitInstance.objects.filter(organization_id=org, active=True, vehicle__isnull=True).order_by(
+            "label", "id"
+        )
     )
     stock_definitions = dict(
         KitInstanceDefinition.objects.filter(kit__in=stock).values_list(
@@ -95,7 +96,6 @@ def _page(request, user, vehicle, *, status=200, errors=None, form=None):
     context = {
         "title": f"Physical kit assignments: {vehicle.display_name}",
         "can_manage_positions": permitted("manage_vehicle_positions", str(user.pk), roles),
-
         "vehicle": vehicle,
         "kits": _kits(org, vehicle),
         "stock_kits": [
@@ -227,4 +227,3 @@ def vehicle_kit_instances(request, vehicle_id):
     if request.POST.get("stage") == "stock":
         return _return_to_stock(request, user, vehicle)
     return _page(request, user, vehicle, status=400, errors=["the request was not valid"])
-

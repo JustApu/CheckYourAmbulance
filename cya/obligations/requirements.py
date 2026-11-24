@@ -31,15 +31,12 @@ from cya.checklists.overlay import NoEffectiveVersionError, resolve_checklist
 from cya.checklists.ownership import cutover_at, governs, owners, precedence_key
 from cya.conditions.models import ConditionalRule
 from cya.kits.history import active_kits, active_kits_on_vehicle, slot_of_reference_kit
-from cya.kits.kit_lists import kit_list_effective_at
 from cya.kits.models import (
     ChecklistKitPlacement,
     KitDefinitionItem,
     KitDefinitionPublication,
     KitInstanceDefinition,
-    VehicleKitRequirement,
 )
-from cya.kits.presence import line_unit_key
 from cya.obligations.models import RequirementBinding
 from cya.obligations.state import NO_KIT
 from cya.operations.status import out_of_service_at
@@ -412,7 +409,9 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
         )
         if version_id is None:
             continue  # nothing published yet for D: nothing to inspect
-        kits = _placed_kits(organization_id, vehicle_id, placement, due_at, occurrence.early_at, recorded_before)
+        kits = _placed_kits(
+            organization_id, vehicle_id, placement, due_at, occurrence.early_at, recorded_before
+        )
         if not kits:
             continue
         contents = KitDefinitionItem.objects.filter(version_id=version_id).order_by(

@@ -173,9 +173,7 @@ def _definition(org, definition_id):
     return definition
 
 
-def add_kit_instance(
-    *, label, vehicle_id=None, compartment_id=None, definition_id=None, **context
-):
+def add_kit_instance(*, label, vehicle_id=None, compartment_id=None, definition_id=None, **context):
     """Create an active physical kit, unassigned in stock or assigned to a compartment.
 
     definition_id names the kit definition the instance has, fixed for its life (SPEC 4.6
