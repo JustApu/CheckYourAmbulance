@@ -25,9 +25,9 @@ from cya.kits.models import (
     VehicleKitRequirement,
 )
 
-# Legacy history writes use the current kit-assignment authority. There is no separate
-# manage_vehicle_kit_lists permission after SPEC 7.0.0.
-ACTION = "manage_kit_assignment"
+# Retained legacy history commands stay Supervisor/Administrator-only. They are not a current
+# user-facing workflow and have no separate manage_vehicle_kit_lists permission.
+ACTION = "manage_kit_definitions"
 DRAFT_COMMAND = "VEHICLE_KIT_LIST_DRAFT"
 PUBLISH_COMMAND = "VEHICLE_KIT_LIST_PUBLISH"
 LINE_FIELDS = frozenset({"definition_id", "compartment_id", "required_count", "display_order"})

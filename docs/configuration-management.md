@@ -205,7 +205,7 @@ Each part is one PR, except part 5, which is three (owner decision 2026-11-15, t
    - **5c, assigned physical kits** (`cya/kits/kit_instance_views.py`):
      - a vehicle's active physical kits, their labels and compartments, and the assignment history;
      - assigning an existing stock kit to a vehicle and compartment, or returning an assigned kit to stock;
-     - linking to the physical kit inventory to create or edit a kit, or duplicate one (CFG-5) before assigning it. Assignment history defines what the vehicle is expected to carry; there is no current kit-list draft or publication workflow.
+     - linking to the physical kit inventory to create a kit before assigning it. Assignment history defines what the vehicle is expected to carry; there is no current kit-list draft or publication workflow.
 6. Checklist screens, as two PRs (owner decision 2026-11-15):
    - **6a, templates** (described above): create, duplicate, draft edit one item at a time, publish now or at a station-local date and time after the impact preview, and the versions in force, scheduled and drafted;
    - **6b, overrides** (described above): a vehicle's override in force, scheduled and draft, edited one entry at a time with 6a's item editor, carried over when stale, and published only for a bound vehicle.
