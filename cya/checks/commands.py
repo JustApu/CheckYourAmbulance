@@ -1182,7 +1182,11 @@ def record_check(
                         category=category,
                         severity=severity,
                         fields=selection[1],
-                        affected=[(shape["item_id"], item.requirement.definition_id, item_version)],
+                        affected=(
+                            []
+                            if item.requirement.source == "KIT_INSTANCE_PRESENCE"
+                            else [(shape["item_id"], item.requirement.definition_id, item_version)]
+                        ),
                         item_id=shape["item_id"],
                         kit_id=chosen_kit,
                         # The place of the failed check (SPEC 6.0.0 7.5, 8.1; AC-42 (3)).
@@ -1460,7 +1464,9 @@ def correct_check(
             content = SimpleNamespace(
                 kind="QUANTITY",
                 unit=None,
-                expected_quantity=root.kit_requirement.required_count,
+                expected_quantity=(
+                    1 if root.kit_presence else root.kit_requirement.required_count
+                ),
                 allowed_outcomes=("PASSED", "FAILED", "UNABLE_TO_INSPECT"),
             )
             deviation = None

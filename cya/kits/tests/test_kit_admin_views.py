@@ -6,7 +6,6 @@ import uuid
 from django.test import override_settings
 
 from cya.checklists.models import KitInstance, Vehicle
-from cya.core.models import AuditEvent
 from cya.kits.commands import add_kit_instance
 from cya.kits.definitions import (
     create_kit_definition,

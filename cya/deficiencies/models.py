@@ -500,6 +500,12 @@ class VerificationScopeRow(Evidence):
                         kit_definition_item__isnull=True,
                         kit_requirement__isnull=False,
                     )
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                        kit_instance__isnull=False,
+                    )
                 ),
                 name="verscope_content_source",
             ),
@@ -592,6 +598,12 @@ class DeficiencyScopeExpansion(Evidence):
                         definition__isnull=True,
                         kit_definition_item__isnull=True,
                         kit_requirement__isnull=False,
+                    )
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                        kit_instance__isnull=False,
                     )
                 ),
                 name="defexp_content_source",
@@ -696,6 +708,12 @@ class CheckSuspension(Evidence):
                         definition__isnull=True,
                         kit_definition_item__isnull=True,
                         kit_requirement__isnull=False,
+                    )
+                    | models.Q(
+                        definition__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit_requirement__isnull=True,
+                        kit_instance__isnull=False,
                     )
                 ),
                 name="checksusp_content_source",

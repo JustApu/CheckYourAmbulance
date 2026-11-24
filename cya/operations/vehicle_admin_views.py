@@ -56,6 +56,7 @@ CONFIGURATION_LINKS = (
     ("vehicle-kit-instances", "Assign physical kits", "manage_kit_assignment", True),
 )
 
+
 def _statuses(organization_id, vehicle_ids):
     """{vehicle id: operational status code} from each vehicle's latest status event.
 
