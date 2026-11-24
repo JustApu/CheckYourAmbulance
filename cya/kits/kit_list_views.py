@@ -60,8 +60,8 @@ def vehicles(request):
     return admin_pages.vehicle_choice(
         request,
         user,
-        title="Kit lists",
-        intro="Choose a vehicle to edit and publish its kit list.",
+        title="Expected kit inventory",
+        intro="Choose a vehicle to view or edit the kit types and quantities it is expected to carry.",
         url_name="vehicle-kit-list",
     )
 
@@ -148,7 +148,7 @@ def _page(request, user, vehicle, *, status=200, errors=None, rows=None):
         rows = [_with_note(line) for line in source]
         rows += [{} for _ in range(min(BLANK_ROWS, MAX_ROWS - len(source)))]
     context = {
-        "title": f"Kit list: {vehicle.display_name}",
+        "title": f"Expected kit inventory: {vehicle.display_name}",
         "vehicle": vehicle,
         **state,
         "rows": rows or [],
