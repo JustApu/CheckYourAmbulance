@@ -314,6 +314,7 @@ class RequirementVersion(Evidence):
                         kit_definition_item__isnull=True,
                         placement__isnull=True,
                         kit_requirement__isnull=True,
+                        kit_presence=False,
                     )
                     | models.Q(
                         item_def__isnull=True,
