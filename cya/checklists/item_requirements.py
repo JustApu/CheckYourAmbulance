@@ -230,6 +230,18 @@ def latest_version(requirement_id):
     )
 
 
+def latest_here(vehicle_id, item_id, place):
+    """The latest version, in force or scheduled, of the vehicle's requirement for the item
+    whose latest version is at `place`, or None. Only the given place is looked at."""
+    latest = {}
+    for version in VehicleItemRequirementVersion.objects.filter(
+        vehicle_id=vehicle_id, item_id=item_id
+    ).order_by("effective_at", "revision"):
+        latest[str(version.requirement_id)] = version
+    found = [v for v in latest.values() if _version_place(v) == tuple(place)]
+    return found[0] if found else None
+
+
 def current_or_next(vehicle_id, at):
     """{requirement id: its version in force at `at`, else its first one scheduled after} for
     every requirement of the vehicle: what a vehicle file or a copy of the vehicle carries."""

@@ -818,16 +818,19 @@ def _spec_place(spec):
 
 
 def _requirement_here(template, spec):
-    """The vehicle's item requirement version for the spec's item at the spec's own place, in
-    force at the draft's minimum publish instant, or None (issue #256 C4). Only that place is
-    looked at: an item kept in several places is never matched to another place's requirement.
+    """The latest version, in force or scheduled, of the vehicle's item requirement for the
+    spec's item at the spec's own place, or None (issue #256 C4), with the draft's minimum
+    publish instant. Only that place is looked at: an item kept in several places is never
+    matched to another place's requirement. The latest version is the baseline, as in
+    refresh_specs: published after a scheduled version the row uses it (rule (a)) rather than
+    reverting it; published before, the row is refused (a version cannot precede a later one).
     """
-    from cya.checklists.item_requirements import in_force_here
+    from cya.checklists.item_requirements import latest_here
 
     if not _uses_requirements(template) or spec.get("kit_id") or not spec.get("item_id"):
         return None, None
     at = minimum_publish_instant(template.pk)
-    return in_force_here(str(template.vehicle_id), spec["item_id"], _spec_place(spec), at), at
+    return latest_here(str(template.vehicle_id), spec["item_id"], _spec_place(spec)), at
 
 
 def _requirement_context(template, spec, item_id):

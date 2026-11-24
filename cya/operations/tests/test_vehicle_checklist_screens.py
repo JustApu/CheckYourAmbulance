@@ -519,6 +519,55 @@ class RequirementEditorTests(KitCase):  # SPEC 6.0.0 CHK-11, AC-42 (1), (4); iss
             publish_template_version(version_id=str(draft.pk), **self.context())
         self.assertEqual(self.versions(), before)
 
+    def test_a_new_row_takes_a_scheduled_requirement_and_keeps_it(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from cya.checklists.commands import (
+            publish_item_requirement_version,
+            publish_template_version,
+        )
+
+        without = [i for i in self.own_items() if i["item_id"] != str(self.masks.pk)]
+        for checklist in (self.first, self.second):  # no checklist inspects the masks now
+            self.publish_checklist(checklist, without)
+        current = self.masks_version()
+        scheduled = timezone.now() + timedelta(days=30)
+        publish_item_requirement_version(
+            requirement_id=str(current.requirement_id),
+            kind="QUANTITY",
+            allowed_outcomes=current.allowed_outcomes,
+            instructions=current.instructions,
+            expected_quantity=8,
+            compartment_id=self.cabinet_row,
+            effective_at=scheduled,
+            **self.context(),
+        )
+        third = self.vehicle_checklist(label="Third")
+        saved = self.post(
+            f"{LIST}{third.pk}/items/new/",
+            place=f"COMPARTMENT:{self.cabinet_row}",
+            base_revision="0",
+            kind="QUANTITY",
+            expected_quantity="99",
+            instructions="Typed.",
+            item_id=str(self.masks.pk),
+            use_requirement="on",
+        )
+        self.assertEqual(saved.status_code, 302, saved.content.decode()[:2000])
+        row = ChecklistItemDef.objects.get(checklist_version__template=third, item=self.masks)
+        self.assertEqual(row.expected_quantity, 8)  # the scheduled version, not 6 in force
+        before, revision = self.versions(), self.masks_version().revision
+        publish_template_version(
+            version_id=str(row.checklist_version_id),
+            effective_at=scheduled + timedelta(days=1),
+            **self.context(),
+        )
+        self.assertEqual(self.versions(), before)  # rule (a): quantity 8 is not reverted
+        latest = self.masks_version()
+        self.assertEqual((latest.revision, latest.expected_quantity), (revision, 8))
+
     def test_a_new_row_takes_the_requirement_at_the_chosen_place_only(self):
         third = self.vehicle_checklist(label="Third")
         posted = {
