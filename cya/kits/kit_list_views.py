@@ -27,6 +27,7 @@ from cya.kits.kit_lists import (
     save_vehicle_kit_list_draft,
 )
 from cya.kits.models import (
+    STORED_COUNT_MAX,
     KitDefinition,
     VehicleKitListPublication,
     VehicleKitListVersion,
@@ -154,6 +155,7 @@ def _page(request, user, vehicle, *, status=200, errors=None, rows=None):
         "editable": editable,
         "line_count": len(source),
         "max_rows": MAX_ROWS,
+        "max_count": STORED_COUNT_MAX,
         "draft_operation_id": admin_pages.new_operation_id(),
         "publish_operation_id": admin_pages.new_operation_id(),
         "errors": errors or [],
