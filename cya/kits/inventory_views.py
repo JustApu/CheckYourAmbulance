@@ -50,7 +50,9 @@ def _page(request, user, *, status=200, errors=None, form=None):
             ),
             "kits": _inventory(org),
             "form": form or {
-                "definition_id": request.POST.get("definition_id", request.GET.get("definition", "")),
+                "definition_id": request.POST.get(
+                    "definition_id", request.GET.get("definition", "")
+                ),
                 "label": request.POST.get("label", request.GET.get("label", ""))[:200],
             },
             "operation_id": admin_pages.new_operation_id(),
@@ -80,7 +82,9 @@ def inventory(request):
     }
     operation_id = admin_pages.operation_id_from(request)
     if operation_id is None:
-        return _page(request, user, status=400, errors=["the form was not valid; try again"], form=form)
+        return _page(
+            request, user, status=400, errors=["the form was not valid; try again"], form=form
+        )
     if not form["definition_id"]:
         return _page(request, user, status=400, errors=["choose the kit type"], form=form)
     try:
@@ -94,11 +98,15 @@ def inventory(request):
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
     except OperationConflict:
-        return _page(request, user, status=409, errors=["this form was already used; try again"], form=form)
+        return _page(
+            request, user, status=409, errors=["this form was already used; try again"], form=form
+        )
     except UNAVAILABLE as error:
         logger.error("kit stock creation unavailable (%s)", type(error).__name__)
         return _page(
             request, user, status=503,
-            errors=["the change could not be completed; nothing was changed. Try again."], form=form,
+            errors=["the change could not be completed; nothing was changed. Try again."],
+            form=form,
         )
-    return HttpResponseRedirect(reverse("kit-instance-inventory") + "?" + urlencode({"saved": "created"}))
+    url = reverse("kit-instance-inventory")
+    return HttpResponseRedirect(url + "?" + urlencode({"saved": "created"}))
