@@ -43,8 +43,7 @@ updated in the same transaction. Every as-of question reads the events, never th
 through `run_command` (audited, idempotent on the operation id), and lock the vehicles involved
 in id order before the kit, the same lock order as obligation generation. After the command
 commits, those vehicles' upcoming obligations are reconciled; a failure there is logged and left
-to the next `generate_obligations` run, as for requirement bindings. They are server functions;
-there is no HTTP route or screen yet.
+to the next `generate_obligations` run, as for requirement bindings. The Administration screens provide separate stock creation and vehicle assignment workflows.
 
 ## Which instances a vehicle owes
 
@@ -109,7 +108,7 @@ Without kit rows the migration reverses and re-applies cleanly, which
 ## Not in this issue
 
 Check-to-obligation linking and the conflict warning ([issue #74](https://github.com/JustApu/CheckYourAmbulance-archive/issues/74), [issue #75](https://github.com/JustApu/CheckYourAmbulance-archive/issues/75)); the attention state
-([issue #83](https://github.com/JustApu/CheckYourAmbulance-archive/issues/83)); an HTTP route or screen to manage kits; per-instance expiration dates (the sealed-kit
+([issue #83](https://github.com/JustApu/CheckYourAmbulance-archive/issues/83)); per-instance expiration dates (the sealed-kit
 workflow, SPEC §10.1); roles beyond `manage_kit_assignment`. SPEC §23 has no numbered criterion
 for kit instances: `tests/scenarios/EX-kit-instance-obligations.json` is a pending contract
 citing AC-1, because adding a numbered criterion needs a SPEC amendment.
