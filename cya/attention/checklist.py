@@ -114,8 +114,7 @@ class ChecklistRow:
     obligation_completed_at: datetime | None = None
     # The shown obligation is under a supervisor check suspension still in force (SPEC 8.9).
     check_suspended: bool = False
-    # A kit presence row (SPEC 2.0.0 KDEF-10, KDEF-12): the kit list line a count is recorded
-    # against; kit_id is then None and expected_quantity is the line's exact count.
+    # Legacy kit-list presence row; current physical presence rows use kit_presence and kit_id.
     kit_requirement_id: str | None = None
     kit_presence: bool = False
     # SPEC 6.0.0 CHK-11: the item requirement of a loose item's row after the cutover (one
@@ -756,8 +755,8 @@ def _rows(
             ChecklistRow(
                 item_id=item_id,
                 item_label=labels.get(item_id, ""),
-                # A presence row's internal key is its line's unit key, never a kit, and a
-                # loose item's is its item requirement (SPEC 6.0.0 CHK-11).
+                # Physical presence rows retain the assigned unit id; legacy line rows do not.
+                # A loose item's is its item requirement (SPEC 6.0.0 CHK-11).
                 kit_id=str(kit_id) if _is_kit(kit_id, requirement) else None,
                 item_requirement_id=getattr(requirement, "item_requirement_id", None),
                 kit_label=kit_label,
