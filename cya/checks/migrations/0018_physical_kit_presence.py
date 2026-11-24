@@ -13,7 +13,10 @@ PHYSICAL_CHECK = """IF NOT EXISTS (
  JOIN checklist_kit_placement pl ON pl.definition_id=kd.definition_id
  JOIN kit_definition d ON d.id=kd.definition_id
  JOIN kit_assignment_event e ON e.kit_id=NEW.kit_id
- WHERE kd.kit_id=NEW.kit_id AND pl.checklist_version_id=NEW.checklist_version_id
+ WHERE kd.kit_id=NEW.kit_id AND kd.organization_id=NEW.organization_id
+ AND pl.organization_id=NEW.organization_id AND d.organization_id=NEW.organization_id
+ AND e.organization_id=NEW.organization_id
+ AND pl.checklist_version_id=NEW.checklist_version_id
  AND d.presence_item_id=NEW.item_id AND e.vehicle_id=NEW.vehicle_id
  AND e.active=1 AND e.compartment_id IS NOT NULL)
 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='physical kit presence check does not match'; END IF;
