@@ -314,7 +314,9 @@ def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at, recor
     """
     kits = [
         kit
-        for kit in active_kits_on_vehicle(organization_id, vehicle_id, due_at)
+        for kit in active_kits_on_vehicle(
+            organization_id, vehicle_id, due_at, recorded_before=recorded_before
+        )
         if kit.since_at < early_at
     ]
     if not kits:
