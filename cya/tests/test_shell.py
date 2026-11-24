@@ -295,7 +295,7 @@ class NavigationTests(ShellTestCase):
         )
         self.assertEqual(
             titles["kits"],
-            ["Kit definitions", "Physical kits", "Expected kit inventory", "Kit library"],
+            ["Kit definitions", "Physical kit inventory", "Assign physical kits", "Kit library"],
         )
         self.assertEqual(
             titles["system"], ["Outgoing mail", "Crew assignments", "Inspection sessions"]
@@ -533,7 +533,7 @@ class SortableTableTemplateTests(TestCase):
         source = pathlib.Path(get_template("kits/kit_instances.html").origin.name).read_text(
             encoding="utf-8"
         )
-        self.assertIn('<th scope="col" data-nosort>Duplicate</th>', source)
+        self.assertIn('<th scope="col" data-nosort>Change</th>', source)
 
     def test_script_reports_sort_state_and_filter_counts(self):
         js = render_to_string("shell/shell.js")

@@ -375,7 +375,7 @@ def _presence_items(
                 early_at=occurrence.early_at,
                 grace_at=occurrence.grace_at,
                 kit_id=kit.kit_id,
-                kit_event_id=kit.event_id,
+                kit_event_id=kit.since_event_id,
                 kit_presence=True,
                 placement_id=pin["placement"],
             ),

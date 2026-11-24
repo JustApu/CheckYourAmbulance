@@ -50,12 +50,11 @@ SAVED = {
 EXPECTED = (vehicle_rules.VehicleError, KeyRuleError, ValueError)
 # The vehicle's other configuration pages, each shown only to those who may open it.
 CONFIGURATION_LINKS = (
-    ("vehicle-bindings", "Checklist assignments", "bind_unbind_template"),
-    ("vehicle-positions", "Compartments and systems", "manage_vehicle_positions"),
-    ("kit-instance-inventory", "Physical kit inventory", "manage_kit_assignment"),
-    ("vehicle-kit-instances", "Assign physical kits", "manage_kit_assignment"),
+    ("vehicle-bindings", "Checklist assignments", "bind_unbind_template", True),
+    ("vehicle-positions", "Compartments and systems", "manage_vehicle_positions", True),
+    ("kit-instance-inventory", "Physical kit inventory", "manage_kit_assignment", False),
+    ("vehicle-kit-instances", "Assign physical kits", "manage_kit_assignment", True),
 )
-
 
 def _statuses(organization_id, vehicle_ids):
     """{vehicle id: operational status code} from each vehicle's latest status event.
@@ -215,8 +214,11 @@ def _vehicle_page(
         "changing": changing,
         "can_duplicate": _can(user, roles, DUPLICATE_ACTION),
         "links": [
-            {"url": reverse(name, args=[vehicle.pk]), "label": label}
-            for name, label, action in CONFIGURATION_LINKS
+            {
+                "url": reverse(name, args=[vehicle.pk] if vehicle_scoped else None),
+                "label": label,
+            }
+            for name, label, action, vehicle_scoped in CONFIGURATION_LINKS
             if _can(user, roles, action)
         ],
         "errors": errors or [],
