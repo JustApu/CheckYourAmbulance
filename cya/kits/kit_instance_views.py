@@ -182,6 +182,30 @@ def _return_to_stock(request, user, vehicle):
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "stock"}))
 
 
+def _return_to_stock(request, user, vehicle):
+    operation_id = admin_pages.operation_id_from(request)
+    kit_id = request.POST.get("kit_id", "")
+    if operation_id is None:
+        return _page(request, user, vehicle, status=400, errors=["the form was not valid; try again"])
+    try:
+        record_kit_assignment(
+            kit_id=kit_id,
+            active=True,
+            **{**_context_ids(user), "operation_id": operation_id},
+        )
+    except (KitError, ValueError) as error:
+        return _page(request, user, vehicle, status=400, errors=[str(error)])
+    except CommandDenied:
+        return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
+    except OperationConflict:
+        return _page(request, user, vehicle, status=409, errors=["this form was already used; try again"])
+    except UNAVAILABLE as error:
+        logger.error("kit return to stock unavailable (%s)", type(error).__name__)
+        return _page(request, user, vehicle, status=503, errors=["the change could not be completed; nothing was changed. Try again."])
+    url = reverse("vehicle-kit-instances", args=[vehicle.pk])
+    return HttpResponseRedirect(url + "?" + urlencode({"saved": "stock"}))
+
+
 @never_cache
 @require_http_methods(["GET", "POST"])
 def vehicle_kit_instances(request, vehicle_id):
