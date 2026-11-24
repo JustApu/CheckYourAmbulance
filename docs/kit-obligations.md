@@ -151,7 +151,7 @@ Designations do not themselves change obligations, checks or kit assignment hist
 
 `version_effective_at(organization_id, definition_id, at)` answers which published version is in force at an instant.
 
-**Not yet.** Checklists still place kit contents by slot, so a kit definition changes no obligation, check or printout yet. Kit-library import and export (§4.7) is part 3: see [kit-library files](kit-library-files.md). Placing kits by definition (`checklist_kit_placement`, KDEF-4) is part 4, below, and vehicle files are part 5: see [vehicle files](vehicle-files.md).
+Kit definitions now drive inspection obligations through checklist placements and physical kit assignments. Kit-library import and export is documented in [kit-library files](kit-library-files.md). The following sections describe checklist placement, assignment-based presence and content obligations, and compatibility with historical vehicle kit lists.
 
 ## Kits placed by definition and historical kit lists
 

@@ -72,9 +72,9 @@ Every mutable change has an audit entry in the same transaction.
 | `kit_definition_publication` | A | version_id ref (unique), effective_at ≥ recorded_at, actor, command_id ref (`KIT_DEFINITION_PUBLISH`); refused for an empty version; one definition's publications are strictly ordered by effective_at |
 | `kit_instance_definition` | A | kit_id ref (unique), definition_id ref (active at insert), actor, command_id ref (the `KIT_ADD` receipt of the kit's own first `kit_assignment_event`, whose response records this definition_id as requested); the definition a kit instance has, fixed at creation (KDEF-3); none for instances made before kit definitions (KDEF-8) |
 | `checklist_kit_placement` | V | checklist_version_id ref, definition_id ref (kit definition the checklist inspects), display_order; unique version/definition; no compartment and no count; frozen with its checklist version once published (SPEC 4.6 KDEF-4, [issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129)) |
-| `vehicle_kit_list_version` | V | vehicle_id ref, revision, created_at; unique vehicle/revision; published iff a `vehicle_kit_list_publication` names it, then frozen (SPEC 4.6 KDEF-9, [issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129)) |
-| `vehicle_kit_requirement` | V | version_id ref, definition_id ref, compartment_id ref (one of the list vehicle's rows; names the slot), required_count ≥ 1 (the exact count), display_order; unique version/compartment/definition; frozen with its version (KDEF-9, KDEF-10) |
-| `vehicle_kit_list_publication` | A | version_id ref (unique), effective_at ≥ recorded_at, actor, command_id ref (`VEHICLE_KIT_LIST_PUBLISH`); one vehicle's publications have strictly increasing effective instants (KDEF-9, CHK-3) |
+| `vehicle_kit_list_version` | V | legacy vehicle count configuration retained for historical/cabinet evidence and compatibility imports; published versions remain frozen and do not generate new vehicle-presence obligations (SPEC 7.0.0 KDEF-9) |
+| `vehicle_kit_requirement` | V | legacy kit-count row retained for historical/cabinet evidence and compatibility imports; it does not generate current vehicle presence obligations (KDEF-9 to KDEF-12) |
+| `vehicle_kit_list_publication` | A | historical publication of a vehicle count configuration; retained for historical/cabinet evidence and compatibility imports; no current vehicle expectation is derived from the count (KDEF-9) |
 | `position_key` | A | kind (`COMPARTMENT` or `SYSTEM`), stable_slot_id, key (lowercase key format); unique per organization and kind on both the slot and the key; the slot must exist; actor, command_id ref (`POSITION_KEY_SET`, `VEHICLE_IMPORT` or `POSITION_ADD`; the slot row must already exist); one key per position, never changed or removed (SPEC 2.1.0 IMP-6, [issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129)) |
 | `vehicle_status_event` | A | vehicle_id ref, prior_event_id? ref, status, explanation, restrictions?; sequence unique per vehicle |
 | `vehicle_activity_event` | A | vehicle_id ref, prior_event_id? ref, active, basis (`CHANGE` or `BASELINE`); sequence unique per vehicle. A baseline is only a vehicle's first event and has no user actor (its receipt names the service identity); active equals the vehicle's flag when written (SPEC 4.8 CFG-1, [issue #130](https://github.com/JustApu/CheckYourAmbulance/issues/130)) |
@@ -148,9 +148,11 @@ missed inspections. As-of queries use only selections recorded by T. ADH-1 order
 are separate non-routine obligations effective from their recorded request, with
 no selection row, even when the same item/kit/due anchor has a routine obligation.
 `kit_key` is the kit instance for an item inside a kit and NO_KIT otherwise, except for a kit
-presence obligation (SPEC 2.0.0 KDEF-12): it has no kit instance and carries its kit list line's
-unit key (`cya.kits.presence.line_unit_key`: vehicle, definition and compartment slot), so two
-lines of one definition are separate anchors and a count change stays on the same anchor.
+legacy kit-list presence obligation (SPEC 2.0.0 KDEF-12): it has no kit instance and carries its
+kit list line's unit key (`cya.kits.presence.line_unit_key`: vehicle, definition and compartment
+slot), so two lines of one definition are separate historical anchors. Current physical-kit
+presence obligations instead key by the assigned kit instance and its assignment run (KDEF-9 to
+KDEF-12); legacy rows remain readable but do not generate new expectations.
 
 `obligation_selection` has unique keys on
 `(organization_id, vehicle_id, item_id, kit_key, due_at, sequence)` and on non-null
