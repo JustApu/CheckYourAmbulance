@@ -64,7 +64,8 @@ class KitAssignmentEvent(Evidence):
             # An active kit is in a compartment slot of a vehicle; a compartment implies a vehicle.
             models.CheckConstraint(
                 condition=(
-                    models.Q(active=True, vehicle__isnull=False, compartment__isnull=False)
+                    models.Q(active=True, vehicle__isnull=True, compartment__isnull=True)
+                    | models.Q(active=True, vehicle__isnull=False, compartment__isnull=False)
                     | models.Q(active=False, vehicle__isnull=True, compartment__isnull=True)
                 ),
                 name="kitassign_placement",
