@@ -709,13 +709,19 @@ def correction_scope(organization_id, deficiency, now):
         for item in placed:
             if any(kit_id == str(kit.pk) for kit_id, _label in item.kits):
                 selected.append(_row_of(item, str(kit.pk)))
-        definition_id = KitInstanceDefinition.objects.filter(
-            organization_id=organization_id, kit_id=kit.pk
-        ).values_list("definition_id", flat=True).first()
+        definition_id = (
+            KitInstanceDefinition.objects.filter(
+                organization_id=organization_id, kit_id=kit.pk
+            )
+            .values_list("definition_id", flat=True)
+            .first()
+        )
         if definition_id:
-            presence_item_id = KitDefinition.objects.filter(
-                organization_id=organization_id, pk=definition_id
-            ).values_list("presence_item_id", flat=True).first()
+            presence_item_id = (
+                KitDefinition.objects.filter(organization_id=organization_id, pk=definition_id)
+                .values_list("presence_item_id", flat=True)
+                .first()
+            )
             if str(presence_item_id) == str(deficiency.item_id):
                 selected.append(ScopeRow(str(deficiency.item_id), None, str(kit.pk)))
     elif deficiency.compartment_id:
@@ -876,14 +882,21 @@ def _expansions(organization_id, deficiency, current, placed=()):
                 active=True,
             ).exists()
             if active_kit:
-                definition_id = KitInstanceDefinition.objects.filter(
-                    organization_id=organization_id, kit_id=kit_id
-                ).values_list("definition_id", flat=True).first()
-                if definition_id and KitDefinition.objects.filter(
-                    organization_id=organization_id,
-                    pk=definition_id,
-                    presence_item_id=item_id,
-                ).exists():
+                definition_id = (
+                    KitInstanceDefinition.objects.filter(
+                        organization_id=organization_id, kit_id=kit_id
+                    )
+                    .values_list("definition_id", flat=True)
+                    .first()
+                )
+                if (
+                    definition_id
+                    and KitDefinition.objects.filter(
+                        organization_id=organization_id,
+                        pk=definition_id,
+                        presence_item_id=item_id,
+                    ).exists()
+                ):
                     applicable.append(ScopeRow(str(item_id), None, str(kit_id)))
                     continue
         content = placed_entry(placed, item_id, kit_id)

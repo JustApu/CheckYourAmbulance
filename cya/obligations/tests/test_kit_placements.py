@@ -435,9 +435,7 @@ class PlacedKitCheckTests(PlacedKitCase):
             for r in rows
             if r.kit_id and r.item_id in contents
         }
-        self.assertEqual(
-            set(placed), {(item, kit) for item in contents for kit in (first, second)}
-        )
+        self.assertEqual(set(placed), {(item, kit) for item in contents for kit in (first, second)})
         for (item, _kit), row in placed.items():
             self.assertEqual(row.definition_id, contents[item])
             self.assertEqual(row.obligation_state, "CURRENT")

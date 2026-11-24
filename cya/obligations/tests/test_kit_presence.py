@@ -4,6 +4,7 @@ from importlib import import_module
 from uuid import uuid4
 
 from django.db import DatabaseError, transaction
+from django.test import tag
 
 from cya.checklists.models import Compartment
 from cya.checks.commands import CheckError, correct_check, record_check
@@ -199,6 +200,7 @@ class PresenceCheckTests(PresenceCase):
         }
         self.assertEqual(found, {self.cabinet_kit: "PASSED"})
 
+    @tag("migration_rollback")
     def test_missing_kit_failure_creates_deficiency_for_that_instance(self):
         from cya.deficiencies.commands import record_correction, start_work
         from cya.deficiencies.models import (
@@ -283,8 +285,8 @@ class PresenceCheckTests(PresenceCase):
         self.assertEqual(presence[self.cabinet_kit].obligation_state, "SATISFIED")
         self.assertEqual(presence[self.drawer_kit].obligation_state, "CURRENT")
         sections, kits = outage_sheet(rows)
-        self.assertEqual({kit.label for kit in kits.values()}, {"Jump kit 1", "Jump kit 2"})
-        self.assertEqual({kit.place for kit in kits.values()}, {self.cabinet.label, self.drawer.label})
+        self.assertEqual({kit.label for kit in kits}, {"Jump kit 1", "Jump kit 2"})
+        self.assertEqual({kit.place for kit in kits}, {self.cabinet.label, self.drawer.label})
 
     def test_presence_row_precedes_the_same_kits_contents(self):
         from cya.attention.checklist import vehicle_checklist
