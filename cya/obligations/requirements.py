@@ -99,6 +99,7 @@ class DesiredItem:
     # A kit presence requirement (SPEC 2.0.0 KDEF-10 to KDEF-12): its kit list line and that
     # line's unit key, which stands in for the kit key of the obligation stream.
     kit_requirement_id: str | None = None
+    kit_presence: bool = False
     unit_key: str | None = None
     # SPEC 6.0.0 CHK-11: an item outside a kit after the item-requirement cutover is owed per
     # vehicle item requirement. Its requirement id is the unit key (one stream per stock, which
@@ -303,7 +304,7 @@ def _definition_version(organization_id, definition_id, due_at, recorded_before)
     return str(latest) if latest else None
 
 
-def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at):
+def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at, recorded_before=None):
     """Instances of the placed definition owed for this inspection (TIME-1a, KDEF-3, KDEF-4).
 
     Every instance with the placed definition that is on the vehicle at D, in any compartment
@@ -336,32 +337,34 @@ def _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before):
 
 
 def _presence_items(
-    organization_id, vehicle_id, occurrence, publication, resolved, placement, lines, context
+    organization_id, vehicle_id, occurrence, publication, resolved, placement, _lines, context
 ):
-    """Kit presence requirements for one placed definition (SPEC 2.0.0 KDEF-10, KDEF-12).
+    """One expected presence check for each assigned physical kit in a placed definition.
 
-    One per line of the vehicle's kit list in force at D that lists the placed definition: an
-    obligation of the definition's presence item outside any kit, pinning the line and the
-    placement. Its stream is keyed by the line's unit key, so two compartments of one
-    definition are separate obligations and a count change stays on the same stream.
+    The requirement stream follows the kit instance and its uninterrupted assignment event. Stock
+    kits are not on the vehicle history and therefore create no expectation.
     """
-    _due_at, _recorded_before, conditional = context
-    for line in lines:
-        if str(line.definition_id) != str(placement.definition_id):
-            continue
-        item_id = str(line.definition.presence_item_id)
-        unit = line_unit_key(vehicle_id, line.definition_id, line.compartment.stable_slot_id)
+    due_at, recorded_before, conditional = context
+    contents = active_kits_on_vehicle(
+        organization_id, vehicle_id, due_at, recorded_before=recorded_before
+    )
+    assigned = _placed_kits(
+        organization_id, vehicle_id, placement, due_at, occurrence.early_at, recorded_before
+    )
+    for kit in assigned:
+        item_id = str(placement.definition.presence_item_id)
         pin = {
             "binding": occurrence.binding_id,
             "conditional": conditional.get(item_id),
-            "kit_requirement": str(line.pk),
+            "kit_presence": kit.kit_id,
+            "kit_assignment": kit.event_id,
             "placement": str(placement.pk),
             "override": resolved.override_version_id,
             "publication": str(publication.pk),
             "schedule": occurrence.schedule_rule_id,
         }
         yield (
-            (item_id, unit),
+            (item_id, kit.kit_id),
             DesiredItem(
                 item_id=item_id,
                 requirement_id=requirement_id(organization_id, vehicle_id, item_id, pin),
@@ -372,12 +375,13 @@ def _presence_items(
                 schedule_rule_id=pin["schedule"],
                 conditional_rule_id=pin["conditional"],
                 slot=occurrence.slot,
-                due_at=_due_at,
+                due_at=due_at,
                 early_at=occurrence.early_at,
                 grace_at=occurrence.grace_at,
+                kit_id=kit.kit_id,
+                kit_event_id=kit.event_id,
+                kit_presence=True,
                 placement_id=pin["placement"],
-                kit_requirement_id=pin["kit_requirement"],
-                unit_key=unit,
             ),
         )
 
@@ -409,7 +413,7 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
         )
         if version_id is None:
             continue  # nothing published yet for D: nothing to inspect
-        kits = _placed_kits(organization_id, vehicle_id, placement, due_at, occurrence.early_at)
+        kits = _placed_kits(organization_id, vehicle_id, placement, due_at, occurrence.early_at, recorded_before)
         if not kits:
             continue
         contents = KitDefinitionItem.objects.filter(version_id=version_id).order_by(
