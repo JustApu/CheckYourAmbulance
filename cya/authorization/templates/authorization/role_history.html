@@ -11,7 +11,7 @@
 {% if history %}
 <div class="role-history-scroll" role="region" aria-label="Role history for {{ target.email }}" tabindex="0">
 <table aria-label="Role history for {{ target.email }}" class="role-history-table">
-  <thead><tr><th scope="col">When (station time)</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead>
+  <thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">Role</th><th scope="col">Changed by</th></tr></thead>
   <tbody>
   {% for event in history %}
     <tr>

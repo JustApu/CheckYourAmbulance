@@ -36,7 +36,7 @@
         <option value="">Choose a truck</option>
         {% for v in home.truck_choices %}<option value="{{ v.id }}">{{ v.display_name }}{% if v.number %} #{{ v.number }}{% endif %}</option>{% endfor %}
       </select></div>
-      <div class="crew-field"><label for="home-truck-until">Until (station time)</label>
+      <div class="crew-field"><label for="home-truck-until">Until</label>
       <input id="home-truck-until" name="until" type="time" required></div>
       <div class="crew-field"><label for="home-truck-until-date">End date</label>
       <input id="home-truck-until-date" name="until_date" type="date" value="{{ home.truck_today }}" required></div>

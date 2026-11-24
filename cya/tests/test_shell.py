@@ -84,6 +84,55 @@ class StationTimeFilterTests(SimpleTestCase):
             )
 
 
+# Comments in templates and scripts are not shown, so they may name station time.
+COMMENTS = re.compile(
+    r"\{#.*?#\}|\{% comment %\}.*?\{% endcomment %\}|<!--.*?-->|/\*.*?\*/|(?<![:\w])//[^\n]*", re.S
+)
+STATION_TIME = re.compile(r"\bstation[\s-]+time\b", re.I)
+
+
+def station_time_labels(text):
+    """Every user-facing mention of "station time" in a template or script source."""
+    return [match.group(0) for match in STATION_TIME.finditer(COMMENTS.sub("", text))]
+
+
+class StationTimeLabelTests(SimpleTestCase):
+    """Station time is the only zone shown, so no screen labels it (owner, 2026-11-24)."""
+
+    def test_the_matcher_finds_every_spelling_outside_comments(self):
+        for text in (
+            "<label>Until (station time)</label>",
+            "<label>Until station time</label>",
+            '"Choose a due time in station time"',
+            '"Choose a due time in station time."',
+            "{{ now|time:'H:i' }} Station Time",
+            "<th>When (station-time)</th>",
+            '<a href="https://example.test/">Due at station time</a>',
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(len(station_time_labels(text)), 1)
+        for text in (
+            "{{ value|station_time }}",
+            "{% load station_time %}",
+            "{# station time is the only zone #}",
+            "<!-- station time -->",
+            "// Station time without a zone",
+            "/* station time */",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(station_time_labels(text), [])
+
+    def test_no_template_or_script_labels_a_time_as_station_time(self):
+        root = pathlib.Path(__file__).resolve().parents[1]
+        found = []
+        for path in sorted(root.rglob("*")):
+            if path.suffix not in {".html", ".js", ".txt"} or "tests" in path.parts:
+                continue
+            for label in station_time_labels(path.read_text(encoding="utf-8")):
+                found.append(f"{path.relative_to(root)}: {label}")
+        self.assertEqual(found, [])
+
+
 class OrganizationTimezoneMiddlewareTests(TestCase):
     def test_station_zone_is_activated_and_anonymous_requests_reset_to_utc(self):
         middleware = OrganizationTimezoneMiddleware(

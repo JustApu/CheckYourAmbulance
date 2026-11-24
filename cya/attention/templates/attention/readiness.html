@@ -9,7 +9,7 @@
 {% endblock %}
 {% block content %}
 <form class="panel" method="get" action="">
-<label>Show the picture as of a past date and time (station time) <input name="as_of" type="datetime-local" value="{% if not live %}{{ picture.as_of|date:'Y-m-d\\TH:i' }}{% endif %}"></label>
+<label>Show the picture as of a past date and time <input name="as_of" type="datetime-local" value="{% if not live %}{{ picture.as_of|date:'Y-m-d\\TH:i' }}{% endif %}"></label>
 <button type="submit" class="button">Show</button>{% if not live %} <a class="button" href="{% url 'fleet-readiness' %}">Back to now</a>{% endif %}
 </form>
 <div class="readiness-filter">
