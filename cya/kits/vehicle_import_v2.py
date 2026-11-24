@@ -460,12 +460,42 @@ def _item_entry(definition, labels, key_of_row):
     }
 
 
+def _requirement_versions(org, vehicle, now):
+    """{requirement id: version} to export (in force now, else first scheduled), or {} before
+    the organization's item-requirement cutover."""
+    from cya.checklists import item_requirements as rules
+
+    if not rules.has_cutover(org):
+        return {}
+    return rules.current_or_next(str(vehicle.pk), now)
+
+
+def export_requirements(org, vehicle, now, key_of_row):
+    """Every item requirement of the vehicle as an item dict (SPEC 6.0.0 IMP-7, CHK-11),
+    including one no checklist inspects any more."""
+    labels = dict(Item.objects.filter(organization_id=org).values_list("pk", "label"))
+    labels = {str(pk): label for pk, label in labels.items()}
+    versions = sorted(
+        _requirement_versions(org, vehicle, now).values(),
+        key=lambda v: (labels.get(str(v.item_id), ""), v.place_kind, str(v.place_slot_id)),
+    )
+    return [_item_entry(v, labels, key_of_row) for v in versions]
+
+
 def export_checklists(org, vehicle, now, key_of_row):
-    """The vehicle's checklists in schema 2 normal form, in precedence order (CHK-10)."""
+    """The vehicle's checklists in schema 2 normal form, in precedence order (CHK-10).
+
+    After the item-requirement cutover a mapped row is written with its requirement's place and
+    values, in force now (else first scheduled): a row keeps the values it recorded, while
+    reads follow the requirement (CHK-5), so the file never carries a stale copy.
+    """
+    from cya.checklists.models import ItemRequirementMap
+
     labels = {
         str(pk): label
         for pk, label in Item.objects.filter(organization_id=org).values_list("pk", "label")
     }
+    versions = _requirement_versions(org, vehicle, now)
     found = []
     for checklist in ChecklistTemplate.objects.filter(vehicle=vehicle).order_by("precedence"):
         version = current_version(checklist, now)
@@ -486,22 +516,112 @@ def export_checklists(org, vehicle, now, key_of_row):
             if version
             else []
         )
+        mapped = (
+            {
+                str(row): versions.get(str(requirement))
+                for row, requirement in ItemRequirementMap.objects.filter(
+                    checklist_version=version, requirement__isnull=False
+                ).values_list("item_def_id", "requirement_id")
+            }
+            if version and versions
+            else {}
+        )
         found.append(
             {
                 "id": f"checklist-{checklist.precedence}",
                 "label": checklist.label,
                 "schedules": sorted(_bound_slots(org, vehicle, checklist)),
                 "kits": kits,
-                "items": [_item_entry(d, labels, key_of_row) for d in definitions],
+                "items": [
+                    _item_entry(mapped.get(str(d.pk)) or d, labels, key_of_row) for d in definitions
+                ],
             }
         )
     return found
+
+
+def requirement_notes(ctx, plans, vehicle):
+    """What publishing the import's drafts would do to the vehicle's item requirements.
+
+    SPEC 6.0.0 CHK-11: a vehicle has one item requirement per item and place, so two of the
+    file's checklists that give one item and place different values are an error (AC-42 (1); a
+    schema 3 file cannot express that). For an existing vehicle each item and place is compared
+    with its requirement in force: new, changed (and refused at publication while a checklist
+    not in the file inspects it), or unchanged (no note). A file requirement no checklist
+    inspects is not imported: requirements arise only when a checklist is published.
+    """
+    from cya.checklists import item_requirements as rules
+
+    notes, seen = [], {}
+    in_file = {p["label"] for p in plans}
+    for plan in plans:
+        for label, item_id, kind, key, fields in plan["items"]:
+            where = f"{kind.lower()} {key}" if kind else "Not placed"
+            if (label, kind, key) in seen:
+                first, first_fields = seen[(label, kind, key)]
+                if first_fields != fields:
+                    ctx.errors.append(
+                        f"checklists {first!r} and {plan['label']!r} give {label!r} ({where}) "
+                        "different requirements; a vehicle has one item requirement per item "
+                        "and place (SPEC 6.0.0 CHK-11)"
+                    )
+                continue
+            seen[(label, kind, key)] = (plan["label"], fields)
+            if ctx.found is None or item_id is None or not rules.has_cutover(ctx.org):
+                continue
+            slot = ctx.slots[kind].get(key) if kind else None
+            version = (
+                None
+                if kind and slot is None
+                else rules.in_force_here(
+                    str(ctx.found.pk),
+                    item_id,
+                    (kind, str(slot)) if kind else ("NOT_PLACED", None),
+                    ctx.now,
+                )
+            )
+            if version is None:
+                notes.append(f"{label} ({where}): a new item requirement")
+            elif any(
+                _value(getattr(version, name)) != _value(fields[name]) for name in rules.FIELDS
+            ):
+                others = [
+                    other
+                    for other in rules.other_users(version.requirement_id, None, ctx.now)
+                    if other not in in_file
+                ]
+                if others:
+                    notes.append(
+                        f"{label} ({where}): changes its item requirement, which "
+                        f"{', '.join(others)} also inspect; publishing the draft is refused "
+                        "until the requirement is changed on the vehicle's item requirements page"
+                    )
+                else:
+                    notes.append(f"{label} ({where}): publishing the draft changes its requirement")
+    used = {
+        entry.get("requirement")
+        for checklist in vehicle.get("checklists") or []
+        for entry in checklist.get("items") or []
+    }
+    for requirement in vehicle.get("requirements") or []:
+        if requirement.get("id") not in used:
+            notes.append(
+                f"{requirement.get('item')} (requirement {requirement.get('id')}): no checklist "
+                "in the file inspects it, so it is not imported"
+            )
+    return notes
+
+
+def _value(value):
+    return list(value) if isinstance(value, (list, tuple)) else value
 
 
 __all__ = [
     "ImportRefused",
     "apply_checklists",
     "export_checklists",
+    "export_requirements",
     "legacy_to_v2",
     "plan_checklists",
+    "requirement_notes",
 ]

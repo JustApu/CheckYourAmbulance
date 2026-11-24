@@ -204,6 +204,42 @@ class ChecklistCase(TransactionTestCase):
         )
         return ChecklistCutover.objects.get(organization=self.org).recorded_at
 
+    def record_item_cutover(self):
+        """Record the item-requirement cutover alone (SPEC 6.0.0 18.3), as tests of C1 to C4 need."""
+        from cya.authorization.persistence import digest
+        from cya.checklists.models import ItemRequirementCutover
+        from cya.core.audit_commands import Plan, run_command
+        from cya.kits.definitions import authorizer
+
+        org = str(self.org.pk)
+
+        def prepare(_actor):
+            def apply(receipt, current):
+                ItemRequirementCutover.objects.create(
+                    organization=self.org,
+                    command=receipt,
+                    recorded_at=receipt.recorded_at,
+                    actor_user=current.user,
+                    actor_roles_at_time=list(current.roles),
+                )
+
+            return Plan(
+                response_body={"code": "ITEM_REQUIREMENT_CUTOVER"},
+                apply=apply,
+                target_type="ORGANIZATION",
+                target_id=org,
+                new_snapshot={"schema_version": 1, "values": {}},
+            )
+
+        run_command(
+            organization_id=org,
+            command_type="ITEM_REQUIREMENT_CUTOVER",
+            request_digest=digest({"organization_id": org}),
+            authorize=authorizer(org, str(self.admin.pk), "draft_edit_template"),
+            prepare=prepare,
+            **ids(),
+        )
+
     def own_row(self, row, vehicle):
         """The given vehicle's own row of the same stable slot as `row`."""
         return (

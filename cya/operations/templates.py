@@ -174,6 +174,9 @@ class PublicationImpact:
     vehicles: list = field(default_factory=list)  # VehicleImpact, by name
     blocking: list = field(default_factory=list)  # refusals not tied to one vehicle
     more_vehicles: bool = False  # more than VEHICLE_LIMIT vehicles; only those were checked
+    # SPEC 6.0.0 CHK-11 (issue #256 C4): what the publication does to the vehicle's item
+    # requirements, one phrase per row that changes one; refusals go to `blocking`.
+    requirements: list = field(default_factory=list)
 
     @property
     def refused(self):
@@ -186,6 +189,8 @@ def _place(definition, slot_labels, kit_labels):
         if definition.kit_id:
             return f"{where}, kit {kit_labels.get(str(definition.kit_id), 'not found')}"
         return where
+    if not definition.system_id:
+        return "Not placed"
     return slot_labels.get(("SYSTEM", str(definition.system_id)), "a system")
 
 
@@ -202,7 +207,9 @@ def _differences(old, new, labels):
 def _slot(definition):
     if definition.compartment_id:
         return ("COMPARTMENT", definition.compartment.stable_slot_id)
-    return ("SYSTEM", definition.system.stable_slot_id)
+    if definition.system_id:
+        return ("SYSTEM", definition.system.stable_slot_id)
+    return ("NOT_PLACED", None)  # SPEC 5.0.0 CHK-9: a vehicle checklist item may be Not placed
 
 
 def _definitions(version):
@@ -333,7 +340,130 @@ def publication_impact(organization_id, version_id, effective_at=None):
         )
     impact.blocking.extend(_placement_refusals(version))
     _vehicle_impacts(impact, org, version, definitions, at)
+    _requirement_impacts(impact, org, version, definitions, at)
     return impact
+
+
+# --- item requirements (SPEC 6.0.0 CHK-11; issue #256 C4) --------------------------------------
+
+
+def place_label(vehicle_id, place, at=None):
+    """A place's label on the vehicle: its position's latest label, or "Not placed"."""
+    kind, slot = place
+    if kind == "NOT_PLACED" or not slot:
+        return "Not placed"
+    model = Compartment if kind == "COMPARTMENT" else VehicleSystem
+    rows = model.objects.filter(vehicle_id=vehicle_id, stable_slot_id=slot).order_by("-revision")
+    row = (rows.filter(effective_at__lte=at).first() if at is not None else None) or rows.first()
+    return row.label if row else "a removed position"
+
+
+def _field_changes(old, new):
+    from cya.checklists.item_requirements import FIELDS
+
+    return [name.replace("_", " ") for name in FIELDS if getattr(old, name) != getattr(new, name)]
+
+
+def _requirement_impacts(impact, org, version, definitions, at):
+    """Each row's rule (a) to (d) at `at`, as publish_template_version will apply it.
+
+    A refusal blocks the publication; a row that differs from the requirement it would share
+    with other checklists is such a refusal (AC-42 (1)), so a draft saved before a requirement
+    was edited is called out here rather than reverting the edit.
+    """
+    from cya.checklists import item_requirements as rules
+
+    vehicle_id = version.template.vehicle_id
+    if vehicle_id is None or not rules.has_cutover(org):
+        return
+    labels = {
+        str(pk): label
+        for pk, label in Item.objects.filter(pk__in={d.item_id for d in definitions}).values_list(
+            "pk", "label"
+        )
+    }
+    plans = rules.plan_rows(
+        vehicle_id=vehicle_id, template_id=version.template_id, rows=definitions, effective_at=at
+    )
+    rows = {str(d.pk): d for d in definitions}
+    for row_id, plan in sorted(plans.items(), key=lambda p: labels.get(p[1].item_id, "")):
+        label = labels.get(plan.item_id, plan.item_id)
+        here = place_label(vehicle_id, plan.place, at)
+        if plan.rule == rules.REFUSED:
+            if plan.users:
+                changes = ", ".join(_field_changes(plan.version, rows[row_id]))
+                impact.blocking.append(
+                    f"{label} at {here}: {', '.join(plan.users)} inspect it there with other "
+                    f"requirements ({changes}). Make the draft match, or change the item "
+                    "requirement itself on the vehicle's item requirements page"
+                )
+            else:
+                impact.blocking.append(f"{label} at {here}: {plan.reason}")
+        elif plan.rule == rules.NEW_VERSION:
+            changes = ", ".join(_field_changes(plan.version, rows[row_id]))
+            impact.requirements.append(
+                f"{label} at {here}: changes its item requirement ({changes})"
+            )
+        elif plan.rule == rules.MOVES:
+            source = place_label(vehicle_id, rules._version_place(plan.version), at)
+            impact.requirements.append(
+                f"{label}: moves its item requirement from {source} to {here} (the same stock)"
+            )
+        elif plan.rule == rules.NEW_REQUIREMENT:
+            impact.requirements.append(f"{label} at {here}: a new item requirement")
+
+
+def minimum_publish_instant(template_id, now=None):
+    """The earliest instant a new draft of the template could take effect: now, or its latest
+    publication's when that is later (publish_template_version refuses anything before)."""
+    now = now or timezone.now()
+    latest = (
+        ChecklistPublication.objects.filter(checklist_version__template_id=template_id)
+        .order_by("-effective_at")
+        .values_list("effective_at", flat=True)
+        .first()
+    )
+    return max(now, latest) if latest else now
+
+
+def refresh_specs(organization_id, template, version, specs):
+    """Specs of a published base version, each row outside a kit taking the values and place
+    of its requirement's latest version, in force or scheduled (issue #256 C4).
+
+    A published row keeps the values it recorded, while its requirement may have been edited
+    since (CHK-5: reads follow the requirement). A new draft starting from it would otherwise
+    revert that edit, or be refused. The latest version, not the one in force now, is the
+    baseline: a draft published after a scheduled version then uses it (rule (a)) instead of
+    publishing the older values over it as a new version (rule (b)). Published before that
+    instant, such a row is refused (a version cannot precede a later one), as the preview
+    says. A saved draft is kept as saved; the preview calls out where it differs. Specs are
+    returned unchanged before the item-requirement cutover.
+    """
+    from cya.checklists import item_requirements as rules
+    from cya.checklists.models import ItemRequirementMap
+
+    if template.vehicle_id is None or not rules.has_cutover(organization_id):
+        return specs
+    mapped = {
+        str(item): requirement
+        for item, requirement in ItemRequirementMap.objects.filter(
+            checklist_version=version, requirement__isnull=False
+        ).values_list("item_def__item_id", "requirement_id")
+    }
+    refreshed = []
+    for spec in specs:
+        requirement = mapped.get(str(spec["item_id"])) if spec["kit_id"] is None else None
+        current = rules.latest_version(requirement) if requirement else None
+        if current is not None:
+            spec = {
+                **spec,
+                **{name: getattr(current, name) for name in rules.FIELDS},
+                "allowed_outcomes": list(current.allowed_outcomes),
+                "compartment_id": str(current.compartment_id) if current.compartment_id else None,
+                "system_id": str(current.system_id) if current.system_id else None,
+            }
+        refreshed.append(spec)
+    return refreshed
 
 
 def _local(instant):

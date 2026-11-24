@@ -50,6 +50,16 @@
   </select><br>
   <span id="item-kit-help">The kit must be in the compartment chosen above.</span>{% if field_errors.kit_id %}<span id="kit-error" class="field-error">Error: {{ field_errors.kit_id }}</span>{% endif %}</p>
 
+  {% if shared_requirement %}
+  <div class="banner" id="shared-requirement"><div>
+    <p>On this vehicle, this item at {{ shared_requirement.place }} has an item requirement (revision {{ shared_requirement.revision }}){% if shared_requirement.others %} that {{ shared_requirement.others|join:", " }} also inspect{% endif %}. Every checklist that inspects it there shares its check, quantity, unit, instructions and outcomes.</p>
+    {% if shared_requirement.others %}<p>Publishing different values here is refused while other checklists inspect it. To change it for all of them, use <a href="{{ requirements_url }}">the vehicle's item requirements</a>.</p>{% endif %}
+  </div></div>
+  {% endif %}
+  {% if requirement_choice %}
+  <p><label><input type="checkbox" name="use_requirement"{% if form.use_requirement %} checked{% endif %}> If the vehicle already has an item requirement for this item at the chosen place, use it</label><br>
+  <span id="use-requirement-help">Its check, quantity, unit, instructions and outcomes then replace the values below. Only the chosen place counts: an item kept in several places has one requirement for each. See <a href="{{ requirements_url }}">the vehicle's item requirements</a>.</span></p>
+  {% endif %}
   <p><label for="item-kind">Check</label><br>
   <select id="item-kind" name="kind" required{% if field_errors.kind %} aria-invalid="true" aria-describedby="kind-error"{% endif %}>
     {% for code, label in kinds %}<option value="{{ code }}"{% if form.kind == code %} selected{% endif %}>{{ label }}</option>{% endfor %}

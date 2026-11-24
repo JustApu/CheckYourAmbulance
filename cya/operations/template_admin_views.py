@@ -54,7 +54,10 @@ from cya.operations.templates import (
     TemplateError,
     create_template,
     create_vehicle_checklist,
+    minimum_publish_instant,
+    place_label,
     publication_impact,
+    refresh_specs,
 )
 from cya.operations.vehicles import VehicleError
 from cya.shell import navigation
@@ -402,7 +405,12 @@ def _base(template):
         {"definition_id": str(p.definition_id), "display_order": p.display_order}
         for p in placements_of(latest.pk)
     ]
-    return latest, _specs(latest), placed or None
+    specs = _specs(latest)
+    if not _is_draft(latest):
+        # Issue #256 C4: a published base takes its item requirements' current values, so an
+        # edit of one item never reverts a requirement edited since. A draft stays as saved.
+        specs = refresh_specs(str(template.organization_id), template, latest, specs)
+    return latest, specs, placed or None
 
 
 def _list_page(request, user, *, status=200, errors=None, form=None):
@@ -702,6 +710,7 @@ def _item_form(spec, choices):
             "kind": "PRESENCE_CONDITION",
             "outcomes": {"FAILED", "UNABLE_TO_INSPECT"},
             "display_order": "",
+            "use_requirement": True,
         }
     place = _choice_for(spec, choices)
     return {
@@ -792,6 +801,73 @@ def _next_order(specs):
     return max((s["display_order"] for s in specs), default=0) + 10
 
 
+def _uses_requirements(template):
+    from cya.checklists.item_requirements import has_cutover
+
+    return template.vehicle_id is not None and has_cutover(str(template.organization_id))
+
+
+def _spec_place(spec):
+    from types import SimpleNamespace
+
+    from cya.checklists.item_requirements import place_of
+
+    return place_of(
+        SimpleNamespace(compartment_id=spec.get("compartment_id"), system_id=spec.get("system_id"))
+    )
+
+
+def _requirement_here(template, spec):
+    """The latest version, in force or scheduled, of the vehicle's item requirement for the
+    spec's item at the spec's own place, or None (issue #256 C4), with the draft's minimum
+    publish instant. Only that place is looked at: an item kept in several places is never
+    matched to another place's requirement. The latest version is the baseline, as in
+    refresh_specs: published after a scheduled version the row uses it (rule (a)) rather than
+    reverting it; published before, the row is refused (a version cannot precede a later one).
+    """
+    from cya.checklists.item_requirements import latest_here
+
+    if not _uses_requirements(template) or spec.get("kit_id") or not spec.get("item_id"):
+        return None, None
+    at = minimum_publish_instant(template.pk)
+    return latest_here(str(template.vehicle_id), spec["item_id"], _spec_place(spec)), at
+
+
+def _requirement_context(template, spec, item_id):
+    """What the item form says about the vehicle's item requirements (SPEC 6.0.0 CHK-11)."""
+    from cya.checklists.item_requirements import other_users
+
+    if not _uses_requirements(template):
+        return {}
+    context = {
+        "requirement_choice": item_id is None,
+        "requirements_url": reverse("vehicle-item-requirements", args=[template.vehicle_id]),
+    }
+    if spec is not None:
+        version, at = _requirement_here(template, spec)
+        if version is not None:
+            context["shared_requirement"] = {
+                "revision": version.revision,
+                "place": place_label(str(template.vehicle_id), _spec_place(spec), at),
+                "others": other_users(version.requirement_id, template.pk, at),
+            }
+    return context
+
+
+def _with_requirement(template, posted):
+    """A new row's values taken from the vehicle's requirement at the chosen place, if any."""
+    from cya.checklists.item_requirements import FIELDS
+
+    version, _at = _requirement_here(template, posted)
+    if version is None:
+        return posted
+    return {
+        **posted,
+        **{name: getattr(version, name) for name in FIELDS},
+        "allowed_outcomes": list(version.allowed_outcomes),
+    }
+
+
 def _item_page(request, user, template, item_id, *, status=200, errors=None, form=None):
     org = str(user.organization_id)
     latest, specs, _placed = _base(template)
@@ -799,6 +875,7 @@ def _item_page(request, user, template, item_id, *, status=200, errors=None, for
     if item_id is not None and spec is None:
         raise Http404("that item is not in the latest version")
     context = {
+        **_requirement_context(template, spec, item_id),
         "title": f"{'Edit' if item_id else 'Add'} an item: {template.label}",
         "template": template,
         "latest": latest,
@@ -889,6 +966,7 @@ def _posted_form(post):
         "place": post.get("place", ""),
         "kit_id": post.get("kit_id", ""),
         "display_order": post.get("display_order", ""),
+        "use_requirement": post.get("use_requirement") == "on",
     }
 
 
@@ -914,6 +992,8 @@ def template_item(request, template_id, item_id=None):
         posted = _spec_from(request.POST, item_id, specs, template.vehicle_id is not None)
     except PageError as error:
         return error_page(400, [str(error)])
+    if item_id is None and posted.get("item_id") and request.POST.get("use_requirement") == "on":
+        posted = _with_requirement(template, posted)  # issue #256 C4
     if item_id is None:
         items = [*specs, posted]
     else:

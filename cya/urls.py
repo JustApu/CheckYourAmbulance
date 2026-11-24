@@ -28,6 +28,7 @@ from cya.operations import api as operations_api
 from cya.operations import (
     binding_admin_views,
     crew_views,
+    item_requirement_views,
     override_admin_views,
     template_admin_views,
     vehicle_admin_views,
@@ -191,6 +192,11 @@ urlpatterns = [
         "administration/vehicles/<uuid:vehicle_id>/duplicate/",
         vehicle_admin_views.duplicate,
         name="vehicle-duplicate",
+    ),
+    path(
+        "administration/vehicles/<uuid:vehicle_id>/item-requirements/",
+        item_requirement_views.item_requirements,
+        name="vehicle-item-requirements",
     ),
     path("administration/positions/", position_views.vehicles, name="position-vehicles"),
     path(
