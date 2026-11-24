@@ -50,6 +50,7 @@ OPTIONAL = (
     "kit_id",
     "kit_requirement_id",
     "kit_presence",
+    "kit_presence",
     "inspection_start_operation_id",
     "verification_for_deficiency_id",
     "deficiency",
