@@ -175,9 +175,10 @@ def template(request, fmt):
 
     if cutover_at(str(user.organization_id)) is not None:
         # SPEC 5.0.0 IMP-7: after the cutover a vehicle file carries its own checklists.
-        from cya.kits import vehicle_files_v2
+        from cya.kits import vehicle_files_v3
 
-        data = vehicle_files_v2.render(vehicle_files_v2.TEMPLATE_VEHICLE, fmt)
+        # SPEC 6.0.0 IMP-7: the example carries item requirements (schema 3).
+        data = vehicle_files_v3.render(vehicle_files_v3.TEMPLATE_VEHICLE, fmt)
         return _download(data, fmt, "vehicle-template")
     return _download(vehicle_files.template(fmt), fmt, "vehicle-template")
 

@@ -11,6 +11,8 @@ A position cannot be retired while anything published still uses it on that vehi
   by a binding recorded to take effect later), or one of the vehicle's overrides, places an
   item there;
 - a kit list in force or published for later names it;
+- an item requirement version in force or published for later keeps an item there (SPEC 6.0.0
+  CHK-11), even when no checklist inspects that requirement any more;
 - an active kit instance is in it.
 retired_blockers lists them. The reverse checks, so that publishing, binding and placing never
 use a retired position, are in the writers themselves, through refuse_retired.
@@ -197,6 +199,32 @@ def templates_bound_now_or_later(organization_id, vehicle_id, now=None):
     return sorted(found)
 
 
+def _requirement_blockers(vehicle_id, kind, slot, now):
+    """SPEC 6.0.0 CHK-11, CFG-2: item requirement versions in force at `now` (the latest of each
+    requirement effective by then) or published for a later instant that keep an item there.
+
+    A requirement outlives the checklists that inspect it, so it blocks on its own: the user
+    moves it (a new version elsewhere or Not placed) before retiring the position.
+    """
+    from cya.checklists.models import Item, VehicleItemRequirementVersion
+
+    versions = _in_force_and_later(
+        VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id),
+        now,
+        lambda v: str(v.requirement_id),
+    )
+    here = sorted(
+        (v for v in versions if v.place_kind == kind and str(v.place_slot_id) == slot),
+        key=lambda v: (v.effective_at, str(v.requirement_id)),
+    )
+    labels = dict(Item.objects.filter(pk__in={v.item_id for v in here}).values_list("pk", "label"))
+    return [
+        f"the item requirement of {labels.get(v.item_id, v.item_id)} "
+        f"(revision {v.revision}, effective {v.effective_at:%Y-%m-%d %H:%M} UTC) keeps it there"
+        for v in here
+    ]
+
+
 def retired_blockers(organization_id, vehicle_id, kind, stable_slot_id, now):
     """What published still uses the position on the vehicle (CFG-2), as readable reasons."""
     org, slot = str(organization_id), str(stable_slot_id)
@@ -240,6 +268,7 @@ def retired_blockers(organization_id, vehicle_id, kind, stable_slot_id, now):
                 f"vehicle override revision {override.revision} "
                 f"(effective {publication.effective_at:%Y-%m-%d %H:%M} UTC) places items there"
             )
+    reasons += _requirement_blockers(vehicle_id, kind, slot, now)
     if kind == "COMPARTMENT":
         kit_lists = _in_force_and_later(
             VehicleKitListPublication.objects.filter(version__vehicle_id=vehicle_id).select_related(

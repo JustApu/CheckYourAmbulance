@@ -17,6 +17,24 @@ Once an organization has moved to vehicle-owned checklists (`migrate_vehicle_che
 - **Legacy files** (schema 1): the file holds the vehicle's effective checklist for one template. Its template key is resolved in the importing organization, and a key that does not resolve makes the file ambiguous, so it is refused. The result is one independent checklist labelled like the template, inspecting the kit definitions of the template's version in force, assigned to the file's schedule (or the only schedule). No binding to the legacy template is made.
 - **Before the cutover** a schema 2 file is refused.
 
+## With item requirements: schema 3 (SPEC 6.0.0 IMP-7, CHK-11, [issue #256](https://github.com/JustApu/CheckYourAmbulance/issues/256) C4)
+
+Once the organization has also moved to item requirements (`migrate_item_requirements`), an export is **schema 3** (`cya/kits/vehicle_files_v3.py`). The example file is schema 3 as well. Import accepts schemas 1, 2 and 3.
+
+- **What it adds.** A `requirements` list holds the vehicle's item requirements. Each has an `id` local to the file (IMP-6), its item, its place (compartment or system key, or neither for Not placed) and its values: `kind`, `quantity`, `unit`, `outcomes`, `expiration_tracked` and `instructions`. A file holds at most one requirement per item and place. A checklist's `items` then name requirements, `[{"requirement": "requirement-1"}, ...]`, in display order. So two checklists that inspect an item in one place name the same requirement, and can never give it different values (AC-42 (1)).
+- **CSV.** CSV adds a `requirement` column and record type:
+  - a `requirement` row carries the item columns and its id;
+  - an `item` row carries only its `checklist` and `requirement`.
+- **Export.**
+  - Each requirement is written at its version in force now, else its first scheduled one. That includes a requirement no checklist inspects any more.
+  - Checklist rows take their requirement's values and place, not the values the row recorded at publication. Reads follow the requirement (CHK-5), so an export never carries a value edited away.
+  - The same holds for a schema 2 export after the cutover to item requirements.
+- **Import** still writes checklist **drafts** only and never publishes a requirement version.
+  - A requirement arises when a checklist that inspects it is published, under the publication rules (a)–(d).
+  - A schema 2 file whose checklists give one item and place different values is refused at preview: their drafts could never both be published.
+  - For an existing vehicle, the preview's **Item requirements** notes compare each item and place with the vehicle's requirement in force: new, or changed. A change that a checklist outside the file also inspects is called out, because publishing the draft is refused until the requirement itself is changed on the vehicle's item requirements page.
+  - A file requirement that no checklist in the file inspects is noted and not imported.
+
 ## Where
 
 **Administration → Vehicle files** (`/administration/vehicle-files/`).

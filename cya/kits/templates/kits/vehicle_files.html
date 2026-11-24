@@ -23,6 +23,11 @@
   <li>Kit list: {% if summary.kit_list_changed %}a new draft{% else %}unchanged{% endif %}; {{ summary.kits_added }} kit{{ summary.kits_added|pluralize }} added</li>
   <li>Schedule: {% if summary.binding_slot %}assigned {{ summary.binding_slot }}{% else %}unchanged{% endif %}</li>
 </ul>
+{% if plan.requirement_notes %}
+<h3>Item requirements</h3>
+<p>The import writes drafts only. These notes say what publishing them would do to the vehicle's item requirements, which every checklist that inspects an item in a place shares.</p>
+<ul id="import-requirements">{% for note in plan.requirement_notes %}<li>{{ note }}</li>{% endfor %}</ul>
+{% endif %}
 <form method="post" action="{% url 'vehicle-files' %}">
   {% csrf_token %}
   <input type="hidden" name="stage" value="confirm">

@@ -22,6 +22,8 @@ database refuses a version that would break that (migration 0014). Kit content k
 definition's requirements and is never linked.
 """
 
+from dataclasses import dataclass
+
 from cya.checklists.models import (  # noqa: F401 - new_requirement_id is re-exported
     ChecklistItemDef,
     ChecklistPublication,
@@ -208,42 +210,152 @@ def link_rows(*, organization_id, vehicle_id, template_id, rows, effective_at, r
         writer.map(row, version)
 
 
-def _resolve(writer, template_id, row, at, previous):
+def version_at(requirement_id, at):
+    """The requirement's version in force at `at` (the latest effective by then), or None."""
+    return (
+        VehicleItemRequirementVersion.objects.filter(
+            requirement_id=requirement_id, effective_at__lte=at
+        )
+        .order_by("-effective_at")
+        .first()
+    )
+
+
+def latest_version(requirement_id):
+    """The requirement's latest version, in force or scheduled, or None."""
+    return (
+        VehicleItemRequirementVersion.objects.filter(requirement_id=requirement_id)
+        .order_by("-effective_at", "-revision")
+        .first()
+    )
+
+
+def latest_here(vehicle_id, item_id, place):
+    """The latest version, in force or scheduled, of the vehicle's requirement for the item
+    whose latest version is at `place`, or None. Only the given place is looked at."""
+    latest = {}
+    for version in VehicleItemRequirementVersion.objects.filter(
+        vehicle_id=vehicle_id, item_id=item_id
+    ).order_by("effective_at", "revision"):
+        latest[str(version.requirement_id)] = version
+    found = [v for v in latest.values() if _version_place(v) == tuple(place)]
+    return found[0] if found else None
+
+
+def current_or_next(vehicle_id, at):
+    """{requirement id: its version in force at `at`, else its first one scheduled after} for
+    every requirement of the vehicle: what a vehicle file or a copy of the vehicle carries."""
+    chosen = {}
+    for version in VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id).order_by(
+        "effective_at", "revision"
+    ):
+        key = str(version.requirement_id)
+        if version.effective_at <= at or key not in chosen:
+            chosen[key] = version
+    return chosen
+
+
+def in_force_here(vehicle_id, item_id, place, at):
+    """The vehicle's requirement version for the item in force at `place` at `at`, or None.
+
+    At most one exists (18.1 item 8). Only the given place is looked at: an item kept in several
+    places has one requirement for each, and none of the others stands in for this one.
+    """
+    versions = VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id, item_id=item_id)
+    found = [v for v in _in_force(versions, at).values() if _version_place(v) == tuple(place)]
+    return found[0] if found else None
+
+
+def plan_rows(*, vehicle_id, template_id, rows, effective_at):
+    """{row id: RowPlan} for the rows outside a kit, read only: what link_rows would do.
+
+    Rows of one checklist version name distinct items, and each rule reads only its own item's
+    versions, so planning every row before writing any equals link_rows's row-by-row writes.
+    """
+    previous = _previous_rows(template_id, effective_at)
+    return {
+        str(row.pk): plan_row(str(vehicle_id), template_id, row, effective_at, previous)
+        for row in rows
+        if row.kit_id is None
+    }
+
+
+USES, NEW_VERSION, MOVES, NEW_REQUIREMENT, REFUSED = (
+    "USES",
+    "NEW_VERSION",
+    "MOVES",
+    "NEW_REQUIREMENT",
+    "REFUSED",
+)
+
+
+@dataclass(frozen=True)
+class RowPlan:
+    """What publishing one row does to its item requirement: rules (a) to (d), or a refusal.
+
+    rule is USES (a), NEW_VERSION (b), MOVES (c), NEW_REQUIREMENT (d) or REFUSED. version is the
+    requirement version in force that the row uses (a), changes (b) or moves from (c).
+    """
+
+    rule: str
+    item_id: str
+    place: tuple
+    requirement_id: str | None = None
+    version: object = None
+    users: tuple = ()  # REFUSED under AC-42 (1): the other checklists' labels
+    reason: str = ""
+
+
+def plan_row(vehicle_id, template_id, row, at, previous):
+    """The rule (a) to (d) that publishing `row` at `at` applies, or its refusal. Reads only."""
     item_id = str(row.item_id)
     place = place_of(row)
     versions = list(
-        VehicleItemRequirementVersion.objects.filter(vehicle_id=writer.vehicle_id, item_id=item_id)
+        VehicleItemRequirementVersion.objects.filter(vehicle_id=vehicle_id, item_id=item_id)
     )
     later = [v for v in versions if v.effective_at > at]
 
-    def refuse_later(requirement_id=None, new_place=None):
+    def blocked_later(requirement_id=None, new_place=None):
         """Versions are appended in effective order (migration 0014): a version at `at` can
         follow neither its own requirement's later version nor, at a new place, another
         requirement's later version there (18.1 item 8). Unrelated places are not blocked."""
-        if any(
+        return any(
             (requirement_id is not None and str(v.requirement_id) == str(requirement_id))
             or (new_place is not None and _version_place(v) == new_place)
             for v in later
-        ):
-            raise ItemRequirementError(
-                f"item {item_id} has a requirement version published for a later instant "
-                "here; publish this checklist at or after it"
-            )
+        )
+
+    def refused_later():
+        return RowPlan(
+            REFUSED,
+            item_id,
+            place,
+            reason=f"item {item_id} has a requirement version published for a later instant "
+            "here; publish this checklist at or after it",
+        )
 
     current = _in_force(versions, at)
     here = [v for v in current.values() if _version_place(v) == place]
     if here:
         (version,) = here  # at most one in force per item and place (18.1 item 8)
+        requirement_id = str(version.requirement_id)
         if fields_of(version) == fields_of(row):
-            return version  # (a)
+            return RowPlan(USES, item_id, place, requirement_id, version)  # (a)
         users = other_users(version.requirement_id, template_id, at)
         if users:  # AC-42 (1)
-            raise ItemRequirementError(
+            return RowPlan(
+                REFUSED,
+                item_id,
+                place,
+                requirement_id,
+                version,
+                tuple(users),
                 f"item {item_id} at this place has other requirements in "
-                f"{', '.join(users)}; publish matching requirements"
+                f"{', '.join(users)}; publish matching requirements",
             )
-        refuse_later(requirement_id=version.requirement_id)
-        return writer.version(version.requirement_id, item_id, at, row)  # (b)
+        if blocked_later(requirement_id=requirement_id):
+            return refused_later()
+        return RowPlan(NEW_VERSION, item_id, place, requirement_id, version)  # (b)
     before = previous.get(item_id)
     moved = requirement_of_row(before) if before is not None else None
     if (
@@ -251,7 +363,21 @@ def _resolve(writer, template_id, row, at, previous):
         and str(moved) in {str(k) for k in current}
         and not other_users(moved, template_id, at)
     ):
-        refuse_later(requirement_id=moved, new_place=place)
-        return writer.version(moved, item_id, at, row)  # (c)
-    refuse_later(new_place=place)
-    return writer.version(writer.requirement(item_id).pk, item_id, at, row)  # (d)
+        if blocked_later(requirement_id=moved, new_place=place):
+            return refused_later()
+        source = next(v for k, v in current.items() if str(k) == str(moved))
+        return RowPlan(MOVES, item_id, place, str(moved), source)  # (c)
+    if blocked_later(new_place=place):
+        return refused_later()
+    return RowPlan(NEW_REQUIREMENT, item_id, place)  # (d)
+
+
+def _resolve(writer, template_id, row, at, previous):
+    plan = plan_row(writer.vehicle_id, template_id, row, at, previous)
+    if plan.rule == REFUSED:
+        raise ItemRequirementError(plan.reason)
+    if plan.rule == USES:
+        return plan.version
+    if plan.rule == NEW_REQUIREMENT:
+        return writer.version(writer.requirement(plan.item_id).pk, plan.item_id, at, row)
+    return writer.version(plan.requirement_id, plan.item_id, at, row)

@@ -8,12 +8,11 @@ from django.test import tag
 from cya.checklists.models import (
     ChecklistItemDef,
     ChecklistPublication,
-    ItemRequirementCutover,
     ItemRequirementMap,
     VehicleItemRequirement,
     VehicleItemRequirementVersion,
 )
-from cya.checklists.tests.support import ChecklistCase, ids
+from cya.checklists.tests.support import ChecklistCase
 from cya.checklists.validation import ChecklistValidationError
 
 
@@ -24,40 +23,6 @@ class ItemRequirementCase(ChecklistCase):
         self.vehicle = self.vehicles[0]
         self.a = self.vehicle_checklist(label="Synthetic checklist A")
         self.b = self.vehicle_checklist(label="Synthetic checklist B")
-
-    def record_item_cutover(self):
-        from cya.authorization.persistence import digest
-        from cya.core.audit_commands import Plan, run_command
-        from cya.kits.definitions import authorizer
-
-        org = str(self.org.pk)
-
-        def prepare(_actor):
-            def apply(receipt, current):
-                ItemRequirementCutover.objects.create(
-                    organization=self.org,
-                    command=receipt,
-                    recorded_at=receipt.recorded_at,
-                    actor_user=current.user,
-                    actor_roles_at_time=list(current.roles),
-                )
-
-            return Plan(
-                response_body={"code": "ITEM_REQUIREMENT_CUTOVER"},
-                apply=apply,
-                target_type="ORGANIZATION",
-                target_id=org,
-                new_snapshot={"schema_version": 1, "values": {}},
-            )
-
-        run_command(
-            organization_id=org,
-            command_type="ITEM_REQUIREMENT_CUTOVER",
-            request_digest=digest({"organization_id": org}),
-            authorize=authorizer(org, str(self.admin.pk), "draft_edit_template"),
-            prepare=prepare,
-            **ids(),
-        )
 
     def rows(self, version_id):
         return {
@@ -285,6 +250,62 @@ class PublicationTests(ItemRequirementCase):
                 actor_roles_at_time=masks.actor_roles_at_time,
             )
 
+    def plans(self, checklist, items):
+        """{item id: RowPlan} of a fresh draft of `checklist`, planned for now (issue #256 C4)."""
+        from django.utils import timezone
+
+        from cya.checklists import commands, item_requirements
+
+        draft = commands.save_template_draft(
+            template_id=str(checklist.pk), items=items, **self.context()
+        ).body["version_id"]
+        plans = item_requirements.plan_rows(
+            vehicle_id=self.vehicle.pk,
+            template_id=checklist.pk,
+            rows=list(ChecklistItemDef.objects.filter(checklist_version_id=draft)),
+            effective_at=timezone.now(),
+        )
+        return {plan.item_id: plan for plan in plans.values()}
+
+    def test_the_dry_run_names_a_shared_requirement_and_a_refusal(self):  # C4, AC-42 (1)
+        from cya.checklists import item_requirements as rules
+
+        self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec(6)])
+        plans = self.plans(self.b, [self.suction_spec(), self.masks_spec(4)])
+        self.assertEqual(plans[str(self.suction.pk)].rule, rules.USES)
+        refused = plans[str(self.masks.pk)]
+        self.assertEqual((refused.rule, refused.users), (rules.REFUSED, ("Synthetic checklist A",)))
+        self.assertFalse(VehicleItemRequirementVersion.objects.filter(expected_quantity=4).exists())
+
+    def test_the_dry_run_names_a_change_a_move_and_a_new_requirement(self):  # C4
+        from cya.checklists import item_requirements as rules
+
+        self.publish_checklist(self.a, [self.suction_spec(), self.masks_spec(6)])
+        system = str(self.own_row(self.system, self.vehicle).pk)
+        items = [
+            self.suction_spec(compartment_id=None, system_id=system),
+            self.masks_spec(4),
+            self.spec(self.siren, 30, compartment_id=None),
+        ]
+        plans = self.plans(self.a, items)
+        self.assertEqual(
+            {item: plan.rule for item, plan in plans.items()},
+            {
+                str(self.suction.pk): rules.MOVES,
+                str(self.masks.pk): rules.NEW_VERSION,
+                str(self.siren.pk): rules.NEW_REQUIREMENT,
+            },
+        )
+        self.assertEqual(plans[str(self.suction.pk)].version.place_kind, "COMPARTMENT")
+        before = VehicleItemRequirement.objects.count()
+        version = self.publish_checklist(self.a, items)  # the writer applies the same rules
+        self.assertEqual(VehicleItemRequirement.objects.count(), before + 1)
+        moved = self.requirement(version, self.suction)
+        self.assertEqual(
+            (str(moved.requirement_id), moved.place_kind),
+            (plans[str(self.suction.pk)].requirement_id, "SYSTEM"),
+        )
+
     def test_the_database_refuses_an_unlinked_publication_after_the_cutover(self):
         with (
             mock.patch("cya.checklists.item_requirements.link_rows"),
@@ -312,3 +333,63 @@ class GuardMigrationTests(ItemRequirementCase):
                 "WHERE TRIGGER_SCHEMA=DATABASE() AND TRIGGER_NAME='cya_checklist_publication_itemreq_bi'"
             )
             self.assertEqual(cursor.fetchone()[0], 1)
+
+
+class PositionRetirementTests(ItemRequirementCase):  # issue #256 C4, SPEC 6.0.0 CFG-2
+    def setUp(self):
+        super().setUp()
+        self.record_item_cutover()
+
+    def retire(self):
+        from cya.kits.positions import revise_position
+
+        return revise_position(
+            vehicle_id=str(self.vehicle.pk),
+            kind="COMPARTMENT",
+            stable_slot_id=str(self.cabinet.stable_slot_id),
+            retired=True,
+            **self.context(),
+        )
+
+    def test_a_requirement_no_checklist_inspects_still_blocks_retirement(self):
+        from cya.checklists import commands
+        from cya.kits.positions import PositionError
+
+        first = self.publish_checklist(self.a, [self.suction_spec()])
+        self.publish_checklist(self.a, [self.spec(self.siren, 30, compartment_id=None)])
+        with self.assertRaisesRegex(
+            PositionError, r"item requirement of Synthetic suction \(revision 1"
+        ):
+            self.retire()
+        suction = self.requirement(first, self.suction)
+        commands.publish_item_requirement_version(  # moved to Not placed from now on
+            requirement_id=str(suction.requirement_id),
+            kind=suction.kind,
+            allowed_outcomes=suction.allowed_outcomes,
+            instructions=suction.instructions,
+            **self.context(),
+        )
+        self.retire()
+
+    def test_a_requirement_version_published_for_later_blocks_retirement(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from cya.checklists import commands
+        from cya.kits.positions import PositionError
+
+        first = self.publish_checklist(self.a, [self.suction_spec(compartment_id=None)])
+        self.publish_checklist(self.a, [self.spec(self.siren, 30, compartment_id=None)])
+        suction = self.requirement(first, self.suction)
+        commands.publish_item_requirement_version(  # moves into the cabinet tomorrow
+            requirement_id=str(suction.requirement_id),
+            kind=suction.kind,
+            allowed_outcomes=suction.allowed_outcomes,
+            instructions=suction.instructions,
+            compartment_id=str(self.own_row(self.cabinet, self.vehicle).pk),
+            effective_at=timezone.now() + timedelta(days=1),
+            **self.context(),
+        )
+        with self.assertRaisesRegex(PositionError, "revision 2"):
+            self.retire()
