@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 ACTION = "manage_kit_assignment"
 DENIAL = "MANAGE_KIT_ASSIGNMENT"
-SAVED = {"assign": "Physical kit assigned."}
+SAVED = {"assign": "Physical kit assigned.", "stock": "Physical kit returned to unassigned stock."}
 
 
 @never_cache
@@ -67,6 +67,7 @@ def _kits(org, vehicle):
     return [
         {
             "id": str(kit.pk),
+            "operation_id": admin_pages.new_operation_id(),
             "label": kit.label,
             "compartment": kit.compartment.label if kit.compartment else "",
             "definition": definitions.get(kit.pk, ""),
@@ -157,6 +158,30 @@ def _assign(request, user, vehicle):
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "assign"}))
 
 
+def _return_to_stock(request, user, vehicle):
+    operation_id = admin_pages.operation_id_from(request)
+    kit_id = request.POST.get("kit_id", "")
+    if operation_id is None:
+        return _page(request, user, vehicle, status=400, errors=["the form was not valid; try again"])
+    try:
+        record_kit_assignment(
+            kit_id=kit_id,
+            active=True,
+            **{**_context_ids(user), "operation_id": operation_id},
+        )
+    except (KitError, ValueError) as error:
+        return _page(request, user, vehicle, status=400, errors=[str(error)])
+    except CommandDenied:
+        return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
+    except OperationConflict:
+        return _page(request, user, vehicle, status=409, errors=["this form was already used; try again"])
+    except UNAVAILABLE as error:
+        logger.error("kit return to stock unavailable (%s)", type(error).__name__)
+        return _page(request, user, vehicle, status=503, errors=["the change could not be completed; nothing was changed. Try again."])
+    url = reverse("vehicle-kit-instances", args=[vehicle.pk])
+    return HttpResponseRedirect(url + "?" + urlencode({"saved": "stock"}))
+
+
 @never_cache
 @require_http_methods(["GET", "POST"])
 def vehicle_kit_instances(request, vehicle_id):
@@ -169,6 +194,8 @@ def vehicle_kit_instances(request, vehicle_id):
         return _page(request, user, vehicle)
     if request.POST.get("stage") == "assign":
         return _assign(request, user, vehicle)
+    if request.POST.get("stage") == "stock":
+        return _return_to_stock(request, user, vehicle)
     return _page(request, user, vehicle, status=400, errors=["the request was not valid"])
 
 
