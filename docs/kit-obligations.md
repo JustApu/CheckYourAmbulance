@@ -128,7 +128,7 @@ Designations do not themselves change obligations, checks or kit assignment hist
 
 ## Kit definitions
 
-[Issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129) part 2 adds the kit definitions of [SPEC §4.6](../SPEC.md) (KDEF-1 to KDEF-8, amendment 1.34.0): a kit type whose contents are versioned like a checklist template. The commands are in `cya/kits/definitions.py`. Each needs the policy action `manage_kit_definitions` (Supervisors and Administrators; §3.3, PERM-41) and runs through `run_command` (operation-id receipt and replay, success or failure audit).
+[Issue #129](https://github.com/JustApu/CheckYourAmbulance/issues/129) part 2 adds the kit definitions of [SPEC §4.6](../SPEC.md) (KDEF-1 to KDEF-8, amendment 1.34.0): a kit type whose contents are versioned like a checklist template. The commands are in `cya/kits/definitions.py`. Each needs the policy action `manage_kit_definitions` (Supervisors and Administrators; §3.3, PERM-41) and runs through `run_command` (operation-id receipt and replay, success or failure audit). The administration screens generate stable machine keys from the name and operation ID; users need those keys only when working directly with kit-library or vehicle configuration files. File imports and exports retain the key so references remain stable when a definition is renamed.
 
 | Command | Writes | Rules |
 |---|---|---|
