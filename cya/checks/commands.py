@@ -893,6 +893,8 @@ def record_check(
     shape["kit_presence"] = kit_presence
     if kit_presence and kit_id is None:
         raise CheckError("KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id")
+    if kit_presence and kit_requirement_id is not None:
+        raise CheckError("MALFORMED_REQUEST", "choose one presence source", path="kit_presence")
     shape["kit_requirement_id"] = _optional_id(kit_requirement_id, "kit_requirement_id")
     shape["inspection_start_operation_id"] = _optional_id(
         inspection_start_operation_id, "inspection_start_operation_id"
