@@ -49,6 +49,7 @@ OPTIONAL = (
     "client_observed_at",
     "kit_id",
     "kit_requirement_id",
+    "kit_presence",
     "inspection_start_operation_id",
     "verification_for_deficiency_id",
     "deficiency",
@@ -131,6 +132,8 @@ def _parse(request):
         problems.append(("$", "UNKNOWN_FIELD"))
     if problems:
         raise Rejected(400, "MALFORMED_REQUEST", problems)
+    if "kit_presence" in body and not isinstance(body["kit_presence"], bool):
+        raise Rejected(400, "MALFORMED_REQUEST", [("kit_presence", "INVALID")])
     if body.get("client_observed_at") is not None:
         body["client_observed_at"] = _observed_at(body["client_observed_at"])
     return body
