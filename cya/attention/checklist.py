@@ -381,31 +381,12 @@ def _presence_of(organization_id, order, resolved, as_of):
 
 
 def _presence_rows(organization_id, vehicle_id, as_of, pin=None):
-    """(template order, ResolvedItem, version id, unit key, placement order) per kit list line.
+    """Legacy kit-list count rows are no longer shown for current inspections.
 
-    The lines of the vehicle's kit list in force at as_of for each definition a bound template
-    places, as the records stood (resolve_checklist), each as its presence Quantity item. With a
-    pin, the definitions the session's checklist places, counted as a check in it is (as_of).
+    Each assigned physical kit's content rows are supplied by _placed_content and its assignment
+    history. Existing recorded kit-count checks stay available in history.
     """
-    if pin is not None:
-        return _presence_of(organization_id, 0, pin.resolved, as_of)
-    found = []
-    bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
-    templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
-    recorded_before = as_of + timedelta(microseconds=1)
-    for order, template in enumerate(t for t in templates if str(t.pk) in bound):
-        try:
-            resolved = resolve_checklist(
-                organization_id=organization_id,
-                vehicle_id=vehicle_id,
-                template_id=template.pk,
-                as_of=as_of,
-                recorded_before=recorded_before,
-            )
-        except (NoEffectiveVersionError, ResolutionError):
-            continue
-        found.extend(_presence_of(organization_id, order, resolved, as_of))
-    return found
+    return []
 
 
 def _kits_at(organization_id, vehicle_id, reference_kit_id, as_of, slots):
