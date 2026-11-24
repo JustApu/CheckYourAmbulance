@@ -13,6 +13,7 @@ from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
+from cya.checklists.models import KitInstance
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.kits import admin_pages
 from cya.kits.commands import KitError, add_kit_instance
@@ -26,8 +27,7 @@ DENIAL = "MANAGE_KIT_ASSIGNMENT"
 
 def _inventory(org):
     kits = list(
-        __import__("cya.checklists.models", fromlist=["KitInstance"])
-        .KitInstance.objects.filter(organization_id=org, active=True, vehicle__isnull=True)
+        KitInstance.objects.filter(organization_id=org, active=True, vehicle__isnull=True)
         .order_by("label", "id")
     )
     names = dict(
