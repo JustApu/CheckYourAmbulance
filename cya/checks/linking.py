@@ -46,18 +46,10 @@ class LinkScopeTooLarge(ValueError):
     """A single check has more eligible obligations than the bounded resolver permits."""
 
 
-def _eligible(
-    *,
-    organization_id,
-    vehicle_id,
-    item_id,
-    kit_key,
-    recorded_at,
-    late,
-    include_satisfied=False,
-    ignore_root_check_id=None,
-    kit_requirement_id=None,
+def _selected_candidates(
+    *, organization_id, vehicle_id, item_id, kit_keys, recorded_at, kit_requirement_id
 ):
+    """The stream's obligations recorded by the instant that are non-routine or selected."""
     selected = (
         ObligationSelection.objects.filter(
             organization_id=OuterRef("organization_id"),
@@ -70,6 +62,20 @@ def _eligible(
         .order_by("-sequence")
         .values("selected_obligation_id")[:1]
     )
+    candidates = Obligation.objects.filter(
+        organization_id=organization_id,
+        vehicle_id=vehicle_id,
+        item_id=item_id,
+        kit_key__in=kit_keys,
+        recorded_at__lte=recorded_at,
+    ).annotate(selected_id=Subquery(selected))
+    if kit_requirement_id is not None:
+        candidates = candidates.filter(requirement_version__kit_requirement_id=kit_requirement_id)
+    return candidates.filter(Q(routine=False) | Q(pk=F("selected_id")))
+
+
+def _satisfied_by(recorded_at, ignore_root_check_id):
+    """Exists expressions, one per kind of evidence that has already satisfied an obligation."""
     already_satisfied = CheckObligationLink.objects.filter(
         organization_id=OuterRef("organization_id"),
         obligation_id=OuterRef("pk"),
@@ -89,42 +95,29 @@ def _eligible(
         already_satisfied = already_satisfied.exclude(
             check_record__root_check_id=ignore_root_check_id
         )
-    candidates = Obligation.objects.filter(
-        organization_id=organization_id,
-        vehicle_id=vehicle_id,
-        item_id=item_id,
-        kit_key=kit_key,
-        recorded_at__lte=recorded_at,
-    ).annotate(selected_id=Subquery(selected))
-    if kit_requirement_id is not None:
-        candidates = candidates.filter(requirement_version__kit_requirement_id=kit_requirement_id)
-    if late:
-        # SCH-2: only up to the obligation's pinned late limit L (inclusive); older ones stay
-        # missed. The range on late_limit_at keeps the read off the item's settled history
-        # (issue #61), and grace_at < t keeps a late completion apart from an on-time one.
-        candidates = candidates.filter(grace_at__lt=recorded_at, late_limit_at__gte=recorded_at)
-    else:
-        candidates = candidates.filter(early_at__lte=recorded_at, grace_at__gte=recorded_at)
-    candidates = candidates.filter(Q(routine=False) | Q(pk=F("selected_id")))
-    if not include_satisfied:
-        # A seal substitution is separate evidence but has already satisfied the
-        # linked obligation just as a qualifying check has.
-        from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
+    # A seal substitution is separate evidence but has already satisfied the
+    # linked obligation just as a qualifying check has.
+    from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
 
-        already_substituted = SealSubstitutionObligation.objects.filter(
-            organization_id=OuterRef("organization_id"),
-            obligation_id=OuterRef("pk"),
-            recorded_at__lte=recorded_at,
-        )
-        already_inspected = SealInspectionObligation.objects.filter(
-            organization_id=OuterRef("organization_id"),
-            obligation_id=OuterRef("pk"),
-            recorded_at__lte=recorded_at,
-            inspection_item__outcome__in=("PASSED", "FAILED"),
-        )
-        candidates = candidates.filter(
-            ~Exists(already_satisfied), ~Exists(already_substituted), ~Exists(already_inspected)
-        )
+    already_substituted = SealSubstitutionObligation.objects.filter(
+        organization_id=OuterRef("organization_id"),
+        obligation_id=OuterRef("pk"),
+        recorded_at__lte=recorded_at,
+    )
+    already_inspected = SealInspectionObligation.objects.filter(
+        organization_id=OuterRef("organization_id"),
+        obligation_id=OuterRef("pk"),
+        recorded_at__lte=recorded_at,
+        inspection_item__outcome__in=("PASSED", "FAILED"),
+    )
+    return (
+        Exists(already_satisfied),
+        Exists(already_substituted),
+        Exists(already_inspected),
+    )
+
+
+def _ordered(candidates):
     return list(
         candidates.select_related(
             "requirement_version__item_def__compartment",
@@ -133,6 +126,40 @@ def _eligible(
             "requirement_version__placement",
         ).order_by("due_at", "pk")[: MAX_LINK_CANDIDATES + 1]
     )
+
+
+def _eligible(
+    *,
+    organization_id,
+    vehicle_id,
+    item_id,
+    kit_key,
+    recorded_at,
+    late,
+    include_satisfied=False,
+    ignore_root_check_id=None,
+    kit_requirement_id=None,
+):
+    candidates = _selected_candidates(
+        organization_id=organization_id,
+        vehicle_id=vehicle_id,
+        item_id=item_id,
+        kit_keys=[kit_key],
+        recorded_at=recorded_at,
+        kit_requirement_id=kit_requirement_id,
+    )
+    if late:
+        # SCH-2: only up to the obligation's pinned late limit L (inclusive); older ones stay
+        # missed. The range on late_limit_at keeps the read off the item's settled history
+        # (issue #61), and grace_at < t keeps a late completion apart from an on-time one.
+        candidates = candidates.filter(grace_at__lt=recorded_at, late_limit_at__gte=recorded_at)
+    else:
+        candidates = candidates.filter(early_at__lte=recorded_at, grace_at__gte=recorded_at)
+    if not include_satisfied:
+        candidates = candidates.filter(
+            *(~done for done in _satisfied_by(recorded_at, ignore_root_check_id))
+        )
+    return _ordered(candidates)
 
 
 def _current_rule(organization_id, recorded_at):
@@ -193,21 +220,73 @@ def _candidates(scope, *, late, include_satisfied=False, ignore_root_check_id=No
     limit), when its pinned item row resolves to R (link or source-row map); the link guard
     allows exactly this case (cya_checks 0017).
     """
-    from cya.checklists.item_requirement_cutover import resolve_item_requirement
-
     requirement = scope["item_requirement_id"]
     base = {k: v for k, v in scope.items() if k != "item_requirement_id"}
     extra = {"include_satisfied": include_satisfied, "ignore_root_check_id": ignore_root_check_id}
     found = _eligible(**base, late=late, **extra)
     if requirement is None:
         return found
-    legacy = [
-        obligation
-        for obligation in _eligible(**{**base, "kit_key": NO_KIT}, late=late, **extra)
-        if obligation.requirement_version.item_def_id
-        and resolve_item_requirement(obligation.requirement_version.item_def_id)[0] == requirement
-    ]
-    return sorted(found + legacy, key=lambda o: (o.due_at, str(o.pk)))
+    legacy = _eligible(**{**base, "kit_key": NO_KIT}, late=late, **extra)
+    return _with_legacy(requirement, found, legacy, {})
+
+
+def _with_legacy(requirement, found, legacy, resolved):
+    """found plus the pre-cutover obligations of `legacy` whose item row maps to requirement."""
+    from cya.checklists.item_requirement_cutover import resolve_item_requirement
+
+    def maps(obligation):
+        item_def_id = obligation.requirement_version.item_def_id
+        if not item_def_id:
+            return False
+        if item_def_id not in resolved:
+            resolved[item_def_id] = resolve_item_requirement(item_def_id)[0]
+        return resolved[item_def_id] == requirement
+
+    return sorted(found + [o for o in legacy if maps(o)], key=lambda o: (o.due_at, str(o.pk)))
+
+
+def _stream_windows(scope):
+    """The three candidate lists one check needs, from a single read (issue #278 Part F).
+
+    Returns (on-time including satisfied, on-time unsatisfied, late unsatisfied), each equal to
+    what _candidates returns for the same scope, or None when the read reaches the resolver
+    bound and the caller must fall back to the separate reads.
+    """
+    t = scope["recorded_at"]
+    requirement = scope["item_requirement_id"]
+    key = scope["kit_key"]
+    keys = [key] if requirement is None else [key, NO_KIT]
+    done = _satisfied_by(t, None)
+    rows = _ordered(
+        _selected_candidates(
+            organization_id=scope["organization_id"],
+            vehicle_id=scope["vehicle_id"],
+            item_id=scope["item_id"],
+            kit_keys=keys,
+            recorded_at=t,
+            kit_requirement_id=scope["kit_requirement_id"],
+        )
+        .filter(Q(early_at__lte=t, grace_at__gte=t) | Q(grace_at__lt=t, late_limit_at__gte=t))
+        .annotate(done_link=done[0], done_substitution=done[1], done_seal=done[2])
+    )
+    if len(rows) > MAX_LINK_CANDIDATES:
+        return None
+
+    def split(on_time, unsatisfied_only):
+        chosen = [
+            o
+            for o in rows
+            if (o.grace_at >= t) == on_time
+            and not (unsatisfied_only and (o.done_link or o.done_substitution or o.done_seal))
+        ]
+        if requirement is None:
+            return chosen
+        own = [o for o in chosen if str(o.kit_key).lower() == key.lower()]
+        legacy = [o for o in chosen if str(o.kit_key).lower() == NO_KIT]
+        return _with_legacy(requirement, own, legacy, resolved)
+
+    resolved = {}
+    return split(True, False), split(True, True), split(False, True)
 
 
 def conflict_obligation(check, *, recorded_at):
@@ -298,6 +377,31 @@ def choose_links(check, *, recorded_at, ignore_root_check_id=None):
     scope = _scope(check, recorded_at)
     on_time = _candidates(scope, late=False, ignore_root_check_id=ignore_root_check_id)
     late = _candidates(scope, late=True, ignore_root_check_id=ignore_root_check_id)
+    return _links(check, scope, on_time, late)
+
+
+def links_and_conflict_obligation(check, *, recorded_at):
+    """choose_links and conflict_obligation for a new check, from one read (issue #278 Part F).
+
+    A save needs both for the same check and instant under the same lock; reading the stream
+    once instead of six times gives the same results. It falls back to the separate reads when
+    the stream reaches the resolver bound, so LinkScopeTooLarge is raised exactly as before.
+    """
+    scope = _scope(check, recorded_at)
+    windows = _stream_windows(scope)
+    if windows is None:
+        return (
+            choose_links(check, recorded_at=recorded_at),
+            conflict_obligation(check, recorded_at=recorded_at),
+        )
+    every_on_time, on_time, late = windows
+    first = (
+        min(every_on_time, key=lambda o: (o.early_at, o.due_at, o.pk)) if every_on_time else None
+    )
+    return _links(check, scope, on_time, late), first
+
+
+def _links(check, scope, on_time, late):
     if len(on_time) + len(late) > MAX_LINK_CANDIDATES:
         raise LinkScopeTooLarge("too many eligible obligations")
     candidates = [(o, "ON_TIME") for o in on_time] + [(o, "LATE") for o in late]

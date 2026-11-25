@@ -44,7 +44,7 @@ from cya.checks.conflicts import CheckConflict, conflicting_check
 from cya.checks.linking import (
     LinkScopeTooLarge,
     choose_links,
-    conflict_obligation,
+    links_and_conflict_obligation,
     persist_links,
     response_links,
 )
@@ -1087,7 +1087,10 @@ def record_check(
             checklist_version_id=version.pk if version else None,
         )
         try:
-            links = choose_links(prospective_check, recorded_at=now)
+            # One read serves both linking and the conflict anchor (issue #278 Part F).
+            links, scope_obligation = links_and_conflict_obligation(
+                prospective_check, recorded_at=now
+            )
         except LinkScopeTooLarge:
             raise CheckError(
                 "CONFIGURATION_UNAVAILABLE",
@@ -1099,7 +1102,6 @@ def record_check(
         _checked_reference(
             prospective_check, shape["acknowledges_check_id"], "acknowledges_check_id"
         )
-        scope_obligation = conflict_obligation(prospective_check, recorded_at=now)
         newer = conflicting_check(
             prospective_check,
             scope_obligation,
