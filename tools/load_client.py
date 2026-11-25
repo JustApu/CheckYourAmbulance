@@ -508,7 +508,8 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_
     start = {
         "operation_id": str(uuid4()),
         "vehicle_id": user["vehicle_id"],
-        "template_id": plan["template_id"],
+        # After the SPEC 5.0.0 cutover each vehicle has its own checklist (issue #278).
+        "template_id": user.get("template_id") or plan["template_id"],
         "separate": False,
     }
     session_id = None

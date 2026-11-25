@@ -49,6 +49,23 @@ def _refuse_unless_rehearsal():
         raise RuntimeError(f"refusing database {name!r}: load preparation is for *_rehearsal only")
 
 
+def checklists_by_vehicle(org):
+    """{vehicle id: its own active checklist} after the SPEC 5.0.0 cutover; {} before it.
+
+    The synthetic agency has one checklist per vehicle. More than one is refused rather than
+    guessed, since a step assigns its slot to exactly one (issue #278).
+    """
+    found = {}
+    for template in ChecklistTemplate.objects.filter(
+        organization=org, vehicle__isnull=False, active=True
+    ):
+        vehicle_id = str(template.vehicle_id)
+        if vehicle_id in found:
+            raise RuntimeError(f"vehicle {vehicle_id} has more than one active checklist")
+        found[vehicle_id] = template
+    return found
+
+
 def _context(org, actor):
     return {
         "organization_id": str(org.pk),
@@ -113,9 +130,22 @@ def prepare(scale, *, now=None):
     now = now or timezone.now()
     org = Organization.objects.get()
     admin = User.objects.get(organization=org, email="rehearsal-administrator@example.test")
-    template = ChecklistTemplate.objects.get(organization=org)
+    # After the SPEC 5.0.0 cutover each vehicle is assigned its own checklist; before it, the
+    # agency's one shared template (issue #278). A step cannot add vehicles after the cutover:
+    # a new vehicle would need a checklist of its own first.
+    owned = checklists_by_vehicle(org)
+    template = None if owned else ChecklistTemplate.objects.get(organization=org)
+    count = VEHICLES_PER_STEP * scale
+    if owned and (
+        Vehicle.objects.filter(organization=org, pk__in=list(owned)).count() < count
+        or Vehicle.objects.filter(organization=org).count() > len(owned)
+    ):
+        raise RuntimeError(
+            "after the 5.0.0 cutover a step can only use vehicles that already have a checklist"
+        )
 
-    vehicles, vehicles_created = _vehicles(org, VEHICLES_PER_STEP * scale, now)
+    vehicles, vehicles_created = _vehicles(org, count, now)
+    checklist_of = {str(v.pk): str((owned[str(v.pk)] if owned else template).pk) for v in vehicles}
     crew = []
     users_created = 0
     for index in range(len(vehicles) * CREW_PER_VEHICLE):
@@ -145,7 +175,7 @@ def prepare(scale, *, now=None):
     for vehicle in vehicles:
         bind_requirement(
             vehicle_id=str(vehicle.pk),
-            template_id=str(template.pk),
+            template_id=checklist_of[str(vehicle.pk)],
             slot=slot,
             **_context(org, admin),
         )
@@ -156,14 +186,22 @@ def prepare(scale, *, now=None):
     users = []
     for v_index, vehicle in enumerate(vehicles):
         for member in crew[v_index * CREW_PER_VEHICLE : (v_index + 1) * CREW_PER_VEHICLE]:
-            users.append({"role": "crew", "vehicle_id": str(vehicle.pk), **_session(member, now)})
+            users.append(
+                {
+                    "role": "crew",
+                    "vehicle_id": str(vehicle.pk),
+                    "template_id": checklist_of[str(vehicle.pk)],
+                    **_session(member, now),
+                }
+            )
     for supervisor in supervisors:
         users.append({"role": "supervisor", **_session(supervisor, now)})
     return {
         "scale": scale,
         "slot": slot,
         "due_at": due.isoformat(),
-        "template_id": str(template.pk),
+        # The shared template before the cutover; each crew entry names its vehicle's checklist.
+        "template_id": str(template.pk) if template else None,
         "vehicle_ids": [str(v.pk) for v in vehicles],
         "created": {"vehicles": vehicles_created, "users": users_created},
         "users": users,
