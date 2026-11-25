@@ -967,5 +967,99 @@ function generic(kind) {
       assert.equal(run.get("area-overview").hidden, true, "narrow screens open the area on its own");
     }
   }
-  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  {
+    // Issue #278 A: a save costs its saver one checklist read, not two, whichever arrives first,
+    // the save's answer or its own push. Other people's hints are still read, never lost.
+    const scenario = () => {
+      const run = checklist(), clock = [];
+      run.context.setTimeout = (fn, ms) => { clock.push({fn, ms: ms || 0, live: true}); return clock.length; };
+      run.context.clearTimeout = id => { if (clock[id - 1]) clock[id - 1].live = false; };
+      run.context.testUI.setRows([row]); run.context.testUI.render();
+      const isRead = r => !r.body && String(r.url).startsWith("/checklist");
+      const answered = new Set();
+      const reads = () => run.requests.filter(isRead).length;
+      // Run due timers (up to `upTo` ms) and answer each new read, until nothing is left to do.
+      const settle = async (upTo = Infinity) => {
+        for (let busy = true; busy;) {
+          busy = false;
+          for (const timer of clock) {
+            if (timer.live && timer.ms <= upTo) { timer.live = false; timer.fn(); busy = true; }
+          }
+          for (const read of run.requests.filter(isRead)) {
+            if (!answered.has(read)) {
+              answered.add(read); busy = true;
+              response(read, 200, {status: "OK", items: [row], group_progress: [], vehicle_status: {status: "IN_SERVICE"}});
+            }
+          }
+          await tick(); await tick();
+        }
+      };
+      const push = (message) => run.sockets[0].onmessage({data: JSON.stringify(message)});
+      const save = () => { findAction(run.elements.items.children[0], "pass").fire("click"); return run.posts().at(-1); };
+      const commit = (post, checkId) => response(post, 201, {status: "COMMITTED", result: {check_id: checkId, outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}});
+      return {run, settle, reads, push, save, commit};
+    };
+    {
+      const t = scenario();
+      const post = t.save();
+      t.push({type: "vehicle.update", event_id: "mine-1", kind: "check.recorded"});   // push first
+      t.commit(post, "mine-1"); await tick();
+      await t.settle();
+      assert.equal(t.reads(), 1, "own push before the answer: one read");
+    }
+    {
+      const t = scenario();
+      const post = t.save();
+      t.commit(post, "mine-2"); await tick();
+      await t.settle();
+      t.push({type: "vehicle.update", event_id: "mine-2", kind: "check.recorded"});   // answer first
+      await t.settle();
+      assert.equal(t.reads(), 1, "own push after the answer: one read");
+      t.push({type: "vehicle.update", event_id: "other-1", kind: "check.recorded"});
+      await t.settle(250);
+      assert.equal(t.reads(), 2, "another person's hint is read 250 ms later");
+      t.push({type: "vehicle.update", event_id: "mine-2", kind: "check.recorded"});
+      await t.settle();
+      assert.equal(t.reads(), 3, "an own event is skipped once only; a repeat is treated as a hint");
+    }
+    {
+      const t = scenario();
+      const post = t.save();
+      t.push({type: "vehicle.update", event_id: "other-2", kind: "check.recorded"});
+      await t.settle(250);
+      assert.equal(t.reads(), 0, "a hint during an unanswered save waits for that save's read");
+      t.commit(post, "mine-3"); await tick();
+      await t.settle();
+      assert.equal(t.reads(), 1, "the committed save's read covers the hint that arrived before it");
+    }
+    {
+      const t = scenario();
+      const post = t.save();
+      t.push({type: "vehicle.update", event_id: "other-3", kind: "deficiency.changed"});
+      response(post, 400, {status: "REJECTED", code: "VALIDATION_FAILED"}); await tick();
+      await t.settle(250);
+      assert.equal(t.reads(), 1, "a refused save leaves no read of its own, so the waiting hint is read");
+    }
+    {
+      const t = scenario();
+      t.save();   // never answered
+      t.push({type: "vehicle.update", event_id: "other-4", kind: "check.recorded"});
+      await t.settle(250);
+      assert.equal(t.reads(), 0);
+      await t.settle(1999);
+      assert.equal(t.reads(), 0);
+      await t.settle(2000);
+      assert.equal(t.reads(), 1, "a hint is read within 2 s (SPEC §17.3) even if a save's answer never comes");
+    }
+    {
+      const t = scenario();
+      t.push({type: "connection.ready", vehicle_id: "vehicle"});
+      await t.settle();
+      assert.equal(t.reads(), 0, "connection.ready is not a change; onopen already re-reads");
+      t.run.sockets[0].onmessage({data: "not json"});
+      await t.settle();
+      assert.equal(t.reads(), 1, "an unreadable frame is still treated as a hint");
+    }
+  }
+  console.log("Offline workflow script regressions passed: checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

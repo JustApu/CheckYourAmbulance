@@ -19,6 +19,8 @@
   var navigationRestored = false, navigationAnchorKey = null, navigationSaveTimer = null;
   var focusOnRestore = false;  // issue #235 B2: a resumed position also restores focus
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false, loadedOnce = false;
+  // Live hints (issue #278 A): our committed check IDs, unanswered saves, and an unread hint.
+  var ownEvents = {}, savesInFlight = 0, hintWaiting = false;
   // Split view (issue #194): at 64rem and wider an open area keeps the area list beside its items.
   var wideQuery = window.matchMedia ? window.matchMedia("(min-width: 64rem)") : null;
   // Loading placeholders (issue #194) stand in until the first answer; never leave them spinning.
@@ -186,7 +188,12 @@
   function send(row, entry) {
     render();
     if (!entry.payload) { entry.payload = checkPayload(row, entry); }
+    savesInFlight += 1;
     post(config.urls.checks, entry.payload).then(function (answer) {
+      savesInFlight -= 1;
+      // Issue #278 A: this page's own push needs no read of its own; the reload below covers it.
+      if (answer.kind === "committed" && answer.body.result.check_id) { ownEvents[answer.body.result.check_id] = true; }
+      if (answer.kind !== "committed" && hintWaiting && !savesInFlight) { scheduleReload(250); }
       if (answer.kind === "committed") {
         entry.status = "saved"; entry.text = "Recorded " + when(answer.body.result.server_recorded_at);
         // The server's outcome is authoritative (a count can derive Fail); remember which check it is.
@@ -970,6 +977,7 @@
     if (signedOutNow) { return; }
     if (loading) { reloadAgain = true; return; }
     loading = true;
+    hintWaiting = false;   // this read starts after every hint received so far, so it covers them
     var listView = config.verification_for_deficiency_id || layoutMode === "FLAT" ? view : "NORMAL";
     var q = "?view=" + encodeURIComponent(listView) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
     // A session reads its own pinned version's rows (SPEC CHK-4), even after a newer version is
@@ -1016,13 +1024,35 @@
     clearTimeout(reloadTimer); reloadTimer = setTimeout(reload, ms);
   }
 
+  // A push is only a hint: any checklist read that starts after it arrives shows its change
+  // (issue #278 A). So a hint is skipped when it is this page's own committed save, whose
+  // reload is already scheduled, or when it arrives while a save of ours is still unanswered:
+  // that save's reload starts later and covers it. If the save is not committed, or its
+  // answer is slow, the hint gets its own read: SPEC §17.3 allows a client to delay a re-read
+  // by up to 2 seconds.
+  var HINT_WAIT_MS = 2000, hintTimer = null;
+  function onHint(message) {
+    var hint = null;
+    try { hint = JSON.parse(message.data); } catch (error) { hint = null; }
+    if (hint && hint.type === "connection.ready") { return; }   // onopen already reconciles
+    if (hint && hint.type === "vehicle.update" && ownEvents[hint.event_id]) {
+      delete ownEvents[hint.event_id];
+      return;
+    }
+    hintWaiting = true;
+    if (!savesInFlight) { scheduleReload(250); return; }
+    if (!hintTimer) {
+      hintTimer = setTimeout(function () { hintTimer = null; if (hintWaiting) { scheduleReload(0); } }, HINT_WAIT_MS);
+    }
+  }
+
   var socket = null, backoff = 1000, stopped = false;
   function connect() {
     if (stopped) { return; }
     var scheme = location.protocol === "https:" ? "wss://" : "ws://";
     socket = new WebSocket(scheme + location.host + config.urls.socket);
     socket.onopen = function () { backoff = 1000; liveBanner.hidden = true; scheduleReload(0); };  // reconcile (17.3)
-    socket.onmessage = function () { scheduleReload(250); };  // a push is only a hint
+    socket.onmessage = onHint;
     socket.onclose = function (event) {
       if (socket && socket.retired) { return; }
       liveBanner.hidden = false;
