@@ -38,7 +38,7 @@ from cya.authorization.guard import PermissionDenied, Principal, require_permiss
 from cya.authorization.locking import locked_identities
 from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import ResourceContext, Role
-from cya.checklists.models import ChecklistPublication, ChecklistVersion, Vehicle
+from cya.checklists.models import ChecklistPublication, ChecklistVersion, KitInstance, Vehicle
 from cya.checklists.overlay import ResolutionError, _active_deviations, resolve_checklist
 from cya.checks.conflicts import CheckConflict, conflicting_check
 from cya.checks.linking import (
@@ -83,6 +83,7 @@ from cya.inspections.projections import (
     is_expired,
     rebuild_session_projection,
 )
+from cya.kits.models import KitAssignmentEvent
 from cya.kits.placements import KIT_DEFINITION_SOURCE, placed_contents
 from cya.kits.presence import PRESENCE_SOURCE, presence_resolved_item
 from cya.notifications.recipients import notify
@@ -1426,7 +1427,49 @@ def correct_check(
         if lock is None:
             raise CheckError("CONFIGURATION_UNAVAILABLE", "item lock is unavailable", status=503)
         root = CheckRecord.objects.get(organization_id=organization_id, pk=root.root_check_id)
+        if root.kit_presence:
+            if root.kit_assignment_event_id is None:
+                raise CheckError(
+                    "KIT_ASSIGNMENT_CHANGED",
+                    "the kit assignment is unavailable; refresh and record a new presence check",
+                    status=409,
+                    path="kit_id",
+                )
+            kit = (
+                KitInstance.objects.select_for_update()
+                .filter(organization_id=organization_id, pk=root.kit_id)
+                .first()
+            )
+            if kit is None:
+                raise CheckError(
+                    "CONFIGURATION_UNAVAILABLE", "physical kit is unavailable", status=503
+                )
         now = timezone.now()
+        if root.kit_presence:
+            assignment = KitAssignmentEvent.objects.filter(
+                organization_id=organization_id,
+                kit_id=root.kit_id,
+                pk=root.kit_assignment_event_id,
+                vehicle_id=root.vehicle_id,
+                active=True,
+                compartment_id__isnull=False,
+                effective_at__lte=now,
+                recorded_at__lte=now,
+            ).first()
+            has_newer = assignment is not None and KitAssignmentEvent.objects.filter(
+                organization_id=organization_id,
+                kit_id=root.kit_id,
+                sequence__gt=assignment.sequence,
+                effective_at__lte=now,
+                recorded_at__lte=now,
+            ).exists()
+            if assignment is None or has_newer:
+                raise CheckError(
+                    "KIT_ASSIGNMENT_CHANGED",
+                    "the kit assignment changed; refresh and record a new presence check",
+                    status=409,
+                    path="kit_id",
+                )
         if root.session_id is not None:
             session = InspectionSession.objects.filter(
                 organization_id=organization_id, pk=root.session_id

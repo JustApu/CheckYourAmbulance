@@ -178,6 +178,29 @@ class PresenceCheckTests(PresenceCase):
         (link,) = CheckObligationLink.objects.filter(check_record=row)
         self.assertEqual(str(link.obligation.kit_instance_id), self.cabinet_kit)
 
+    def test_correction_reports_when_the_physical_kit_assignment_changed(self):
+        check_id = self.check(self.cabinet_kit).body["check_id"]
+        self.clock.set(self.at(hours=5, minutes=35))
+        record_kit_assignment(
+            kit_id=self.cabinet_kit,
+            active=True,
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(self.drawer.pk),
+            **self.context(self.supervisor),
+        )
+        self.clock.set(self.at(hours=5, minutes=40))
+
+        with self.assertRaises(CheckError) as raised:
+            correct_check(
+                check_id=check_id,
+                expected_tip_check_id=check_id,
+                outcome="PASSED",
+                quantity=1,
+                **self.context(self.crew),
+            )
+
+        self.assertEqual(raised.exception.code, "KIT_ASSIGNMENT_CHANGED")
+
     def test_conflict_warning_is_scoped_to_the_physical_kit(self):
         self.check(self.cabinet_kit)
         with self.assertRaises(CheckConflict):
