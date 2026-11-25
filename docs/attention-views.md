@@ -205,7 +205,10 @@ a past picture and does not update.
 
 **Live.** The screen re-reads its panel:
 - on a vehicle hint from the existing live channel, for up to 3 vehicles (one fewer than the default
-  per-user socket limit, leaving room for another tab);
+  per-user socket limit, leaving room for another tab). The first hint opens a 2-second window and
+  every hint in it shares one re-read at its end, the most SPEC §17.3 lets a client combine and
+  delay; a re-read that starts sooner (the timer, a reconnect) covers them instead
+  ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278));
 - on reconnect and when the tab is shown again;
 - every 60 seconds, which also covers changes no event announces, such as a deadline passing or an
   acknowledgement expiring.
@@ -248,7 +251,8 @@ never cut. The age rule and the item and kit labels of the shown suspensions are
 - the HTTP roles and the screen.
 
 `readiness_script_harness.js` runs the screen script against fake sockets, timers and fetch:
-hints, reconnect, the timer, the stale notice, sign-in end and one read at a time.
+hints and their 2-second window, reconnect, the timer, the stale notice, sign-in end and one read
+at a time.
 
 ## Not built here
 

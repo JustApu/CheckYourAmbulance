@@ -7,7 +7,7 @@ time, what the pages do (`checklist.js`, `vehicle.js`, `readiness.js`):
   - open the vehicle page and start or join its inspection session, then open the session page;
   - keep the vehicle's live-update WebSocket open, and reload the checklist 250 ms after each push, one reload at a time. As the page does since issue #278, a push for one's own committed save, or one that arrives while one's save is unanswered, is covered by the reload after that save instead (`Hints`);
   - each of a vehicle's three crew saves a third of its items at a human pace. A save that gets no definite answer is retried with the same operation ID (REC-4).
-* **Supervisors:** open the fleet readiness page and its live-update sockets, then reload the panel every refresh interval and 250 ms after each push.
+* **Supervisors:** open the fleet readiness page and its live-update sockets, then reload the panel every refresh interval, and once 2 s after the first of a burst of pushes (issue #278 C).
 
 Every request's latency is recorded, and the report gives percentiles per kind and per group.
 Opening a connection and each request-response exchange are bounded by `--request-timeout`; a
@@ -46,6 +46,7 @@ PAGES = ("page_vehicle", "page_session", "page_readiness")
 SAVES = ("session_start", "check_save")
 RELOADS = ("checklist", "checklist_items", "panel")
 MAX_ITEM_READ = 20  # items one partial checklist read may name (issue #278 B)
+PANEL_PUSH_WINDOW = 2.0  # readiness.js gathers pushes this long, then reads once (#278 C)
 GROUPS = {"pages_and_saves": PAGES + SAVES, "live_reloads": RELOADS}
 PERCENTILES = (50, 90, 95, 98, 99)
 MAX_CONNECTIONS = 6  # per user, as browsers do per host
@@ -363,12 +364,22 @@ class Reloader:
 
     def __init__(self, fetch):
         self.fetch, self.timer, self.running, self.again = fetch, None, False, False
+        self.gathering = None  # a push window (gather); a read that starts covers it
         self.tasks = set()
 
     def schedule(self, delay):
         if self.timer:
             self.timer.cancel()
         self.timer = asyncio.get_running_loop().call_later(delay, self._fire)
+
+    def gather(self, window):
+        """readiness.js (issue #278 C): the first push starts a window; later ones join it."""
+        if self.gathering is None:
+            self.gathering = asyncio.get_running_loop().call_later(window, self._gathered)
+
+    def _gathered(self):
+        self.gathering = None
+        self._fire()
 
     def _fire(self):
         task = asyncio.create_task(self._run())
@@ -380,6 +391,9 @@ class Reloader:
             self.again = True
             return
         self.running = True
+        if self.gathering is not None:
+            self.gathering.cancel()
+            self.gathering = None
         try:
             await self.fetch()
         finally:
@@ -391,6 +405,8 @@ class Reloader:
     async def stop(self):
         if self.timer:
             self.timer.cancel()
+        if self.gathering is not None:
+            self.gathering.cancel()
         for task in list(self.tasks):
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -619,7 +635,16 @@ async def supervisor(site, user, recorder, done):
         await browser.get("panel", config["panel_url"])
 
     reloader = Reloader(refresh)
-    sockets = [Live(browser, path, reloader.schedule, recorder) for path in config["sockets"]]
+    sockets = [
+        Live(
+            browser,
+            path,
+            reloader.schedule,
+            recorder,
+            on_text=lambda _text: reloader.gather(PANEL_PUSH_WINDOW),
+        )
+        for path in config["sockets"]
+    ]
     for socket in sockets:
         socket.start()
     reloader.schedule(0)

@@ -8,12 +8,17 @@
   var stale = document.getElementById("readiness-stale");
   var refreshing = false, again = false, timer = null, open = 0, ended = false, tried = 0;
   var signedOut = false, interval = null, sockets = [];
+  // Issue #278 C: vehicle hints are gathered for up to PUSH_WINDOW_MS, then read once. A busy
+  // shift sends several hints a second; each used to cost a whole panel read. SPEC §17.3 lets a
+  // client combine pushes into one re-read and delay it by up to 2 seconds, so the window starts
+  // at the first hint and is never extended by later ones.
+  var PUSH_WINDOW_MS = 2000, pushTimer = null;
   // Signed out (a 401 from the panel, issue 37): stop every timer and socket and say so. The page
   // never requests /auth/login/ by itself; the person follows the link when they are ready.
   function stop() {
     if (signedOut) { return; }
     signedOut = true; ended = true;
-    clearInterval(interval); clearTimeout(timer);
+    clearInterval(interval); clearTimeout(timer); clearTimeout(pushTimer);
     sockets.forEach(function (s) { s.retired = true; if (s.close) { s.close(); } });
     state.textContent = "Signed out. ";
     var link = document.createElement("a");
@@ -41,6 +46,8 @@
     if (signedOut) { return; }
     if (refreshing) { again = true; return; }
     refreshing = true;
+    // This read starts after every hint so far, so it covers any still gathering.
+    if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
     fetch(config.panel_url, {credentials: "same-origin", cache: "no-store"}).then(function (r) {
       if (r.status === 401) { stop(); return null; }
       if (!r.ok) { throw new Error("panel"); } return r.text();
@@ -63,6 +70,10 @@
     });
   }
   function schedule(ms) { if (!signedOut) { clearTimeout(timer); timer = setTimeout(refresh, ms); } }
+  function hinted() {
+    if (signedOut || pushTimer) { return; }
+    pushTimer = setTimeout(function () { pushTimer = null; refresh(); }, PUSH_WINDOW_MS);
+  }
   interval = setInterval(refresh, config.refresh_seconds * 1000);
   document.addEventListener("visibilitychange", function () { if (!document.hidden) { schedule(0); } });
   config.sockets.forEach(function (path) {
@@ -74,7 +85,7 @@
       sockets.push(socket);
       function attempted() { if (!socket.attempted) { socket.attempted = true; if (!first) { first = true; tried += 1; } } }
       socket.onopen = function () { attempted(); backoff = 1000; counted = true; open += 1; describe(); schedule(0); };
-      socket.onmessage = function () { schedule(250); };
+      socket.onmessage = hinted;
       socket.onclose = function (event) {
         if (socket.retired) { return; }
         attempted();
