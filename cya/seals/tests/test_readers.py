@@ -53,7 +53,9 @@ class SealReaderTests(SimpleTestCase):
             items.filter.return_value.values_list.return_value = [("item", "Sample item")]
             kits.filter.return_value.values_list.return_value = []
             definitions.filter.return_value = []
-            data = inspection_scope(\n                "org", "vehicle", "slot", "slot", at=datetime(2026, 11, 14, tzinfo=UTC)\n            )
+            data = inspection_scope(
+                "org", "vehicle", "slot", "slot", at=datetime(2026, 11, 14, tzinfo=UTC)
+            )
         self.assertTrue(data["items"][0]["expiration_tracked"])
         self.assertNotIn("count", data["items"][0])
         self.assertNotIn("expiration", data["items"][0])

@@ -99,9 +99,7 @@ class Migration(migrations.Migration):
                 ("count", models.PositiveIntegerField()),
                 (
                     "actor_user",
-                    models.ForeignKey(
-                        on_delete=PROTECT, related_name="+", to="cya_accounts.user"
-                    ),
+                    models.ForeignKey(on_delete=PROTECT, related_name="+", to="cya_accounts.user"),
                 ),
                 (
                     "assignment",
