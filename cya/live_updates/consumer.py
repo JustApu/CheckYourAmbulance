@@ -135,16 +135,21 @@ class VehicleLiveConsumer(AsyncWebsocketConsumer):
         vehicle_id = event.get("vehicle_id")
         event_id = event.get("event_id")
         kind = event.get("kind")
+        item_id = event.get("item_id")
         if (
             event.get("organization_id") != self.organization_id
             or vehicle_id != self.vehicle_id
             or not _canonical_uuid(event_id)
             or not isinstance(kind, str)
             or kind not in EVENT_KINDS
+            or (item_id is not None and not _canonical_uuid(item_id))
         ):
             logger.error("invalid live update rejected")
             return
-        await self._send_json({"type": "vehicle.update", "event_id": event_id, "kind": kind})
+        frame = {"type": "vehicle.update", "event_id": event_id, "kind": kind}
+        if item_id is not None:
+            frame["item_id"] = item_id  # issue #278: only this item's rows can have changed
+        await self._send_json(frame)
 
     async def _send_json(self, value):
         await self.send(text_data=json.dumps(value, ensure_ascii=True, separators=(",", ":")))

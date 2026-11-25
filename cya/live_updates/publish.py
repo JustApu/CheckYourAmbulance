@@ -23,17 +23,32 @@ def _valid_id(value, field):
         raise ValueError(f"{field} must be a canonical UUID")
 
 
-def publish_vehicle_update(*, organization_id, vehicle_id, event_id, kind):
+def publish_vehicle_update(*, organization_id, vehicle_id, event_id, kind, item_id=None):
     """Publish a small hint after commit; reconnecting clients re-read authoritative state.
 
     Delivery is intentionally best-effort. A channel-layer failure cannot roll back an
     already-committed business command; reconnect reconciliation repairs missed hints.
+
+    item_id, when given, promises that the change can alter only that item's checklist rows, so
+    a page may re-read just those (issue #278). Leave it out whenever the change may reach
+    other rows; a page then re-reads the whole checklist.
     """
     _valid_id(organization_id, "organization_id")
     _valid_id(vehicle_id, "vehicle_id")
     _valid_id(event_id, "event_id")
+    if item_id is not None:
+        _valid_id(item_id, "item_id")
     if not isinstance(kind, str) or kind not in EVENT_KINDS:
         raise ValueError("kind is not a supported vehicle update")
+    message = {
+        "type": "live.update",
+        "organization_id": organization_id,
+        "vehicle_id": vehicle_id,
+        "event_id": event_id,
+        "kind": kind,
+    }
+    if item_id is not None:
+        message["item_id"] = item_id
 
     def deliver():
         try:
@@ -41,14 +56,7 @@ def publish_vehicle_update(*, organization_id, vehicle_id, event_id, kind):
             if channel_layer is None:
                 raise RuntimeError("channel layer is unavailable")
             async_to_sync(channel_layer.group_send)(
-                f"vehicle.{organization_id}.{vehicle_id}",
-                {
-                    "type": "live.update",
-                    "organization_id": organization_id,
-                    "vehicle_id": vehicle_id,
-                    "event_id": event_id,
-                    "kind": kind,
-                },
+                f"vehicle.{organization_id}.{vehicle_id}", message
             )
         except Exception as error:
             logger.error("live update delivery unavailable (%s)", type(error).__name__)

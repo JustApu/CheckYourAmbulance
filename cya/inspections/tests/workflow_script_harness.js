@@ -126,7 +126,7 @@ function checklist(state = "OPEN", extra = {}) {
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   if (config.test_wide) run.window.matchMedia = () => ({matches: true, addEventListener() {}});
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},groups(){return groupProgressRows;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   // Verification regressions exercise item actions, including the no-session retry path.
   if (config.verification_for_deficiency_id) run.get("layout-flat").fire("click");
   return run;
@@ -1077,5 +1077,121 @@ function generic(kind) {
       assert.equal(t.reads(), before + 1, "a forgotten own push is read like any hint");
     }
   }
-  console.log("Offline workflow script regressions passed: checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  {
+    // Issue #278 B: a hint naming its item re-reads only that item's rows and patches them, with
+    // group progress recounted as the server counts it; anything else re-reads the whole list.
+    const make = (id, compartment, state, extra = {}) => ({...row, item_id: id, item_label: "Item " + id, kit_id: null, kit_label: null,
+      compartment_id: compartment, compartment_label: "Compartment " + compartment, obligation_state: state, deficiencies: [], ...extra});
+    const base = [make("a", "c1", "DUE"), make("b", "c1", "SATISFIED"), make("c", "c2", "OVERDUE"),
+      make("d", "c2", "DUE", {kit_presence: true, kit_id: "kit-d"})];
+    const serverGroups = list => {
+      // Hand-written from cya/attention/checklist.py _group_progress, for these fixtures.
+      const out = [];
+      for (const r of list) {
+        let g = out.find(x => x.key === "compartment:" + r.compartment_id);
+        if (!g) { g = {key: "compartment:" + r.compartment_id, label: r.compartment_label, total: 0, checked: 0, due: 0, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0, ids: new Set()}; out.push(g); }
+        g.total += 1;
+        g[{SATISFIED: "checked", DUE: "due", CURRENT: "due_soon", OVERDUE: "overdue", UPCOMING: "not_due"}[r.obligation_state]] += 1;
+        for (const d of r.deficiencies) g.ids.add(d.id);
+      }
+      return out.map(({ids, ...g}) => ({...g, open_deficiencies: ids.size}));
+    };
+    const scenario = async (extra = {}) => {
+      const run = checklist("OPEN", extra), clock = [];
+      run.context.setTimeout = (fn, ms) => { clock.push({fn, ms: ms || 0, live: true}); return clock.length; };
+      run.context.clearTimeout = id => { if (clock[id - 1]) clock[id - 1].live = false; };
+      const isRead = r => !r.body && String(r.url).startsWith("/checklist");
+      const reads = () => run.requests.filter(isRead);
+      const fire = async (upTo = Infinity) => {
+        for (const timer of clock) if (timer.live && timer.ms <= upTo) { timer.live = false; timer.fn(); }
+        await tick(); await tick();
+      };
+      const itemsOf = read => { const m = String(read.url).match(/item_ids=([^&]*)/); return m ? decodeURIComponent(m[1]).split(",") : null; };
+      const answer = async (read, items, groups) => {
+        response(read, 200, {status: "OK", items, group_progress: groups === undefined ? serverGroups(items) : groups, vehicle_status: {status: "IN_SERVICE"}});
+        await tick(); await tick();
+      };
+      run.context.testUI.reload();
+      await answer(reads()[0], base);
+      const push = message => run.sockets[0].onmessage({data: JSON.stringify(message)});
+      return {run, reads, fire, itemsOf, answer, push, groups: () => JSON.parse(JSON.stringify(run.context.testUI.groups()))};
+    };
+    {
+      const t = await scenario();
+      assert.deepEqual(t.groups(), serverGroups(base));
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.equal(t.reads().length, 2);
+      assert.deepEqual(t.itemsOf(t.reads()[1]), ["a"], "an item hint reads only that item");
+      assert(String(t.reads()[1].url).includes("session_id=session"), "the item read keeps the session's own rows");
+      const fresh = make("a", "c1", "SATISFIED", {deficiencies: [{id: "def-1", status: "OPEN", summary: "s", severity_code: "HIGH", severity_label: "High", reported_at: "2026-06-01T00:00:00Z"}]});
+      await t.answer(t.reads()[1], [fresh], null);
+      const expected = [fresh, ...base.slice(1)];
+      assert.deepEqual(t.groups(), serverGroups(expected), "group progress is recounted exactly as the server counts it");
+      assert.equal(t.run.elements.items.children.length > 0, true);
+      await t.fire();
+      assert.equal(t.reads().length, 2, "a patched item needs no further read");
+    }
+    {
+      const t = await scenario();
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      t.push({type: "vehicle.update", event_id: "e2", kind: "check.recorded", item_id: "c"});
+      await t.fire(250);
+      assert.deepEqual(t.itemsOf(t.reads()[1]).sort(), ["a", "c"], "hints within the debounce share one read");
+      await t.answer(t.reads()[1], [make("a", "c1", "SATISFIED"), make("c", "c2", "SATISFIED"), make("c", "c2", "DUE", {kit_id: "new-kit"})], null);
+      await t.fire();
+      assert.equal(t.reads().length, 3, "a row the page does not hold means the whole list is read");
+      assert.equal(t.itemsOf(t.reads()[2]), null);
+    }
+    for (const message of [
+      {type: "vehicle.update", event_id: "e1", kind: "check.recorded"},
+      {type: "vehicle.update", event_id: "e1", kind: "deficiency.changed", item_id: "a"},
+      {type: "vehicle.update", event_id: "e1", kind: "status.changed"},
+    ]) {
+      const t = await scenario();
+      t.push({type: "vehicle.update", event_id: "e0", kind: "check.recorded", item_id: "a"});
+      t.push(message);
+      await t.fire(250);
+      assert.equal(t.reads().length, 2);
+      assert.equal(t.itemsOf(t.reads()[1]), null, "a hint that names no item, or another kind, reads the whole list: " + JSON.stringify(message));
+    }
+    {
+      const t = await scenario();
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      response(t.reads()[1], 503, {status: "REJECTED", code: "RETRY_LATER"}); await tick(); await tick();
+      assert.equal(t.run.get("stale").hidden, false);
+      t.push({type: "vehicle.update", event_id: "e2", kind: "check.recorded", item_id: "b"});
+      await t.fire(250);
+      assert.deepEqual(t.itemsOf(t.reads()[2]).sort(), ["a", "b"], "a failed item read stays owed");
+    }
+    {
+      const t = await scenario({needs_attention_only: true});
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.equal(t.itemsOf(t.reads()[1]), null, "a filtered list does not hold every counted row, so it reads the whole list");
+    }
+    {
+      const t = await scenario();
+      t.run.context.testUI.setRows(base); t.run.context.testUI.render();
+      const tap = id => findAction(t.run.elements.items.children.find(n => n.dataset.itemKey && n.dataset.itemKey.startsWith(id + "|")), "pass").fire("click");
+      tap("b");
+      response(t.run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "mine-b", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+      await t.fire(0);
+      assert.deepEqual(t.itemsOf(t.reads()[1]), ["b"], "the saver re-reads only the saved item");
+      await t.answer(t.reads()[1], [make("b", "c1", "SATISFIED")], null);
+      tap("d");
+      response(t.run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "mine-d", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+      await t.fire(0);
+      assert.equal(t.itemsOf(t.reads()[2]), null, "a kit presence save re-reads the whole list");
+    }
+    {
+      const t = await scenario();
+      t.run.sockets[0].onopen();
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire();
+      assert.equal(t.itemsOf(t.reads()[1]), null, "a reconnect's reconciliation is always the whole list");
+    }
+  }
+  console.log("Offline workflow script regressions passed: checklist item reads (issue #278 B), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

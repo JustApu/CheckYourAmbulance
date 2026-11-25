@@ -1246,11 +1246,15 @@ def record_check(
 
             from cya.live_updates.publish import publish_vehicle_update
 
+            # Issue #278: an item or kit-content check changes only its own item's rows. A kit
+            # presence check (either source) can change its kit's content rows, so it names none.
+            presence = shape["kit_presence"] or shape["kit_requirement_id"] is not None
             publish_vehicle_update(
                 organization_id=organization_id,
                 vehicle_id=shape["vehicle_id"],
                 event_id=check_id,
                 kind="check.recorded",
+                item_id=None if presence else shape["item_id"],
             )
             if selection is not None or (verification and verification.event_type):
                 publish_vehicle_update(
