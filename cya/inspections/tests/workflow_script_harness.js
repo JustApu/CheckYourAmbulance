@@ -126,7 +126,7 @@ function checklist(state = "OPEN", extra = {}) {
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   if (config.test_wide) run.window.matchMedia = () => ({matches: true, addEventListener() {}});
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},groups(){return groupProgressRows;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   // Verification regressions exercise item actions, including the no-session retry path.
   if (config.verification_for_deficiency_id) run.get("layout-flat").fire("click");
   return run;
@@ -967,5 +967,231 @@ function generic(kind) {
       assert.equal(run.get("area-overview").hidden, true, "narrow screens open the area on its own");
     }
   }
-  console.log("Offline workflow script regressions passed: checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  {
+    // Issue #278 A: a save costs its saver one checklist read, not two, whichever arrives first,
+    // the save's answer or its own push. Other people's hints are still read, never lost.
+    const scenario = () => {
+      const run = checklist(), clock = [];
+      run.context.setTimeout = (fn, ms) => { clock.push({fn, ms: ms || 0, live: true}); return clock.length; };
+      run.context.clearTimeout = id => { if (clock[id - 1]) clock[id - 1].live = false; };
+      run.context.testUI.setRows([row]); run.context.testUI.render();
+      const isRead = r => !r.body && String(r.url).startsWith("/checklist");
+      const answered = new Set();
+      const reads = () => run.requests.filter(isRead).length;
+      // Run due timers (up to `upTo` ms) and answer each new read, until nothing is left to do.
+      const settle = async (upTo = Infinity) => {
+        for (let busy = true; busy;) {
+          busy = false;
+          for (const timer of clock) {
+            if (timer.live && timer.ms <= upTo) { timer.live = false; timer.fn(); busy = true; }
+          }
+          for (const read of run.requests.filter(isRead)) {
+            if (!answered.has(read)) {
+              answered.add(read); busy = true;
+              response(read, 200, {status: "OK", items: [row], group_progress: [], vehicle_status: {status: "IN_SERVICE"}});
+            }
+          }
+          await tick(); await tick();
+        }
+      };
+      const push = (message) => run.sockets[0].onmessage({data: JSON.stringify(message)});
+      const save = () => { findAction(run.elements.items.children[0], "pass").fire("click"); return run.posts().at(-1); };
+      const commit = (post, checkId) => response(post, 201, {status: "COMMITTED", result: {check_id: checkId, outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}});
+      return {run, settle, reads, push, save, commit};
+    };
+    {
+      const t = scenario();
+      const post = t.save();
+      t.push({type: "vehicle.update", event_id: "mine-1", kind: "check.recorded"});   // push first
+      t.commit(post, "mine-1"); await tick();
+      await t.settle();
+      assert.equal(t.reads(), 1, "own push before the answer: one read");
+    }
+    {
+      const t = scenario();
+      const post = t.save();
+      t.commit(post, "mine-2"); await tick();
+      await t.settle();
+      t.push({type: "vehicle.update", event_id: "mine-2", kind: "check.recorded"});   // answer first
+      await t.settle();
+      assert.equal(t.reads(), 1, "own push after the answer: one read");
+      t.push({type: "vehicle.update", event_id: "other-1", kind: "check.recorded"});
+      await t.settle(250);
+      assert.equal(t.reads(), 2, "another person's hint is read 250 ms later");
+      t.push({type: "vehicle.update", event_id: "mine-2", kind: "check.recorded"});
+      await t.settle();
+      assert.equal(t.reads(), 3, "an own event is skipped once only; a repeat is treated as a hint");
+    }
+    {
+      const t = scenario();
+      const post = t.save();
+      t.push({type: "vehicle.update", event_id: "other-2", kind: "check.recorded"});
+      await t.settle(250);
+      assert.equal(t.reads(), 0, "a hint during an unanswered save waits for that save's read");
+      t.commit(post, "mine-3"); await tick();
+      await t.settle();
+      assert.equal(t.reads(), 1, "the committed save's read covers the hint that arrived before it");
+    }
+    {
+      const t = scenario();
+      const post = t.save();
+      t.push({type: "vehicle.update", event_id: "other-3", kind: "deficiency.changed"});
+      response(post, 400, {status: "REJECTED", code: "VALIDATION_FAILED"}); await tick();
+      await t.settle(250);
+      assert.equal(t.reads(), 1, "a refused save leaves no read of its own, so the waiting hint is read");
+    }
+    {
+      const t = scenario();
+      t.save();   // never answered
+      t.push({type: "vehicle.update", event_id: "other-4", kind: "check.recorded"});
+      await t.settle(250);
+      assert.equal(t.reads(), 0);
+      await t.settle(1999);
+      assert.equal(t.reads(), 0);
+      await t.settle(2000);
+      assert.equal(t.reads(), 1, "a hint is read within 2 s (SPEC §17.3) even if a save's answer never comes");
+    }
+    {
+      const t = scenario();
+      t.push({type: "connection.ready", vehicle_id: "vehicle"});
+      await t.settle();
+      assert.equal(t.reads(), 0, "connection.ready is not a change; onopen already re-reads");
+      t.run.sockets[0].onmessage({data: "not json"});
+      await t.settle();
+      assert.equal(t.reads(), 1, "an unreadable frame is still treated as a hint");
+    }
+    {
+      // Only the newest 50 own check ids are kept; an older own push costs one read, nothing worse.
+      const t = scenario();
+      for (let n = 0; n < 51; n += 1) {
+        const post = t.save();
+        t.commit(post, "own-" + n); await tick();
+        await t.settle();
+      }
+      const before = t.reads();
+      t.push({type: "vehicle.update", event_id: "own-50", kind: "check.recorded"});
+      await t.settle();
+      assert.equal(t.reads(), before, "a recent own push is still skipped");
+      t.push({type: "vehicle.update", event_id: "own-0", kind: "check.recorded"});
+      await t.settle();
+      assert.equal(t.reads(), before + 1, "a forgotten own push is read like any hint");
+    }
+  }
+  {
+    // Issue #278 B: a hint naming its item re-reads only that item's rows and patches them, with
+    // group progress recounted as the server counts it; anything else re-reads the whole list.
+    const make = (id, compartment, state, extra = {}) => ({...row, item_id: id, item_label: "Item " + id, kit_id: null, kit_label: null,
+      compartment_id: compartment, compartment_label: "Compartment " + compartment, obligation_state: state, deficiencies: [], ...extra});
+    const base = [make("a", "c1", "DUE"), make("b", "c1", "SATISFIED"), make("c", "c2", "OVERDUE"),
+      make("d", "c2", "DUE", {kit_presence: true, kit_id: "kit-d"})];
+    const serverGroups = list => {
+      // Hand-written from cya/attention/checklist.py _group_progress, for these fixtures.
+      const out = [];
+      for (const r of list) {
+        let g = out.find(x => x.key === "compartment:" + r.compartment_id);
+        if (!g) { g = {key: "compartment:" + r.compartment_id, label: r.compartment_label, total: 0, checked: 0, due: 0, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0, ids: new Set()}; out.push(g); }
+        g.total += 1;
+        g[{SATISFIED: "checked", DUE: "due", CURRENT: "due_soon", OVERDUE: "overdue", UPCOMING: "not_due"}[r.obligation_state]] += 1;
+        for (const d of r.deficiencies) g.ids.add(d.id);
+      }
+      return out.map(({ids, ...g}) => ({...g, open_deficiencies: ids.size}));
+    };
+    const scenario = async (extra = {}) => {
+      const run = checklist("OPEN", extra), clock = [];
+      run.context.setTimeout = (fn, ms) => { clock.push({fn, ms: ms || 0, live: true}); return clock.length; };
+      run.context.clearTimeout = id => { if (clock[id - 1]) clock[id - 1].live = false; };
+      const isRead = r => !r.body && String(r.url).startsWith("/checklist");
+      const reads = () => run.requests.filter(isRead);
+      const fire = async (upTo = Infinity) => {
+        for (const timer of clock) if (timer.live && timer.ms <= upTo) { timer.live = false; timer.fn(); }
+        await tick(); await tick();
+      };
+      const itemsOf = read => { const m = String(read.url).match(/item_ids=([^&]*)/); return m ? decodeURIComponent(m[1]).split(",") : null; };
+      const answer = async (read, items, groups) => {
+        response(read, 200, {status: "OK", items, group_progress: groups === undefined ? serverGroups(items) : groups, vehicle_status: {status: "IN_SERVICE"}});
+        await tick(); await tick();
+      };
+      run.context.testUI.reload();
+      await answer(reads()[0], base);
+      const push = message => run.sockets[0].onmessage({data: JSON.stringify(message)});
+      return {run, reads, fire, itemsOf, answer, push, groups: () => JSON.parse(JSON.stringify(run.context.testUI.groups()))};
+    };
+    {
+      const t = await scenario();
+      assert.deepEqual(t.groups(), serverGroups(base));
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.equal(t.reads().length, 2);
+      assert.deepEqual(t.itemsOf(t.reads()[1]), ["a"], "an item hint reads only that item");
+      assert(String(t.reads()[1].url).includes("session_id=session"), "the item read keeps the session's own rows");
+      const fresh = make("a", "c1", "SATISFIED", {deficiencies: [{id: "def-1", status: "OPEN", summary: "s", severity_code: "HIGH", severity_label: "High", reported_at: "2026-06-01T00:00:00Z"}]});
+      await t.answer(t.reads()[1], [fresh], null);
+      const expected = [fresh, ...base.slice(1)];
+      assert.deepEqual(t.groups(), serverGroups(expected), "group progress is recounted exactly as the server counts it");
+      assert.equal(t.run.elements.items.children.length > 0, true);
+      await t.fire();
+      assert.equal(t.reads().length, 2, "a patched item needs no further read");
+    }
+    {
+      const t = await scenario();
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      t.push({type: "vehicle.update", event_id: "e2", kind: "check.recorded", item_id: "c"});
+      await t.fire(250);
+      assert.deepEqual(t.itemsOf(t.reads()[1]).sort(), ["a", "c"], "hints within the debounce share one read");
+      await t.answer(t.reads()[1], [make("a", "c1", "SATISFIED"), make("c", "c2", "SATISFIED"), make("c", "c2", "DUE", {kit_id: "new-kit"})], null);
+      await t.fire();
+      assert.equal(t.reads().length, 3, "a row the page does not hold means the whole list is read");
+      assert.equal(t.itemsOf(t.reads()[2]), null);
+    }
+    for (const message of [
+      {type: "vehicle.update", event_id: "e1", kind: "check.recorded"},
+      {type: "vehicle.update", event_id: "e1", kind: "deficiency.changed", item_id: "a"},
+      {type: "vehicle.update", event_id: "e1", kind: "status.changed"},
+    ]) {
+      const t = await scenario();
+      t.push({type: "vehicle.update", event_id: "e0", kind: "check.recorded", item_id: "a"});
+      t.push(message);
+      await t.fire(250);
+      assert.equal(t.reads().length, 2);
+      assert.equal(t.itemsOf(t.reads()[1]), null, "a hint that names no item, or another kind, reads the whole list: " + JSON.stringify(message));
+    }
+    {
+      const t = await scenario();
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      response(t.reads()[1], 503, {status: "REJECTED", code: "RETRY_LATER"}); await tick(); await tick();
+      assert.equal(t.run.get("stale").hidden, false);
+      t.push({type: "vehicle.update", event_id: "e2", kind: "check.recorded", item_id: "b"});
+      await t.fire(250);
+      assert.deepEqual(t.itemsOf(t.reads()[2]).sort(), ["a", "b"], "a failed item read stays owed");
+    }
+    {
+      const t = await scenario({needs_attention_only: true});
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.equal(t.itemsOf(t.reads()[1]), null, "a filtered list does not hold every counted row, so it reads the whole list");
+    }
+    {
+      const t = await scenario();
+      t.run.context.testUI.setRows(base); t.run.context.testUI.render();
+      const tap = id => findAction(t.run.elements.items.children.find(n => n.dataset.itemKey && n.dataset.itemKey.startsWith(id + "|")), "pass").fire("click");
+      tap("b");
+      response(t.run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "mine-b", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+      await t.fire(0);
+      assert.deepEqual(t.itemsOf(t.reads()[1]), ["b"], "the saver re-reads only the saved item");
+      await t.answer(t.reads()[1], [make("b", "c1", "SATISFIED")], null);
+      tap("d");
+      response(t.run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "mine-d", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+      await t.fire(0);
+      assert.equal(t.itemsOf(t.reads()[2]), null, "a kit presence save re-reads the whole list");
+    }
+    {
+      const t = await scenario();
+      t.run.sockets[0].onopen();
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire();
+      assert.equal(t.itemsOf(t.reads()[1]), null, "a reconnect's reconciliation is always the whole list");
+    }
+  }
+  console.log("Offline workflow script regressions passed: checklist item reads (issue #278 B), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

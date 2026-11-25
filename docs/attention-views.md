@@ -127,7 +127,7 @@ tables.
 
 | Route | Purpose |
 |---|---|
-| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=&checklist_version_id=` | The query above at the present instant; the user's saved view and filter apply unless the query names them; `checklist_version_id` (optional) limits the rows to that checklist version's own |
+| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=&checklist_version_id=&session_id=&item_ids=` | The query above at the present instant; the user's saved view and filter apply unless the query names them; `checklist_version_id` (optional) limits the rows to that checklist version's own. `item_ids` (optional, 1 to 20 comma-separated item ids, else `400 INVALID_ITEMS`) returns only those items' rows, each exactly as in the whole list, with `group_progress: null`: the checklist screen patches the rows a live update names instead of re-reading every row ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278)) |
 | `GET /api/v1/me/view-preferences` | The saved (or default) view and filter |
 | `POST /api/v1/me/view-preferences` | `{operation_id (a version 4 UUID, else 400), preferred_view, needs_attention_only}`; `200` with the stored values; a replay returns the stored result |
 
@@ -205,10 +205,15 @@ a past picture and does not update.
 
 **Live.** The screen re-reads its panel:
 - on a vehicle hint from the existing live channel, for up to 3 vehicles (one fewer than the default
-  per-user socket limit, leaving room for another tab);
+  per-user socket limit, leaving room for another tab). The first hint opens a 2-second window and
+  every hint in it shares one re-read at its end, the most SPEC §17.3 lets a client combine and
+  delay; a re-read that starts sooner (the timer, a reconnect) covers them instead
+  ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278));
 - on reconnect and when the tab is shown again;
-- every 60 seconds, which also covers changes no event announces, such as a deadline passing or an
-  acknowledgement expiring.
+- every 20 seconds, which also covers changes no event announces, such as a deadline passing or an
+  acknowledgement expiring, and is the only update for vehicles past the first 3. The timer plus one
+  re-read must fit SPEC §17.3's 30-second target; it was 60 seconds before
+  [issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278).
 
 It says how many vehicles are live and shows a notice when a re-read fails. When sign-in ends it
 stops promising live updates. When a re-read gets 401 (the session ended), it stops the timer,
@@ -248,7 +253,8 @@ never cut. The age rule and the item and kit labels of the shown suspensions are
 - the HTTP roles and the screen.
 
 `readiness_script_harness.js` runs the screen script against fake sockets, timers and fetch:
-hints, reconnect, the timer, the stale notice, sign-in end and one read at a time.
+hints and their 2-second window, reconnect, the timer, the stale notice, sign-in end and one read
+at a time.
 
 ## Not built here
 

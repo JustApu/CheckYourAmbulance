@@ -5,9 +5,9 @@ time, what the pages do (`checklist.js`, `vehicle.js`, `readiness.js`):
 
 * **Crew:**
   - open the vehicle page and start or join its inspection session, then open the session page;
-  - keep the vehicle's live-update WebSocket open, and reload the checklist 250 ms after each push, one reload at a time;
+  - keep the vehicle's live-update WebSocket open, and reload the checklist 250 ms after each push, one reload at a time. As the page does since issue #278, a push for one's own committed save, or one that arrives while one's save is unanswered, is covered by the reload after that save instead (`Hints`);
   - each of a vehicle's three crew saves a third of its items at a human pace. A save that gets no definite answer is retried with the same operation ID (REC-4).
-* **Supervisors:** open the fleet readiness page and its live-update sockets, then reload the panel every refresh interval and 250 ms after each push.
+* **Supervisors:** open the fleet readiness page and its live-update sockets, then reload the panel every refresh interval, and once 2 s after the first of a burst of pushes (issue #278 C).
 
 Every request's latency is recorded, and the report gives percentiles per kind and per group.
 Opening a connection and each request-response exchange are bounded by `--request-timeout`; a
@@ -44,7 +44,9 @@ from wsproto.events import (
 
 PAGES = ("page_vehicle", "page_session", "page_readiness")
 SAVES = ("session_start", "check_save")
-RELOADS = ("checklist", "panel")
+RELOADS = ("checklist", "checklist_items", "panel")
+MAX_ITEM_READ = 20  # items one partial checklist read may name (issue #278 B)
+PANEL_PUSH_WINDOW = 2.0  # readiness.js gathers pushes this long, then reads once (#278 C)
 GROUPS = {"pages_and_saves": PAGES + SAVES, "live_reloads": RELOADS}
 PERCENTILES = (50, 90, 95, 98, 99)
 MAX_CONNECTIONS = 6  # per user, as browsers do per host
@@ -277,8 +279,9 @@ def json_body(data):
 class Live:
     """A page's live-update socket: a push schedules a reload, as the pages do."""
 
-    def __init__(self, browser, path, on_push, recorder):
+    def __init__(self, browser, path, on_push, recorder, on_text=None):
         self.browser, self.path, self.on_push, self.recorder = browser, path, on_push, recorder
+        self.on_text = on_text  # given: a push's text goes there instead of on_push(0.25)
         self.task = None
 
     def start(self):
@@ -329,7 +332,10 @@ class Live:
                         return
                     elif isinstance(event, TextMessage):
                         self.recorder.count("ws_push")
-                        self.on_push(0.25)
+                        if self.on_text:
+                            self.on_text(event.data)
+                        else:
+                            self.on_push(0.25)
                     elif isinstance(event, Ping):
                         writer.write(ws.send(event.response()))
                     elif isinstance(event, CloseConnection):
@@ -358,12 +364,22 @@ class Reloader:
 
     def __init__(self, fetch):
         self.fetch, self.timer, self.running, self.again = fetch, None, False, False
+        self.gathering = None  # a push window (gather); a read that starts covers it
         self.tasks = set()
 
     def schedule(self, delay):
         if self.timer:
             self.timer.cancel()
         self.timer = asyncio.get_running_loop().call_later(delay, self._fire)
+
+    def gather(self, window):
+        """readiness.js (issue #278 C): the first push starts a window; later ones join it."""
+        if self.gathering is None:
+            self.gathering = asyncio.get_running_loop().call_later(window, self._gathered)
+
+    def _gathered(self):
+        self.gathering = None
+        self._fire()
 
     def _fire(self):
         task = asyncio.create_task(self._run())
@@ -375,6 +391,9 @@ class Reloader:
             self.again = True
             return
         self.running = True
+        if self.gathering is not None:
+            self.gathering.cancel()
+            self.gathering = None
         try:
             await self.fetch()
         finally:
@@ -386,9 +405,96 @@ class Reloader:
     async def stop(self):
         if self.timer:
             self.timer.cancel()
+        if self.gathering is not None:
+            self.gathering.cancel()
         for task in list(self.tasks):
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+
+
+class Hints:
+    """What `checklist.js` does with a push (issue #278 A and B); a push is only a hint.
+
+    Any checklist read that starts after a hint covers it. So a hint is skipped when it is the
+    page's own committed save (whose reload is already scheduled), and waits while a save is
+    unanswered, because that save's reload starts later. A save that is not committed, or an
+    answer slower than `wait` seconds, leaves the hint its own read.
+
+    A check hint that names its item, and one's own item save, owe only that item's rows
+    (`item_ids`); anything else, and the first read, owes the whole list.
+    """
+
+    def __init__(self, reloader, wait=2.0):
+        self.reloader, self.wait = reloader, wait
+        self.own, self.in_flight, self.waiting, self.timer = set(), 0, False, None
+        self.need_full, self.items = True, set()
+
+    def read_started(self):
+        """The items to read, or None for the whole list; the read covers what was owed."""
+        self.waiting = False
+        partial = not self.need_full and 0 < len(self.items) <= MAX_ITEM_READ
+        items = sorted(self.items) if partial else None
+        self.need_full, self.items = False, set()
+        return items
+
+    def read_failed(self, items):
+        if items:
+            self.items.update(items)
+        else:
+            self.need_full = True
+
+    def full(self, delay):
+        self.need_full = True
+        self.reloader.schedule(delay)
+
+    def save_started(self):
+        self.in_flight += 1
+
+    def save_finished(self, committed, check_id=None, item_id=None):
+        self.in_flight -= 1
+        if committed:
+            if check_id:
+                self.own.add(check_id)
+            if item_id:
+                self.items.add(item_id)
+            else:
+                self.need_full = True
+            self.reloader.schedule(0)  # checklist.js: a read after a committed save
+        elif self.waiting and not self.in_flight:
+            self.reloader.schedule(0.25)
+
+    def on_text(self, text):
+        hint = json_body(text)
+        if not isinstance(hint, dict):
+            hint = {}
+        if hint.get("type") == "connection.ready":
+            return  # the socket's accept already scheduled a read
+        if hint.get("type") == "vehicle.update" and hint.get("event_id") in self.own:
+            self.own.discard(hint["event_id"])
+            return
+        if (
+            hint.get("type") == "vehicle.update"
+            and hint.get("kind") == "check.recorded"
+            and isinstance(hint.get("item_id"), str)
+            and hint["item_id"]
+        ):
+            self.items.add(hint["item_id"])
+        else:
+            self.need_full = True
+        self.waiting = True
+        if not self.in_flight:
+            self.reloader.schedule(0.25)
+        elif self.timer is None:
+            self.timer = asyncio.get_running_loop().call_later(self.wait, self._late)
+
+    def _late(self):
+        self.timer = None
+        if self.waiting:
+            self.reloader.schedule(0)
+
+    def stop(self):
+        if self.timer:
+            self.timer.cancel()
 
 
 async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_reload=True):
@@ -431,17 +537,31 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_
     rows = {}
 
     async def reload():
-        status, data = await browser.get(
-            "checklist",
-            f"{config['urls']['checklist']}?view={config['view']}&needs_attention_only=false",
-        )
+        items = hints.read_started() if hints else None
+        url = f"{config['urls']['checklist']}?view={config['view']}&needs_attention_only=false"
+        if items:
+            url += "&item_ids=" + ",".join(items)
+        status, data = await browser.get("checklist_items" if items else "checklist", url)
         body = json_body(data) or {}
         if status == 200 and body.get("status") == "OK":
-            rows.clear()
-            rows.update({(r["item_id"], r.get("kit_id")): r for r in body["items"]})
+            fresh = {(r["item_id"], r.get("kit_id")): r for r in body["items"]}
+            if not items:
+                rows.clear()
+            rows.update(fresh)
+        elif hints:
+            hints.read_failed(items)
 
     reloader = Reloader(reload)
-    live = Live(browser, config["urls"]["socket"], reloader.schedule, recorder)
+    # Without the post-save reload (--no-ack-reload) nothing covers a skipped hint, so every
+    # push is read, as before issue #278.
+    hints = Hints(reloader) if ack_reload else None
+    live = Live(
+        browser,
+        config["urls"]["socket"],
+        hints.full if hints else reloader.schedule,  # a (re)connect reconciles the whole list
+        recorder,
+        on_text=hints.on_text if hints else None,
+    )
     live.start()
     await reload()
     mine = sorted(rows)[member_index::3]
@@ -452,9 +572,16 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_
             if row is None:
                 recorder.count("item_vanished")
                 continue
-            if await save(browser, config, session_page, row, recorder) and ack_reload:
-                reloader.schedule(0)  # checklist.js: scheduleReload(0) after a committed save
+            if hints:
+                hints.save_started()
+            committed, check_id = await save(browser, config, session_page, row, recorder)
+            if hints:
+                # As the page: a kit presence save can change its kit's other rows.
+                presence = row.get("kit_presence") or row.get("kit_requirement_id")
+                hints.save_finished(committed, check_id, None if presence else row["item_id"])
     finally:
+        if hints:
+            hints.stop()
         await live.stop()
         await reloader.stop()
         browser.close()
@@ -480,7 +607,7 @@ async def save(browser, config, referer, row, recorder):
         body = json_body(data) or {}
         if body.get("status") == "COMMITTED":
             recorder.count("saved")
-            return True
+            return True, (body.get("result") or {}).get("check_id")
         if body.get("status") == "CONFLICT" and status == 409:
             # Proceed after the warning: a new decision acknowledging the newer check (CON-3).
             newer = (body.get("newest_check") or {}).get("check_id")
@@ -490,11 +617,11 @@ async def save(browser, config, referer, row, recorder):
             continue
         if body.get("status") == "REJECTED" and 0 < status < 500:
             recorder.count(f"rejected_{body.get('code')}")
-            return False
+            return False, None
         recorder.count("unconfirmed_retry")
         await asyncio.sleep(1 + attempt)
     recorder.count("gave_up")
-    return False
+    return False, None
 
 
 async def supervisor(site, user, recorder, done):
@@ -509,7 +636,16 @@ async def supervisor(site, user, recorder, done):
         await browser.get("panel", config["panel_url"])
 
     reloader = Reloader(refresh)
-    sockets = [Live(browser, path, reloader.schedule, recorder) for path in config["sockets"]]
+    sockets = [
+        Live(
+            browser,
+            path,
+            reloader.schedule,
+            recorder,
+            on_text=lambda _text: reloader.gather(PANEL_PUSH_WINDOW),
+        )
+        for path in config["sockets"]
+    ]
     for socket in sockets:
         socket.start()
     reloader.schedule(0)

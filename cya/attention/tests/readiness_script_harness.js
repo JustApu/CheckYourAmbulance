@@ -37,12 +37,13 @@ function run(config) {
     createElement: () => ({}),
     addEventListener(name, fn) { listeners[name] = fn; },
   };
+  let nextTimeout = 0;
   class FakeSocket { constructor(url) { this.url = url; sockets.push(this); } close() { this.closed = true; } }
   const context = {
     document, location: {protocol: "https:", host: "example.invalid"}, JSON,
     WebSocket: FakeSocket,
-    setTimeout(fn, ms) { timeouts.push({fn, ms}); return timeouts.length; },
-    clearTimeout() {},
+    setTimeout(fn, ms) { const t = {fn, ms, id: ++nextTimeout}; timeouts.push(t); return t.id; },
+    clearTimeout(id) { const t = timeouts.find(x => x.id === id); if (t) { t.cancelled = true; } },
     setInterval(fn, ms) { intervals.push({fn, ms}); return intervals.length; },
     clearInterval(id) { if (intervals[id - 1]) { intervals[id - 1].cleared = true; } },
     fetch(url) {
@@ -54,7 +55,8 @@ function run(config) {
   vm.createContext(context);
   vm.runInContext(source, context);
   return {nodes, requests, sockets, timeouts, intervals, listeners, document,
-    fire() { const pending = timeouts.splice(0); pending.forEach(t => t.fn()); }};
+    live: () => timeouts.filter(t => !t.cancelled),
+    fire() { const pending = timeouts.splice(0); pending.forEach(t => { if (!t.cancelled) { t.fn(); } }); }};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b/"], vehicle_count: 4, refresh_seconds: 60};
@@ -143,5 +145,33 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.equal(page.requests.length, 1);  // nothing more, and no sign-in request
     assert.equal(page.sockets.length, sockets);  // no reconnect
   }
-  console.log("Offline readiness script regressions passed: sockets, hints, timer, stale notice, sign-in end, single read, signed-out stop.");
+  {
+    // Issue #278 C: hints are gathered for 2 s (SPEC §17.3's limit) and read once; later hints
+    // never push the read back, and a read that starts meanwhile covers them.
+    const page = run(config);
+    page.sockets[0].onmessage({data: "{}"});
+    page.sockets[1].onmessage({data: "{}"});
+    page.sockets[0].onmessage({data: "{}"});
+    assert.deepEqual(page.live().map(t => t.ms), [2000], "one 2-second window for a burst of hints");
+    page.fire();
+    assert.equal(page.requests.length, 1, "a burst costs one panel read");
+    page.requests[0].resolve({ok: true, text: async () => "a"}); await tick(); await tick();
+    page.sockets[1].onmessage({data: "{}"});
+    page.intervals[0].fn();  // the timer's read starts inside the window
+    assert.equal(page.requests.length, 2);
+    assert.deepEqual(page.live(), [], "the gathering window is dropped: that read covers the hint");
+    page.requests[1].resolve({ok: true, text: async () => "b"}); await tick(); await tick();
+    page.fire();
+    assert.equal(page.requests.length, 2);
+    page.sockets[0].onmessage({data: "{}"});
+    page.fire();
+    assert.equal(page.requests.length, 3);
+    page.sockets[1].onmessage({data: "{}"});
+    page.fire();  // a read is in flight: this hint waits for it
+    assert.equal(page.requests.length, 3);
+    page.requests[2].resolve({ok: true, text: async () => "c"}); await tick(); await tick();
+    page.fire();
+    assert.equal(page.requests.length, 4, "a hint during a read is never lost");
+  }
+  console.log("Offline readiness script regressions passed: sockets, hints (2-second window), timer, stale notice, sign-in end, single read, signed-out stop.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

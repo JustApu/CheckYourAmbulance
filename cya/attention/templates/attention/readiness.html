@@ -19,7 +19,7 @@
 <div id="readiness-panel">{% include "attention/readiness_panel.html" %}</div>
 </div>
 {% if live %}
-<p id="readiness-live-state" role="status">Updates every 60 seconds.</p>
+<p id="readiness-live-state" role="status">Updates every {{ config.refresh_seconds }} seconds.</p>
 <p id="readiness-stale" role="alert" hidden>Could not refresh. What you see may be out of date; the page keeps trying.</p>
 {% else %}
 <p role="status">As of {{ picture.as_of|station_time:"seconds" }}. This past picture does not update.</p>

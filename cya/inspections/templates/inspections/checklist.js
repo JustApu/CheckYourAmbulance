@@ -19,6 +19,18 @@
   var navigationRestored = false, navigationAnchorKey = null, navigationSaveTimer = null;
   var focusOnRestore = false;  // issue #235 B2: a resumed position also restores focus
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false, loadedOnce = false;
+  // Live hints (issue #278 A): our committed check IDs, unanswered saves, and an unread hint.
+  var ownEvents = {}, ownOrder = [], savesInFlight = 0, hintWaiting = false;
+  // A push for our own save may never come (the socket was down, or it came before the answer
+  // and was already covered), so only the newest OWN_EVENT_LIMIT ids are remembered. Forgetting
+  // one is safe: its push, if it does come, just costs one more read.
+  var OWN_EVENT_LIMIT = 50;
+  function rememberOwn(id) {
+    ownEvents[id] = true; ownOrder.push(id);
+    while (ownOrder.length > OWN_EVENT_LIMIT) { delete ownEvents[ownOrder.shift()]; }
+  }
+  // What the next read must cover (issue #278 B): the whole list, or only these items' rows.
+  var needFull = true, pendingItems = {}, MAX_ITEM_READ = 20;
   // Split view (issue #194): at 64rem and wider an open area keeps the area list beside its items.
   var wideQuery = window.matchMedia ? window.matchMedia("(min-width: 64rem)") : null;
   // Loading placeholders (issue #194) stand in until the first answer; never leave them spinning.
@@ -186,7 +198,12 @@
   function send(row, entry) {
     render();
     if (!entry.payload) { entry.payload = checkPayload(row, entry); }
+    savesInFlight += 1;
     post(config.urls.checks, entry.payload).then(function (answer) {
+      savesInFlight -= 1;
+      // Issue #278 A: this page's own push needs no read of its own; the reload below covers it.
+      if (answer.kind === "committed" && answer.body.result.check_id) { rememberOwn(answer.body.result.check_id); }
+      if (answer.kind !== "committed" && hintWaiting && !savesInFlight) { scheduleRead(250); }
       if (answer.kind === "committed") {
         entry.status = "saved"; entry.text = "Recorded " + when(answer.body.result.server_recorded_at);
         // The server's outcome is authoritative (a count can derive Fail); remember which check it is.
@@ -209,7 +226,10 @@
         // The toast is the announcement: the item's own Saved line is rebuilt on every render.
         toast("Saved: " + (outcomeWords[entry.savedOutcome] || "check") + " for " + row.item_label +
           (row.kit_label ? " (" + row.kit_label + ")" : "") + ".");
-        scheduleReload(0);
+        // Issue #278 B: an item check changes only its item's rows; a kit presence check can
+        // change its kit's contents, so it re-reads the whole list (as its push names no item).
+        if (row.kit_presence || row.kit_requirement_id) { scheduleReload(0); }
+        else { scheduleItemRead(row.item_id, 0); }
       } else if (answer.kind === "conflict") {
         entry.status = "idle"; entry.text = "";
         askConflict(row, entry, answer.body.newest_check);
@@ -966,12 +986,69 @@
     $("live-detail").textContent = "You are signed out, so updates have stopped. Sign in again and reload. " +
       "An item marked Unconfirmed may have been recorded: use its Retry button, not a new tap.";
   }
+  // The server's group progress (cya/attention/checklist.py _group_progress), recounted here after
+  // an item read patches rows (issue #278 B). Only for the whole, unfiltered Normal list, which is
+  // exactly the set of rows the server counts. str(None) is "None" in the server's labels.
+  function py(value) { return value === null || value === undefined ? "None" : String(value); }
+  var STATE_COUNT = {SATISFIED: "checked", DUE: "due", CURRENT: "due_soon", OVERDUE: "overdue",
+    UPCOMING: "not_due", SUSPENDED: "exceptions", EXEMPT: "exceptions", WAIVED: "exceptions"};
+  function groupsOf(list) {
+    var groups = [], byKey = {}, ids = {};
+    list.forEach(function (row) {
+      var k, label;
+      if (row.not_placed) { k = "not-placed"; label = "Not placed"; }
+      else if (row.compartment_id) { k = "compartment:" + row.compartment_id; label = row.compartment_label; }
+      else if (row.system_id) { k = "system:" + row.system_id; label = "Vehicle system: " + py(row.system_label); }
+      else if (row.kit_id) { k = "kit:" + row.kit_id; label = "Kit: " + py(row.kit_label); }
+      else { k = "vehicle"; label = "Vehicle-wide checks"; }
+      var group = byKey[k];
+      if (!group) {
+        group = byKey[k] = {key: k, label: label || "Vehicle-wide checks", total: 0, checked: 0, due: 0,
+          due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0};
+        ids[k] = {};
+        groups.push(group);
+      }
+      group.total += 1;
+      if (row.obligation_state === null || row.obligation_state === undefined) { group.no_obligation += 1; }
+      else if (STATE_COUNT[row.obligation_state]) { group[STATE_COUNT[row.obligation_state]] += 1; }
+      (row.deficiencies || []).forEach(function (d) {
+        if (d.id && !ids[k][d.id]) { ids[k][d.id] = true; group.open_deficiencies += 1; }
+      });
+    });
+    return groups;
+  }
+  // Replace the named items' rows in place. False when the answer is not the same set of rows
+  // in the same order (an item gained, lost or moved a row): only a whole read can place those.
+  function patchRows(itemIds, fresh) {
+    var named = {};
+    itemIds.forEach(function (id) { named[id] = true; });
+    var old = rows.filter(function (r) { return named[r.item_id]; });
+    if (old.length !== fresh.length) { return false; }
+    for (var i = 0; i < fresh.length; i += 1) {
+      if (!named[fresh[i].item_id] || key(fresh[i]) !== key(old[i])) { return false; }
+    }
+    var next = 0;
+    rows = rows.map(function (r) { return named[r.item_id] ? fresh[next++] : r; });
+    groupProgressRows = groupsOf(rows);
+    return true;
+  }
+  function currentListView() {
+    return config.verification_for_deficiency_id || layoutMode === "FLAT" ? view : "NORMAL";
+  }
   function reload() {
     if (signedOutNow) { return; }
     if (loading) { reloadAgain = true; return; }
     loading = true;
-    var listView = config.verification_for_deficiency_id || layoutMode === "FLAT" ? view : "NORMAL";
+    hintWaiting = false;   // this read starts after every hint received so far, so it covers them
+    var listView = currentListView();
+    // Issue #278 B: only the named items' rows when nothing else asked for the whole list, and
+    // only where this page holds every row the server counts (Normal order, no filter).
+    var itemIds = Object.keys(pendingItems);
+    var partial = !needFull && itemIds.length > 0 && itemIds.length <= MAX_ITEM_READ && loadedOnce &&
+      listView === "NORMAL" && !onlyAttention && !config.verification_for_deficiency_id;
+    needFull = false; pendingItems = {};
     var q = "?view=" + encodeURIComponent(listView) + "&needs_attention_only=" + (onlyAttention ? "true" : "false");
+    if (partial) { q += "&item_ids=" + itemIds.map(encodeURIComponent).join(","); }
     // A session reads its own pinned version's rows (SPEC CHK-4), even after a newer version is
     // published, so an item another checklist also lists is shown here too, with the vehicle's
     // shared state (SPEC 6.0.0 VW-5, issue #256).
@@ -986,6 +1063,13 @@
     }).then(function (a) {
       if (a === null) { return; }
       if (!a.ok || a.body.status !== "OK") { throw new Error("checklist"); }
+      if (partial) {
+        if (!Array.isArray(a.body.items)) { throw new Error("checklist"); }
+        setStatus(a.body.vehicle_status);
+        if (patchRows(itemIds, a.body.items)) { $("stale").hidden = true; render(); }
+        else { needFull = true; reloadAgain = true; }   // the rows changed shape: read them all
+        return;
+      }
       if (!Array.isArray(a.body.group_progress)) { throw new Error("checklist groups"); }
       rows = a.body.items; groupProgressRows = a.body.group_progress; setStatus(a.body.vehicle_status);
       if (config.verification_for_deficiency_id) {
@@ -1001,6 +1085,8 @@
       $("stale").hidden = true; loadedOnce = true; clearLoading(); render();
     }).catch(function () {
       $("stale").hidden = false;   // data on screen may be out of date
+      // A failed read covered nothing: what it was asked for stays owed to the next read.
+      if (partial) { itemIds.forEach(function (id) { pendingItems[id] = true; }); } else { needFull = true; }
       if (!loadedOnce) {
         clearLoading("The checklist could not be loaded.");
         notice.textContent = "The checklist could not be loaded yet. It tries again when the connection returns, or refresh the page.";
@@ -1008,12 +1094,46 @@
       }
     }).then(function () {
       loading = false;
-      if (reloadAgain && !signedOutNow) { reloadAgain = false; scheduleReload(0); }
+      if (reloadAgain && !signedOutNow) { reloadAgain = false; scheduleRead(0); }
     });
   }
-  function scheduleReload(ms) {
+  // scheduleRead runs whatever read is owed; scheduleReload owes the whole list (reconnect,
+  // a view change, a refused save, a hint that names no item); scheduleItemRead owes one item.
+  function scheduleRead(ms) {
     if (signedOutNow) { return; }
     clearTimeout(reloadTimer); reloadTimer = setTimeout(reload, ms);
+  }
+  function scheduleReload(ms) { needFull = true; scheduleRead(ms); }
+  function scheduleItemRead(itemId, ms) { pendingItems[itemId] = true; scheduleRead(ms); }
+
+  // A push is only a hint: any checklist read that starts after it arrives shows its change
+  // (issue #278 A). So a hint is skipped when it is this page's own committed save, whose
+  // reload is already scheduled, or when it arrives while a save of ours is still unanswered:
+  // that save's reload starts later and covers it. If the save is not committed, or its
+  // answer is slow, the hint gets its own read: SPEC §17.3 allows a client to delay a re-read
+  // by up to 2 seconds.
+  var HINT_WAIT_MS = 2000, hintTimer = null;
+  function onHint(message) {
+    var hint = null;
+    try { hint = JSON.parse(message.data); } catch (error) { hint = null; }
+    if (hint && hint.type === "connection.ready") { return; }   // onopen already reconciles
+    if (hint && hint.type === "vehicle.update" && ownEvents[hint.event_id]) {
+      delete ownEvents[hint.event_id];
+      return;
+    }
+    // Issue #278 B: a check hint that names its item owes only that item's rows; anything
+    // else (another kind, no item, an unreadable frame) owes the whole list.
+    if (hint && hint.type === "vehicle.update" && hint.kind === "check.recorded" &&
+        typeof hint.item_id === "string" && hint.item_id) {
+      pendingItems[hint.item_id] = true;
+    } else {
+      needFull = true;
+    }
+    hintWaiting = true;
+    if (!savesInFlight) { scheduleRead(250); return; }
+    if (!hintTimer) {
+      hintTimer = setTimeout(function () { hintTimer = null; if (hintWaiting) { scheduleRead(0); } }, HINT_WAIT_MS);
+    }
   }
 
   var socket = null, backoff = 1000, stopped = false;
@@ -1022,7 +1142,7 @@
     var scheme = location.protocol === "https:" ? "wss://" : "ws://";
     socket = new WebSocket(scheme + location.host + config.urls.socket);
     socket.onopen = function () { backoff = 1000; liveBanner.hidden = true; scheduleReload(0); };  // reconcile (17.3)
-    socket.onmessage = function () { scheduleReload(250); };  // a push is only a hint
+    socket.onmessage = onHint;
     socket.onclose = function (event) {
       if (socket && socket.retired) { return; }
       liveBanner.hidden = false;

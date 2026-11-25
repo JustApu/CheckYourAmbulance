@@ -31,6 +31,7 @@ class FakeSite:
     def __init__(self):
         self.latest = dict.fromkeys(ITEMS)
         self.saves, self.checklist_reads, self.panel_reads = [], 0, 0
+        self.item_reads = []  # the item ids each partial checklist read named (issue #278 B)
         self.sockets = []
         self.fail_first_save_of = ITEMS[0]  # answer 503 once: the client must retry the same op
         self.conflict_first_save_of = ITEMS[1]  # answer 409 once: the client acknowledges
@@ -122,10 +123,16 @@ class FakeSite:
             }
             return 200, (form + script("cya-config", config)).encode(), []
         if path == f"/api/v1/vehicles/{VEHICLE}/checklist":
-            self.checklist_reads += 1
+            query = dict(p.split("=", 1) for p in target.partition("?")[2].split("&") if p)
+            named = set(query["item_ids"].split(",")) if "item_ids" in query else None
+            if named is None:
+                self.checklist_reads += 1
+            else:
+                self.item_reads.append(named)
             items = [
                 {"item_id": i, "checklist_version_id": "v1", "latest_check_id": c}
                 for i, c in self.latest.items()
+                if named is None or i in named
             ]
             return 200, json.dumps({"status": "OK", "items": items}).encode(), []
         if path == "/api/v1/checks":
@@ -153,10 +160,13 @@ class FakeSite:
             newest = {"check_id": "newer-check"}
             body = {"status": "CONFLICT", "code": "CHECK_CONFLICT", "newest_check": newest}
             return 409, json.dumps(body).encode(), []
-        self.latest[item] = f"check-{len(self.saves)}"
+        check_id = f"check-{len(self.saves)}"
+        self.latest[item] = check_id
+        # As the server does: the push goes out on commit, before the save's answer.
         for push in self.sockets:
-            push()
-        return 201, json.dumps({"status": "COMMITTED"}).encode(), []
+            push(check_id, item)
+        body = {"status": "COMMITTED", "result": {"check_id": check_id}}
+        return 201, json.dumps(body).encode(), []
 
     async def websocket(self, data, reader, writer):
         if self.stall == SOCKET:
@@ -174,8 +184,16 @@ class FakeSite:
             writer.close()
             return
 
-        def push():
-            writer.write(ws.send(TextMessage(data='{"type": "vehicle.changed"}')))
+        writer.write(ws.send(TextMessage(data='{"type": "connection.ready"}')))
+
+        def push(check_id, item_id):
+            hint = {
+                "type": "vehicle.update",
+                "event_id": check_id,
+                "kind": "check.recorded",
+                "item_id": item_id,
+            }
+            writer.write(ws.send(TextMessage(data=json.dumps(hint))))
 
         self.sockets.append(push)
         try:
@@ -223,7 +241,7 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         return {"scale": 1, "template_id": "t1", "users": [*crew, boss]}
 
     async def test_a_shift_change_saves_every_item_and_reports_latencies(self):
-        report = await load_client.run(self.plan(), self.site, (0, 0.01), 0.01, seed=3)
+        report = await load_client.run(self.plan(), self.site, (0.1, 0.15), 0.01, seed=3)
         self.assertEqual(self.fake.refused, [])
         committed = [s for s in self.fake.saves if s["item_id"] in ITEMS]
         self.assertEqual(report["events"]["saved"], 3)
@@ -239,9 +257,12 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         for save in committed:
             self.assertEqual(save["session_id"], SESSION)
             self.assertEqual(save["outcome"], "PASSED")
-        # Pushes after each save made the pages reload, and the supervisor read the panel.
+        # Pushes after each save made the pages re-read the saved items only (issue #278 B), and
+        # the supervisor read the panel. Every crew member read the whole list at least once.
         self.assertGreater(report["events"]["ws_push"], 0)
-        self.assertGreater(self.fake.checklist_reads, 3)
+        self.assertGreaterEqual(self.fake.checklist_reads, 3)
+        self.assertTrue(self.fake.item_reads)
+        self.assertTrue(all(named <= set(ITEMS) for named in self.fake.item_reads))
         self.assertGreater(self.fake.panel_reads, 0)
         saves = report["kinds"]["check_save"]
         self.assertEqual(saves["count"], 5)  # 3 commits, one 503, one 409
@@ -252,6 +273,110 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(group["p50"] <= group["p95"] <= group["p99"] <= group["max"])
         self.assertEqual(report["shape"]["crew"], 3)
         self.assertEqual(report["shape"]["supervisors"], 1)
+
+    async def test_hints_cost_one_read_per_own_save_and_keep_other_hints(self):
+        # Issue #278 A, mirroring checklist.js: a read that starts after a hint covers it.
+        reads = []
+
+        class Reloader:
+            def schedule(self, delay):
+                reads.append(delay)
+
+        def hint(event_id):
+            return json.dumps({"type": "vehicle.update", "event_id": event_id, "kind": "x"})
+
+        hints = load_client.Hints(Reloader(), wait=0.01)
+        # Own push before the answer: it waits for the save, whose read covers it.
+        hints.save_started()
+        hints.on_text(hint("c1"))
+        hints.save_finished(True, "c1")
+        hints.read_started()
+        await asyncio.sleep(0.03)
+        self.assertEqual(reads, [0])
+        # Own push after the answer is skipped; someone else's is read 250 ms later.
+        hints.save_started()
+        hints.save_finished(True, "c2")
+        hints.read_started()
+        hints.on_text(hint("c2"))
+        self.assertEqual(reads, [0, 0])
+        hints.on_text(hint("other"))
+        self.assertEqual(reads, [0, 0, 0.25])
+        hints.read_started()
+        # A hint during a save that is refused gets its own read.
+        hints.save_started()
+        hints.on_text(hint("other-2"))
+        hints.save_finished(False)
+        self.assertEqual(reads, [0, 0, 0.25, 0.25])
+        hints.read_started()
+        # A hint during a save that never answers is read after `wait`.
+        hints.save_started()
+        hints.on_text(hint("other-3"))
+        self.assertEqual(len(reads), 4)
+        await asyncio.sleep(0.03)
+        self.assertEqual(reads[-1], 0)
+        hints.read_started()
+        # connection.ready is no change; an unreadable frame is still a hint.
+        hints.in_flight = 0
+        hints.on_text('{"type": "connection.ready"}')
+        self.assertEqual(len(reads), 5)
+        hints.on_text("not json")
+        self.assertEqual(reads[-1], 0.25)
+        hints.stop()
+
+    async def test_panel_pushes_are_gathered_into_one_read(self):
+        # Issue #278 C, mirroring readiness.js: the first push opens a window; a read covers it.
+        reads = []
+
+        async def fetch():
+            reads.append(1)
+
+        reloader = load_client.Reloader(fetch)
+        for _ in range(3):
+            reloader.gather(0.02)
+        await asyncio.sleep(0.06)
+        self.assertEqual(len(reads), 1, "a burst costs one read")
+        reloader.gather(0.02)
+        reloader.schedule(0)  # the timer's read starts inside the window
+        await asyncio.sleep(0.06)
+        self.assertEqual(len(reads), 2, "that read covers the gathered push")
+        await reloader.stop()
+
+    async def test_hints_owe_item_reads_or_the_whole_list(self):
+        # Issue #278 B, mirroring checklist.js.
+        class Reloader:
+            def schedule(self, delay):
+                pass
+
+        def hint(**fields):
+            return json.dumps({"type": "vehicle.update", "event_id": "e", **fields})
+
+        hints = load_client.Hints(Reloader())
+        self.assertIsNone(hints.read_started(), "the first read is the whole list")
+        hints.on_text(hint(kind="check.recorded", item_id="b"))
+        hints.on_text(hint(kind="check.recorded", item_id="a"))
+        self.assertEqual(hints.read_started(), ["a", "b"])
+        hints.save_started()
+        hints.save_finished(True, "c1", "c")
+        self.assertEqual(hints.read_started(), ["c"], "an own item save reads only that item")
+        hints.read_failed(["c"])
+        self.assertEqual(hints.read_started(), ["c"], "a failed item read stays owed")
+        for other in (
+            hint(kind="check.recorded"),
+            hint(kind="deficiency.changed", item_id="a"),
+            "not json",
+        ):
+            hints.on_text(hint(kind="check.recorded", item_id="a"))
+            hints.on_text(other)
+            self.assertIsNone(hints.read_started(), other)
+        hints.save_started()
+        hints.save_finished(True, "c2", None)
+        self.assertIsNone(hints.read_started(), "a kit presence save reads the whole list")
+        for n in range(load_client.MAX_ITEM_READ + 1):
+            hints.on_text(hint(kind="check.recorded", item_id=f"i{n}"))
+        self.assertIsNone(hints.read_started(), "too many items for one read: the whole list")
+        hints.full(0)
+        self.assertIsNone(hints.read_started())
+        hints.stop()
 
     async def test_a_signed_out_user_does_not_start_and_nothing_is_saved(self):
         plan = self.plan()

@@ -214,6 +214,34 @@ class PreferenceApiTests(AttentionCase):
         self.assertEqual(group["total"], len(compartment_rows))
         self.assertEqual(group["label"], self.cabinet.label)
 
+    def test_item_ids_read_only_those_rows_without_group_progress(self):
+        # Issue #278: the rows a live update names, exactly as in the whole list.
+        full = self.checklist("?needs_attention_only=false").json()
+        kit_item = str(self.kit_item.pk)
+        part = self.checklist(f"?needs_attention_only=false&item_ids={kit_item}").json()
+        self.assertEqual(part["status"], "OK")
+        self.assertIsNone(part["group_progress"])
+        self.assertEqual(part["items"], [r for r in full["items"] if r["item_id"] == kit_item])
+        self.assertEqual(part["vehicle_status"], full["vehicle_status"])
+        both = f"{kit_item},{self.suction.pk}"
+        part = self.checklist(f"?needs_attention_only=false&item_ids={both}").json()
+        self.assertEqual(
+            part["items"],
+            [r for r in full["items"] if r["item_id"] in (kit_item, str(self.suction.pk))],
+        )
+        unknown = self.checklist(f"?needs_attention_only=false&item_ids={uuid4()}").json()
+        self.assertEqual(unknown["items"], [])
+        too_many = ",".join(str(uuid4()) for _ in range(21))
+        for query in (
+            "item_ids=",
+            "item_ids=nope",
+            f"item_ids={kit_item},",
+            f"item_ids={too_many}",
+        ):
+            answer = self.checklist("?" + query)
+            self.assertEqual(answer.status_code, 400, query)
+            self.assertEqual(answer.json()["code"], "INVALID_ITEMS", query)
+
     def test_bad_requests(self):
         for body in (
             self.body(preferred_view="SIDEWAYS"),

@@ -31,7 +31,9 @@ from tools.command_identity import human_operation_id
 logger = logging.getLogger(__name__)
 
 PREFERENCE_FIELDS = frozenset({"operation_id", "preferred_view", "needs_attention_only"})
-CHECKLIST_QUERY = frozenset({"view", "needs_attention_only", "checklist_version_id", "session_id"})
+CHECKLIST_QUERY = frozenset(
+    {"view", "needs_attention_only", "checklist_version_id", "session_id", "item_ids"}
+)
 
 
 def _stamped(value):
@@ -152,6 +154,8 @@ def checklist(request, vehicle_id):
             needs_attention_only=only,
             checklist_version_id=request.GET.get("checklist_version_id"),
             session=_session(organization, vehicle, user, request.GET.get("session_id")),
+            # Issue #278: comma-separated item ids read only those rows, without group progress.
+            item_ids=(request.GET["item_ids"].split(",") if "item_ids" in request.GET else None),
         )
     except Rejected as error:
         return _reply(error.status, error.code, correlation_id, error.field_errors)
@@ -171,7 +175,9 @@ def checklist(request, vehicle_id):
             "view": result.view,
             "needs_attention_only": result.needs_attention_only,
             "vehicle_status": {**status, "since": _stamped(status["since"])},
-            "group_progress": list(result.group_progress),
+            "group_progress": (
+                None if result.group_progress is None else list(result.group_progress)
+            ),
             "items": [checklist_row(row, authors.get(row.latest_check_id)) for row in result.rows],
         }
     )
