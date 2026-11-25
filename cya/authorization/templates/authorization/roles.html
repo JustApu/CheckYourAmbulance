@@ -51,7 +51,7 @@
       </fieldset>
       {% if target.is_self %}<p class="banner banner-error role-self-warning" data-role-self-warning hidden><span class="indicator-icon" aria-hidden="true">&#9888;</span> You are removing your own Administrator role. You will lose access to Administration as soon as you save.</p>{% endif %}
       <div class="role-change-actions">
-        <p class="role-change-status" role="status" aria-live="polite" data-role-change-status hidden></p>
+        <p class="role-change-status visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-role-change-status></p>
         <button type="submit" class="button primary" data-role-save-button>Save</button>
         <button type="reset" class="button" data-role-reset-button>Reset</button>
       </div>
