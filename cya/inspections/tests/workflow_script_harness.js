@@ -1060,6 +1060,22 @@ function generic(kind) {
       await t.settle();
       assert.equal(t.reads(), 1, "an unreadable frame is still treated as a hint");
     }
+    {
+      // Only the newest 50 own check ids are kept; an older own push costs one read, nothing worse.
+      const t = scenario();
+      for (let n = 0; n < 51; n += 1) {
+        const post = t.save();
+        t.commit(post, "own-" + n); await tick();
+        await t.settle();
+      }
+      const before = t.reads();
+      t.push({type: "vehicle.update", event_id: "own-50", kind: "check.recorded"});
+      await t.settle();
+      assert.equal(t.reads(), before, "a recent own push is still skipped");
+      t.push({type: "vehicle.update", event_id: "own-0", kind: "check.recorded"});
+      await t.settle();
+      assert.equal(t.reads(), before + 1, "a forgotten own push is read like any hint");
+    }
   }
   console.log("Offline workflow script regressions passed: checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

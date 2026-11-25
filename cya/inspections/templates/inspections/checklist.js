@@ -20,7 +20,15 @@
   var focusOnRestore = false;  // issue #235 B2: a resumed position also restores focus
   var loading = false, reloadAgain = false, reloadTimer = null, signedOutNow = false, loadedOnce = false;
   // Live hints (issue #278 A): our committed check IDs, unanswered saves, and an unread hint.
-  var ownEvents = {}, savesInFlight = 0, hintWaiting = false;
+  var ownEvents = {}, ownOrder = [], savesInFlight = 0, hintWaiting = false;
+  // A push for our own save may never come (the socket was down, or it came before the answer
+  // and was already covered), so only the newest OWN_EVENT_LIMIT ids are remembered. Forgetting
+  // one is safe: its push, if it does come, just costs one more read.
+  var OWN_EVENT_LIMIT = 50;
+  function rememberOwn(id) {
+    ownEvents[id] = true; ownOrder.push(id);
+    while (ownOrder.length > OWN_EVENT_LIMIT) { delete ownEvents[ownOrder.shift()]; }
+  }
   // Split view (issue #194): at 64rem and wider an open area keeps the area list beside its items.
   var wideQuery = window.matchMedia ? window.matchMedia("(min-width: 64rem)") : null;
   // Loading placeholders (issue #194) stand in until the first answer; never leave them spinning.
@@ -192,7 +200,7 @@
     post(config.urls.checks, entry.payload).then(function (answer) {
       savesInFlight -= 1;
       // Issue #278 A: this page's own push needs no read of its own; the reload below covers it.
-      if (answer.kind === "committed" && answer.body.result.check_id) { ownEvents[answer.body.result.check_id] = true; }
+      if (answer.kind === "committed" && answer.body.result.check_id) { rememberOwn(answer.body.result.check_id); }
       if (answer.kind !== "committed" && hintWaiting && !savesInFlight) { scheduleReload(250); }
       if (answer.kind === "committed") {
         entry.status = "saved"; entry.text = "Recorded " + when(answer.body.result.server_recorded_at);
