@@ -153,10 +153,13 @@ class FakeSite:
             newest = {"check_id": "newer-check"}
             body = {"status": "CONFLICT", "code": "CHECK_CONFLICT", "newest_check": newest}
             return 409, json.dumps(body).encode(), []
-        self.latest[item] = f"check-{len(self.saves)}"
+        check_id = f"check-{len(self.saves)}"
+        self.latest[item] = check_id
+        # As the server does: the push goes out on commit, before the save's answer.
         for push in self.sockets:
-            push()
-        return 201, json.dumps({"status": "COMMITTED"}).encode(), []
+            push(check_id)
+        body = {"status": "COMMITTED", "result": {"check_id": check_id}}
+        return 201, json.dumps(body).encode(), []
 
     async def websocket(self, data, reader, writer):
         if self.stall == SOCKET:
@@ -174,8 +177,11 @@ class FakeSite:
             writer.close()
             return
 
-        def push():
-            writer.write(ws.send(TextMessage(data='{"type": "vehicle.changed"}')))
+        writer.write(ws.send(TextMessage(data='{"type": "connection.ready"}')))
+
+        def push(check_id):
+            hint = {"type": "vehicle.update", "event_id": check_id, "kind": "check.recorded"}
+            writer.write(ws.send(TextMessage(data=json.dumps(hint))))
 
         self.sockets.append(push)
         try:
@@ -252,6 +258,55 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(group["p50"] <= group["p95"] <= group["p99"] <= group["max"])
         self.assertEqual(report["shape"]["crew"], 3)
         self.assertEqual(report["shape"]["supervisors"], 1)
+
+    async def test_hints_cost_one_read_per_own_save_and_keep_other_hints(self):
+        # Issue #278 A, mirroring checklist.js: a read that starts after a hint covers it.
+        reads = []
+
+        class Reloader:
+            def schedule(self, delay):
+                reads.append(delay)
+
+        def hint(event_id):
+            return json.dumps({"type": "vehicle.update", "event_id": event_id, "kind": "x"})
+
+        hints = load_client.Hints(Reloader(), wait=0.01)
+        # Own push before the answer: it waits for the save, whose read covers it.
+        hints.save_started()
+        hints.on_text(hint("c1"))
+        hints.save_finished(True, "c1")
+        hints.read_started()
+        await asyncio.sleep(0.03)
+        self.assertEqual(reads, [0])
+        # Own push after the answer is skipped; someone else's is read 250 ms later.
+        hints.save_started()
+        hints.save_finished(True, "c2")
+        hints.read_started()
+        hints.on_text(hint("c2"))
+        self.assertEqual(reads, [0, 0])
+        hints.on_text(hint("other"))
+        self.assertEqual(reads, [0, 0, 0.25])
+        hints.read_started()
+        # A hint during a save that is refused gets its own read.
+        hints.save_started()
+        hints.on_text(hint("other-2"))
+        hints.save_finished(False)
+        self.assertEqual(reads, [0, 0, 0.25, 0.25])
+        hints.read_started()
+        # A hint during a save that never answers is read after `wait`.
+        hints.save_started()
+        hints.on_text(hint("other-3"))
+        self.assertEqual(len(reads), 4)
+        await asyncio.sleep(0.03)
+        self.assertEqual(reads[-1], 0)
+        hints.read_started()
+        # connection.ready is no change; an unreadable frame is still a hint.
+        hints.in_flight = 0
+        hints.on_text('{"type": "connection.ready"}')
+        self.assertEqual(len(reads), 5)
+        hints.on_text("not json")
+        self.assertEqual(reads[-1], 0.25)
+        hints.stop()
 
     async def test_a_signed_out_user_does_not_start_and_nothing_is_saved(self):
         plan = self.plan()
