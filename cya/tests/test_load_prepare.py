@@ -1,6 +1,7 @@
 """Load-test preparation (issue #10) on a tiny synthetic rehearsal agency."""
 
 from datetime import UTC, datetime, timedelta
+from io import StringIO
 from unittest import mock
 
 from django.contrib.sessions.backends.signed_cookies import SessionStore
@@ -9,7 +10,7 @@ from django.test import TransactionTestCase
 from django.utils import timezone
 
 from cya.accounts.middleware import SESSION_AUTH_TIME_KEY, SESSION_USER_KEY
-from cya.accounts.models import User
+from cya.accounts.models import Organization, User
 from cya.checklists.models import Vehicle
 from cya.obligations.models import Obligation
 from tools import load_prepare, rehearsal_history
@@ -73,6 +74,33 @@ class LoadPrepareTests(TransactionTestCase):
         self.assertEqual(User.objects.filter(email__contains="load-").count(), 1 + 15 + 2)
         third = self.prepare(2)
         self.assertEqual(third["created"], {"vehicles": 0, "users": 0})
+
+    def test_after_the_vehicle_checklist_cutover_each_vehicle_gets_its_own_checklist(self):
+        # Issue #278 E: the plan names each crew member's vehicle checklist, and the step's slot
+        # is assigned to it, since the shared template is read-only after the cutover.
+        call_command("flush", verbosity=0, interactive=False, reset_sequences=True)
+        end = timezone.now() - timedelta(days=1)
+        rehearsal_history.generate(
+            vehicles=5, items=3, days=1, crew=15, seed=5, end=end, progress=lambda line: None
+        )
+        org = Organization.objects.get()
+        admin = User.objects.get(idp_subject="synthetic-rehearsal-administrator")
+        call_command(
+            "migrate_vehicle_checklists",
+            organization=str(org.pk),
+            actor_user_id=str(admin.pk),
+            stdout=StringIO(),
+        )
+        owned = load_prepare.checklists_by_vehicle(org)
+        plan = self.prepare(1)
+        self.assertIsNone(plan["template_id"])
+        crew = [u for u in plan["users"] if u["role"] == "crew"]
+        for user in crew:
+            self.assertEqual(user["template_id"], str(owned[user["vehicle_id"]].pk))
+        due = datetime.fromisoformat(plan["due_at"])
+        self.assertEqual(Obligation.objects.filter(due_at=due).count(), 5 * 3)
+        with self.assertRaisesRegex(RuntimeError, "already have a checklist"):
+            self.prepare(2)
 
     def test_refusals(self):
         with self.assertRaisesRegex(RuntimeError, "_rehearsal only"):
