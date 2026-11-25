@@ -323,6 +323,24 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reads[-1], 0.25)
         hints.stop()
 
+    async def test_panel_pushes_are_gathered_into_one_read(self):
+        # Issue #278 C, mirroring readiness.js: the first push opens a window; a read covers it.
+        reads = []
+
+        async def fetch():
+            reads.append(1)
+
+        reloader = load_client.Reloader(fetch)
+        for _ in range(3):
+            reloader.gather(0.02)
+        await asyncio.sleep(0.06)
+        self.assertEqual(len(reads), 1, "a burst costs one read")
+        reloader.gather(0.02)
+        reloader.schedule(0)  # the timer's read starts inside the window
+        await asyncio.sleep(0.06)
+        self.assertEqual(len(reads), 2, "that read covers the gathered push")
+        await reloader.stop()
+
     async def test_hints_owe_item_reads_or_the_whole_list(self):
         # Issue #278 B, mirroring checklist.js.
         class Reloader:

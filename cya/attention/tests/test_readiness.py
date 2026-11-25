@@ -442,6 +442,10 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "readiness-config")
         self.assertContains(page, "Required checks by state")
         self.assertNotContains(page, 'compliant" flag:')
+        # Issue #278: vehicles past the live sockets update only on the timer, and SPEC §17.3
+        # wants a change shown within 30 s, so the timer plus one read must fit in that.
+        self.assertEqual(page.context["config"]["refresh_seconds"], 20)
+        self.assertContains(page, "Updates every 20 seconds.")
 
     def test_vehicle_summaries_keep_attention_signals_separate_and_link_workflows(self):
         deficiency_id = self.failed(self.suction).body["deficiency_ids"][0]
