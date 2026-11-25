@@ -38,7 +38,7 @@ from cya.authorization.guard import PermissionDenied, Principal, require_permiss
 from cya.authorization.locking import locked_identities
 from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import ResourceContext, Role
-from cya.checklists.models import ChecklistPublication, ChecklistVersion, Vehicle
+from cya.checklists.models import ChecklistPublication, ChecklistVersion, KitInstance, Vehicle
 from cya.checklists.overlay import ResolutionError, _active_deviations, resolve_checklist
 from cya.checks.conflicts import CheckConflict, conflicting_check
 from cya.checks.linking import (
@@ -83,6 +83,7 @@ from cya.inspections.projections import (
     is_expired,
     rebuild_session_projection,
 )
+from cya.kits.models import KitAssignmentEvent
 from cya.kits.placements import KIT_DEFINITION_SOURCE, placed_contents
 from cya.kits.presence import PRESENCE_SOURCE, presence_resolved_item
 from cya.notifications.recipients import notify
@@ -330,6 +331,7 @@ def _resolved_item(
     session=None,
     kit_id=None,
     kit_requirement_id=None,
+    kit_presence=False,
 ):
     """The item as the vehicle's governing checklist defines it; no silent version substitution.
 
@@ -356,6 +358,33 @@ def _resolved_item(
             "the vehicle's checklist version has changed; reload the checklist",
             status=409,
             path="checklist_version_id",
+        )
+    if kit_presence:
+        if kit_id is None:
+            raise CheckError(
+                "KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id"
+            )
+        from cya.kits.presence import instance_presence_resolved_item
+
+        for placement in resolved.placements:
+            presence = instance_presence_resolved_item(
+                organization_id,
+                resolved,
+                placement,
+                kit_id,
+                item_id,
+                compartment_labels={},
+                as_of=session.opened_at if pinned else now,
+                recorded_before=(
+                    session.recorded_at + timedelta(microseconds=1) if pinned else None
+                ),
+            )
+            if presence is not None:
+                return presence
+        raise CheckError(
+            "ITEM_NOT_IN_CHECKLIST",
+            "the physical kit is not assigned to this vehicle for this checklist",
+            path="kit_id",
         )
     if kit_requirement_id is not None:
         # A kit presence check counts one kit list line (SPEC 2.0.0 KDEF-10, KDEF-12).
@@ -561,6 +590,8 @@ def content_source(requirement):
         return fields | {"kit_definition_item_id": requirement.definition_id}
     if requirement.source == PRESENCE_SOURCE:
         return fields | {"kit_requirement_id": requirement.definition_id}
+    if requirement.source == "KIT_INSTANCE_PRESENCE":
+        return fields | {"kit_presence": True}
     return fields | {"item_def_id": requirement.definition_id}
 
 
@@ -818,6 +849,7 @@ def record_check(
     verification_for_deficiency_id=None,
     deficiency=None,
     kit_requirement_id=None,
+    kit_presence=False,
     inspection_start_operation_id=None,
     organization_id,
     actor_id,
@@ -868,6 +900,15 @@ def record_check(
         "verification_for_deficiency_id": verification_for_deficiency_id,
         "deficiency": deficiency,
     }
+    if not isinstance(kit_presence, bool):
+        raise CheckError("MALFORMED_REQUEST", "kit_presence must be a boolean", path="kit_presence")
+    shape["kit_presence"] = kit_presence
+    if kit_presence and kit_id is None:
+        raise CheckError(
+            "KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id"
+        )
+    if kit_presence and kit_requirement_id is not None:
+        raise CheckError("MALFORMED_REQUEST", "choose one presence source", path="kit_presence")
     shape["kit_requirement_id"] = _optional_id(kit_requirement_id, "kit_requirement_id")
     shape["inspection_start_operation_id"] = _optional_id(
         inspection_start_operation_id, "inspection_start_operation_id"
@@ -887,6 +928,8 @@ def record_check(
         raise _malformed(
             "inspection_start_operation_id", "only a standalone kit count names this start"
         )
+    if kit_presence:
+        request["kit_presence"] = True
     if kit_requirement_id is not None:
         # Only when given, so the digest of every existing kind of request is unchanged.
         request["kit_requirement_id"] = kit_requirement_id
@@ -939,6 +982,7 @@ def record_check(
                 _pinned_session(organization_id, actor, shape),
                 shape["kit_id"],
                 shape["kit_requirement_id"],
+                shape["kit_presence"],
             )
             raise CheckError(
                 "CONFIGURATION_UNAVAILABLE",
@@ -968,6 +1012,7 @@ def record_check(
                 _pinned_session(organization_id, actor, shape),
                 shape["kit_id"],
                 shape["kit_requirement_id"],
+                shape["kit_presence"],
             )
         )
         shape["derived"] = shape["outcome"] is None
@@ -1010,6 +1055,16 @@ def record_check(
             )
         session = _session_for_check(organization_id, actor, shape, version, now)
         chosen_kit = chosen_kit_id(item.requirement.kit_id is not None, item.kits, shape["kit_id"])
+        kit_assignment_event_id = (
+            getattr(item.requirement, "kit_event_id", None) if shape["kit_presence"] else None
+        )
+        if shape["kit_presence"] and kit_assignment_event_id is None:
+            raise CheckError(
+                "KIT_ASSIGNMENT_UNAVAILABLE",
+                "the physical kit assignment is unavailable; refresh and try again",
+                status=409,
+                path="kit_id",
+            )
         check_id = new_id()
         # SPEC 6.0.0 CHK-11, 7.2: the requirement version of the row shown, for an item
         # outside a kit after the item-requirement cutover (None otherwise).
@@ -1024,7 +1079,9 @@ def record_check(
             vehicle_id=shape["vehicle_id"],
             item_id=shape["item_id"],
             kit_id=chosen_kit,
+            kit_assignment_event_id=kit_assignment_event_id,
             kit_requirement_id=shape["kit_requirement_id"],
+            kit_presence=shape["kit_presence"],
             item_requirement_version_id=item_version,
             # Anchors the interim link guard on this checklist's requirement (issue #256 B).
             checklist_version_id=version.pk if version else None,
@@ -1118,6 +1175,7 @@ def record_check(
                 **content_source(item.requirement),
                 checklist_version_id=version.pk if version else None,
                 item_requirement_version_id=item_version,
+                kit_assignment_event_id=kit_assignment_event_id,
                 kit_id=chosen_kit,
                 session=session,
                 basis_check_id=shape["basis_check_id"],
@@ -1146,7 +1204,11 @@ def record_check(
                         category=category,
                         severity=severity,
                         fields=selection[1],
-                        affected=[(shape["item_id"], item.requirement.definition_id, item_version)],
+                        affected=(
+                            []
+                            if item.requirement.source == "KIT_INSTANCE_PRESENCE"
+                            else [(shape["item_id"], item.requirement.definition_id, item_version)]
+                        ),
                         item_id=shape["item_id"],
                         kit_id=chosen_kit,
                         # The place of the failed check (SPEC 6.0.0 7.5, 8.1; AC-42 (3)).
@@ -1365,7 +1427,52 @@ def correct_check(
         if lock is None:
             raise CheckError("CONFIGURATION_UNAVAILABLE", "item lock is unavailable", status=503)
         root = CheckRecord.objects.get(organization_id=organization_id, pk=root.root_check_id)
+        if root.kit_presence:
+            if root.kit_assignment_event_id is None:
+                raise CheckError(
+                    "KIT_ASSIGNMENT_CHANGED",
+                    "the kit assignment is unavailable; refresh and record a new presence check",
+                    status=409,
+                    path="kit_id",
+                )
+            kit = (
+                KitInstance.objects.select_for_update()
+                .filter(organization_id=organization_id, pk=root.kit_id)
+                .first()
+            )
+            if kit is None:
+                raise CheckError(
+                    "CONFIGURATION_UNAVAILABLE", "physical kit is unavailable", status=503
+                )
         now = timezone.now()
+        if root.kit_presence:
+            assignment = KitAssignmentEvent.objects.filter(
+                organization_id=organization_id,
+                kit_id=root.kit_id,
+                pk=root.kit_assignment_event_id,
+                vehicle_id=root.vehicle_id,
+                active=True,
+                compartment_id__isnull=False,
+                effective_at__lte=now,
+                recorded_at__lte=now,
+            ).first()
+            has_newer = (
+                assignment is not None
+                and KitAssignmentEvent.objects.filter(
+                    organization_id=organization_id,
+                    kit_id=root.kit_id,
+                    sequence__gt=assignment.sequence,
+                    effective_at__lte=now,
+                    recorded_at__lte=now,
+                ).exists()
+            )
+            if assignment is None or has_newer:
+                raise CheckError(
+                    "KIT_ASSIGNMENT_CHANGED",
+                    "the kit assignment changed; refresh and record a new presence check",
+                    status=409,
+                    path="kit_id",
+                )
         if root.session_id is not None:
             session = InspectionSession.objects.filter(
                 organization_id=organization_id, pk=root.session_id
@@ -1424,7 +1531,7 @@ def correct_check(
             content = SimpleNamespace(
                 kind="QUANTITY",
                 unit=None,
-                expected_quantity=root.kit_requirement.required_count,
+                expected_quantity=1 if root.kit_presence else root.kit_requirement.required_count,
                 allowed_outcomes=("PASSED", "FAILED", "UNABLE_TO_INSPECT"),
             )
             deviation = None
@@ -1482,6 +1589,7 @@ def correct_check(
             vehicle_id=root.vehicle_id,
             item_id=root.item_id,
             kit_id=root.kit_id,
+            kit_assignment_event_id=root.kit_assignment_event_id,
             kit_requirement_id=root.kit_requirement_id,
             checklist_version_id=root.checklist_version_id,
             item_requirement_version_id=root.item_requirement_version_id,
@@ -1513,6 +1621,8 @@ def correct_check(
                 item_def_id=root.item_def_id,
                 kit_definition_item_id=root.kit_definition_item_id,
                 kit_requirement_id=root.kit_requirement_id,
+                kit_presence=root.kit_presence,
+                kit_assignment_event_id=root.kit_assignment_event_id,
                 checklist_version_id=root.checklist_version_id,
                 item_requirement_version_id=root.item_requirement_version_id,
                 kit_id=root.kit_id,

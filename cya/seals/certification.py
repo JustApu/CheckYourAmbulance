@@ -21,6 +21,15 @@ class StoredCertification:
     items: tuple[CertifiedItem, ...]
     lines: tuple[CertifiedKitCount, ...]
     nested: tuple[tuple[str, str], ...]  # kit and prior substitution IDs
+    presence: tuple["CertifiedKitPresence", ...] = ()
+
+
+@dataclass(frozen=True)
+class CertifiedKitPresence:
+    kit_id: str
+    assignment_event_id: str
+    item_id: str
+    count: int
 
 
 def _bounded(query):
@@ -37,6 +46,7 @@ def stored_certification(organization_id, seal_event):
         SealInspectionItem,
         SealInspectionKitCount,
         SealInspectionKitInstance,
+        SealInspectionKitPresence,
         SealInspectionKitVerification,
     )
 
@@ -80,6 +90,15 @@ def stored_certification(organization_id, seal_event):
         )
         for row in counts
     )
+    presence_rows = _bounded(
+        SealInspectionKitPresence.objects.filter(
+            organization_id=organization_id, inspection=inspection
+        ).order_by("kit_id")
+    )
+    presence = tuple(
+        CertifiedKitPresence(str(row.kit_id), str(row.assignment_id), str(row.item_id), row.count)
+        for row in presence_rows
+    )
     nested = _bounded(
         SealInspectionKitVerification.objects.filter(
             organization_id=organization_id, inspection=inspection
@@ -88,17 +107,37 @@ def stored_certification(organization_id, seal_event):
         .values_list("kit_id", "substitution_id")
     )
     return StoredCertification(
-        items, lines, tuple((str(kit), str(substitution)) for kit, substitution in nested)
+        items,
+        lines,
+        tuple((str(kit), str(substitution)) for kit, substitution in nested),
+        presence,
     )
 
 
-def certification_refusal(scope, certified_items, lines, certified_lines, *, nested_kit_ids=()):
+def certification_refusal(
+    scope,
+    certified_items,
+    lines,
+    certified_lines,
+    *,
+    current_presence=(),
+    certified_presence=(),
+    nested_kit_ids=(),
+):
     """Return a conflict code if the saved inspection no longer covers the current scope.
 
     The caller has independently reverified every nested kit and supplies its physical id;
     nesting does not bypass a change to the cabinet's certified kit-list lines or assignments.
     """
-    for rows in (scope, certified_items, lines, certified_lines, nested_kit_ids):
+    for rows in (
+        scope,
+        certified_items,
+        lines,
+        certified_lines,
+        current_presence,
+        certified_presence,
+        nested_kit_ids,
+    ):
         if not isinstance(rows, (tuple, list)) or len(rows) > MAX_SCOPE:
             raise ValueError("invalid or oversized seal certification")
     nested = set(nested_kit_ids)
@@ -142,4 +181,14 @@ def certification_refusal(scope, certified_items, lines, certified_lines, *, nes
         )
         if result is not None:
             return result
+    current = {(row.kit_id, row.assignment_event_id, row.item_id) for row in current_presence}
+    recorded = {}
+    for row in certified_presence:
+        if not isinstance(row, CertifiedKitPresence) or row.kit_id in recorded:
+            raise ValueError("invalid or duplicate certified physical kit presence")
+        recorded[row.kit_id] = (row.assignment_event_id, row.item_id, row.count)
+    if set(recorded) != {kit_id for kit_id, _event, _item in current}:
+        return "KIT_SCOPE_CHANGED"
+    if any(recorded[kit_id] != (event_id, item_id, 1) for kit_id, event_id, item_id in current):
+        return "KIT_PRESENCE_CHANGED"
     return None

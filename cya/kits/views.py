@@ -117,17 +117,27 @@ def _page(request, user, roles, *, status=200, plan=None, carried=None, errors=N
     return render(request, "kits/library.html", context, status=status)
 
 
+def _detect_format(data):
+    """Detect JSON by its top-level delimiter; kit-library CSV is the other supported format."""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ImportRefused(["file: not UTF-8 text"]) from None
+    first = text.lstrip()[:1]
+    if first in ("{", "["):
+        return "json"
+    return "csv"
+
+
 def _upload(request):
-    """(file bytes, format) from a preview POST, or raise ImportRefused naming the problem."""
-    fmt = request.POST.get("format")
-    if fmt not in library_files.FORMATS:
-        raise ImportRefused([f"format: choose one of {list(library_files.FORMATS)}"])
+    """(file bytes, detected format) from a preview POST."""
     uploaded = request.FILES.get("library")
     if uploaded is None:
         raise ImportRefused(["file: choose a kit-library file to preview"])
     if uploaded.size > library_files.MAX_BYTES:
         raise ImportRefused([f"file: larger than {library_files.MAX_BYTES} bytes"])
-    return uploaded.read(library_files.MAX_BYTES + 1), fmt
+    data = uploaded.read(library_files.MAX_BYTES + 1)
+    return data, _detect_format(data)
 
 
 def _preview(request, user, roles):
@@ -156,11 +166,12 @@ def _preview(request, user, roles):
 
 
 def _confirm(request, user, roles):
-    fmt, token = request.POST.get("format"), request.POST.get("base_token", "")
+    token = request.POST.get("base_token", "")
     try:
         data = base64.b64decode(request.POST.get("data", ""), validate=True)
+        fmt = _detect_format(data)
         operation_id = str(uuid.UUID(request.POST.get("operation_id", ""), version=4))
-    except (binascii.Error, ValueError):
+    except (binascii.Error, ValueError, ImportRefused):
         return _page(
             request,
             user,

@@ -229,7 +229,9 @@ class SealInspectionItem(Evidence):
                 condition=(
                     models.Q(item_def__isnull=False, kit_definition_item__isnull=True)
                     | models.Q(
-                        item_def__isnull=True, kit_definition_item__isnull=False, kit__isnull=False
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=False,
+                        kit__isnull=False,
                     )
                 ),
                 name="sealinspectitem_source",
@@ -285,6 +287,41 @@ class SealInspectionKitInstance(Evidence):
         constraints = [
             models.UniqueConstraint(fields=["organization", "id"], name="sealkitinst_org_id"),
             models.UniqueConstraint(fields=["kit_count", "kit"], name="sealkitinst_count_kit"),
+        ]
+
+
+class SealInspectionKitPresence(Evidence):
+    """A fresh, individually attributed count of one assigned physical kit during reseal."""
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    inspection = models.ForeignKey(SealInspection, on_delete=models.PROTECT, related_name="+")
+    kit = models.ForeignKey(
+        "cya_checklists.KitInstance", on_delete=models.PROTECT, related_name="+"
+    )
+    assignment = models.ForeignKey(
+        "cya_kits.KitAssignmentEvent",
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
+    item = models.ForeignKey("cya_checklists.Item", on_delete=models.PROTECT, related_name="+")
+    check_record = models.ForeignKey(
+        "cya_checks.CheckRecord",
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
+    count = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "seal_inspection_kit_presence"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="sealkitpresence_org_id"),
+            models.UniqueConstraint(fields=["inspection", "kit"], name="sealkitpresence_kit"),
+            models.CheckConstraint(
+                condition=models.Q(count__in=[0, 1]), name="sealkitpresence_count"
+            ),
         ]
 
 

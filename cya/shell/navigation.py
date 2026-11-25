@@ -2,7 +2,7 @@
 
 SECTIONS is the access table: each section page checks it on the server. TABS and MORE are
 what the navigation shows (issue #194): the same five places for every role, Home, Inspect,
-Problems, Vehicles and More, with Kits and Administration under More. "Problems" is the
+Problems, Vehicles and More, with Administration under More for roles that may open it. "Problems" is the
 on-screen word for what the SPEC, code and records call deficiencies. Vehicles brings the
 vehicle status list and fleet readiness together.
 
@@ -19,8 +19,6 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.urls import reverse
 from django.utils.module_loading import import_string
-
-from cya.authorization.policy import permitted
 
 logger = logging.getLogger(__name__)
 
@@ -78,15 +76,6 @@ TABS = (
     Tab("vehicles", "Vehicles", "vehicles", "status", ("/status/", "/fleet/"), ALL_ROLES),
 )
 
-# Kits: the kit pages a user may open, in order of preference; the More entry links to the
-# first one the user's roles permit (each page still checks its own action).
-KIT_PAGES = (
-    ("kit-library", "/administration/kits/", "export_configuration"),
-    ("kit-definitions", "/administration/kit-definitions/", "manage_kit_definitions"),
-    ("kit-list-vehicles", "/administration/kit-lists/", "manage_vehicle_kit_lists"),
-    ("kit-instance-vehicles", "/administration/kit-instances/", "manage_kit_assignment"),
-)
-
 
 def roles_for(user):
     """The user's role names, or an empty set if unknown (fail closed)."""
@@ -121,21 +110,8 @@ SHORTCUTS = {
     "inspect": "i",
     "problems": "p",
     "vehicles": "v",
-    "kits": "k",
     "administration": "a",
 }
-
-
-def _administration_beyond_kits(user, roles):
-    """Issue #235 E2: whether Administration offers a page that Kits does not lead to.
-
-    For a Supply Officer every administration page is a kit page, so a separate Administration
-    entry would only repeat Kits. The landing page itself stays open to them.
-    """
-    from cya.shell.views import administration_link_names  # the views import this module
-
-    kit_names = {name for name, _prefix, _action in KIT_PAGES}
-    return bool(administration_link_names(user, roles) - kit_names)
 
 
 def app_navigation(user, path):
@@ -145,24 +121,7 @@ def app_navigation(user, path):
     if not tabs:
         return None
     more = []
-    user_id = str(user.pk)
-    kit = next(
-        (page for page in KIT_PAGES if permitted(page[2], user_id, roles)),
-        None,
-    )
-    kit_paths = tuple(prefix for _, prefix, _ in KIT_PAGES)
-    if kit is not None:
-        more.append(
-            {
-                "key": "kits",
-                "label": "Kits",
-                "shortcut": SHORTCUTS["kits"],
-                "icon": "kits",
-                "url": reverse(kit[0]),
-                "current": _owns(kit_paths, path),
-            }
-        )
-    if section_by_key("administration").roles & roles and _administration_beyond_kits(user, roles):
+    if section_by_key("administration").roles & roles:
         more.append(
             {
                 "key": "administration",
@@ -170,7 +129,7 @@ def app_navigation(user, path):
                 "shortcut": SHORTCUTS["administration"],
                 "icon": "administration",
                 "url": reverse("administration"),
-                "current": _owns(("/administration/",), path) and not _owns(kit_paths, path),
+                "current": _owns(("/administration/",), path),
             }
         )
     return {

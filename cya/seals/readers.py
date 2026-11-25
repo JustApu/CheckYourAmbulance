@@ -11,7 +11,7 @@ from cya.kits.models import KitDefinition
 from cya.kits.sealable import kit_sealable
 from cya.seals.commands import MAX_EVENTS, _event_state
 from cya.seals.models import SealEvent
-from cya.seals.scope import MAX_SCOPE, resolve_kit_lines, resolve_scope
+from cya.seals.scope import MAX_SCOPE, resolve_kit_lines, resolve_kit_presence, resolve_scope
 
 
 def _bounded(query, limit):
@@ -143,6 +143,14 @@ def inspection_scope(organization_id, vehicle_id, kind, subject_id, *, at=None):
     )
     if len(labels) != len({r.item_id for r in items}) or len(kit_labels) != len(assignments):
         raise ValueError("seal scope labels are unavailable")
+    kit_presence = resolve_kit_presence(organization_id, vehicle_id, assignments, at)
+    presence_labels = dict(
+        Item.objects.filter(
+            organization_id=organization_id, pk__in={row.item_id for row in kit_presence}
+        ).values_list("pk", "label")
+    )
+    if len(presence_labels) != len({row.item_id for row in kit_presence}):
+        raise ValueError("kit presence labels are unavailable")
     lines = (
         resolve_kit_lines(organization_id, vehicle_id, subject_id, at, assignments)
         if kind == "slot"
@@ -180,6 +188,17 @@ def inspection_scope(organization_id, vehicle_id, kind, subject_id, *, at=None):
                 "allowed_outcomes": list(item.allowed_outcomes),
             }
             for item in items
+        ],
+        "kit_presence": [
+            {
+                "kit_id": row.kit_id,
+                "assignment_event_id": row.assignment_event_id,
+                "item_id": row.item_id,
+                "checklist_version_id": row.checklist_version_id,
+                "kit_label": kit_labels[row.kit_id],
+                "label": presence_labels[row.item_id],
+            }
+            for row in kit_presence
         ],
         "kit_lines": [
             {

@@ -152,6 +152,7 @@
     }
     if (row.kit_id) { p.kit_id = row.kit_id; }
     if (row.kit_requirement_id) { p.kit_requirement_id = row.kit_requirement_id; }
+    if (row.kit_presence) { p.kit_presence = true; }
     if (entry.acknowledges) { p.acknowledges_check_id = entry.acknowledges; }
     if (entry.outcome) { p.outcome = entry.outcome; }
     if (entry.outcome !== "UNABLE_TO_INSPECT") {

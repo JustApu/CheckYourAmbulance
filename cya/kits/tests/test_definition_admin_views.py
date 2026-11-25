@@ -84,9 +84,10 @@ class DefinitionPageTests(KitCase):
         return self.client_.post(url, {"csrfmiddlewaretoken": self.csrf(url), **fields})
 
     def create(self):
-        created = self.post(LIST, stage="create", label="Synthetic jump kit", key="jump-kit")
+        created = self.post(LIST, stage="create", label="Synthetic jump kit")
         self.assertEqual(created.status_code, 302)
-        definition = KitDefinition.objects.get(key="jump-kit")
+        definition = KitDefinition.objects.get(label="Synthetic jump kit")
+        self.assertTrue(definition.key.startswith("synthetic-jump-kit-"))
         return definition, f"{LIST}{definition.pk}/"
 
     def fields(self, **extra):
@@ -180,9 +181,9 @@ class DefinitionPageTests(KitCase):
     def test_duplicate_copies_a_version(self):
         definition, url = self.create()
         self.post(f"{url}items/new/", item_id=str(self.kit_item.pk), **self.fields())
-        copied = self.post(f"{url}duplicate/", revision="1", label="Synthetic copy", key="copy-kit")
+        copied = self.post(f"{url}duplicate/", revision="1", label="Synthetic copy")
         self.assertEqual(copied.status_code, 302)
-        self.assertTrue(KitDefinition.objects.filter(key="copy-kit").exists())
+        self.assertTrue(KitDefinition.objects.filter(key__startswith="synthetic-copy-").exists())
 
     def test_uses_are_bounded_and_empty_for_an_unused_definition(self):
         definition, _url = self.create()

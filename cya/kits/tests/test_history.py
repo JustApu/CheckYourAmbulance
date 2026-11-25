@@ -71,6 +71,10 @@ class ActiveKitsTests(KitCase):
             **self.context(self.supervisor),
         )
         self.assertEqual(self.active()[0].since_event_id, run)
+        self.assertEqual(
+            self.active()[0].assignment_event_id,
+            str(KitAssignmentEvent.objects.get(kit_id=kit_id, sequence=2).pk),
+        )
 
     def test_moving_to_another_vehicle_is_a_removal_plus_an_addition(self):
         kit_id = self.add_kit("A").body["kit_id"]

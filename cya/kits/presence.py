@@ -69,6 +69,71 @@ def line_unit_keys(kit_requirement_ids):
 
 
 PRESENCE_SOURCE = "KIT_PRESENCE"  # a requirement whose definition_id is a kit list line
+INSTANCE_PRESENCE_SOURCE = "KIT_INSTANCE_PRESENCE"  # one assigned physical unit, keyed by kit id
+
+
+def instance_presence_resolved_item(
+    organization_id,
+    resolved,
+    placement,
+    kit_id,
+    item_id,
+    *,
+    compartment_labels,
+    as_of,
+    recorded_before=None,
+    assignment_events=None,
+):
+    """Resolve a presence row for one physical kit assigned at the checklist instant."""
+    from cya.checklists.models import Compartment
+    from cya.checklists.overlay import Requirement, ResolvedItem
+    from cya.kits.history import active_kits_on_vehicle
+
+    assigned = next((row for row in placement.kits if str(row[0]) == str(kit_id)), None)
+    if assigned is None:
+        return None
+    if assignment_events is None:
+        assignment_events = {
+            row.kit_id: row
+            for row in active_kits_on_vehicle(
+                organization_id, resolved.vehicle_id, as_of, recorded_before=recorded_before
+            )
+        }
+    run = assignment_events.get(str(kit_id))
+    if run is None:
+        return None
+    compartment_id = str(assigned[2]) if assigned[2] else None
+    requirement = Requirement(
+        item_id=str(item_id),
+        definition_id=str(placement.placement_id),
+        source=INSTANCE_PRESENCE_SOURCE,
+        display_order=placement.display_order,
+        kind="QUANTITY",
+        instructions="",
+        expected_quantity=1,
+        unit=None,
+        allowed_outcomes=("PASSED", "FAILED", "UNABLE_TO_INSPECT"),
+        compartment_id=compartment_id,
+        system_id=None,
+        kit_id=str(kit_id),
+        kit_event_id=run.assignment_event_id,
+    )
+    if compartment_id not in compartment_labels:
+        compartment_labels[compartment_id] = (
+            Compartment.objects.filter(organization_id=organization_id, pk=compartment_id)
+            .values_list("label", flat=True)
+            .first()
+        )
+    return ResolvedItem(
+        requirement=requirement,
+        compartment_id=compartment_id,
+        compartment_label=compartment_labels.get(compartment_id),
+        system_id=None,
+        system_label=None,
+        effective_quantity=1,
+        deviation_id=None,
+        kits=((str(kit_id), str(assigned[1])),),
+    )
 
 
 def presence_resolved_item(organization_id, resolved, kit_requirement_id, item_id, as_of):

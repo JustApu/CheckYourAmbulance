@@ -38,7 +38,7 @@ from django.utils import timezone
 from cya.attention.facts import deficiency_facts, latest_effective_checks
 from cya.attention.state import Attention, applies, attention_states, latest_checks
 from cya.authorization.backend import canonical_id
-from cya.checklists.models import ChecklistTemplate, Item, KitInstance, Vehicle
+from cya.checklists.models import ChecklistTemplate, Compartment, Item, KitInstance, Vehicle
 from cya.checklists.overlay import (
     NoEffectiveVersionError,
     ResolutionError,
@@ -49,7 +49,13 @@ from cya.deficiencies.models import Deficiency, DeficiencyEvent
 from cya.kits.history import active_kits, slot_of_reference_kit
 from cya.kits.models import ChecklistKitPlacement, KitDefinition
 from cya.kits.placements import placed_items
-from cya.kits.presence import PRESENCE_SOURCE, line_unit_keys, presence_resolved_item
+from cya.kits.presence import (
+    INSTANCE_PRESENCE_SOURCE,
+    PRESENCE_SOURCE,
+    instance_presence_resolved_item,
+    line_unit_keys,
+    presence_resolved_item,
+)
 from cya.obligations.models import Obligation, RequirementVersion
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.requirements import bound_template_ids
@@ -114,9 +120,9 @@ class ChecklistRow:
     obligation_completed_at: datetime | None = None
     # The shown obligation is under a supervisor check suspension still in force (SPEC 8.9).
     check_suspended: bool = False
-    # A kit presence row (SPEC 2.0.0 KDEF-10, KDEF-12): the kit list line a count is recorded
-    # against; kit_id is then None and expected_quantity is the line's exact count.
+    # Legacy kit-list presence row; current physical presence rows use kit_presence and kit_id.
     kit_requirement_id: str | None = None
+    kit_presence: bool = False
     # SPEC 6.0.0 CHK-11: the item requirement of a loose item's row after the cutover (one
     # stock in one place); with the item it identifies the row.
     item_requirement_id: str | None = None
@@ -381,30 +387,78 @@ def _presence_of(organization_id, order, resolved, as_of):
 
 
 def _presence_rows(organization_id, vehicle_id, as_of, pin=None):
-    """(template order, ResolvedItem, version id, unit key, placement order) per kit list line.
-
-    The lines of the vehicle's kit list in force at as_of for each definition a bound template
-    places, as the records stood (resolve_checklist), each as its presence Quantity item. With a
-    pin, the definitions the session's checklist places, counted as a check in it is (as_of).
-    """
+    """(order, resolved presence item, version, kit id, label, placement order) per assigned unit."""
     if pin is not None:
-        return _presence_of(organization_id, 0, pin.resolved, as_of)
+        resolved_rows = [(0, pin.resolved, str(pin.resolved.template_version_id))]
+    else:
+        bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
+        templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
+        resolved_rows = []
+        for order, template in enumerate(t for t in templates if str(t.pk) in bound):
+            try:
+                resolved = resolve_checklist(
+                    organization_id=organization_id,
+                    vehicle_id=vehicle_id,
+                    template_id=template.pk,
+                    as_of=as_of,
+                    recorded_before=as_of + timedelta(microseconds=1),
+                )
+            except NoEffectiveVersionError:
+                continue
+            except ResolutionError as error:
+                raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+            resolved_rows.append((order, resolved, str(resolved.template_version_id)))
     found = []
-    bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
-    templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
-    recorded_before = as_of + timedelta(microseconds=1)
-    for order, template in enumerate(t for t in templates if str(t.pk) in bound):
-        try:
-            resolved = resolve_checklist(
-                organization_id=organization_id,
-                vehicle_id=vehicle_id,
-                template_id=template.pk,
-                as_of=as_of,
-                recorded_before=recorded_before,
-            )
-        except (NoEffectiveVersionError, ResolutionError):
-            continue
-        found.extend(_presence_of(organization_id, order, resolved, as_of))
+    presence_ids = {
+        str(pk): str(item)
+        for pk, item in KitDefinition.objects.filter(
+            organization_id=organization_id,
+            pk__in={
+                p.definition_id for _, resolved, _ in resolved_rows for p in resolved.placements
+            },
+        ).values_list("pk", "presence_item_id")
+    }
+    from cya.kits.history import active_kits_on_vehicle
+
+    assignment_events = {
+        kit.kit_id: kit
+        for kit in active_kits_on_vehicle(
+            organization_id, vehicle_id, as_of, recorded_before=as_of + timedelta(microseconds=1)
+        )
+    }
+    compartment_ids = {
+        str(kit[2])
+        for _, resolved, _ in resolved_rows
+        for placement in resolved.placements
+        for kit in placement.kits
+        if kit[2]
+    }
+    compartment_labels = dict(
+        Compartment.objects.filter(
+            organization_id=organization_id, pk__in=compartment_ids
+        ).values_list("pk", "label")
+    )
+    for order, resolved, version_id in resolved_rows:
+        for placement in resolved.placements:
+            item_id = presence_ids.get(str(placement.definition_id))
+            if item_id is None:
+                continue
+            for kit_id, label, _compartment in placement.kits:
+                row = instance_presence_resolved_item(
+                    organization_id,
+                    resolved,
+                    placement,
+                    kit_id,
+                    item_id,
+                    compartment_labels=compartment_labels,
+                    as_of=as_of,
+                    recorded_before=as_of + timedelta(microseconds=1),
+                    assignment_events=assignment_events,
+                )
+                if row is not None:
+                    found.append(
+                        (order, row, version_id, str(kit_id), label, placement.display_order)
+                    )
     return found
 
 
@@ -658,20 +712,20 @@ def _placements(organization_id, vehicle_id, as_of, pin=None):
                     version_id,
                 )
             )
-    # Kit presence (KDEF-10, KDEF-12): one row per kit list line; its key is the line's unit key.
-    for order, resolved, version_id, unit, placement_display in _presence_rows(
+    # Physical-kit presence is one row per assigned instance, never per stock unit.
+    for order, resolved, version_id, kit_id, kit_label, placement_display in _presence_rows(
         organization_id, vehicle_id, as_of, pin
     ):
         item_id = str(resolved.requirement.item_id)
-        if (version_id, item_id, unit) not in present:
-            present.add((version_id, item_id, unit))
+        if (version_id, item_id, kit_id) not in present:
+            present.add((version_id, item_id, kit_id))
             placed.append(
                 (
                     order,
                     (placement_display, 0, resolved.requirement.display_order),
                     item_id,
-                    unit,
-                    None,
+                    kit_id,
+                    kit_label,
                     resolved,
                     version_id,
                 )
@@ -737,8 +791,8 @@ def _rows(
             ChecklistRow(
                 item_id=item_id,
                 item_label=labels.get(item_id, ""),
-                # A presence row's internal key is its line's unit key, never a kit, and a
-                # loose item's is its item requirement (SPEC 6.0.0 CHK-11).
+                # Physical presence rows retain the assigned unit id; legacy line rows do not.
+                # A loose item's is its item requirement (SPEC 6.0.0 CHK-11).
                 kit_id=str(kit_id) if _is_kit(kit_id, requirement) else None,
                 item_requirement_id=getattr(requirement, "item_requirement_id", None),
                 kit_label=kit_label,
@@ -769,6 +823,7 @@ def _rows(
                     if requirement.source == PRESENCE_SOURCE
                     else None
                 ),
+                kit_presence=requirement.source == INSTANCE_PRESENCE_SOURCE,
                 check_suspended=state is not None and state.suspension_in_force,
                 latest_check_id=last.check_id if last else None,
                 latest_check_outcome=last.outcome if last else None,

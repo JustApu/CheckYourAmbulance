@@ -82,6 +82,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "seal_inspection_item",
                     "seal_inspection_obligation",
                     "seal_inspection_kit_count",
+                    "seal_inspection_kit_presence",
                     "seal_inspection_kit_instance",
                     "seal_inspection_kit_verification",
                     "kit_definition_publication",

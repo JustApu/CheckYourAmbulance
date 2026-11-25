@@ -203,28 +203,24 @@ class NavigationTests(ShellTestCase):
         tabs = ["Home", "Inspect", "Problems", "Vehicles", "More"]
         cases = {
             "CREW": [],
-            "SUPERVISOR": ["Kits", "Administration"],
-            # Issue #235 E2: every administration page a Supply Officer may open is a kit page,
-            # so Administration would only repeat Kits.
-            "SUPPLY_OFFICER": ["Kits"],
-            "ADMINISTRATOR": ["Kits", "Administration"],
+            "SUPERVISOR": ["Administration"],
+            "SUPPLY_OFFICER": ["Administration"],
+            "ADMINISTRATOR": ["Administration"],
         }
         for index, (role, more) in enumerate(cases.items()):
             with self.subTest(role=role):
                 client = self.client_for(self.make_user(str(index), [role]))
                 self.assertEqual(self.labels(client.get("/")), (tabs, more))
 
-    def test_kits_links_the_first_kit_page_the_role_may_open(self):
-        cases = {
-            "SUPERVISOR": "/administration/kits/",
-            "SUPPLY_OFFICER": "/administration/kit-instances/",
-        }
-        for index, (role, url) in enumerate(cases.items()):
+    def test_kit_managers_go_to_administration(self):
+        for index, role in enumerate(("SUPERVISOR", "SUPPLY_OFFICER", "ADMINISTRATOR")):
             with self.subTest(role=role):
                 client = self.client_for(self.make_user(str(index), [role]))
+                nav = self.nav(client.get("/"))
                 self.assertRegex(
-                    self.nav(client.get("/")), rf'<a href="{url}"[^>]*>.*?<span>Kits</span>'
+                    nav, r'<a href="/administration/"[^>]*>.*?<span>Administration</span>'
                 )
+                self.assertNotRegex(nav, r"<span>Kits</span>")
 
     def test_legacy_emt_constant_aliases_crew(self):
         self.assertEqual(navigation.EMT, navigation.CREW)
@@ -261,8 +257,7 @@ class NavigationTests(ShellTestCase):
         self.assertIn('aria-current="true"', more)
         self.assertRegex(nav, r'<a href="/administration/" aria-current="page"[^>]*>')
         nav = self.nav(client.get("/administration/kits/"))
-        self.assertRegex(nav, r'<a href="/administration/kits/" aria-current="page"[^>]*>')
-        self.assertNotRegex(nav, r'<a href="/administration/" aria-current')
+        self.assertRegex(nav, r'<a href="/administration/" aria-current="page"[^>]*>')
         nav = self.nav(client.get("/inspection/"))
         self.assertNotIn("is-current", nav)
         self.assertNotIn('aria-current="true"', nav)
@@ -299,7 +294,8 @@ class NavigationTests(ShellTestCase):
             ["Vehicles", "Compartments and systems", "Checklist templates", "Vehicle files"],
         )
         self.assertEqual(
-            titles["kits"], ["Kit definitions", "Kit lists", "Kit instances", "Kit library"]
+            titles["kits"],
+            ["Kit definitions", "Physical kit inventory", "Assign physical kits", "Kit library"],
         )
         self.assertEqual(
             titles["system"], ["Outgoing mail", "Crew assignments", "Inspection sessions"]
@@ -537,7 +533,7 @@ class SortableTableTemplateTests(TestCase):
         source = pathlib.Path(get_template("kits/kit_instances.html").origin.name).read_text(
             encoding="utf-8"
         )
-        self.assertIn('<th scope="col" data-nosort>Duplicate</th>', source)
+        self.assertIn('<th scope="col" data-nosort>Change</th>', source)
 
     def test_script_reports_sort_state_and_filter_counts(self):
         js = render_to_string("shell/shell.js")

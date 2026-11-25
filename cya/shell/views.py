@@ -85,19 +85,19 @@ ADMINISTRATION_LINKS = (
     (
         "kit-definitions",
         "Kit definitions",
-        "create, edit, duplicate, publish and deactivate kit definitions.",
+        "Define what each kit type contains; create, edit, duplicate, publish and deactivate it.",
         "manage_kit_definitions",
     ),
     (
-        "kit-list-vehicles",
-        "Kit lists",
-        "edit and publish the kits each vehicle must carry.",
-        "manage_vehicle_kit_lists",
+        "kit-instance-inventory",
+        "Physical kit inventory",
+        "Create and label individual physical kits before assigning them to a vehicle.",
+        "manage_kit_assignment",
     ),
     (
         "kit-instance-vehicles",
-        "Kit instances",
-        "add a kit to a vehicle, or duplicate one.",
+        "Assign physical kits",
+        "Assign an existing physical kit from stock to a vehicle and compartment.",
         "manage_kit_assignment",
     ),
     (
@@ -128,8 +128,8 @@ ADMINISTRATION_GROUPS = (
     (
         "kits",
         "Kits",
-        "What each kit holds, which kits each vehicle carries, and the shared library.",
-        ("kit-definitions", "kit-list-vehicles", "kit-instance-vehicles", "kit-library"),
+        "Define kit contents, create physical units, assign them to vehicles, then use the shared library.",
+        ("kit-definitions", "kit-instance-inventory", "kit-instance-vehicles", "kit-library"),
     ),
     (
         "system",

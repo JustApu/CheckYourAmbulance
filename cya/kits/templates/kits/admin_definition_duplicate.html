@@ -4,7 +4,7 @@
 
 <div class="kit-library">
 <p><a href="{% url 'kit-definitions' %}">All kit definitions</a> · <a href="{% url 'kit-definition' definition.pk %}">{{ definition.label }}</a></p>
-<p>The copy is a new kit definition with its own name and key. Its first draft copies the contents of the version you choose. No publication, kit instance or history is copied, and this definition is not changed.</p>
+<p>The copy is a new kit definition with its own name and a file reference generated automatically. Its first draft copies the contents of the version you choose. No publication, kit instance or history is copied, and this definition is not changed.</p>
 {% if versions %}
 <form method="post" class="admin-form" aria-label="Duplicate {{ definition.label }}">
   {% csrf_token %}
@@ -18,9 +18,6 @@
   <span id="dup-revision-help">The list shows the newest {{ versions|length }} revisions. A number here is used instead of the list.</span></p>{% endif %}
   <p><label for="dup-label">Name</label><br>
   <input id="dup-label" name="label" value="{{ form.label }}" maxlength="200" required{% if field_errors.label %} aria-invalid="true" aria-describedby="dup-label-error"{% endif %}>{% if field_errors.label %}<span id="dup-label-error" class="field-error">Error: {{ field_errors.label }}</span>{% endif %}</p>
-  <p><label for="dup-key">Key</label><br>
-  <input id="dup-key" name="key" value="{{ form.key }}" maxlength="100" required aria-describedby="dup-key-help{% if field_errors.key %} dup-key-error{% endif %}"{% if field_errors.key %} aria-invalid="true"{% endif %} autocapitalize="none" spellcheck="false"><br>
-  <span id="dup-key-help">Lowercase letters, digits, and . _ - ; set now and never changed.</span>{% if field_errors.key %}<span id="dup-key-error" class="field-error">Error: {{ field_errors.key }}</span>{% endif %}</p>
   <p><button type="submit" class="button primary">Duplicate</button> <a class="button" href="{% url 'kit-definition' definition.pk %}">Cancel</a></p>
 </form>
 {% else %}<p>This kit definition has no versions to copy yet.</p>{% endif %}

@@ -47,6 +47,7 @@ class CheckRecord(Evidence):
         db_constraint=False,
     )
     # A kit presence check: the kit list line it counted (SPEC 2.0.0 KDEF-12, section 7.2).
+    kit_presence = models.BooleanField(default=False)
     kit_requirement = models.ForeignKey(
         "cya_kits.VehicleKitRequirement",
         null=True,
@@ -68,6 +69,14 @@ class CheckRecord(Evidence):
     )
     # The vehicle's own kit that was present, frozen at check time; null when none or ambiguous.
     kit = models.ForeignKey(KitInstance, null=True, on_delete=models.PROTECT, related_name="+")
+    # The exact latest assignment event under which an instance-presence check was made.
+    kit_assignment_event = models.ForeignKey(
+        "cya_kits.KitAssignmentEvent",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,
+    )
     # The inspection session this check was made in (SPEC 6.1); null for a check outside one.
     # It is activity for the session's inactivity timer (SPEC 6.3 SES-2) and never compliance.
     session = models.ForeignKey(
@@ -124,19 +133,31 @@ class CheckRecord(Evidence):
                         item_def__isnull=False,
                         kit_definition_item__isnull=True,
                         kit_requirement__isnull=True,
+                        kit_presence=False,
+                        kit_assignment_event__isnull=True,
                     )
                     | models.Q(
                         item_def__isnull=True,
                         kit_definition_item__isnull=False,
                         kit__isnull=False,
                         kit_requirement__isnull=True,
+                        kit_presence=False,
+                        kit_assignment_event__isnull=True,
                     )
-                    # A kit presence check names the kit list line it counted (KDEF-12).
                     | models.Q(
                         item_def__isnull=True,
                         kit_definition_item__isnull=True,
                         kit__isnull=True,
                         kit_requirement__isnull=False,
+                        kit_presence=False,
+                        kit_assignment_event__isnull=True,
+                    )
+                    | models.Q(
+                        item_def__isnull=True,
+                        kit_definition_item__isnull=True,
+                        kit__isnull=False,
+                        kit_requirement__isnull=True,
+                        kit_presence=True,
                     )
                 ),
                 name="check_content_source",

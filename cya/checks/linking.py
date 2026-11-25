@@ -234,9 +234,15 @@ def _requirement_key(version):
 
     Until vehicle item requirements exist (SPEC 6.0.0 CHK-11, Part C), one check is shared only
     between obligations whose pinned requirement versions check the item the same way in the
-    same place. A kit item's place is its kit instance, and a kit presence check's place is its
-    kit list line; both are already part of the link scope (KDEF-12).
+    same place. A kit item's place is its kit instance; legacy presence checks use their kit-list
+    line, and physical-kit presence checks use the kit and assignment run (KDEF-12).
     """
+    if version.kit_presence:
+        return (
+            "KIT_PRESENCE",
+            str(version.kit_instance_id),
+            str(version.kit_event_id),
+        )
     if version.kit_requirement_id is not None:
         return ("PRESENCE", str(version.kit_requirement_id))
     content = version.item_def or version.kit_definition_item

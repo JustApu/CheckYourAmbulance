@@ -187,6 +187,7 @@ def _ensure_requirement_versions(plan, evidence):
             kit_definition_item_id=d.kit_definition_item_id,
             placement_id=d.placement_id,
             kit_requirement_id=d.kit_requirement_id,
+            kit_presence=d.kit_presence,
             item_requirement_version_id=d.item_requirement_version_id,
             **evidence,
         )

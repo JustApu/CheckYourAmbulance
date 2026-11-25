@@ -247,7 +247,11 @@ def _append_revision(
     specs = [
         (
             str(r.item_id),
-            str(r.definition_id or r.kit_definition_item_id or r.kit_requirement_id),
+            (
+                str(r.definition_id or r.kit_definition_item_id or r.kit_requirement_id)
+                if r.definition_id or r.kit_definition_item_id or r.kit_requirement_id
+                else None
+            ),
             r.kit_instance_id,
             r.item_requirement_version_id,
             r.instance_key,

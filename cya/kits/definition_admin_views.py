@@ -17,6 +17,7 @@ from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.shortcuts import render
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
@@ -67,7 +68,7 @@ logger = logging.getLogger(__name__)
 ACTION = "manage_kit_definitions"
 DENIAL = "MANAGE_KIT_DEFINITIONS"
 USE_LIMIT = 25  # uses of each kind listed in the activity preview (SPEC NFR-6)
-KIT_FIELDS = (("key", ("key",)), ("label", ("label", "name")), ("version_id", ("version",)))
+KIT_FIELDS = (("label", ("label", "name")), ("version_id", ("version",)))
 CONTENT_FIELDS = (
     "item_id",
     "display_order",
@@ -254,6 +255,13 @@ def _op():
     return admin_pages.new_operation_id()
 
 
+def _generated_key(label, operation_id):
+    """Stable machine reference for UI-created definitions; unchanged for an idempotent retry."""
+    base = slugify(label)[:75].rstrip("-") or "kit"
+    suffix = str(operation_id).replace("-", "").lower()[:24]
+    return f"{base}-{suffix}"
+
+
 def _list_page(request, user, *, status=200, errors=None, form=None):
     org = str(user.organization_id)
     now = timezone.now()
@@ -347,11 +355,14 @@ def definitions(request):
         return _list_page(request, user)
     if request.POST.get("stage") != "create":
         return _list_page(request, user, status=400, errors=["the request was not valid"])
-    form = {"label": request.POST.get("label", ""), "key": request.POST.get("key", "")}
+    form = {"label": request.POST.get("label", "")}
+    operation_id = request.POST.get("operation_id", "")
     result, refused = _run(
         request,
         user,
-        lambda ids: create_kit_definition(key=form["key"].strip(), label=form["label"], **ids),
+        lambda ids: create_kit_definition(
+            key=_generated_key(form["label"], operation_id), label=form["label"], **ids
+        ),
         lambda status, errors: _list_page(request, user, status=status, errors=errors, form=form),
     )
     if refused:
@@ -612,7 +623,6 @@ def duplicate(request, definition_id):
         "version_id": request.POST.get("version_id", ""),
         "revision": request.POST.get("revision", "").strip(),
         "label": request.POST.get("label", f"Copy of {found.label}"),
-        "key": request.POST.get("key", ""),
     }
 
     def page(status=200, errors=None):
@@ -647,7 +657,7 @@ def duplicate(request, definition_id):
         user,
         lambda ids: duplicate_kit_definition(
             source_version_id=str(source.pk),
-            key=form["key"].strip(),
+            key=_generated_key(form["label"], request.POST.get("operation_id", "")),
             label=form["label"],
             **ids,
         ),

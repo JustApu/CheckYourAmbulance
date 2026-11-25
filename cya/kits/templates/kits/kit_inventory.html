@@ -1,0 +1,38 @@
+{% extends "shell/base.html" %}
+{% block content %}
+{% if saved %}{% include "shell/save_state.html" with state="saved" %}<p role="status">{{ saved }}</p>{% endif %}
+{% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was changed.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
+
+<div class="kit-library">
+<p>Create and label individual physical units here. A unit in stock is not expected on any vehicle until you assign it.</p>
+<h2 id="create-kit-heading">Create a physical kit</h2>
+{% if definitions %}
+<form method="post" action="{% url 'kit-instance-inventory' %}" aria-labelledby="create-kit-heading" class="admin-form">
+  {% csrf_token %}
+  <input type="hidden" name="stage" value="create">
+  <input type="hidden" name="operation_id" value="{{ operation_id }}">
+  <p><label for="kit-definition">Kit type</label><br>
+    <select id="kit-definition" name="definition_id" required>
+      <option value="">(choose)</option>
+      {% for d in definitions %}<option value="{{ d.pk }}"{% if form.definition_id == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
+    </select>
+  </p>
+  <p><label for="kit-label">Physical kit label</label><br><input id="kit-label" name="label" value="{{ form.label }}" maxlength="200" required></p>
+  <p><button type="submit" class="button">Create kit in stock</button></p>
+</form>
+{% else %}
+<p>No active kit types are available. {% if can_manage_definitions %}Add one in <a href="{% url 'kit-definitions' %}">Kit definitions</a>{% else %}A Supervisor or Administrator adds kit types in Kit definitions{% endif %} first.</p>
+{% endif %}
+
+<h2 id="stock-heading">Unassigned physical kits</h2>
+{% if kits %}
+<div class="table-scroll" role="region" aria-labelledby="stock-heading" tabindex="0">
+<table aria-labelledby="stock-heading">
+<thead><tr><th scope="col">Physical kit</th><th scope="col">Kit type</th><th scope="col">Next step</th></tr></thead>
+<tbody>{% for kit in kits %}<tr><td>{{ kit.label }}</td><td>{{ kit.definition }}</td><td>Assign to a vehicle</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% else %}<p>No unassigned physical kits are in stock.</p>{% endif %}
+<p><a href="{% url 'kit-instance-vehicles' %}">Assign physical kits to vehicles</a></p>
+</div>
+{% endblock %}

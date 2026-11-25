@@ -1,12 +1,12 @@
 {% extends "shell/base.html" %}
 {% block content %}
 {% if imported %}{% include "shell/save_state.html" with state="saved" %}
-<p role="status">Imported. Any checklist override and kit list were saved as drafts; publish them to put them in force.</p>{% endif %}
+<p role="status">Imported. Checklist changes were saved as drafts. Any physical kits requested by compatibility count rows were created and assigned; those assignments define what the vehicle is expected to carry.</p>{% endif %}
 {% if errors %}<div class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span><div><p>Nothing was imported.</p><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div></div>{% endif %}
 
 <div class="kit-library">
 <h2>Files</h2>
-<p>A vehicle file describes one vehicle: its VIN, compartments and systems, the items outside kits, and its kit list. Download a template or a vehicle's file, edit it, and import it. A file never removes anything it leaves out; imports create drafts, and publishing stays a separate step.</p>
+<p>A vehicle file describes one vehicle: its VIN, compartments and systems, items outside kits, checklists and schedule assignments. Its compatibility kit-count rows can provision missing physical kits; imported units are assigned to the vehicle, and assignments define the expected kits. A file never removes anything it leaves out, and checklist changes are saved as drafts for separate publication.</p>
 <ul>
 {% for fmt in formats %}
   <li><a href="{% url 'vehicle-file-template' fmt %}">Blank template ({{ fmt|upper }})</a></li>
@@ -20,7 +20,7 @@
   <li>Vehicle: {% if summary.vehicle == "CREATE" %}created{% else %}updated{% endif %}</li>
   <li>Compartments and systems: {{ summary.positions_added }} added, {{ summary.positions_relabelled }} renamed</li>
   <li>Checklist items: {{ summary.override_entries }} change{{ summary.override_entries|pluralize }} as a draft override; {{ summary.items_created }} new item{{ summary.items_created|pluralize }}</li>
-  <li>Kit list: {% if summary.kit_list_changed %}a new draft{% else %}unchanged{% endif %}; {{ summary.kits_added }} kit{{ summary.kits_added|pluralize }} added</li>
+  <li>Compatibility kit counts: {% if summary.kit_list_changed %}a compatibility draft was created{% else %}unchanged{% endif %}; {{ summary.kits_added }} physical kit{{ summary.kits_added|pluralize }} added and assigned</li>
   <li>Schedule: {% if summary.binding_slot %}assigned {{ summary.binding_slot }}{% else %}unchanged{% endif %}</li>
 </ul>
 {% if plan.requirement_notes %}

@@ -4,7 +4,7 @@ from cya.kits.seal_rules import SealVerificationFacts, verification_refusal
 from cya.kits.sealable import kit_sealable
 from cya.seals.certification import certification_refusal, stored_certification
 from cya.seals.models import SealSubstitution
-from cya.seals.scope import resolve_kit_lines, resolve_scope
+from cya.seals.scope import resolve_kit_lines, resolve_kit_presence, resolve_scope
 
 
 def _eligible_seal(seal, pending, *, marking, today, open_deficiency, suspended):
@@ -68,10 +68,19 @@ def current_certification(
         )
         if refusal:
             return "NESTED_SEAL_INVALID"
-        nested_scope, _ = resolve_scope(organization_id, vehicle_id, at, kit_id=kit_id)
+        nested_scope, nested_assignments = resolve_scope(
+            organization_id, vehicle_id, at, kit_id=kit_id
+        )
         nested_saved = stored_certification(organization_id, nested_seal)
         if nested_saved.nested or certification_refusal(
-            nested_scope, nested_saved.items, (), nested_saved.lines
+            nested_scope,
+            nested_saved.items,
+            (),
+            nested_saved.lines,
+            current_presence=resolve_kit_presence(
+                organization_id, vehicle_id, nested_assignments, at
+            ),
+            certified_presence=nested_saved.presence,
         ):
             return "NESTED_SEAL_INVALID"
         nested_ids.append(kit_id)
@@ -82,4 +91,12 @@ def current_certification(
         if seal.kit_id is None
         else ()
     )
-    return certification_refusal(scope, saved.items, lines, saved.lines, nested_kit_ids=nested_ids)
+    return certification_refusal(
+        scope,
+        saved.items,
+        lines,
+        saved.lines,
+        current_presence=resolve_kit_presence(organization_id, vehicle_id, assignments, at),
+        certified_presence=saved.presence,
+        nested_kit_ids=nested_ids,
+    )

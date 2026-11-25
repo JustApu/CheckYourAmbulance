@@ -31,15 +31,12 @@ from cya.checklists.overlay import NoEffectiveVersionError, resolve_checklist
 from cya.checklists.ownership import cutover_at, governs, owners, precedence_key
 from cya.conditions.models import ConditionalRule
 from cya.kits.history import active_kits, active_kits_on_vehicle, slot_of_reference_kit
-from cya.kits.kit_lists import kit_list_effective_at
 from cya.kits.models import (
     ChecklistKitPlacement,
     KitDefinitionItem,
     KitDefinitionPublication,
     KitInstanceDefinition,
-    VehicleKitRequirement,
 )
-from cya.kits.presence import line_unit_key
 from cya.obligations.models import RequirementBinding
 from cya.obligations.state import NO_KIT
 from cya.operations.status import out_of_service_at
@@ -99,6 +96,7 @@ class DesiredItem:
     # A kit presence requirement (SPEC 2.0.0 KDEF-10 to KDEF-12): its kit list line and that
     # line's unit key, which stands in for the kit key of the obligation stream.
     kit_requirement_id: str | None = None
+    kit_presence: bool = False
     unit_key: str | None = None
     # SPEC 6.0.0 CHK-11: an item outside a kit after the item-requirement cutover is owed per
     # vehicle item requirement. Its requirement id is the unit key (one stream per stock, which
@@ -303,68 +301,46 @@ def _definition_version(organization_id, definition_id, due_at, recorded_before)
     return str(latest) if latest else None
 
 
-def _placed_kits(organization_id, vehicle_id, placement, due_at, early_at):
-    """Instances of the placed definition owed for this inspection (TIME-1a, KDEF-3, KDEF-4).
-
-    Every instance with the placed definition that is on the vehicle at D, in any compartment
-    (SPEC 2.0.0 KDEF-4), read from the assignment history like any kit item (not cut off at the
-    freeze instant). An instance whose stay on the vehicle began after the window opened waits
-    for the next due instant.
-    """
-    kits = [
-        kit
-        for kit in active_kits_on_vehicle(organization_id, vehicle_id, due_at)
-        if kit.since_at < early_at
-    ]
-    if not kits:
-        return []
-    having = set(
-        KitInstanceDefinition.objects.filter(
-            kit_id__in=[k.kit_id for k in kits], definition_id=placement.definition_id
-        ).values_list("kit_id", flat=True)
-    )
-    return [kit for kit in kits if kit.kit_id in {str(k) for k in having}]
-
-
 def _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before):
-    """The lines of the vehicle's kit list in force at D, as the records stood (KDEF-9)."""
-    version = kit_list_effective_at(organization_id, vehicle_id, due_at, recorded_before)
-    if version is None:
-        return []
-    return list(
-        VehicleKitRequirement.objects.filter(version=version)
-        .select_related("compartment", "definition")
-        .order_by("display_order", "id")
-    )
+    """No new inspection expectations come from the legacy expected-count list.
+
+    Historical list-based obligations and checks remain stored and readable. Future kit contents
+    are generated per physical unit from the assignment history below.
+    """
+    return []
 
 
 def _presence_items(
-    organization_id, vehicle_id, occurrence, publication, resolved, placement, lines, context
+    organization_id,
+    vehicle_id,
+    occurrence,
+    publication,
+    resolved,
+    placement,
+    _lines,
+    context,
+    assigned_kits,
 ):
-    """Kit presence requirements for one placed definition (SPEC 2.0.0 KDEF-10, KDEF-12).
+    """One expected presence check for each assigned physical kit in a placed definition.
 
-    One per line of the vehicle's kit list in force at D that lists the placed definition: an
-    obligation of the definition's presence item outside any kit, pinning the line and the
-    placement. Its stream is keyed by the line's unit key, so two compartments of one
-    definition are separate obligations and a count change stays on the same stream.
+    The requirement stream follows the kit instance and its uninterrupted assignment event. Stock
+    kits are not on the vehicle history and therefore create no expectation.
     """
-    _due_at, _recorded_before, conditional = context
-    for line in lines:
-        if str(line.definition_id) != str(placement.definition_id):
-            continue
-        item_id = str(line.definition.presence_item_id)
-        unit = line_unit_key(vehicle_id, line.definition_id, line.compartment.stable_slot_id)
+    due_at, _recorded_before, conditional = context
+    for kit in assigned_kits:
+        item_id = str(placement.definition.presence_item_id)
         pin = {
             "binding": occurrence.binding_id,
             "conditional": conditional.get(item_id),
-            "kit_requirement": str(line.pk),
+            "kit_presence": kit.kit_id,
+            "kit_assignment": kit.since_event_id,
             "placement": str(placement.pk),
             "override": resolved.override_version_id,
             "publication": str(publication.pk),
             "schedule": occurrence.schedule_rule_id,
         }
         yield (
-            (item_id, unit),
+            (item_id, kit.kit_id),
             DesiredItem(
                 item_id=item_id,
                 requirement_id=requirement_id(organization_id, vehicle_id, item_id, pin),
@@ -375,12 +351,13 @@ def _presence_items(
                 schedule_rule_id=pin["schedule"],
                 conditional_rule_id=pin["conditional"],
                 slot=occurrence.slot,
-                due_at=_due_at,
+                due_at=due_at,
                 early_at=occurrence.early_at,
                 grace_at=occurrence.grace_at,
+                kit_id=kit.kit_id,
+                kit_event_id=kit.since_event_id,
+                kit_presence=True,
                 placement_id=pin["placement"],
-                kit_requirement_id=pin["kit_requirement"],
-                unit_key=unit,
             ),
         )
 
@@ -396,7 +373,25 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
         checklist_version_id=resolved.template_version_id
     ).order_by("display_order", "id")
     lines = _kit_list_lines(organization_id, vehicle_id, due_at, recorded_before)
+    assigned = [
+        kit
+        for kit in active_kits_on_vehicle(
+            organization_id, vehicle_id, due_at, recorded_before=recorded_before
+        )
+        if kit.since_at < occurrence.early_at
+    ]
+    definitions_by_kit = defaultdict(set)
+    if assigned:
+        for kit_id, definition_id in KitInstanceDefinition.objects.filter(
+            organization_id=organization_id, kit_id__in=[kit.kit_id for kit in assigned]
+        ).values_list("kit_id", "definition_id"):
+            definitions_by_kit[str(kit_id)].add(str(definition_id))
     for placement in placements:
+        kits = [
+            kit
+            for kit in assigned
+            if str(placement.definition_id) in definitions_by_kit[kit.kit_id]
+        ]
         yield from _presence_items(
             organization_id,
             vehicle_id,
@@ -406,13 +401,13 @@ def _placement_items(organization_id, vehicle_id, occurrence, publication, resol
             placement,
             lines,
             context,
+            kits,
         )
         version_id = _definition_version(
             organization_id, placement.definition_id, due_at, recorded_before
         )
         if version_id is None:
             continue  # nothing published yet for D: nothing to inspect
-        kits = _placed_kits(organization_id, vehicle_id, placement, due_at, occurrence.early_at)
         if not kits:
             continue
         contents = KitDefinitionItem.objects.filter(version_id=version_id).order_by(

@@ -65,6 +65,8 @@ class VehiclePagesTests(KitCase):
         page = self.client_.get(self.url)
         self.assertContains(page, f'href="{self.duplicate_url}"')
         self.assertContains(page, f'href="/administration/positions/{self.vehicle.pk}/"')
+        self.assertContains(page, 'href="/administration/kit-instances/"')
+        self.assertContains(page, f'href="/administration/kit-instances/{self.vehicle.pk}/"')
         self.assertEqual(self.client_.get(f"{LIST}{uuid.uuid4()}/").status_code, 404)
         # Text fields use the full-size admin form style (48 px), not the browser default
         # (issue #111 rendered check on PR #174).

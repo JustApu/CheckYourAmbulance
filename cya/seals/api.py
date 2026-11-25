@@ -48,7 +48,12 @@ def command(request, action):
             raise Rejected(404, "NOT_FOUND")
         handler, required = ACTIONS[action]
         optional = OPTIONAL_SUBJECT | (
-            {"start_operation_id", "nested_substitution_ids", "kit_count_checks"}
+            {
+                "start_operation_id",
+                "nested_substitution_ids",
+                "kit_count_checks",
+                "kit_presence_checks",
+            }
             if action == "reseal"
             else set()
         )

@@ -1,7 +1,7 @@
 """Kit definitions a checklist version inspects (SPEC 4.6 KDEF-4, issue #129 part 4a).
 
-A placement names a kit definition only: where and how many instances each vehicle should carry
-come from the vehicle's kit list (cya.kits.kit_lists, KDEF-9). validate_placements checks the
+A placement names a kit definition only. Assignment history determines which physical instances
+a vehicle is expected to carry; the placement selects which definition the checklist inspects. validate_placements checks the
 placements a template draft carries; check_publishable checks them again when the version is
 published; placements_of reads a version's rows. Obligations do not use placements yet (KDEF-8:
 slot-placed kit items keep working until a later part of issue #129).
@@ -221,11 +221,14 @@ def content_columns(definition_id):
     """A scope row's content source columns from one content id.
 
     The id names a checklist item definition, a placed kit definition's content entry, or (for
-    a kit presence check, KDEF-12) a kit list line; exactly one column is set.
+    a legacy kit presence check, KDEF-12) a kit list line. A physical presence row instead names
+    its kit instance; exactly one source column is set.
     """
     from cya.kits.models import VehicleKitRequirement
 
     columns = {"definition_id": None, "kit_definition_item_id": None, "kit_requirement_id": None}
+    if definition_id is None:
+        return columns
     if is_kit_content(definition_id):
         return columns | {"kit_definition_item_id": str(definition_id)}
     if VehicleKitRequirement.objects.filter(pk=definition_id).exists():

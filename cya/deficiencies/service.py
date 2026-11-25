@@ -9,6 +9,7 @@ deficiency is locked through its deficiency_lock row, and several are locked sor
 from datetime import datetime
 from typing import NamedTuple
 
+from django.db.models import Q
 from django.utils import timezone
 
 from cya.authorization.backend import canonical_id
@@ -47,7 +48,7 @@ from cya.deficiencies.transitions import (
     validate_transition,
 )
 from cya.kits.history import active_kits, slot_of_reference_kit
-from cya.kits.models import KitInstanceDefinition
+from cya.kits.models import KitDefinition, KitInstanceDefinition
 from cya.kits.placements import content_columns, placed_items
 from cya.operations.models import MAX_TEXT
 
@@ -652,7 +653,7 @@ class ScopeRow(NamedTuple):
     """
 
     item_id: str
-    definition_id: str
+    definition_id: str | None
     kit_id: str | None
     item_requirement_id: str | None = None
     item_requirement_version_id: str | None = None
@@ -708,6 +709,19 @@ def correction_scope(organization_id, deficiency, now):
         for item in placed:
             if any(kit_id == str(kit.pk) for kit_id, _label in item.kits):
                 selected.append(_row_of(item, str(kit.pk)))
+        definition_id = (
+            KitInstanceDefinition.objects.filter(organization_id=organization_id, kit_id=kit.pk)
+            .values_list("definition_id", flat=True)
+            .first()
+        )
+        if definition_id:
+            presence_item_id = (
+                KitDefinition.objects.filter(organization_id=organization_id, pk=definition_id)
+                .values_list("presence_item_id", flat=True)
+                .first()
+            )
+            if str(presence_item_id) == str(deficiency.item_id):
+                selected.append(ScopeRow(str(deficiency.item_id), None, str(kit.pk)))
     elif deficiency.compartment_id:
         target = Compartment.objects.filter(
             organization_id=organization_id,
@@ -858,6 +872,31 @@ def _expansions(organization_id, deficiency, current, placed=()):
         )
     applicable = []
     for item_id, kit_id, place in rows:
+        if kit_id:
+            active_kit = KitInstance.objects.filter(
+                organization_id=organization_id,
+                pk=kit_id,
+                vehicle_id=deficiency.vehicle_id,
+                active=True,
+            ).exists()
+            if active_kit:
+                definition_id = (
+                    KitInstanceDefinition.objects.filter(
+                        organization_id=organization_id, kit_id=kit_id
+                    )
+                    .values_list("definition_id", flat=True)
+                    .first()
+                )
+                if (
+                    definition_id
+                    and KitDefinition.objects.filter(
+                        organization_id=organization_id,
+                        pk=definition_id,
+                        presence_item_id=item_id,
+                    ).exists()
+                ):
+                    applicable.append(ScopeRow(str(item_id), None, str(kit_id)))
+                    continue
         content = placed_entry(placed, item_id, kit_id)
         if content is not None:
             applicable.append(_row_of(content, str(kit_id)))
@@ -895,7 +934,7 @@ def suggest_related(organization_id, vehicle_id, item_id=None):
         covered = DeficiencyAffectedItem.objects.filter(
             organization_id=organization_id, item_id=item_id
         ).values("deficiency_id")
-        rows = rows.filter(deficiency_id__in=covered)
+        rows = rows.filter(Q(deficiency_id__in=covered) | Q(deficiency__item_id=item_id))
     rows = rows.select_related("deficiency", "severity_version").order_by(
         "-deficiency__reported_at", "-deficiency_id"
     )

@@ -38,7 +38,6 @@ Existing actions cover the rest:
 - `draft_edit_template` and `publish_template`: templates;
 - `manage_kit_definitions`: kit definitions;
 - `manage_kit_assignment`: kit instances, including CFG-5;
-- `manage_vehicle_kit_lists`: kit lists;
 - `set_configuration_keys`: VINs and keys (Administrator only).
 
 Part 5b opens the Administration section to Supervisors, and part 5c to Supply Officers, who may manage kit instances (`manage_kit_assignment`). The landing page lists only the pages the user may open, and each page checks its own action on the server: role administration stays Administrator-only, and import stays with `import_configuration`. On a vehicle's kit page, when there is no active kit type or the vehicle has no compartment, the add form is replaced by a note saying what is missing and that a Supervisor or Administrator adds it, linking to Kit definitions or the vehicle's Compartments and systems page for someone who may open it (issue #235 E1).
@@ -203,15 +202,13 @@ Each part is one PR, except part 5, which is three (owner decision 2026-11-15, t
      - the Supervisor access above;
      - per vehicle, add, rename, reorder and retire compartments and systems (`cya/kits/position_views.py`);
      - retiring previews what blocks it, or asks for confirmation (CFG-6).
-   - **5c, kit lists and kit instances** (`cya/kits/kit_list_views.py`, `cya/kits/kit_instance_views.py`):
-     - a vehicle's kit list in force, any publication scheduled for later, and its draft;
-     - saving a whole new draft. The editor holds at most as many lines as one form can carry (Django's `DATA_UPLOAD_MAX_NUMBER_FIELDS`, 198 lines by default). A longer list is shown but not offered for editing, and a malformed or partial save is refused, so a save never replaces the draft with part of it;
-     - publishing now, or at a station-local date and time (a time skipped by a clock change is refused). Only these two choices are accepted;
-     - adding a kit instance with its kit type;
-     - duplicating one (CFG-5): pick a vehicle, and its add form opens with the same type.
+   - **5c, assigned physical kits** (`cya/kits/kit_instance_views.py`):
+     - a vehicle's active physical kits, their labels and compartments, and the assignment history;
+     - assigning an existing stock kit to a vehicle and compartment, or returning an assigned kit to stock;
+     - linking to the physical kit inventory to create a kit before assigning it. Assignment history defines what the vehicle is expected to carry; there is no current kit-list draft or publication workflow.
 6. Checklist screens, as two PRs (owner decision 2026-11-15):
    - **6a, templates** (described above): create, duplicate, draft edit one item at a time, publish now or at a station-local date and time after the impact preview, and the versions in force, scheduled and drafted;
    - **6b, overrides** (described above): a vehicle's override in force, scheduled and draft, edited one entry at a time with 6a's item editor, carried over when stale, and published only for a bound vehicle.
-7. Kit definition screens (`cya/kits/definition_admin_views.py`, `manage_kit_definitions`): list and create, edit the draft one content item at a time (with new items by name and the stale-edit check, as in 6a), publish now or later after a preview, duplicate any version, a paged history, and deactivate or reactivate after a preview of where the definition is used (templates placing it, kit lists naming it, active kit instances; bounded, and refused if it changed since the preview, CFG-6). The kit library page keeps import and export and links to these screens.
+7. Kit definition screens (`cya/kits/definition_admin_views.py`, `manage_kit_definitions`): list and create, edit the draft one content item at a time (with new items by name and the stale-edit check, as in 6a), publish now or later after a preview, duplicate any version, a paged history, and deactivate or reactivate after a preview of where the definition is used (templates placing it and active physical kit instances; bounded, and refused if it changed since the preview, CFG-6). The kit library page keeps import and export and links to these screens.
 
 The issue's acceptance criteria for responsive and accessible pages (UX issue #111), and its role, duplication, versioning, history and concurrency tests, apply to each part that adds the behaviour.

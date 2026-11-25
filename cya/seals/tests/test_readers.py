@@ -46,14 +46,17 @@ class SealReaderTests(SimpleTestCase):
             patch("cya.seals.readers.subjects", return_value=[subject]),
             patch("cya.seals.readers.resolve_scope", return_value=((item,), {})),
             patch("cya.seals.readers.resolve_kit_lines", return_value=()),
+            patch("cya.seals.readers.resolve_kit_presence", return_value=()),
             patch("cya.seals.readers.Item.objects") as items,
             patch("cya.seals.readers.KitInstance.objects") as kits,
             patch("cya.seals.readers.KitDefinition.objects") as definitions,
         ):
-            items.filter.return_value.values_list.return_value = [("item", "Sample item")]
+            items.filter.return_value.values_list.side_effect = [[("item", "Sample item")], []]
             kits.filter.return_value.values_list.return_value = []
             definitions.filter.return_value = []
-            data = inspection_scope("org", "vehicle", "slot", "slot", at="instant")
+            data = inspection_scope(
+                "org", "vehicle", "slot", "slot", at=datetime(2026, 11, 14, tzinfo=UTC)
+            )
         self.assertTrue(data["items"][0]["expiration_tracked"])
         self.assertNotIn("count", data["items"][0])
         self.assertNotIn("expiration", data["items"][0])
