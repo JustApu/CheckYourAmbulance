@@ -552,7 +552,7 @@ def attach_status_fact(facts, vehicle_id, due_at, instant, timelines, activity_t
     return result
 
 
-def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False):
+def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False, item_ids=None):
     """Read current facts, or return None for a missing, partially selected or outdated cache.
 
     Comparing all in-scope source IDs protects first deployment/recovery from a partial
@@ -560,6 +560,11 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
     is re-read only when a row refreshed after the captured instant may be newer than it.
     Rows refreshed after the captured instant are replayed individually at that instant.
     Historical requests never call this function. No cache population occurs in a reader.
+
+    With item_ids, both the source and the projection reads are limited to those items'
+    obligations, so a one-row checklist read does not load the vehicle's whole window
+    (issue #278 Part H). Every check above then holds per item: the result is the full
+    read's rows for those items. Only the row bound sees fewer rows.
     """
     aware(instant)
     vehicle_ids = [str(v) for v in vehicle_ids]
@@ -575,18 +580,21 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
         vehicle_id__in=vehicle_ids,
         recorded_at__lte=instant,
     )
+    projections = ObligationProjection.objects.filter(
+        scope,
+        organization_id=organization_id,
+        vehicle_id__in=vehicle_ids,
+    )
+    if item_ids is not None:
+        sources = sources.filter(item_id__in=sorted(item_ids))
+        projections = projections.filter(obligation__item_id__in=sorted(item_ids))
     page_limit = MAX_ROWS * max(1, len(vehicle_ids))
     # Limit in SQL before QuerySet iteration, which otherwise buffers every matching row.
     source_rows = _bounded(sources.values_list("pk", "routine")[: page_limit + 1], page_limit)
     # The facts themselves are not read here, only a digest of each row's content: unchanged
     # rows come from the per-process cache, and only the others are fetched (issue #99).
     rows = _bounded(
-        ObligationProjection.objects.filter(
-            scope,
-            organization_id=organization_id,
-            vehicle_id__in=vehicle_ids,
-        )
-        .annotate(digest=facts_digest())
+        projections.annotate(digest=facts_digest())
         # "Refreshed after T" is decided in SQL, and the due instant comes from each row's facts:
         # no datetime is converted per row (issue #99).
         .annotate(newer=ExpressionWrapper(Q(refreshed_at__gt=instant), output_field=BooleanField()))

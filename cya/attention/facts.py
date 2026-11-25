@@ -111,43 +111,61 @@ def latest_effective_checks(organization_id, vehicle_id, keys, as_of):
     return list(facts.values())
 
 
-def _deficiency_rows_live(organization_id, vehicle_id):
+def _affecting(organization_id, item_ids):
+    """Ids of the deficiencies with an affected-item row for one of item_ids.
+
+    A deficiency applies to a row only through those rows (attention.state.applies), so
+    one-row reads need no other deficiency (issue #278 Part H).
+    """
+    return DeficiencyAffectedItem.objects.filter(
+        organization_id=organization_id, item_id__in=sorted(item_ids)
+    ).values("deficiency_id")
+
+
+def _deficiency_rows_live(organization_id, vehicle_id, item_ids=None):
     rows = DeficiencyProjection.objects.filter(
         organization_id=organization_id,
         deficiency__vehicle_id=vehicle_id,
         status__in=ACTIVE_STATUSES,
-    ).values_list("deficiency_id", "status")
+    )
+    if item_ids is not None:
+        rows = rows.filter(deficiency_id__in=_affecting(organization_id, item_ids))
+    rows = rows.values_list("deficiency_id", "status")
     return {str(pk): status for pk, status in rows}
 
 
-def _deficiency_rows_as_of(organization_id, vehicle_id, as_of):
-    latest = (
-        DeficiencyEvent.objects.filter(
-            organization_id=organization_id,
-            deficiency__vehicle_id=vehicle_id,
-            recorded_at__lte=as_of,
-        )
-        .annotate(
-            rn=Window(
-                RowNumber(),
-                partition_by=[F("deficiency_id")],
-                order_by=[F("sequence").desc()],
-            )
-        )
-        .filter(rn=1)
+def _deficiency_rows_as_of(organization_id, vehicle_id, as_of, item_ids=None):
+    events = DeficiencyEvent.objects.filter(
+        organization_id=organization_id,
+        deficiency__vehicle_id=vehicle_id,
+        recorded_at__lte=as_of,
     )
+    if item_ids is not None:
+        events = events.filter(deficiency_id__in=_affecting(organization_id, item_ids))
+    latest = events.annotate(
+        rn=Window(
+            RowNumber(),
+            partition_by=[F("deficiency_id")],
+            order_by=[F("sequence").desc()],
+        )
+    ).filter(rn=1)
     statuses = {str(e.deficiency_id): e.to_status for e in latest[: MAX_ROWS + 1]}
     if len(statuses) > MAX_ROWS:
         raise ValueError("deficiency history exceeds the row limit")
     return {pk: status for pk, status in statuses.items() if status in ACTIVE_STATUSES}
 
 
-def deficiency_facts(organization_id, vehicle_id, as_of=None):
-    """Unresolved deficiencies of the vehicle: live projection, or events up to as_of."""
+def deficiency_facts(organization_id, vehicle_id, as_of=None, item_ids=None):
+    """Unresolved deficiencies of the vehicle: live projection, or events up to as_of.
+
+    With item_ids, only the deficiencies that can apply to those items (_affecting).
+    """
     if as_of is None:
-        statuses = _deficiency_rows_live(organization_id, vehicle_id)
+        statuses = _deficiency_rows_live(organization_id, vehicle_id, item_ids)
     else:
-        statuses = _deficiency_rows_as_of(organization_id, vehicle_id, _aware(as_of, "as_of"))
+        statuses = _deficiency_rows_as_of(
+            organization_id, vehicle_id, _aware(as_of, "as_of"), item_ids
+        )
     if not statuses:
         return []
     kits, places = {}, {}

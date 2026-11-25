@@ -519,7 +519,9 @@ def _obligation_by_key(
     if current and suspension_lookup is None:
         from cya.obligations.current import current_rows, evaluate_facts
 
-        cached = current_rows(organization_id, [vehicle_id], as_of, include_all_ad_hoc=True)
+        cached = current_rows(
+            organization_id, [vehicle_id], as_of, include_all_ad_hoc=True, item_ids=item_ids
+        )
         if cached is not None:
             facts = cached[vehicle_id]
             if item_ids is not None:
@@ -789,7 +791,7 @@ def _rows(
     )
     placed.sort(key=lambda p: (p[0], p[1], p[2], str(p[3] or "")))
     keys = [(p[2], str(p[3]) if p[3] else NO_KIT) for p in placed]
-    facts = deficiency_facts(organization_id, vehicle_id, as_of)
+    facts = deficiency_facts(organization_id, vehicle_id, as_of, item_ids)
     checks = latest_effective_checks(organization_id, vehicle_id, keys, as_of)
     attention = attention_states(keys, checks, facts)
     newest = latest_checks(checks)
