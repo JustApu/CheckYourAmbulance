@@ -1456,13 +1456,16 @@ def correct_check(
                 effective_at__lte=now,
                 recorded_at__lte=now,
             ).first()
-            has_newer = assignment is not None and KitAssignmentEvent.objects.filter(
-                organization_id=organization_id,
-                kit_id=root.kit_id,
-                sequence__gt=assignment.sequence,
-                effective_at__lte=now,
-                recorded_at__lte=now,
-            ).exists()
+            has_newer = (
+                assignment is not None
+                and KitAssignmentEvent.objects.filter(
+                    organization_id=organization_id,
+                    kit_id=root.kit_id,
+                    sequence__gt=assignment.sequence,
+                    effective_at__lte=now,
+                    recorded_at__lte=now,
+                ).exists()
+            )
             if assignment is None or has_newer:
                 raise CheckError(
                     "KIT_ASSIGNMENT_CHANGED",
