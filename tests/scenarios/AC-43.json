@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "id": "AC-43",
+  "criterion": "AC-43",
+  "requirements": [
+    "AUD-1",
+    "REC-1",
+    "REC-4",
+    "REC-5",
+    "SCH-2",
+    "SCH-6",
+    "CON-3",
+    "COR-1",
+    "INV-8",
+    "ODO-6",
+    "LATE-1",
+    "LATE-2",
+    "LATE-3",
+    "LATE-4",
+    "LATE-5",
+    "LATE-6",
+    "LATE-7",
+    "LATE-8",
+    "DEP-11"
+  ],
+  "fixture": "../fixtures/base.json",
+  "synthetic": true,
+  "given": [
+    "a vehicle with a printed checklist version and applicable kit-definition reference",
+    "paper inspection, odometer and seal records with one original performance instant and one or more attributed performers",
+    "an overdue obligation with a missed state, existing later checks, and a kit or cabinet seal",
+    "Crew, Supervisor, Administrator and inactive organization-user accounts"
+  ],
+  "when": [
+    "a Crew user enters their own paper records, or a Supervisor or Administrator selects performers through autocomplete",
+    "the user saves a batch header and then independently records checks, readings and seal events",
+    "a paper check is entered after its performance window and after the app has recorded a later check",
+    "the user retries a committed operation, encounters a same-obligation CON-3 warning, and proceeds or cancels",
+    "a Supervisor or Administrator invalidates a paper batch, or first re-enters a mistaken Normal-mode paper check and then invalidates it with the replacement batch reference",
+    "the user saves the first paper record and receives the fresh-print offer"
+  ],
+  "then": [
+    "paper entry is explicit and does not open or resume a live session",
+    "the performance instant and performer set are stored once per batch, while entry actor and server entry instant are separate and immutable",
+    "printed vehicle and kit-definition versions determine record identity; missing or ambiguous mapping refuses only that row",
+    "each row saves independently with its own operation id and server entry metadata; replay is idempotent and CON-3 applies to the same obligation",
+    "current compliance and Missed recompute from eligible performance time, while as-of history includes only records received by its cutoff",
+    "historical paper checks do not supersede checks performed later, and outcomes retain existing deficiency consequences",
+    "batch invalidation preserves originals and recomputes linked check, odometer and seal state; mistaken Normal-mode correction requires the replacement batch reference",
+    "existing odometer, seal scope, expiration, deficiency and reseal rules apply; invalidated paper seal events cannot support reliance",
+    "performers receive participation credit separately from the app-entry actor; a fresh current paper copy is offered once after the first acknowledged row"
+  ],
+  "status": "contract",
+  "notes": "Language-neutral symbolic contract for issue #9's owner-approved 8.0.0 paper-entry amendment; not bound to application commands.",
+  "database": "commit"
+}

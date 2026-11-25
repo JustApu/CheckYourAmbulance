@@ -1011,6 +1011,58 @@
         "VW-5",
         "CON-7"
       ]
+    },
+    "AC-43": {
+      "setup": [
+        "paper_checklists_for_vehicle_and_kit_versions",
+        "paper_inspection_with_original_performance_instant",
+        "authorized_crew_supervisor_and_administrator_users",
+        "overdue_obligations_and_existing_seal_state"
+      ],
+      "actions": [
+        "choose_paper_entry_mode_for_batch",
+        "record_performance_time_and_performers_once",
+        "save_check_reading_and_seal_rows_individually",
+        "search_and_select_attributed_performer",
+        "resolve_same_obligation_con3_and_replay_operation",
+        "invalidate_paper_batch_and_reenter",
+        "correct_misclassified_normal_paper_check_after_replacement_batch",
+        "offer_fresh_checklist_after_first_acknowledged_row"
+      ],
+      "assert": [
+        "paper_source_and_server_provenance_are_separate",
+        "performance_time_controls_current_compliance",
+        "asof_history_uses_server_entry_time",
+        "printed_version_binds_item_identity",
+        "ambiguous_mapping_refuses_only_affected_record",
+        "each_row_autosaves_without_batch_submit",
+        "performer_credit_is_separate_from_entry_actor",
+        "batch_invalidation_retains_originals_and_recomputes",
+        "normal_misclassification_invalidation_requires_replacement_batch",
+        "odometer_and_seal_rules_use_performance_time",
+        "fresh_print_is_offered_once"
+      ],
+      "requirements": [
+        "AUD-1",
+        "REC-1",
+        "REC-4",
+        "REC-5",
+        "SCH-2",
+        "SCH-6",
+        "CON-3",
+        "COR-1",
+        "INV-8",
+        "ODO-6",
+        "LATE-1",
+        "LATE-2",
+        "LATE-3",
+        "LATE-4",
+        "LATE-5",
+        "LATE-6",
+        "LATE-7",
+        "LATE-8",
+        "DEP-11"
+      ]
     }
   }
 }
