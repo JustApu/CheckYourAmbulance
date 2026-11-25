@@ -480,22 +480,40 @@ def _newest_older_by_key(organization_id, keys, lower, units=None):
         )
         if newest is not None:
             found[(vehicle_id, item_id, unit)] = newest
-    # An item requirement's key (SPEC 6.0.0 CHK-11): one indexed lookup each, like a line's.
-    for vehicle_id, item_id, unit in sorted(k for k in keys if k[2] in units.requirements):
-        newest = (
-            CheckRecord.objects.filter(
-                organization_id=organization_id,
-                vehicle_id=vehicle_id,
-                item_id=item_id,
-                item_requirement_version_id__in=units.versions.get(unit, ()),
-                recorded_at__lte=lower,
+    # An item requirement's key (SPEC 6.0.0 CHK-11), which every item outside a kit has after the
+    # cutover: one statement per chunk, as for the plain keys below, instead of one query per key
+    # (issue #278 Part G). Each derived row is one (key, version) pair; its lookup is the same
+    # backward step the per-key query made, and the key's answer is the newest over its versions.
+    group = [
+        (key, version)
+        for key in sorted(k for k in keys if k[2] in units.requirements)
+        for version in sorted(units.versions.get(key[2], ()))
+    ]
+    for start in range(0, len(group), LOOKUP_CHUNK):
+        chunk = group[start : start + LOOKUP_CHUNK]
+        sql = (
+            "SELECT k.n, (SELECT c.recorded_at FROM "
+            + table
+            + " c WHERE c.organization_id = %s AND c.vehicle_id = k.vehicle_id"
+            + " AND c.item_id = k.item_id AND c.item_requirement_version_id = k.version_id"
+            + " AND c.recorded_at <= %s ORDER BY c.recorded_at DESC LIMIT 1) AS recorded_at FROM ("
+            + " UNION ALL ".join(
+                ["SELECT %s AS n, %s AS vehicle_id, %s AS item_id, %s AS version_id"]
+                + ["SELECT %s, %s, %s, %s"] * (len(chunk) - 1)
             )
-            .order_by("-recorded_at")
-            .values_list("recorded_at", flat=True)
-            .first()
+            + ") k"
         )
-        if newest is not None:
-            found[(vehicle_id, item_id, unit)] = newest
+        params = [organization_id, instant]
+        for n, ((vehicle_id, item_id, _unit), version) in enumerate(chunk):
+            params += [n, vehicle_id, item_id, version]
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            for n, newest in cursor.fetchall():
+                if newest is None:
+                    continue
+                key, newest = chunk[n][0], _aware(newest)
+                if key not in found or newest > found[key]:
+                    found[key] = newest
     special = units.units | units.requirements
     for kitted in (False, True):
         group = sorted(k for k in keys if k[2] not in special and (k[2] != NO_KIT) == kitted)

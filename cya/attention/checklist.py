@@ -211,18 +211,15 @@ def _items_of(order, resolved):
     return chosen
 
 
-def _resolved_items(organization_id, vehicle_id, as_of, pin=None):
-    """(template order, item id, ResolvedItem, version id) per item of each bound checklist.
+def _bound_resolved(organization_id, vehicle_id, as_of):
+    """(template order, ResolvedChecklist) per template bound to the vehicle at as_of.
 
-    Only templates with a BIND in force for this vehicle at as_of apply (a template published
-    for another vehicle does not), and only publications and bindings recorded by as_of count,
-    so a past answer is reproducible. An item two checklists both list appears once for each
-    (SPEC 6.0.0 VW-5), in template order; _one_per_key keeps the first for a vehicle-wide read.
-    With a pin, only the session's own checklist applies, whatever is bound now.
+    Only templates with a BIND in force for this vehicle at as_of apply, and only publications
+    and bindings recorded by as_of count, so a past answer is reproducible. A template with no
+    effective version is skipped. One read resolves each checklist once and shares it between
+    its items, placed kit content and presence rows (issue #278 Part G).
     """
-    if pin is not None:
-        return _items_of(0, pin.resolved)
-    chosen = []
+    found = []
     bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
     templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
     for order, template in enumerate(t for t in templates if str(t.pk) in bound):
@@ -238,6 +235,25 @@ def _resolved_items(organization_id, vehicle_id, as_of, pin=None):
             continue
         except ResolutionError as error:
             raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+        found.append((order, resolved))
+    return found
+
+
+def _resolved_items(organization_id, vehicle_id, as_of, pin=None, bound=None):
+    """(template order, item id, ResolvedItem, version id) per item of each bound checklist.
+
+    Only templates with a BIND in force for this vehicle at as_of apply (a template published
+    for another vehicle does not), and only publications and bindings recorded by as_of count,
+    so a past answer is reproducible. An item two checklists both list appears once for each
+    (SPEC 6.0.0 VW-5), in template order; _one_per_key keeps the first for a vehicle-wide read.
+    With a pin, only the session's own checklist applies, whatever is bound now.
+    """
+    if pin is not None:
+        return _items_of(0, pin.resolved)
+    chosen = []
+    if bound is None:
+        bound = _bound_resolved(organization_id, vehicle_id, as_of)
+    for order, resolved in bound:
         chosen.extend(_items_of(order, resolved))
     return chosen
 
@@ -278,7 +294,7 @@ def _one_per_key(placed):
     return kept
 
 
-def _placed_content(organization_id, vehicle_id, as_of, pin=None):
+def _placed_content(organization_id, vehicle_id, as_of, pin=None, bound=None):
     """(template order, ResolvedItem, version id, kits) per placed kit content entry (KDEF-4).
 
     Like _resolved_items, only bound templates and records made by as_of count. Each entry is one
@@ -295,22 +311,10 @@ def _placed_content(organization_id, vehicle_id, as_of, pin=None):
             )
         ]
     found = []
-    bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
-    templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
     recorded_before = as_of + timedelta(microseconds=1)
-    for order, template in enumerate(t for t in templates if str(t.pk) in bound):
-        try:
-            resolved = resolve_checklist(
-                organization_id=organization_id,
-                vehicle_id=vehicle_id,
-                template_id=template.pk,
-                as_of=as_of,
-                recorded_before=recorded_before,
-            )
-        except NoEffectiveVersionError:
-            continue
-        except ResolutionError as error:
-            raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+    if bound is None:
+        bound = _bound_resolved(organization_id, vehicle_id, as_of)
+    for order, resolved in bound:
         # One item per kit present, in its own compartment, from the assignment history as of
         # as_of (resolve_checklist), so a past instant never reads the current kit rows.
         for item in placed_items(organization_id, resolved, as_of, recorded_before):
@@ -386,28 +390,16 @@ def _presence_of(organization_id, order, resolved, as_of):
     return found
 
 
-def _presence_rows(organization_id, vehicle_id, as_of, pin=None):
+def _presence_rows(organization_id, vehicle_id, as_of, pin=None, bound=None):
     """(order, resolved presence item, version, kit id, label, placement order) per assigned unit."""
     if pin is not None:
         resolved_rows = [(0, pin.resolved, str(pin.resolved.template_version_id))]
     else:
-        bound = set(bound_template_ids(organization_id, vehicle_id, as_of))
-        templates = ChecklistTemplate.objects.filter(organization_id=organization_id).order_by("pk")
-        resolved_rows = []
-        for order, template in enumerate(t for t in templates if str(t.pk) in bound):
-            try:
-                resolved = resolve_checklist(
-                    organization_id=organization_id,
-                    vehicle_id=vehicle_id,
-                    template_id=template.pk,
-                    as_of=as_of,
-                    recorded_before=as_of + timedelta(microseconds=1),
-                )
-            except NoEffectiveVersionError:
-                continue
-            except ResolutionError as error:
-                raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
-            resolved_rows.append((order, resolved, str(resolved.template_version_id)))
+        if bound is None:
+            bound = _bound_resolved(organization_id, vehicle_id, as_of)
+        resolved_rows = [
+            (order, resolved, str(resolved.template_version_id)) for order, resolved in bound
+        ]
     found = []
     presence_ids = {
         str(pk): str(item)
@@ -666,7 +658,9 @@ def _placements(organization_id, vehicle_id, as_of, pin=None):
     callers that read the vehicle as a whole keep one per key with _one_per_key. With a pin, the
     entries are the session's checklist's own (CHK-4).
     """
-    items = _resolved_items(organization_id, vehicle_id, as_of, pin)
+    # Each bound checklist is resolved once for its items, placed content and presence rows.
+    bound = None if pin is not None else _bound_resolved(organization_id, vehicle_id, as_of)
+    items = _resolved_items(organization_id, vehicle_id, as_of, pin, bound)
     labels = dict(
         Item.objects.filter(
             organization_id=organization_id, pk__in={entry[1] for entry in items}
@@ -704,7 +698,7 @@ def _placements(organization_id, vehicle_id, as_of, pin=None):
     # Content of kits placed by definition (issue #129): one row per kit of that definition, in
     # each checklist that places it.
     present = {(row[6], row[2], row[3]) for row in placed}
-    content = _placed_content(organization_id, vehicle_id, as_of, pin)
+    content = _placed_content(organization_id, vehicle_id, as_of, pin, bound)
     placement_order = dict(
         ChecklistKitPlacement.objects.filter(
             pk__in={entry[1].requirement.kit_id for entry in content}
@@ -734,7 +728,7 @@ def _placements(organization_id, vehicle_id, as_of, pin=None):
             )
     # Physical-kit presence is one row per assigned instance, never per stock unit.
     for order, resolved, version_id, kit_id, kit_label, placement_display in _presence_rows(
-        organization_id, vehicle_id, as_of, pin
+        organization_id, vehicle_id, as_of, pin, bound
     ):
         item_id = str(resolved.requirement.item_id)
         if (version_id, item_id, kit_id) not in present:
