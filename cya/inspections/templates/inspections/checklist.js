@@ -700,7 +700,14 @@
     var title = el("h3", "", titleText);
     head.appendChild(title);
     // The explicit deficiency block already communicates attention for this row.
-    if (row.item_attention === "ATTENTION" && !row.deficiencies.length) { head.appendChild(el("span", "pill pill-needs-attention", "⚠ Needs attention")); }
+    if (row.item_attention === "ATTENTION" && !row.deficiencies.length) {
+      var attentionPill = el("span", "pill pill-needs-attention");
+      var warningIcon = el("span", "", "⚠");
+      warningIcon.setAttribute("aria-hidden", "true");
+      attentionPill.appendChild(warningIcon);
+      attentionPill.appendChild(document.createTextNode(" Needs attention"));
+      head.appendChild(attentionPill);
+    }
     var st = stateText(row);
     if (st) {
       var status = el("span", "window-status", st);
