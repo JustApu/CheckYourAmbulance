@@ -37,6 +37,10 @@ from cya.shell.views import deny_section
 logger = logging.getLogger(__name__)
 READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})
 LIVE_SOCKETS = 3  # one fewer than the default per-user socket limit, leaving room for one tab
+# Vehicles past the first LIVE_SOCKETS get no instant hint, only this timer. SPEC §17.3 wants a
+# change on the screen within 30 seconds, so the timer plus one panel read (about 8 s in the
+# issue #70 rehearsal) must fit in 30 s (issue #278). It was 60.
+REFRESH_SECONDS = 20
 
 
 def _as_of(request, station_zone=None):
@@ -208,7 +212,7 @@ def _screen(request, template, background=False):
                 if live
                 else [],
                 "vehicle_count": len(picture.vehicles),
-                "refresh_seconds": 60,
+                "refresh_seconds": REFRESH_SECONDS,
             },
         },
     )

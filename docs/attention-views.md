@@ -210,8 +210,10 @@ a past picture and does not update.
   delay; a re-read that starts sooner (the timer, a reconnect) covers them instead
   ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278));
 - on reconnect and when the tab is shown again;
-- every 60 seconds, which also covers changes no event announces, such as a deadline passing or an
-  acknowledgement expiring.
+- every 20 seconds, which also covers changes no event announces, such as a deadline passing or an
+  acknowledgement expiring, and is the only update for vehicles past the first 3. The timer plus one
+  re-read must fit SPEC §17.3's 30-second target; it was 60 seconds before
+  [issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278).
 
 It says how many vehicles are live and shows a notice when a re-read fails. When sign-in ends it
 stops promising live updates. When a re-read gets 401 (the session ended), it stops the timer,
