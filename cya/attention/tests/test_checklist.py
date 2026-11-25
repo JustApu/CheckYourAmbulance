@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from unittest import mock
+from uuid import uuid4
 
 from django.test import override_settings
 
@@ -17,6 +18,69 @@ from cya.obligations.models import Obligation
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import NO_KIT, CheckEvidence, State, SuspensionEvidence
 from cya.operations.commands import set_vehicle_status
+
+
+class ItemReadTests(AttentionCase):
+    """Issue #278: a read naming items gives those items' rows exactly as the whole list does."""
+
+    def assert_item_reads_match(self, **kw):
+        full = self.rows(**kw)
+        for item_id in {r.item_id for r in self.rows()}:
+            part = vehicle_checklist(
+                str(self.org.pk), str(self.vehicle.pk), item_ids=[item_id], **kw
+            )
+            self.assertIsNone(part.group_progress)
+            self.assertEqual(list(part.rows), [r for r in full if r.item_id == item_id], kw)
+
+    def history(self):
+        self.clock.set(self.at(hours=5, minutes=30))
+        self.failed(self.suction)  # red, with a deficiency
+        self.record(self.masks, quantity=6)
+        self.failed(self.kit_item, kit_id=self.kit_b)  # one kit's row only
+        self.clock.set(self.at(days=1, hours=7))  # due again; yesterday's rows are history
+
+    def test_each_item_read_matches_the_whole_list_in_every_view(self):
+        self.history()
+        self.assertTrue(any(r.attention.red for r in self.rows()))
+        for kw in (
+            {},
+            {"view": "PRIORITY"},
+            {"needs_attention_only": True},
+            {"checklist_version_id": self.version_id},
+        ):
+            self.assert_item_reads_match(**kw)
+
+    def test_it_matches_without_the_current_projection_too(self):
+        self.history()
+        with mock.patch("cya.obligations.current.current_rows", return_value=None):
+            self.assert_item_reads_match()
+
+    def test_an_item_read_evaluates_only_that_items_obligations(self):
+        from cya.obligations import current
+
+        self.history()
+        calls = []
+        real = current.evaluate_facts
+
+        def counting(facts, instant):
+            calls.append(facts)
+            return real(facts, instant)
+
+        with mock.patch.object(current, "evaluate_facts", side_effect=counting):
+            self.rows()
+            whole = len(calls)
+            calls.clear()
+            vehicle_checklist(str(self.org.pk), str(self.vehicle.pk), item_ids=[str(self.masks.pk)])
+        self.assertGreater(whole, len(calls), "the whole read used the current projection")
+        self.assertTrue(calls)
+
+    def test_bad_item_lists_are_refused(self):
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        too_many = [str(uuid4()) for _ in range(21)]
+        for item_ids in ([], ["nope"], [None], too_many):
+            with self.assertRaises(ChecklistQueryError) as raised:
+                vehicle_checklist(org, vehicle, item_ids=item_ids)
+            self.assertEqual(raised.exception.code, "INVALID_ITEMS")
 
 
 class AttentionTests(AttentionCase):

@@ -845,6 +845,12 @@ class InspectionScenario:
                     "vehicle_id": str(self.vehicle.pk),
                     "event_id": result.body["check_id"],
                     "kind": "check.recorded",
+                    # Issue #278 B: an item check names its item (an identifier too).
+                    "item_id": str(
+                        CheckRecord.objects.values_list("item_id", flat=True).get(
+                            pk=result.body["check_id"]
+                        )
+                    ),
                 },
                 "committed check delivered through in-process channel layer",
             )

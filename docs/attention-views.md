@@ -127,7 +127,7 @@ tables.
 
 | Route | Purpose |
 |---|---|
-| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=&checklist_version_id=` | The query above at the present instant; the user's saved view and filter apply unless the query names them; `checklist_version_id` (optional) limits the rows to that checklist version's own |
+| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=&checklist_version_id=&session_id=&item_ids=` | The query above at the present instant; the user's saved view and filter apply unless the query names them; `checklist_version_id` (optional) limits the rows to that checklist version's own. `item_ids` (optional, 1 to 20 comma-separated item ids, else `400 INVALID_ITEMS`) returns only those items' rows, each exactly as in the whole list, with `group_progress: null`: the checklist screen patches the rows a live update names instead of re-reading every row ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278)) |
 | `GET /api/v1/me/view-preferences` | The saved (or default) view and filter |
 | `POST /api/v1/me/view-preferences` | `{operation_id (a version 4 UUID, else 400), preferred_view, needs_attention_only}`; `200` with the stored values; a replay returns the stored result |
 

@@ -142,6 +142,33 @@ class ConsumerEventTests(TransactionTestCase):
             {"type": "vehicle.update", "event_id": event_id, "kind": "check.recorded"}
         )
 
+    def test_an_item_id_is_relayed_and_a_malformed_one_discards_the_hint(self):
+        # Issue #278: the item a change is limited to is an identifier too.
+        consumer = SimpleNamespace(
+            organization_id=str(uuid4()), vehicle_id=str(uuid4()), _send_json=AsyncMock()
+        )
+        event_id, item_id = str(uuid4()), str(uuid4())
+        event = {
+            "organization_id": consumer.organization_id,
+            "vehicle_id": consumer.vehicle_id,
+            "event_id": event_id,
+            "kind": "check.recorded",
+            "item_id": item_id,
+        }
+        async_to_sync(VehicleLiveConsumer.live_update)(consumer, event)
+        consumer._send_json.assert_awaited_once_with(
+            {
+                "type": "vehicle.update",
+                "event_id": event_id,
+                "kind": "check.recorded",
+                "item_id": item_id,
+            }
+        )
+        consumer._send_json.reset_mock()
+        for bad in ("not-a-uuid", item_id.upper(), [], 7):
+            async_to_sync(VehicleLiveConsumer.live_update)(consumer, {**event, "item_id": bad})
+        consumer._send_json.assert_not_awaited()
+
     def test_status_hints_are_relayed_as_identifier_only_frames(self):
         for kind in ("status.changed", "status.request"):
             consumer = SimpleNamespace(
@@ -246,6 +273,30 @@ class PublishAfterCommitTests(TransactionTestCase):
                 event_id=str(uuid4()),
                 kind="check.payload",
             )
+        with self.assertRaises(ValueError):
+            publish_vehicle_update(
+                organization_id=str(uuid4()),
+                vehicle_id=str(uuid4()),
+                event_id=str(uuid4()),
+                kind="check.recorded",
+                item_id="not-an-id",
+            )
+
+    def test_an_item_id_travels_with_the_hint_only_when_given(self):
+        layer = self.RecordingLayer()
+        organization_id, vehicle_id, item_id = (str(uuid4()) for _ in range(3))
+        with patch("cya.live_updates.publish.get_channel_layer", return_value=layer):
+            with transaction.atomic():
+                self.publish(organization_id, vehicle_id, str(uuid4()))
+                publish_vehicle_update(
+                    organization_id=organization_id,
+                    vehicle_id=vehicle_id,
+                    event_id=str(uuid4()),
+                    kind="check.recorded",
+                    item_id=item_id,
+                )
+        self.assertNotIn("item_id", layer.sent[0][1])
+        self.assertEqual(layer.sent[1][1]["item_id"], item_id)
 
 
 class SocketAuthorizationTests(ChecklistCase):
@@ -434,3 +485,7 @@ class CheckPublicationTests(CheckCase):
         self.assertEqual(message["vehicle_id"], str(self.vehicle.pk))
         self.assertEqual(message["event_id"], result.body["check_id"])
         self.assertEqual(message["kind"], "check.recorded")
+        # Issue #278: an item check names its item, so pages re-read only that item's rows.
+        check = CheckRecord.objects.get(pk=result.body["check_id"])
+        self.assertFalse(check.kit_presence)
+        self.assertEqual(message["item_id"], str(check.item_id))

@@ -44,7 +44,8 @@ from wsproto.events import (
 
 PAGES = ("page_vehicle", "page_session", "page_readiness")
 SAVES = ("session_start", "check_save")
-RELOADS = ("checklist", "panel")
+RELOADS = ("checklist", "checklist_items", "panel")
+MAX_ITEM_READ = 20  # items one partial checklist read may name (issue #278 B)
 GROUPS = {"pages_and_saves": PAGES + SAVES, "live_reloads": RELOADS}
 PERCENTILES = (50, 90, 95, 98, 99)
 MAX_CONNECTIONS = 6  # per user, as browsers do per host
@@ -396,30 +397,53 @@ class Reloader:
 
 
 class Hints:
-    """What `checklist.js` does with a push (issue #278 A); a push is only a hint.
+    """What `checklist.js` does with a push (issue #278 A and B); a push is only a hint.
 
     Any checklist read that starts after a hint covers it. So a hint is skipped when it is the
     page's own committed save (whose reload is already scheduled), and waits while a save is
     unanswered, because that save's reload starts later. A save that is not committed, or an
     answer slower than `wait` seconds, leaves the hint its own read.
+
+    A check hint that names its item, and one's own item save, owe only that item's rows
+    (`item_ids`); anything else, and the first read, owes the whole list.
     """
 
     def __init__(self, reloader, wait=2.0):
         self.reloader, self.wait = reloader, wait
         self.own, self.in_flight, self.waiting, self.timer = set(), 0, False, None
+        self.need_full, self.items = True, set()
 
     def read_started(self):
+        """The items to read, or None for the whole list; the read covers what was owed."""
         self.waiting = False
+        partial = not self.need_full and 0 < len(self.items) <= MAX_ITEM_READ
+        items = sorted(self.items) if partial else None
+        self.need_full, self.items = False, set()
+        return items
+
+    def read_failed(self, items):
+        if items:
+            self.items.update(items)
+        else:
+            self.need_full = True
+
+    def full(self, delay):
+        self.need_full = True
+        self.reloader.schedule(delay)
 
     def save_started(self):
         self.in_flight += 1
 
-    def save_finished(self, committed, check_id=None):
+    def save_finished(self, committed, check_id=None, item_id=None):
         self.in_flight -= 1
         if committed:
             if check_id:
                 self.own.add(check_id)
-            self.reloader.schedule(0)  # checklist.js: scheduleReload(0) after a committed save
+            if item_id:
+                self.items.add(item_id)
+            else:
+                self.need_full = True
+            self.reloader.schedule(0)  # checklist.js: a read after a committed save
         elif self.waiting and not self.in_flight:
             self.reloader.schedule(0.25)
 
@@ -432,6 +456,15 @@ class Hints:
         if hint.get("type") == "vehicle.update" and hint.get("event_id") in self.own:
             self.own.discard(hint["event_id"])
             return
+        if (
+            hint.get("type") == "vehicle.update"
+            and hint.get("kind") == "check.recorded"
+            and isinstance(hint.get("item_id"), str)
+            and hint["item_id"]
+        ):
+            self.items.add(hint["item_id"])
+        else:
+            self.need_full = True
         self.waiting = True
         if not self.in_flight:
             self.reloader.schedule(0.25)
@@ -487,16 +520,19 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_
     rows = {}
 
     async def reload():
-        if hints:
-            hints.read_started()
-        status, data = await browser.get(
-            "checklist",
-            f"{config['urls']['checklist']}?view={config['view']}&needs_attention_only=false",
-        )
+        items = hints.read_started() if hints else None
+        url = f"{config['urls']['checklist']}?view={config['view']}&needs_attention_only=false"
+        if items:
+            url += "&item_ids=" + ",".join(items)
+        status, data = await browser.get("checklist_items" if items else "checklist", url)
         body = json_body(data) or {}
         if status == 200 and body.get("status") == "OK":
-            rows.clear()
-            rows.update({(r["item_id"], r.get("kit_id")): r for r in body["items"]})
+            fresh = {(r["item_id"], r.get("kit_id")): r for r in body["items"]}
+            if not items:
+                rows.clear()
+            rows.update(fresh)
+        elif hints:
+            hints.read_failed(items)
 
     reloader = Reloader(reload)
     # Without the post-save reload (--no-ack-reload) nothing covers a skipped hint, so every
@@ -505,7 +541,7 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_
     live = Live(
         browser,
         config["urls"]["socket"],
-        reloader.schedule,
+        hints.full if hints else reloader.schedule,  # a (re)connect reconciles the whole list
         recorder,
         on_text=hints.on_text if hints else None,
     )
@@ -523,7 +559,9 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_
                 hints.save_started()
             committed, check_id = await save(browser, config, session_page, row, recorder)
             if hints:
-                hints.save_finished(committed, check_id)
+                # As the page: a kit presence save can change its kit's other rows.
+                presence = row.get("kit_presence") or row.get("kit_requirement_id")
+                hints.save_finished(committed, check_id, None if presence else row["item_id"])
     finally:
         if hints:
             hints.stop()

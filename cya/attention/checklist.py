@@ -505,8 +505,23 @@ def _missed(state, as_of):
     return state.state == State.OVERDUE and as_of > state.obligation.late_limit()
 
 
-def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *, current=False):
-    """The most urgent obligation state per (item_id, kit_key), leaving out missed ones."""
+def _fact_item_id(facts):
+    """The item of one stored projection row, read without evaluating it."""
+    evidence = getattr(facts, "evidence", None)
+    return str(evidence[0].item_id if evidence is not None else facts["obligation"]["item_id"])
+
+
+MAX_ITEM_IDS = 20  # items one partial checklist read may name (issue #278)
+
+
+def _obligation_by_key(
+    organization_id, vehicle_id, as_of, suspension_lookup, *, current=False, item_ids=None
+):
+    """The most urgent obligation state per (item_id, kit_key), leaving out missed ones.
+
+    With item_ids, only those items' obligations are evaluated (issue #278): each key's state
+    depends on its own obligations alone, so the result for those keys is the same.
+    """
     best = {}
     states = None
     if current and suspension_lookup is None:
@@ -514,8 +529,11 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *,
 
         cached = current_rows(organization_id, [vehicle_id], as_of, include_all_ad_hoc=True)
         if cached is not None:
+            facts = cached[vehicle_id]
+            if item_ids is not None:
+                facts = [f for f in facts if _fact_item_id(f) in item_ids]
             states = sorted(
-                (evaluate_facts(f, as_of) for f in cached[vehicle_id]),
+                (evaluate_facts(f, as_of) for f in facts),
                 key=lambda s: (
                     s.obligation.due_at,
                     s.obligation.item_id,
@@ -533,6 +551,8 @@ def _obligation_by_key(organization_id, vehicle_id, as_of, suspension_lookup, *,
         )
     for state in states:
         if _missed(state, as_of):
+            continue
+        if item_ids is not None and str(state.obligation.item_id) not in item_ids:
             continue
         key = (state.obligation.item_id, state.obligation.unit_key)
         current = best.get(key)
@@ -748,6 +768,7 @@ def _rows(
     current=False,
     checklist_version_id=None,
     pin=None,
+    item_ids=None,
 ):
     placed, labels = _placements(organization_id, vehicle_id, as_of, pin)
     if pin is not None:
@@ -755,8 +776,12 @@ def _rows(
         checklist_version_id = str(pin.resolved.template_version_id)
     if checklist_version_id is None:
         placed = _one_per_key(placed)
+    if item_ids is not None:
+        # Issue #278: only these items' rows. Every later step is per (item, kit) key, so each
+        # row comes out exactly as in the whole list.
+        placed = [p for p in placed if p[2] in item_ids]
     obligations = _obligation_by_key(
-        organization_id, vehicle_id, as_of, suspension_lookup, current=current
+        organization_id, vehicle_id, as_of, suspension_lookup, current=current, item_ids=item_ids
     )
     placed = _ordered_rows(organization_id, vehicle_id, placed, obligations)
     if checklist_version_id is not None:
@@ -915,8 +940,13 @@ def vehicle_checklist(
     suspension_lookup=None,
     checklist_version_id=None,
     session=None,
+    item_ids=None,
 ):
     """The vehicle's checklist rows for a view and filter, as of an instant (default now).
+
+    With item_ids (at most MAX_ITEM_IDS identifiers), only those items' rows, each exactly as
+    in the whole list, and no group progress (None): a page patches the rows it shows after a
+    live update names the items (issue #278).
 
     Without checklist_version_id there is one row per item (and kit) for the whole vehicle. With
     it, the rows are that checklist version's own, including items another checklist also lists
@@ -942,6 +972,15 @@ def vehicle_checklist(
             ) from None
     if type(needs_attention_only) is not bool:
         raise ChecklistQueryError("INVALID_FILTER", "needs_attention_only must be a boolean", 400)
+    if item_ids is not None:
+        try:
+            item_ids = frozenset(canonical_id(value) for value in item_ids)
+        except (ValueError, TypeError, AttributeError):
+            raise ChecklistQueryError(
+                "INVALID_ITEMS", "item_ids must be identifiers", 400
+            ) from None
+        if not item_ids or len(item_ids) > MAX_ITEM_IDS:
+            raise ChecklistQueryError("INVALID_ITEMS", f"name 1 to {MAX_ITEM_IDS} items", 400)
     instant = timezone.now() if as_of is None else as_of
     if not isinstance(instant, datetime) or instant.utcoffset() is None:
         raise ChecklistQueryError("INVALID_AS_OF", "as_of must be timezone-aware", 400)
@@ -960,8 +999,9 @@ def vehicle_checklist(
         current=as_of is None,
         checklist_version_id=checklist_version_id,
         pin=pin,
+        item_ids=item_ids,
     )
-    group_progress = _group_progress(rows)
+    group_progress = None if item_ids is not None else _group_progress(rows)
     if needs_attention_only:
         rows = [
             row
