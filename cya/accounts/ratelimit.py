@@ -25,6 +25,7 @@ The proxy limits sign-in too; this is the second, application layer DEP-10 requi
 """
 
 import hashlib
+import hmac
 import ipaddress
 import logging
 import threading
@@ -79,7 +80,11 @@ class SharedWindowLimiter:
     """Fixed-window counters in the shared store, so several processes share one limit.
 
     Windows are aligned to the epoch (one key per route, address and window start), so every
-    process counts into the same key without coordination. Keys are hashed so addresses are not
+    process counts into the same key without coordination. Unlike the in-memory limiter, whose
+    window starts at an address's first request, a window here starts on the clock: an address
+    that spends its limit just before a boundary can spend it again just after, so up to twice
+    the limit can pass in a short interval. The proxy's limit still applies (DEP-10). Key names
+    are an HMAC of the route, address and window under SECRET_KEY, so addresses are not
     stored in clear. Any store error falls back to this process's own counters.
     """
 
@@ -91,7 +96,12 @@ class SharedWindowLimiter:
 
         now = self._clock()
         start = int(now // window) * window
-        name = "cya:signin:" + hashlib.sha256(repr((key, window, start)).encode()).hexdigest()
+        name = (
+            "cya:signin:"
+            + hmac.new(
+                settings.SECRET_KEY.encode(), repr((key, window, start)).encode(), hashlib.sha256
+            ).hexdigest()
+        )
         try:
             pipe = self._client.pipeline()
             pipe.incr(name)
