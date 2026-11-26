@@ -30,11 +30,21 @@ def session_group(organization_id, session_id):
 
 
 def open_sessions(organization_id, vehicle_id):
-    """The vehicle's open inspection sessions (SES-7 allows one per checklist), bounded."""
+    """The vehicle's sessions open now (SES-7 allows one per checklist), bounded.
+
+    Open and before their end instant (SES-9): a session past its end is closed by the session
+    job, and until that job runs its projection can still say OPEN. Pushing rows to such a
+    session would cost a read for nobody (issue #278: stale sessions multiplied a save's cost).
+    """
+    from django.utils import timezone
+
     from cya.inspections.models import InspectionSession, SessionProjection
 
     open_ids = SessionProjection.objects.filter(
-        organization_id=organization_id, session__vehicle_id=vehicle_id, state="OPEN"
+        organization_id=organization_id,
+        session__vehicle_id=vehicle_id,
+        state="OPEN",
+        ends_at__gt=timezone.now(),
     ).values("session_id")
     return list(
         InspectionSession.objects.select_related("checklist_version")

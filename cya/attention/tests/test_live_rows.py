@@ -7,6 +7,7 @@ reading the rows fails.
 """
 
 import json
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -83,6 +84,18 @@ class RowMessageTests(PinnedVersionMixin, AttentionCase):
     def test_a_vehicle_without_an_open_session_gets_none(self):
         other = str(self.vehicles[1].pk)
         self.assertEqual(live_rows.row_messages(self.org_id, other, self.item_id, str(uuid4())), [])
+
+    def test_a_session_past_its_end_gets_none_even_while_marked_open(self):
+        # Issue #278: stale OPEN sessions (their job not yet run) multiplied a save's cost.
+        from cya.inspections.models import SessionProjection
+
+        SessionProjection.objects.filter(session=self.session).update(
+            ends_at=self.clock.now - timedelta(seconds=1)
+        )
+        self.assertEqual(SessionProjection.objects.get(session=self.session).state, "OPEN")
+        self.assertEqual(
+            live_rows.row_messages(self.org_id, self.vehicle_id, self.item_id, str(uuid4())), []
+        )
 
     def test_rows_too_large_for_a_frame_are_left_out(self):
         with patch.object(live_rows, "MAX_BYTES", 10):
