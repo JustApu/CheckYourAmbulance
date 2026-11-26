@@ -43,7 +43,13 @@ updated in the same transaction. Every as-of question reads the events, never th
 through `run_command` (audited, idempotent on the operation id), and lock the vehicles involved
 in id order before the kit, the same lock order as obligation generation. After the command
 commits, those vehicles' upcoming obligations are reconciled; a failure there is logged and left
-to the next `generate_obligations` run, as for requirement bindings. The Administration screens provide separate stock creation and vehicle assignment workflows.
+to the next `generate_obligations` run, as for requirement bindings. A caller may pass
+`expected_event_id`, the latest event it showed; if the kit's latest event is any other,
+`record_kit_assignment` raises `KitChanged` (a `KitError`) and appends no event; the refusal
+is audited as failed (issue #277).
+The Administration screens provide separate stock creation and vehicle assignment workflows,
+and an organization-wide list that finds any kit and moves it in one event, including directly
+from one vehicle to another.
 
 ## Which instances a vehicle owes
 

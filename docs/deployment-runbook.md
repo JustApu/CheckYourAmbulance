@@ -542,9 +542,30 @@ server on the same host (Redis 6 or later, or Valkey) and point the application 
 server holds no record of work: only live-update messages in flight and the sign-in counters,
 both of which expire. It needs no backup.
 
-**Not yet rehearsed.** The configuration below follows DEP-2 and DEP-10. It has not yet been
-run on the Rocky or Ubuntu host profiles; record the package, version and evidence here when it
-is.
+**Rehearsed on Rocky Linux 9.8 (2026-11-26); not yet on Ubuntu.** On the Rocky rehearsal host
+the distribution's AppStream package `valkey` 8.1.10 (`dnf install valkey`) was configured as
+below. Its unit runs as the `valkey` identity with `/run/valkey` as runtime directory, so the
+socket was `/run/valkey/valkey.sock`. The settings went in a root:valkey 0640 file included
+from `/etc/valkey/valkey.conf`, and the application identity was added to the `valkey` group.
+Checks made there:
+- no TCP listener;
+- a client without the password is refused (`NOAUTH`);
+- the application identity connects and an unrelated account is refused at the socket;
+- `CONFIG GET save` is empty;
+- through the application's own code, the shared layer was selected and carried a group message,
+  and two sign-in limiters shared one limit;
+- in 3-process load runs, every client received pushes published by other processes
+  ([performance record](issue-67-performance.md#issue-278-several-processes-the-readiness-floor-and-pushed-rows-2026-11-26)).
+
+The failure path (step 5) and the browser checks (step 4) are not yet rehearsed. On Ubuntu, record
+the package, version and evidence here when they are run.
+
+**A drop-in that resets `EnvironmentFile=`.** Put the store settings in a drop-in whose name sorts
+after every other drop-in of the application's service. On the rehearsal host another drop-in
+cleared `EnvironmentFile=` before naming its own file, and because it sorted later it silently
+removed the store settings. The application then ran its processes with the in-memory layer;
+Valkey's own `INFO stats` (`total_commands_processed`) showed it. Check `systemctl cat` for the
+service, and confirm the store's command count rises during use.
 
 1. **Install and confine the server.** Use the distribution's package. Configure it so that
    only the application can reach it:

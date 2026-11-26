@@ -16,6 +16,8 @@ The 2026-11-25 re-run after issue #278 Parts A–C, with the database working se
 [its own section](#issue-278-part-e-1-re-run-after-parts-ac-2026-11-25); the targets are still **not met**.
 The re-run with issue #278 Parts F–H is recorded in
 [its own section](#issue-278-parts-fh-1-re-run-2026-11-26); the targets are still **not met**.
+The runs with the readiness floor, several processes and pushed rows are recorded in
+[their own section](#issue-278-several-processes-the-readiness-floor-and-pushed-rows-2026-11-26); the targets are still **not met**.
 The local synthetic measurements below do not establish the owner targets.
 
 After review, the rehearsal operator should deploy the reviewed head with traffic
@@ -27,6 +29,78 @@ readiness. Record request counts, failures, p50/p90/p95, proportions below one
 and two seconds, single-process CPU and MariaDB CPU. Retain the owner's p90 >3 s
 cutoff before trying higher load steps. Record any remaining bottleneck instead
 of treating a faster isolated query as a passing shift-change result.
+
+## Issue #278: several processes, the readiness floor and pushed rows (2026-11-26)
+
+Claude ran the same 1× scenario on the Rocky rehearsal host (4 cores) on 2026-11-26. The [Parts F–H record](#issue-278-parts-fh-1-re-run-2026-11-26) describes the setup, and these runs kept it: the same base snapshot restored before every step, the same 1× step and client settings, synthetic data only, and one host. The results are directional. The 1× targets are still **not met**.
+
+**What changed between runs.**
+- **10-second floor:** [PR #291](https://github.com/JustApu/CheckYourAmbulance/pull/291), SPEC 8.1.0. The readiness screen re-reads in response to pushes at most every 10 s.
+- **Several processes:** [PR #294](https://github.com/JustApu/CheckYourAmbulance/pull/294), SPEC 8.2.0, a Valkey shared layer.
+- **Pushed rows:** [PR #296](https://github.com/JustApu/CheckYourAmbulance/pull/296), SPEC 8.3.0, the changed rows in the check push. It was **in review** when these runs were made, in three versions:
+  - **S:** rows read inside the save.
+  - **F:** S, plus rows only for sessions before their end.
+  - **G:** F, with rows read off the request path.
+- **Releases:**
+  - The **R** runs used `81bd69b` with the files of Parts F–H and #291.
+  - The **C** runs are `main` at `44783fe`, which has #291 and #294 but not #296.
+  - The **S, F and G** runs are that `main` merged with #296 at the version named.
+- **Channel layer:** 3-worker steps on `main` used the Valkey shared layer, so every push reached every client. Earlier multi-worker steps, including **R**, used the in-memory layer, which does not cross processes. Every 1-worker step used the in-memory layer.
+
+**Results** (seconds, client-side wall time; pages and saves together):
+
+| Step | Release | Workers (layer) | Saves in window | p50 / p95 | Under 1 s / under 2 s | Save p50 / p95 | Row reads | Panel reads | Pushes received | App / DB cores |
+|---|---|---|---|---|---|---|---:|---:|---:|---|
+| R1a | F–H + floor | 1 (memory) | 631 of 750 (600 s) | 7.40 / 10.80 | 1.5% / 2.4% | 7.51 / 10.80 | 1,635 | 59 | 2,659 | 1.03 / 0.67 |
+| R1b | F–H + floor | 1 (memory) | 623 of 750 (600 s) | 7.62 / 11.12 | 1.6% / 2.7% | 7.77 / 11.12 | 1,631 | 68 | 2,622 | 1.04 / 0.56 |
+| R3a | F–H + floor | 3 (memory) | 750 (360 s) | 0.61 / 2.31 | 74.7% / 93.1% | 0.62 / 2.26 | 1,151 | 75 | 1,024 | 1.37 / 1.13 |
+| R3b | F–H + floor | 3 (memory) | 750 (362 s) | 0.63 / 2.59 | 69.6% / 90.9% | 0.65 / 2.52 | 1,153 | 74 | 1,037 | 1.42 / 1.12 |
+| C1a | `main` | 1 (memory) | 603 of 750 (600 s) | 8.15 / 11.36 | 1.5% / 2.9% | 8.26 / 11.36 | 1,581 | 66 | 2,532 | 1.04 / 0.51 |
+| C3a | `main` | 3 (Valkey) | 750 (362 s) | 0.68 / 2.32 | 67.9% / 92.2% | 0.69 / 2.30 | 1,514 | 82 | 2,233 | 1.51 / 0.80 |
+| S1a | + #296 S | 1 (memory) | 420 of 750 (600 s) | 13.67 / 17.47 | 7.1% / 8.3% | 13.78 / 17.47 | 323 | 79 | 3,038 | 1.03 / 0.47 |
+| S1b | + #296 S | 1 (memory) | 427 of 750 (600 s) | 13.57 / 16.58 | 8.7% / 8.9% | 13.71 / 16.61 | 322 | 79 | 3,085 | 1.03 / 0.47 |
+| S1c | + #296 S | 1 (memory) | 434 of 750 (600 s) | 13.35 / 16.38 | 7.8% / 9.8% | 13.50 / 16.38 | 345 | 82 | 3,135 | 1.03 / 0.48 |
+| S3a | + #296 S | 3 (Valkey) | 750 (447 s) | 2.19 / 4.75 | 5.8% / 43.4% | 2.24 / 4.77 | 552 | 103 | 3,564 | 1.83 / 0.92 |
+| S3b | + #296 S | 3 (Valkey) | 750 (440 s) | 2.22 / 4.52 | 5.4% / 43.8% | 2.33 / 4.56 | 567 | 99 | 3,887 | 1.90 / 0.90 |
+| F1a | + #296 F | 1 (memory) | 710 of 750 (600 s) | 6.08 / 9.09 | 4.8% / 6.1% | 6.18 / 9.11 | 549 | 107 | 5,115 | 1.02 / 0.51 |
+| F3a | + #296 F | 3 (Valkey) | 750 (372 s) | 0.87 / 2.67 | 56.6% / 87.7% | 0.90 / 2.64 | 563 | 81 | 3,569 | 1.42 / 0.72 |
+| G1a | + #296 G | 1 (memory) | 634 of 750 (600 s) | 7.60 / 10.71 | 1.6% / 2.5% | 7.71 / 10.73 | 1,351 | 70 | 3,244 | 1.04 / 0.50 |
+| G3a | + #296 G | 3 (Valkey) | 750 (358 s) | **0.58 / 2.12** | **74.9% / 94.6%** | 0.59 / 2.04 | 103 | 80 | 4,708 | 1.23 / 0.65 |
+| G3b | + #296 G | 3 (Valkey) | 750 (352 s) | **0.55 / 2.16** | **78.8% / 93.8%** | 0.56 / 2.12 | 164 | 78 | 4,410 | 1.33 / 0.73 |
+
+The S, F and G versions also count each pushed-rows frame as a push. The 1-worker steps with errors (S1a–S1c 26–30, F1a 29) had save attempts that got no answer. They were retried, as in the [Parts F–H record](#issue-278-parts-fh-1-re-run-2026-11-26), and those saves all landed.
+
+**Where one process's CPU goes.** For several 1-worker steps, the application ran under a per-request CPU timer that wraps the outermost middleware and adds the thread CPU of each request. Its overhead is two clock reads per request. Requests and the event loop thread (WebSockets and pushes) accounted for about 98% of the process CPU, except in G1a (93%), where most of the rest was the rows thread.
+
+| Step | Row reads | Panel reads | Saves | Full reads | Event loop | Other |
+|---|---|---|---|---|---|---|
+| F–H, 1 worker (no floor; one step) | 253 s (1,680 × 0.15 s) | 159 s (60 × 2.65 s) | 139 s (641 × 0.22 s) | 26 s | 24 s | 2% |
+| C1a | 244 s (1,593 × 0.15 s) | 177 s (68 × 2.60 s) | 140 s (613 × 0.23 s) | 25 s | 23 s | 2% |
+| S1c | 53 s (348 × 0.15 s) | 193 s (84 × 2.30 s) | 322 s (443 × 0.73 s) | 23 s | 17 s | 1% |
+| G1a | 214 s (1,363 × 0.16 s) | 167 s (72 × 2.31 s) | 148 s (641 × 0.23 s) | 22 s | 24 s | 45 s, mostly the rows thread |
+
+Counts here are requests seen by the server; the results table counts them at the client.
+
+**Reading the results.**
+- **The floor caps panel reads where reads are fast.** At 3 workers, panel reads fell from 110–114 per step (Parts F–H record) to 74–75, and application CPU from 1.57–1.59 to 1.37–1.42 cores. At 1 worker a panel read already takes longer than 10 s, so the floor never applies.
+- **Several processes are now a supported configuration** (SPEC 8.2.0). With Valkey, every push reaches every client: 2,233 pushes against about 1,030 with the in-memory layer, which drops pushes across processes. Even so, C3a matched the in-memory R3 steps (67.9% / 92.2% under 1 s / 2 s).
+- **Pushed rows: version S.** It made everything worse. A direct profile on the same data found that the rehearsal snapshot holds sessions still marked OPEN after their end instant, because their session job had not run. So each save read the item's rows five times: 0.34–0.44 s of CPU and 124 queries, against 0.08 s and 23 for one session. Saves rose to 0.73 s of CPU. A deployment whose session job lags could see the same, so F sends rows only to sessions before their end.
+- **Pushed rows: version F.** It helped 1 worker (p50 8.15 to 6.08 s, 603 to 710 saves) but hurt 3 workers (under 1 s from 67.9% to 56.6%). Reading rows inside the save delayed every save's answer where CPU was not the limit.
+- **Pushed rows: version G.** It reads the rows on one background thread per process, which sends the rows and then the hint. This gave the best results of issue #278:
+  - at 3 workers, 74.9–78.8% under 1 s and 93.8–94.6% under 2 s, with save p50 0.56–0.59 s;
+  - row reads fell about 90%, to 103–164;
+  - application CPU fell to 1.23–1.33 cores.
+  At 1 worker G is close to `main` (p50 7.60 against 8.15 s). The single process is CPU-bound, so the rows thread competes with requests, and the saver's 1-second wait for its own rows often runs out.
+- **The targets are still not met.** The best step reached 78.8% under 1 s and 94.6% under 2 s; the targets are 95% and 98%. A single process remains far from them: CPU demand at this load is about two cores. The readiness panel is now the largest remaining per-request cost, at 2.3–2.6 s of CPU each. Making it cheaper would need caching each obligation's evaluated state until its next time boundary, which was not attempted. Narrowing the RPT-5a candidate read by item made no measurable difference and was dropped.
+
+**Deviations, recorded so the runs can be judged.**
+- *Releases.* The R runs and the C, S, F and G runs differ in about 60 unrelated commits on `main`. C1a is slightly slower than R1 (p50 8.15 against 7.40–7.62 s), so those commits do not change the picture.
+- *A false start.* The first Valkey attempt ran one 3-worker step without the store, which was discarded. Another drop-in on the host's service resets `EnvironmentFile=` and sorts after the one that named the store. Valkey had received only 66 commands. The store setting then went in a drop-in that sorts last, Valkey's counters confirmed use in the first later 3-worker step (about 100 commands a second from 12–13 connections). In every Valkey step the push counts confirm it: 2,233–4,708, against about 1,030 without a shared layer.
+- *Copied environments.* The rehearsal releases reuse a copied virtual environment whose `uvicorn` script runs an older release's Python, so these runs started `python -m uvicorn` instead. The application code and pinned packages were those of each release.
+- *Earlier profiling attempts.* Stack-sampling profilers built from Python, at 10 ms and at 50 ms, disturbed the 1-worker process (up to 61 failed saves and 50-second lock waits) and are not used for any figure here. Only the per-request timer above is. The 50-second waits were MariaDB's lock-wait timeout, reached when the slowed process held a save's locks. That did not happen in any unprofiled step.
+- *Settle gate, client placement, time limit.* As in Part E.
+
+**Not claimed:** a worker count for production, any 4×/10× step, Ubuntu results, behaviour of #296 after review changes, or any statistical statement.
 
 ## Issue #278 Parts F–H: 1× re-run (2026-11-26)
 
