@@ -66,8 +66,9 @@ function field(form, name, value = "", type = "text") {
   form.fields[name] = node; return node;
 }
 function environment(config, forms = []) {
-  const elements = {}, requests = [], sockets = [], timers = [];
+  const elements = {}, requests = [], sockets = [], timers = [], frames = [];
   const window = {scrollY: 0, innerHeight: 200, simulateListJump: false,
+    requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
     CyaTimezones: {
       toUtc(text) { return new Date(text + "Z").toISOString(); },
       formatUtc(text) { const date = new Date(text); return isNaN(date) ? "" : date.toISOString(); },
@@ -112,7 +113,7 @@ function environment(config, forms = []) {
     },
   };
   vm.createContext(context);
-  return {context, document, window, elements, requests, sockets, timers,
+  return {context, document, window, elements, requests, sockets, timers, frames,
     get: id => document.getElementById(id), posts: () => requests.filter(r => r.body),
     run(file, transform = source => source) { vm.runInContext(transform(fs.readFileSync(path.join(root, file), "utf8")), context); },
   };
@@ -199,6 +200,8 @@ function generic(kind) {
     assert.equal(run.document.activeElement.dataset.itemKey, "item-5|kit-a");
     response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
+    assert.equal(run.frames.length, 1, "focus restoration waits until the replacement button is rendered");
+    run.frames.splice(0).forEach(callback => callback(0));
     assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
     response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
