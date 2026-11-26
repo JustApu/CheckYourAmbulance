@@ -75,7 +75,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         page = self.detail(pk)
         self.assertContains(page, 'data-kind="dependency-exit"')
         self.assertContains(page, "&lt;script&gt;Synthetic vendor&lt;/script&gt;")
-        self.assertContains(page, "No automatic reminder")
+        self.assertContains(page, "The app will not send a reminder.")
         stale = self.post(
             f"/api/v1/deficiencies/{pk}/progress-notes",
             {
@@ -100,7 +100,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         pk = self.report(summary="Synthetic pump issue")
         opened = self.detail(pk)
         self.assertContains(opened, "Synthetic pump issue")
-        self.assertContains(opened, "Affected scope")
+        self.assertContains(opened, "Affected item or area")
         self.assertContains(opened, self.suction.label)
         self.assertContains(opened, "Next action")
         self.assertContains(opened, "Work updates and dependencies")
@@ -201,7 +201,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertEqual(first.json()["result"], self.post(url, body).json()["result"])
         page = self.detail(pk)
         for text in (
-            "Governing deadline",
+            "Current deadline",
             "Age since original report",
             "Synthetic parts delay",
             self.user.display_name,
@@ -412,7 +412,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         pk = self.report()
         page = self.detail(pk).content.decode()
         self.assertIn("<dt>Deadline</dt><dd>Not set</dd>", page)
-        self.assertIn("<dt>Governing deadline</dt><dd>Not set</dd>", page)
+        self.assertIn("<dt>Current deadline</dt><dd>Not set</dd>", page)
         deadline = page.split("<dt>Deadline</dt><dd>")[1].split("</dd>", 1)[0]
         self.assertEqual(deadline, "Not set")
         set_deadline(
