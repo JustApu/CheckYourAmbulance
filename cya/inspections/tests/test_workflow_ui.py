@@ -768,7 +768,7 @@ class DeficiencyListTests(CrewUiCase):
         invalid = self.client.get("/problems/", {"status": "UNKNOWN"})
         self.assertEqual(invalid.status_code, 200)
         self.assertEqual(invalid.context["page"]["total"], 0)
-        self.assertContains(invalid, "Choose a valid lifecycle status.")
+        self.assertContains(invalid, "Choose a valid problem status.")
         overlong = self.client.get("/problems/", {"q": "x" * 101})
         self.assertEqual(overlong.context["page"]["total"], 0)
         self.assertContains(overlong, "Filter text is limited to 100 characters.")
