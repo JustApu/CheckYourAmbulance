@@ -206,9 +206,14 @@ a past picture and does not update.
 **Live.** The screen re-reads its panel:
 - on a vehicle hint from the existing live channel, for up to 3 vehicles (one fewer than the default
   per-user socket limit, leaving room for another tab). The first hint opens a 2-second window and
-  every hint in it shares one re-read at its end, the most SPEC §17.3 lets a client combine and
-  delay; a re-read that starts sooner (the timer, a reconnect) covers them instead
-  ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278));
+  every hint in it shares one re-read at its end; a re-read that starts sooner (the timer, a
+  reconnect) covers them instead ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278)).
+  Hint-driven re-reads are then at most once every 10 seconds, measured from the start of the
+  previous re-read (SPEC 8.1.0 §17.3, OQ-86): a hint inside those 10 seconds, or during a read,
+  waits for their end, and one re-read covers every hint received meanwhile. A read slower than
+  10 seconds is followed at once by the re-read its hints owe. So at shift change each
+  supervisor's panel is read at most about 6 times a minute, however often vehicles change, and a
+  change shows within 10 seconds plus one read;
 - on reconnect and when the tab is shown again;
 - every 20 seconds, which also covers changes no event announces, such as a deadline passing or an
   acknowledgement expiring, and is the only update for vehicles past the first 3. The timer plus one
@@ -253,8 +258,9 @@ never cut. The age rule and the item and kit labels of the shown suspensions are
 - the HTTP roles and the screen.
 
 `readiness_script_harness.js` runs the screen script against fake sockets, timers and fetch:
-hints and their 2-second window, reconnect, the timer, the stale notice, sign-in end and one read
-at a time.
+hints with their 2-second window and 10-second floor (including a read slower than the floor,
+and the timer and reconnect reading at once inside it), reconnect, the timer, the stale notice,
+sign-in end and one read at a time.
 
 ## Not built here
 
