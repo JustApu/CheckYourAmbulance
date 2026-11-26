@@ -153,7 +153,7 @@ def _command(request, user, vehicle, stage):
     }
     try:
         if stage == "add":
-            position_rules.add_position(
+            result = position_rules.add_position(
                 vehicle_id=str(vehicle.pk),
                 kind=kind,
                 label=form["label"],
@@ -162,7 +162,7 @@ def _command(request, user, vehicle, stage):
                 **ids,
             )
         elif stage == "revise":
-            position_rules.revise_position(
+            result = position_rules.revise_position(
                 vehicle_id=str(vehicle.pk),
                 kind=kind,
                 stable_slot_id=request.POST.get("slot", ""),
@@ -171,7 +171,7 @@ def _command(request, user, vehicle, stage):
                 **ids,
             )
         elif stage == "set-key":
-            key_rules.set_vehicle_position_key(
+            result = key_rules.set_vehicle_position_key(
                 vehicle_id=str(vehicle.pk),
                 kind=kind,
                 stable_slot_id=request.POST.get("slot", ""),
@@ -179,7 +179,7 @@ def _command(request, user, vehicle, stage):
                 **ids,
             )
         else:
-            position_rules.revise_position(
+            result = position_rules.revise_position(
                 vehicle_id=str(vehicle.pk),
                 kind=kind,
                 stable_slot_id=request.POST.get("slot", ""),
@@ -192,13 +192,7 @@ def _command(request, user, vehicle, stage):
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
     except OperationConflict:
-        return _page(
-            request,
-            user,
-            vehicle,
-            status=409,
-            errors=["this form was already used for a different change; try again"],
-        )
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     except UNAVAILABLE as error:
         logger.error("position change unavailable (%s)", type(error).__name__)
         return _page(
@@ -208,6 +202,8 @@ def _command(request, user, vehicle, stage):
             status=503,
             errors=["the change could not be completed; nothing was changed. Try again."],
         )
+    if result.operation_reused:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     url = reverse("vehicle-positions", args=[vehicle.pk])
     return HttpResponseRedirect(url + "?" + urlencode({"saved": stage}))
 

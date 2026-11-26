@@ -537,20 +537,21 @@ def _run(request, user, call, error_page):
         return None, error_page(400, ["the form was not valid; reload the page and try again"])
     ids = {**_context_ids(user), "operation_id": operation_id}
     try:
-        return call(ids), None
+        result = call(ids)
     except REFUSALS as error:
         return None, error_page(400, [str(error)])
     except CommandDenied:
         return None, render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
     except OperationConflict:
-        return None, error_page(
-            409, ["this form was already used for a different change; reload and try again"]
-        )
+        return None, error_page(409, [admin_pages.REUSED])
     except UNAVAILABLE as error:
         logger.error("checklist template change unavailable (%s)", type(error).__name__)
         return None, error_page(
             503, ["the change could not be completed; nothing was changed. Try again."]
         )
+    if result.operation_reused:
+        return None, error_page(409, [admin_pages.REUSED])
+    return result, None
 
 
 def _saved(url_name, args, stage):

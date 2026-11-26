@@ -93,6 +93,19 @@ class PositionPagesTests(KitCase):
         self.assertEqual(len(self.rows(slot)), 1)
         self.assertContains(self.client_.get(first["Location"]), "Compartment or system added.")
 
+    def test_a_form_reused_for_a_different_position_is_refused(self):
+        # Issue #297: run_command replays the first add and applies nothing; that is not a save.
+        operation = str(uuid.uuid4())
+        fields = {"stage": "add", "kind": "COMPARTMENT", "display_order": "3"}
+        first = self.post(label="Synthetic drawer", key="drawer", operation_id=operation, **fields)
+        self.assertEqual(first.status_code, 302)
+
+        reused = self.post(label="Synthetic shelf", key="shelf", operation_id=operation, **fields)
+
+        self.assertContains(reused, "already used for a different change", status_code=409)
+        self.assertContains(reused, "nothing was changed", status_code=409)
+        self.assertFalse(PositionKey.objects.filter(key="shelf").exists())
+
     def test_the_page_explains_each_kind_and_what_a_key_is_for(self):
         # Issue #238 F1, F1a, F1b, F1c.
         page = self.client_.get(self.url)
