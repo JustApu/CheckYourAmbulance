@@ -447,8 +447,9 @@ Each flag is checked against `uvicorn --help` for 0.54.0, and
 `cya/tests/test_asgi_server.py` parses this exact block with uvicorn's own
 command line and serves HTTP and the live-update WebSocket through it:
 
-- `--workers 1` and no `--reload`: one process (DEP-2). Setting the count
-  explicitly stops a `WEB_CONCURRENCY` variable from raising it.
+- `--workers 1` and no `--reload`: one process, the default (DEP-2). Setting the count
+  explicitly stops a `WEB_CONCURRENCY` variable from raising it. For several processes,
+  see [several application processes](#several-application-processes-spec-dep-2-amendment-820).
 - `--uds`: a Unix socket for the proxy (DEP-10). uvicorn creates a new socket
   file with mode 0666 (0.54.0 `Server.startup`; a file already at that path
   keeps its mode), so the directory controls access. Create it owned by the
@@ -500,8 +501,8 @@ so the proxy must overwrite that header on every request
 (`proxy_set_header X-Real-IP $remote_addr;`). A missing or malformed value falls
 back to the connection's address, which every client shares: the proxy's
 loopback address, or an empty key over the Unix socket, where uvicorn reports
-no client address. Counters live in the
-single application process (DEP-2) and reset on restart. Pages that re-read a
+no client address. With one process the counters live in that process and reset on
+restart; with several they live in the shared store (DEP-2, amendment 8.2.0). Pages that re-read a
 panel in the background get 401 when signed out and stop, instead of following a
 redirect to `/auth/login/` ([issue #37](https://github.com/JustApu/CheckYourAmbulance/issues/37)), so a tab left open past its
 session does not count against the limit; check this on the rehearsal host. Do not trust arbitrary
@@ -522,8 +523,9 @@ authorization at the configured interval. These messages are identifier-only
 hints, except the rows a check changed, which go only to that session's
 participants (SPEC 8.3.0); clients must reread authoritative state after
 reconnect. See [live updates](live-updates.md) for the event and recovery
-contract. Do not deploy multiple application processes without an approved
-shared channel layer and connection accounting.
+contract. Run several application processes only with the shared store configured
+([several application processes](#several-application-processes-spec-dep-2-amendment-820));
+the per-user socket limit is then counted per process.
 
 Keep access/error logs private and bounded. Exclude OAuth codes/query strings,
 authorization headers, cookies, tokens and request bodies from logs and error
@@ -531,6 +533,56 @@ reports; verify at both proxy and app server, including errors. Do not publish
 raw logs. [issue #8](https://github.com/JustApu/CheckYourAmbulance/issues/8) must test alerts for unreachable site, certificate expiry
 within 14 days, disk space, stale backup/log shipping, refused DB connections
 and repeated 5xx errors, delivered to both operator and deputy.
+
+### Several application processes (SPEC DEP-2, amendment 8.2.0)
+
+One process with the in-memory layer, as above, stays a supported configuration. To run several
+([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278)), add a Redis-compatible
+server on the same host (Redis 6 or later, or Valkey) and point the application at it. The
+server holds no record of work: only live-update messages in flight and the sign-in counters,
+both of which expire. It needs no backup.
+
+**Not yet rehearsed.** The configuration below follows DEP-2 and DEP-10. It has not yet been
+run on the Rocky or Ubuntu host profiles; record the package, version and evidence here when it
+is.
+
+1. **Install and confine the server.** Use the distribution's package. Configure it so that
+   only the application can reach it:
+   ```text
+   port 0                                   # no TCP listener
+   unixsocket /run/cya-store/store.sock
+   unixsocketperm 770                       # owner and group only
+   requirepass <from the root-only secrets file>
+   save ""                                  # no snapshots: nothing to keep
+   appendonly no
+   maxmemory 128mb
+   maxmemory-policy volatile-lru            # every key the application writes expires
+   ```
+   Run it as its own service identity. Put the application's identity in the socket's group
+   and no other account. If a loopback listener is used instead of the socket, bind it to
+   127.0.0.1 only; the application refuses any other host at startup.
+2. **Configure the application.** Add these to the runtime environment file. The password goes
+   only in the root-only secrets file, never in a URL:
+   ```text
+   CYA_SHARED_STORE_URL=unix:///run/cya-store/store.sock
+   CYA_SHARED_STORE_PASSWORD=<the same password>
+   ```
+   Startup refuses a URL with another scheme, a host other than loopback, credentials inside
+   the URL, or no password (`cya/core/shared_store.py`).
+3. **Choose the process count.** Replace `--workers 1` with `--workers N`. Leave at least one
+   core for the database. Each process holds its own caches, so allow about 250 MB of memory
+   per process; raise the service's `MemoryMax` to match. With a store configured, start the
+   store first (`Wants=` and `After=` the store's unit). The application still starts without
+   the store, but has no live updates until the store is available.
+4. **Check delivery across processes.** Open one vehicle's checklist in two browser sessions.
+   Record a check in one and confirm the other shows it within SPEC §17.3's targets. Repeat a
+   few times with fresh sessions, because each connection lands on any process. Then sign in
+   repeatedly from one address past `CYA_SIGNIN_RATE_LIMIT`: the limit must hold across
+   processes.
+5. **Check the failure path.** Stop the store. Recording and reading must continue: screens
+   show their live-update banner and catch up when the store returns. Sign-in is then counted
+   in each process (logged as "shared sign-in counters unavailable") and the proxy's limit
+   still applies. Start the store again and confirm live updates resume.
 
 ## Operations alerts (SPEC DEP-13, issue #8)
 

@@ -47,6 +47,7 @@ SAVES = ("session_start", "check_save")
 RELOADS = ("checklist", "checklist_items", "panel")
 MAX_ITEM_READ = 20  # items one partial checklist read may name (issue #278 B)
 PANEL_PUSH_WINDOW = 2.0  # readiness.js gathers pushes this long, then reads once (#278 C)
+PANEL_PUSH_FLOOR = 10.0  # and reads on a push no sooner after its last read began (SPEC 8.1.0)
 GROUPS = {"pages_and_saves": PAGES + SAVES, "live_reloads": RELOADS}
 PERCENTILES = (50, 90, 95, 98, 99)
 MAX_CONNECTIONS = 6  # per user, as browsers do per host
@@ -365,6 +366,7 @@ class Reloader:
     def __init__(self, fetch):
         self.fetch, self.timer, self.running, self.again = fetch, None, False, False
         self.gathering = None  # a push window (gather); a read that starts covers it
+        self.last_start = None  # loop time the last read began (the push floor)
         self.tasks = set()
 
     def schedule(self, delay):
@@ -372,10 +374,22 @@ class Reloader:
             self.timer.cancel()
         self.timer = asyncio.get_running_loop().call_later(delay, self._fire)
 
-    def gather(self, window):
-        """readiness.js (issue #278 C): the first push starts a window; later ones join it."""
-        if self.gathering is None:
-            self.gathering = asyncio.get_running_loop().call_later(window, self._gathered)
+    def gather(self, window, floor=0.0):
+        """readiness.js (issue #278 C): the first push starts a window; later ones join it.
+
+        With a floor (SPEC 8.1.0 §17.3, OQ-86), a push-driven read starts no sooner than `floor`
+        after the previous read began: a push inside the floor waits for its end instead of
+        opening a window. A push during a read that outlasts the floor runs once more afterwards.
+        """
+        if self.gathering is not None:
+            return
+        loop = asyncio.get_running_loop()
+        delay = window
+        if floor and self.last_start is not None:
+            left = self.last_start + floor - loop.time()
+            if left > 0:
+                delay = left
+        self.gathering = loop.call_later(delay, self._gathered)
 
     def _gathered(self):
         self.gathering = None
@@ -391,6 +405,7 @@ class Reloader:
             self.again = True
             return
         self.running = True
+        self.last_start = asyncio.get_running_loop().time()
         if self.gathering is not None:
             self.gathering.cancel()
             self.gathering = None
@@ -682,7 +697,7 @@ async def supervisor(site, user, recorder, done):
             path,
             reloader.schedule,
             recorder,
-            on_text=lambda _text: reloader.gather(PANEL_PUSH_WINDOW),
+            on_text=lambda _text: reloader.gather(PANEL_PUSH_WINDOW, PANEL_PUSH_FLOOR),
         )
         for path in config["sockets"]
     ]
