@@ -12,6 +12,8 @@ A later measurement on the current `main` after issues #73 to #75 and the worker
 [their own section](#net-benchmark-and-worker-count-test-after-issues-73-to-75-2026-11-09); the targets are still **not met**.
 The 2026-11-22 Rocky rehearsal run, with direct per-operation measurements, is recorded in
 [its own section](#rocky-rehearsal-1-run-with-direct-measurements-2026-11-22); the targets are still **not met**.
+The 2026-11-25 re-run after issue #278 Parts A–C, with the database working set and new direct measurements, is recorded in
+[its own section](#issue-278-part-e-1-re-run-after-parts-ac-2026-11-25); the targets are still **not met**.
 The local synthetic measurements below do not establish the owner targets.
 
 After review, the rehearsal operator should deploy the reviewed head with traffic
@@ -23,6 +25,115 @@ readiness. Record request counts, failures, p50/p90/p95, proportions below one
 and two seconds, single-process CPU and MariaDB CPU. Retain the owner's p90 >3 s
 cutoff before trying higher load steps. Record any remaining bottleneck instead
 of treating a faster isolated query as a passing shift-change result.
+
+## Issue #278 Part E: 1× re-run after Parts A–C (2026-11-25)
+
+Claude re-ran the issue #10 1× scenario on the Rocky rehearsal host (4 cores, 7.5 GB) with
+[issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278) Parts A–C merged. Part A skips a page's own
+pushes, Part B re-reads only the changed checklist row, and Part C caps the readiness push window at 2 s and refreshes
+every 20 s. The release was `main` at `81bd69b`. Arms ran at 1, 2 and 3 uvicorn workers in A/B/C/C/B/A order, with
+synthetic data only, two runs per worker count and one host, so the results are directional. The run does **not**
+satisfy issue #70's 1× acceptance: the targets are still **not met**.
+
+**Setup.**
+- **Same as 2026-11-22:** MariaDB 10.11 with the host's durable settings, a 3 GB buffer pool dumped and reloaded in
+  full, and a cold copy of the whole data directory restored before each arm. Each arm used a test-only drop-in for the
+  worker count and a freshly prepared 1× step (five vehicles × 150 items, 15 crew, two supervisors). The push-driven
+  client ran with think time 3 to 8 s, arrivals over 30 s, the shipped page's reload after a committed save, a 600 s
+  limit, seed 10 and the default 90 s request timeout. The channel layer is the shipped in-memory layer, so the 2- and
+  3-worker arms do not deliver live updates across workers and are not a deployable configuration (SPEC DEP-2).
+- **New data.** The 2026-11-22 copy was extended to 2026-11-24 with the old release first. It was then migrated with
+  `main` through the SPEC 5.0.0 vehicle-checklist, 6.0.0 item-requirement and 7.0.0 kit-assignment cutovers. A full
+  projection rebuild of 194,250 obligations then reported 0 differences. So this run measures Parts A–C together with
+  the 5.0.0–7.0.0 code and data shape, not Parts A–C alone.
+- **New client behaviour (Parts A and B):** a crew member skips their own save's push, and a check push re-reads only
+  that row (`item_ids`). Panel reads coalesce within 2 s.
+
+**Results** (seconds, client-side wall time):
+
+| Arm | Workers | Saves in window | Pages and saves p50 / p95 | Under 1 s / under 2 s | Live reload p50 / p95 | Row reads p50 (count) | Full checklist reads p50 (count) | Panel p50 (count) | App / DB cores | App memory peak |
+|---|---:|---|---|---|---|---|---|---|---|---|
+| W1a | 1 | 338 of 750 (600 s, stopped at the limit) | 17.5 / 22.3 | 2.3% / 2.9% | 14.3 / 24.5 | 14.1 (544) | 34.4 (30) | none: both supervisors failed to start | 1.05 / 0.49 | 425 MB |
+| W2a | 2 | 635 of 750 (600 s, stopped at the limit) | 7.4 / 11.8 | 1.9% / 5.1% | 7.4 / 13.3 | 7.2 (986) | 12.2 (30) | 24.5 (47) | 1.82 / 1.09 | 593 MB |
+| W3a | 3 | 750 (514 s) | 3.5 / 7.4 | 7.4% / 20.2% | 4.0 / 9.5 | 3.8 (1,093) | 8.0 (30) | 17.6 (56) | 2.17 / 1.31 | 757 MB |
+| W3b | 3 | 750 (514 s) | 3.5 / 6.9 | 6.5% / 18.3% | 3.7 / 8.8 | 3.6 (1,119) | 5.7 (30) | 16.5 (65) | 2.16 / 1.32 | 717 MB |
+| W2b | 2 | 623 of 750 (600 s, stopped at the limit) | 7.6 / 12.0 | 2.5% / 5.1% | 7.4 / 13.6 | 7.1 (988) | 11.9 (30) | 26.6 (45) | 1.82 / 1.08 | 594 MB |
+| W1b | 1 | 348 of 750 (600 s, stopped at the limit) | 16.6 / 21.5 | 1.8% / 2.8% | 13.9 / 19.5 | 13.8 (570) | 30.9 (30) | none: both supervisors failed to start | 1.04 / 0.50 | 370 MB |
+
+In both 1-worker arms, each supervisor's first readiness page ended at the reverse proxy's 60 s read timeout, so no
+supervisor ran in those arms. W3a recorded one save that did not get an answer and was retried. No other save failed
+in any arm. Swap stayed at 524 to 1,548 KB, and the highest 5-second I/O-wait sample was 20%.
+
+**Database working set.** Buffer-pool counters were sampled after each arm's preparation and again at its end:
+
+| Workers | Pool pages holding data, before → after (of 194,688) | Pages read from disk during the arm | Page read requests | Served from memory |
+|---|---|---|---|---|
+| 1 | 148,529–148,545 → 166,744–167,237 | 7,845–7,978 (about 125 MB) | 50.6–51.2 million | over 99.98% |
+| 2 | 148,524–148,772 → 176,662–176,925 | 13,257–13,387 (about 210 MB) | 113.2–115.5 million | over 99.98% |
+| 3 | 148,313–148,773 → 180,270–180,766 | 15,342–15,390 (about 245 MB) | 115.8–117.2 million | over 99.98% |
+
+With a 3 GB pool on this data, the database read almost nothing from disk, and the pool ended 86–93% full. No
+smaller pool was tried, and the per-table breakdown in the Part E plan was not collected. So this supports "3 GB is
+enough for this data", not a sizing rule.
+
+**Direct measurements.** After the arms, the base snapshot was restored, the service was stopped and one 1× step was
+prepared. One process then called the real functions with no other load, through `manage.py shell` as the schema owner
+(on 2026-11-22 it was the runtime account). This was done twice: once on `81bd69b`, and once on `81bd69b` plus PR #286
+(Part F, a save reads its obligations once). The second run restored the snapshot again. SQL query counts are from
+Django's query capture; CPU is the process's own.
+
+| Operation | `81bd69b`: wall (CPU) | Queries | With PR #286: wall (CPU) | Queries | 2026-11-22 (`cb45f27`), wall | Queries |
+|---|---|---:|---|---:|---|---:|
+| Readiness panel, five vehicles, first call | 7.91 s (5.67 s) | 44 | 8.03 s (5.57 s) | 44 | — | — |
+| Readiness panel, five vehicles, warm (5 reads) | 2.14 to 3.15 s (1.43 to 2.17 s) | 31 to 33 | 2.17 to 3.31 s (1.41 to 2.32 s) | 31 to 33 | 7.94 to 8.37 s (`_picture`) | 43 to 44 |
+| Vehicle checklist, 150 rows (4 reads) | 0.96 to 1.16 s (0.59 to 0.80 s) | 206 | 0.99 to 1.26 s (0.64 to 0.87 s) | 206 | 0.53 to 0.71 s | 52 to 53 |
+| One checklist row (`item_ids`, 4 reads) | 0.51 to 0.71 s (0.30 to 0.49 s) | 57 | 0.52 to 0.72 s (0.31 to 0.51 s) | 57 | — | — |
+| One routine check save, no session (8 saves) | 0.34 to 0.80 s (0.19 to 0.22 s) | 58 | 0.27 to 0.76 s (0.13 to 0.16 s) | 52 | 0.24 to 0.30 s after the first | 51 |
+
+**Reading the results.**
+- **The targets are not met.** The target is at least 95% of page loads and saves under 1 s and at least 98% under 2 s,
+  with a stop before higher steps if p90 exceeds 3 s. The best arm had 7.4% under 1 s and 20.2% under 2 s, with p95 near
+  7 s.
+- **The pairs agree.** Pages-and-saves p50 differed by 0.0 s between the 3-worker arms, 0.2 s between the 2-worker arms
+  and 0.8 s between the 1-worker arms. On 2026-11-22 the 1-worker arms differed by 6.6 s.
+- **The application CPU is still the limit.** Application cores rose with the workers (about 1.0, 1.8 and 2.2) while
+  the database used 0.5 to 1.3 cores and almost never read the disk.
+- **Against 2026-11-22.** At 3 workers, pages-and-saves p50 fell from 4.2–4.3 s to 3.5 s, and the share under 2 s rose
+  from 12–13% to 18–20%. Live reloads p50 fell from about 9 s to 3.7–4.0 s, and all 750 saves finished in 514 s instead
+  of 555–575 s. At 1 and 2 workers the run was no better: 1-worker p50 was 16.6–17.5 s against 8.8–15.4 s, and fewer
+  saves fitted in the window at 2 workers (623–635 against 675–710). The code and data both changed between the runs,
+  so this does not isolate Parts A–C.
+- **Part B cut full reads but not their cost.** Full checklist reads fell to 30 per arm, one per crew member at start.
+  Instead, about 1.5 single-row reads ran per save (544 to 1,119 per arm). A single-row read still costs about 0.3 s of
+  CPU and 57 queries, roughly half a full read, so most of a read's cost does not depend on how many rows it returns.
+- **Checklist reads now cost more than saves.** Per save, about 1.5 row reads at 0.3 s of CPU outweigh the save's own
+  0.19 s (0.13 s with PR #286). The full read rose from 52 to 206 queries and from about 0.6 s to about 1 s since
+  2026-11-22, so the 5.0.0–7.0.0 read path has more queries per row. That is the next thing to profile.
+- **Readiness is slower on the migrated data.** Warm panel reads take 2.1 to 3.3 s (1.4 to 2.3 s of CPU) with no load,
+  and 16.5 to 26.6 s p50 under load. Part D (a per-vehicle readiness cache) was shelved after a measurement on the
+  pre-migration data showed about 0.5 s. That premise no longer holds, so Part D is open again for the owner to decide.
+- **Part F (PR #286)** removes about a third of a save's CPU (0.19 s to 0.13 s, 58 to 52 queries). Its effect under load
+  has not been measured.
+
+**Deviations, recorded so the run can be judged.**
+- *Settle gate.* The gate required six quiet 5-second samples with no swap. Swap in use from earlier work kept every
+  arm waiting the gate's full 10 minutes (`quiet_samples=0`). The arms are consistent with each other.
+- *Client placement.* The load client ran on the application host itself, over HTTPS to the public name, sharing its
+  four cores, as on 2026-11-22. `MemoryMax` was raised to 5 GB for the arms; peak memory stayed under 0.8 GB.
+- *Time limit.* Every 1- and 2-worker arm stopped at the 600 s limit with saves still to do. Their percentiles cover
+  the requests completed by then.
+- *Readiness timeouts.* The 1-worker arms ran with no supervisor load (see above), so they are lighter than the 2- and
+  3-worker arms.
+- *Order.* The arms ran in W1a, W2a, W3a, W3b, W2b, W1b order.
+- *Working set.* Per-table pool pages were not sampled; only the global counters above.
+- *Direct measurements.* These ran as the schema owner rather than the runtime account. Earlier profiling on this host
+  had bound extra daily schedules, so the snapshot was restored before each of the two measured runs and only one 1×
+  step was prepared, as in each arm.
+- *Load steps leave a slot bound.* As on 2026-11-22, `load_prepare` does not unbind its slot. The per-arm restores make
+  this harmless here.
+
+**Not claimed:** a worker count, a hosting layout or a channel layer (SPEC DEP-2 and section 17.7 item 7 remain owner
+decisions), any 4×/10× step, Part F's effect under load, or any statistical statement.
 
 ## Rocky rehearsal 1× run with direct measurements (2026-11-22)
 
