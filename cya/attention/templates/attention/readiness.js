@@ -43,8 +43,9 @@
         config.refresh_seconds + " seconds.";
       return;
     }
-    state.textContent = every + (n >= total ? " Changes show at once." :
-      " Changes on the first " + n + " vehicles show at once.");
+    // SPEC 8.1.0 §17.3: hint-driven reads are at most 10 seconds apart, so not "at once".
+    state.textContent = every + (n >= total ? " Changes show within 10 seconds." :
+      " Changes on the first " + n + " vehicles show within 10 seconds.");
   }
   function refresh() {
     if (signedOut) { return; }
