@@ -88,11 +88,11 @@
 {% if can_update_dependency %}
 {% if dependency %}
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="dependency" data-url="{% url 'api-deficiency-dependency-revisions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
-{% csrf_token %}<h2>Update waiting work</h2>
+{% csrf_token %}<h2>Update what is holding up the work</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
 {% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
 <label>Follow-up date and time (optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
-<button type="submit" class="button primary">Update waiting work</button>
+<button type="submit" class="button primary">Save update</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 <form class="panel workflow-write" data-kind="dependency-exit" data-url="{% url 'api-deficiency-dependency-exits' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
@@ -107,7 +107,7 @@
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
 {% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
 <label>Follow-up date and time (optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
-<button type="submit" class="button primary">Record waiting work</button>
+<button type="submit" class="button primary">Record what is pending</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% endif %}
