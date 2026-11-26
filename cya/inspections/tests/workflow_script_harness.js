@@ -735,8 +735,8 @@ function generic(kind) {
   }
   for (const [verification, expected] of [
     [{status: "PENDING_VERIFICATION", counts_toward_scope: true, remaining_scope_rows: 2}, "2 verification items still need a check"],
-    [{status: "PENDING_VERIFICATION", counts_toward_scope: false}, "does not count"],
-    [{status: "PENDING_VERIFICATION", closure_withheld: true, remaining_scope_rows: 0}, "closure withheld"],
+    [{status: "PENDING_VERIFICATION", counts_toward_scope: false}, "did not verify the repair"],
+    [{status: "PENDING_VERIFICATION", closure_withheld: true, remaining_scope_rows: 0}, "did not close automatically"],
   ]) {
     const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency"});
     run.context.testUI.setRows([row]); run.context.testUI.startCheck(row, null, "PASSED");
