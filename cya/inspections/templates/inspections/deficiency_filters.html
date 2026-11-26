@@ -15,7 +15,7 @@
 <label for="deficiency-assignee">Assigned to
 <input id="deficiency-assignee" type="search" name="assignee" maxlength="100" value="{{ filters.assignee }}"{% if filter_assignee_suggestions %} list="deficiency-assignee-suggestions"{% endif %}>
 </label>
-<label for="deficiency-status">Lifecycle status
+<label for="deficiency-status">Problem status
 <select id="deficiency-status" name="status">
 <option value="active"{% if filters.status == "active" %} selected{% endif %}>Outstanding only</option>
 <option value="all"{% if filters.status == "all" %} selected{% endif %}>{{ filter_all_statuses_label }}</option>

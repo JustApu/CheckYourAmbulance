@@ -74,11 +74,26 @@
       (row.item_requirement_id ? "|r" + row.item_requirement_id : "");
   }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
-  function restoreFocusIntent() {
+  var focusRestoreScheduled = false;
+  function restoreFocusIntent(afterRender) {
     if (!focusIntent) { return; }
     var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
-    if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
-    else { (item || list).focus({preventScroll: true}); }
+    if (!target || target.disabled) { (item || list).focus({preventScroll: true}); return; }
+    if (!afterRender) { target.focus({preventScroll: true}); focusIntent = null; return; }
+    if (focusRestoreScheduled) { return; }
+    focusRestoreScheduled = true;
+    var defer = typeof window.requestAnimationFrame === "function" ?
+      function (callback) { window.requestAnimationFrame(callback); } :
+      function (callback) { setTimeout(callback, 0); };
+    defer(function () {
+      focusRestoreScheduled = false;
+      if (!focusIntent) { return; }
+      var intent = focusIntent, active = document.activeElement;
+      if (active && active !== document.body && active !== list) { focusIntent = null; return; }
+      var item = itemForKey(intent.key), target = item && actionIn(item, intent.action);
+      if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
+      else { (item || list).focus({preventScroll: true}); }
+    });
   }
   function itemForKey(itemKey) {
     for (var i = 0; i < list.children.length; i++) {
@@ -215,9 +230,9 @@
         if (verification) {
           var detail = verification.status === "CLOSED_VERIFIED" ? "Closed — Verified." :
             verification.status === "IN_PROGRESS" ? "Verification failed — back in progress." :
-            verification.closure_withheld ? "Scope satisfied; automatic closure withheld. Contact a supervisor." :
-            verification.counts_toward_scope ? verification.remaining_scope_rows + " scope rows remain." :
-            "Saved check does not count toward the verification scope.";
+            verification.closure_withheld ? "Verification is complete, but the problem did not close automatically. Contact a supervisor." :
+            verification.counts_toward_scope ? verification.remaining_scope_rows + " verification items still need a check." :
+            "This saved check did not verify the repair.";
           entry.text += ". " + detail;
           verificationNotice = "Saved. " + detail;
           $("session-message").textContent = verificationNotice;
@@ -255,7 +270,7 @@
     var words = {saved: "was saved", failed: "was not saved", unconfirmed: "is unconfirmed: it may or may not have been recorded"};
     $("session-message").textContent = "Your check of \"" + row.item_label + "\" " + words[entry.status] + "." +
       (entry.text ? " " + entry.text : "") +
-      (entry.status === "saved" || config.verification_for_deficiency_id ? "" : " Turn off Needs Attention Only to see the item and retry.");
+      (entry.status === "saved" || config.verification_for_deficiency_id ? "" : " Turn off ‘Needs attention only’ to find and retry the item.");
   }
 
   // ---- conflict dialog (CON-2, CON-3) ----------------------------------------------------
@@ -372,7 +387,7 @@
   // ---- rendering -------------------------------------------------------------------------
   function stateText(row) {
     if (config.verification_for_deficiency_id) { return "Outstanding verification"; }
-    if (!row.obligation_state) { return "No current requirement"; }
+    if (!row.obligation_state) { return "No check is currently required"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "PASSED") { return "Passed"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "FAILED") { return "Failed"; }
     if (row.obligation_state === "SATISFIED" && row.obligation_outcome === "UNABLE_TO_INSPECT") { return "Unable to inspect"; }
@@ -391,7 +406,7 @@
   // so the satisfying outcome is shown. A supervisor completion is not a check result: no mark.
   var unmarkedStates = {SUSPENDED: true, EXEMPT: true, WAIVED: true};
   function recordedOutcome(row, entry) {
-    // Issue #235 B3: with no current window ("No current requirement", or "Not due" before the
+    // Issue #235 B3: with no current window ("No check is currently required", or "Not due" before the
     // window opens) there is no window result to show, even right after this person's tap.
     if (!config.verification_for_deficiency_id &&
         (!row.obligation_state || row.obligation_state === "UPCOMING")) { return null; }
@@ -558,7 +573,7 @@
   }
   function breakdownText(group) {
     return group.due_soon + " due soon · " + group.not_due + " not due · " +
-      group.no_obligation + " without an obligation · " + group.exceptions + " exception" +
+      group.no_obligation + " not required · " + group.exceptions + " exception" +
       (group.exceptions === 1 ? "" : "s");
   }
   function renderAreaCards() {
@@ -700,7 +715,14 @@
     var title = el("h3", "", titleText);
     head.appendChild(title);
     // The explicit deficiency block already communicates attention for this row.
-    if (row.item_attention === "ATTENTION" && !row.deficiencies.length) { head.appendChild(el("span", "pill pill-needs-attention", "⚠ Needs attention")); }
+    if (row.item_attention === "ATTENTION" && !row.deficiencies.length) {
+      var attentionPill = el("span", "pill pill-needs-attention");
+      var warningIcon = el("span", "", "⚠");
+      warningIcon.setAttribute("aria-hidden", "true");
+      attentionPill.appendChild(warningIcon);
+      attentionPill.appendChild(document.createTextNode(" Needs attention"));
+      head.appendChild(attentionPill);
+    }
     var st = stateText(row);
     if (st) {
       var status = el("span", "window-status", st);
@@ -800,7 +822,7 @@
     var modalOpen = dialog.open || outcomeDialog.open;
     if (!modalOpen) {
       if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
-        restoreFocusIntent();
+        restoreFocusIntent(true);
       } else if (focusInList) {
         var restoredItem = itemForKey(focusKey);
         var target = restoredItem && actionIn(restoredItem, focusAction);
@@ -915,7 +937,7 @@
       if (needsCheck(row)) { status.textContent = ""; goToRow(row); return; }
     }
     status.textContent = progressCounts().left && onlyAttention ?
-      "No unchecked items are shown. Turn off Needs Attention Only to see the rest." :
+      "No unchecked items are shown. Turn off ‘Needs attention only’ to see the rest." :
       progressCounts().left ? "No unchecked items are shown on this screen." : "Every due item is checked.";
   }
   function jumpTo(groupKey) {
@@ -1079,7 +1101,7 @@
           if (entries[k] && ["pending", "unconfirmed"].indexOf(entries[k].status) !== -1 &&
               !rows.some(function (r) { return key(r) === k; })) { rows.push(verificationRows[k]); }
         });
-        $("session-message").textContent = verificationNotice + " Current report: " + a.body.verification_status + ". " + a.body.remaining_scope_rows + " outstanding scope rows." +
+        $("session-message").textContent = verificationNotice + " Current report: " + a.body.verification_status + ". Verification items still needing a check: " + a.body.remaining_scope_rows + "." +
           (a.body.unavailable_scope_rows ? " Some items are unavailable on the current checklist. Contact a supervisor; they remain outstanding." : "");
       }
       $("stale").hidden = true; loadedOnce = true; clearLoading(); render();

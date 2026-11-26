@@ -60,6 +60,17 @@ class RoleAdministrationHttpTests(TransactionTestCase):
         )
         self.assertEqual(found.content.decode().count('tabindex="-1" data-focus-on-load'), 1)
 
+    def test_staged_role_status_is_a_persistent_live_region(self):
+        admin_client, _admin = self.make_administrator("admin-role-status")
+        self.sign_in("crew-role-status")
+        response = admin_client.get(URL, {"q": "crew-role-status"})
+        self.assertContains(
+            response,
+            '<p class="role-change-status visually-hidden" role="status" aria-live="polite" '
+            'aria-atomic="true" data-role-change-status></p>',
+            html=True,
+        )
+
     def test_role_history_names_who_made_the_change(self):
         # Issue #235 D8: "Changed by" shows the person's name, as the user list does.
         admin_client, admin = self.make_administrator("admin-named")

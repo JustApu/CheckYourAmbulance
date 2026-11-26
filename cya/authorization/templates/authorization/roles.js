@@ -37,18 +37,20 @@
       if (selfWarning) { selfWarning.hidden = !losingAdministration; }
       save.hidden = changed.length === 0;
       reset.hidden = changed.length === 0;
-      status.hidden = changed.length === 0;
       if (row) { row.toggleAttribute("data-role-pending-row", changed.length > 0); }
+      let statusMessage = "";
       if (changed.length > 0) {
         const parts = [];
         const added = changed.filter((choice) => choice.checked).map((choice) => choice.dataset.roleLabel);
         const removed = changed.filter((choice) => !choice.checked).map((choice) => choice.dataset.roleLabel);
         if (added.length) { parts.push("add " + list(added)); }
         if (removed.length) { parts.push("remove " + list(removed)); }
-        status.textContent = "Not saved yet: " + parts.join("; ") + ". Select Save to apply "
+        statusMessage = "Not saved yet: " + parts.join("; ") + ". Select Save to apply "
           + (changed.length === 1 ? "this change." : "these " + changed.length + " changes.")
           + (losingAdministration ? " You will lose access to Administration when you save." : "");
       }
+      status.classList.toggle("visually-hidden", !statusMessage);
+      status.textContent = statusMessage;
     };
 
     choices.forEach((choice) => choice.addEventListener("change", update));

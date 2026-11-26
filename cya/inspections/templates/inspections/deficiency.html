@@ -12,29 +12,29 @@
 <p>{{ deficiency.description }}</p>
 <p>Reported by {{ deficiency.reporter.display_name }} at {{ deficiency.reported_at|station_time }}</p>
 <dl class="deficiency-facts">
-<dt>Affected scope</dt><dd>{% if deficiency.item %}{{ deficiency.item.label }}{% if deficiency.kit %} · {{ deficiency.kit.label }}{% elif place %} · {{ place }}{% endif %}{% elif deficiency.kit %}Kit: {{ deficiency.kit.label }}{% elif deficiency.compartment %}Compartment: {{ deficiency.compartment.label }}{% else %}Whole vehicle{% endif %}</dd>
+<dt>Affected item or area</dt><dd>{% if deficiency.item %}{{ deficiency.item.label }}{% if deficiency.kit %} · {{ deficiency.kit.label }}{% elif place %} · {{ place }}{% endif %}{% elif deficiency.kit %}Kit: {{ deficiency.kit.label }}{% elif deficiency.compartment %}Compartment: {{ deficiency.compartment.label }}{% else %}Whole vehicle{% endif %}</dd>
 <dt>Assignee</dt><dd>{{ assignee.display_name|default:"Unassigned" }}</dd>
 <dt>Deadline</dt><dd>{% if deadline.base_deadline %}{{ deadline.base_deadline|station_time }}{% else %}Not set{% endif %}</dd>
-<dt>Governing deadline</dt><dd>{% if deadline.governing_deadline %}{{ deadline.governing_deadline|station_time }}{% else %}Not set{% endif %}{% if deadline.overdue %} · Overdue{% endif %}</dd>
+<dt>Current deadline</dt><dd>{% if deadline.governing_deadline %}{{ deadline.governing_deadline|station_time }}{% else %}Not set{% endif %}{% if deadline.overdue %} · Overdue{% endif %}</dd>
 <dt>Age since original report</dt><dd>{{ age_days }} days · {{ deadline.extension_count }} extension requests{% if deadline.long_running %} · Long-running{% endif %}</dd>
 {% if status == "Pending Verification" %}<dt>Verification progress</dt><dd>{{ verification_progress.verified }} of {{ verification_progress.total }} verified · {{ verification_progress.outstanding }} outstanding</dd>{% endif %}
 </dl>
-{% if dependency %}<p>Current dependency: {{ dependency.explanation }}</p><p>Follow-up: {% if dependency.follow_up_at %}{{ dependency.follow_up_at|station_time }}{% else %}Not set{% endif %}. No automatic reminder.</p>{% endif %}
+{% if dependency %}<p>Work waiting on: {{ dependency.explanation }}</p><p>Follow-up: {% if dependency.follow_up_at %}{{ dependency.follow_up_at|station_time }}{% else %}Not set{% endif %}. The app will not send a reminder.</p>{% endif %}
 </section>
 <section class="panel deficiency-next-action" aria-labelledby="next-action-title">
 <h2 id="next-action-title">Next action</h2>
 {% if empty_scope_available %}
-<p>No current verification items remain. <a href="#empty-scope-closure">Use the closure exception below.</a></p>
+<p>There are no current items to check. <a href="#empty-scope-closure">Use the option below to close the problem.</a></p>
 {% elif scope %}
 <h3>Complete the verification checks</h3>
-<p>Each outstanding item and physical kit needs its own verification Pass. A routine Pass does not verify this repair.</p>
+<p>After the repair, pass a check for each affected item and kit to confirm the problem is fixed. A routine check does not confirm this repair.</p>
 <p>{{ verification_progress.verified }} of {{ verification_progress.total }} checks verified.</p>
 <ul>{% for row in scope %}<li>{{ row.item.label }}{% if row.kit_instance %} — {{ row.kit_instance.label }}{% elif row.item_requirement_version %} — {{ row.item_requirement_version.compartment.label|default:row.item_requirement_version.system.label|default:"Not placed" }}{% endif %}: {% if row.satisfied %}Verified{% else %}Outstanding{% endif %} · after {{ row.required_after|station_time:"seconds" }}</li>{% endfor %}</ul>
 <a class="button primary" href="{% url 'deficiency-verification' deficiency.pk %}">Perform verification checks</a>
 {% elif can_record_repair %}
 <form class="panel workflow-write" data-kind="repair" data-url="{{ config.correction_url }}" data-expected-event="{{ config.expected_event_id }}"{% if can_close_empty_scope %} data-can-close-empty="1"{% endif %}>
 {% csrf_token %}
-<p>Record that the repair is complete and request verification of the affected scope.</p>
+<p>Record the repair as complete and request a verification check for each affected item or area.</p>
 <button type="submit" class="button primary">Record repair</button>
 <p class="workflow-result" role="status"></p>
 <a class="workflow-refresh" href="" hidden>Refresh history</a>
@@ -46,19 +46,19 @@
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% elif status == "Open" %}
-<p>A supervisor or administrator can start work. Use Work updates below to record a dependency or progress note.</p>
+<p>A supervisor or administrator can start work. Use Work updates below to record what work is waiting on or add a progress note.</p>
 {% elif dependency %}
-<p>Work is waiting on the dependency above. Check its follow-up date; no automatic reminder is sent.</p>
+<p>Work is waiting on the item above. Check its follow-up date. The app will not send a reminder.</p>
 {% else %}
 <p>Review the current status and history below for the next update.</p>
 {% endif %}
 </section>
 {% if empty_scope_available %}{# issue #235 A3: only when nothing is left to verify #}
 <details class="panel deficiency-details" id="empty-scope-closure" open>
-<summary>Closure exception — no current verification items</summary>
+<summary>Close when there are no items to check</summary>
 <form class="panel workflow-write" data-kind="empty-scope-close" data-url="{% url 'api-deficiency-empty-scope-closures' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
-{% csrf_token %}<h2>Close: no current verification items</h2>
-<p>Use only when the checklist no longer has anything to verify for this problem. It closes as &ldquo;Closed &mdash; No current verification items&rdquo;; only an Administrator can reopen it.</p>
+{% csrf_token %}<h2>Close with no items to check</h2>
+<p>Use this only when there are no items left to check for this problem. It will be marked &ldquo;Closed &mdash; No current verification items.&rdquo; Only an administrator can reopen it.</p>
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>
 <button type="submit" class="button primary">Close problem</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
@@ -67,7 +67,7 @@
 {% endif %}
 {% if can_request_extension or can_add_note or can_update_dependency %}
 <details class="panel deficiency-details" id="work-updates"{% if dependency %} open{% endif %}>
-<summary id="work-updates-summary">Work updates and dependencies</summary>
+<summary id="work-updates-summary">Work updates and delays</summary>
 {% if can_request_extension %}
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="extension" data-url="{% url 'api-deficiency-extension-requests' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>Request deadline extension</h2>
@@ -88,26 +88,26 @@
 {% if can_update_dependency %}
 {% if dependency %}
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="dependency" data-url="{% url 'api-deficiency-dependency-revisions' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
-{% csrf_token %}<h2>Update dependency</h2>
+{% csrf_token %}<h2>Update what is holding up the work</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
 {% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
 <label>Follow-up date and time (optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
-<button type="submit" class="button primary">Update dependency</button>
+<button type="submit" class="button primary">Save update</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 <form class="panel workflow-write" data-kind="dependency-exit" data-url="{% url 'api-deficiency-dependency-exits' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
-{% csrf_token %}<h2>End dependency</h2>
+{% csrf_token %}<h2>Stop waiting on this work</h2>
 <label>Return to <select name="return_to"><option value="">Status before waiting</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In Progress</option></select></label>
-<button type="submit" class="button primary">End dependency</button>
+<button type="submit" class="button primary">Stop waiting on this work</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% elif can_enter_dependency %}
 <form class="panel workflow-write" data-time-zone="{{ cya_user.organization.station_zone }}" data-kind="dependency" data-url="{% url 'api-deficiency-dependencies' deficiency.pk %}" data-expected-event="{{ config.expected_event_id }}">
-{% csrf_token %}<h2>Awaiting External Dependency</h2>
+{% csrf_token %}<h2>Waiting on outside work</h2>
 <label>Explanation <textarea name="explanation" required maxlength="4000">{{ dependency.explanation|default:"" }}</textarea></label>
 {% if follow_up_passed %}<p>The follow-up set for {{ follow_up_passed|station_time }} has passed; set a new one or leave it empty.</p>{% endif %}
 <label>Follow-up date and time (optional; no automatic reminder) <input name="follow_up_at" type="datetime-local" value="{{ follow_up_prefill|date:'Y-m-d\TH:i' }}"></label>
-<button type="submit" class="button primary">Record dependency</button>
+<button type="submit" class="button primary">Record what is pending</button>
 <p class="workflow-result" role="status"></p><a class="workflow-refresh" href="" hidden>Refresh history</a>
 </form>
 {% endif %}
@@ -195,7 +195,7 @@
 {% if supervisor.verification_items is not None %}
 <form class="panel workflow-write" {% if not supervisor.expanding %}data-time-zone="{{ cya_user.organization.station_zone }}" {% endif %}data-kind="{% if supervisor.expanding %}expand{% else %}add-verification{% endif %}" data-url="{% if supervisor.expanding %}{% url 'api-deficiency-scope-expansions' deficiency.pk %}{% else %}{% url 'api-deficiency-added-verifications' deficiency.pk %}{% endif %}" data-expected-event="{{ config.expected_event_id }}">
 {% csrf_token %}<h2>{% if supervisor.expanding %}Expand verification scope{% else %}Add verification after closure{% endif %}</h2>
-<p>{% if supervisor.expanding %}Each item and physical kit you add needs its own verification Pass.{% else %}This reopens the problem; each item and physical kit you add needs a verification Pass by the deadline.{% endif %}</p>
+<p>{% if supervisor.expanding %}Each item and specific kit you add needs its own verification check.{% else %}This reopens the problem. Each item and specific kit you add needs a verification check by the deadline.{% endif %}</p>
 <fieldset><legend>Items</legend>{% for value, label in supervisor.verification_items %}<label><input type="checkbox" name="items" value="{{ value }}"> {{ label }}</label>{% empty %}<p>No current checklist items.</p>{% endfor %}</fieldset>
 {% if not supervisor.expanding %}<label>Verification deadline <input name="deadline" type="datetime-local" required></label>{% endif %}
 <label>Explanation <textarea name="explanation" required maxlength="4000"></textarea></label>

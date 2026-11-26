@@ -48,12 +48,12 @@
     ALREADY_LINKED: "These reports are already linked.", NOT_LINKED: "These reports are not linked.",
     DEFICIENCY_NOT_ACTIVE: "That problem is closed or Reported in Error. Choose another report.",
     DEFICIENCY_CHANGED: "This problem changed. Refresh history before making a new decision.",
-    INVALID_EXTENSION_DATE: "Choose a future date later than the governing deadline.",
+    INVALID_EXTENSION_DATE: "Choose a future date later than the current deadline.",
     NO_DEADLINE: "A supervisor must set a deadline before an extension can be requested.",
     INVALID_FOLLOW_UP: "Choose a future follow-up date.",
-    DEPENDENCY_UNCHANGED: "Change the dependency explanation or follow-up date.",
-    NO_ACTIVE_DEPENDENCY: "This dependency has ended. Refresh history.",
-    DEPENDENCY_ALREADY_RECORDED: "A dependency is already recorded. Refresh to update it.",
+    DEPENDENCY_UNCHANGED: "Change what work is waiting on or its follow-up date.",
+    NO_ACTIVE_DEPENDENCY: "The waiting work has ended. Refresh history.",
+    DEPENDENCY_ALREADY_RECORDED: "Waiting work is already recorded. Refresh to update it.",
     MALFORMED_REQUEST: "Check the form values and try again.",
     INVALID_TRANSITION: "This problem is not in a status that allows this action.",
     NOT_YET_SUPPORTED: "This action is not available yet. Record a fresh independent check when appropriate.",
@@ -70,8 +70,8 @@
     ALREADY_IN_SCOPE: "An item you chose is already in the verification scope.",
     ALREADY_SUSPENDED: "An item you chose is already suspended for this problem.",
     ITEM_NOT_IN_CHECKLIST: "An item you chose is no longer on the vehicle's checklist. Refresh.",
-    ITEM_NOT_IN_SCOPE: "An item you chose is outside this problem's affected scope.",
-    KIT_REQUIRED: "Choose the physical kit for that item. Refresh.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
+    ITEM_NOT_IN_SCOPE: "An item you chose is not part of this problem. Refresh this page.",
+    KIT_REQUIRED: "Choose the specific kit that contains this item. Refresh the list.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
     TOO_MANY_SUSPENSIONS: "Too many suspensions at once. Choose fewer items.",
     SUSPENSION_ALREADY_ENDED: "This suspension has already ended. Refresh history.",
     SUSPENSION_NOT_FOUND: "This suspension is no longer available. Refresh history.",
@@ -85,10 +85,10 @@
     // The repair form carries data-can-close-empty when this user may use the empty-scope close
     // (issue 21). The close is offered only once nothing is left to verify (issue #235 A3), so a
     // scope that emptied after the page loaded needs a refresh to show it.
-    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Refresh this page, then use \u201cClose: no current verification items\u201d."},
+    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Refresh this page, then use \u201cClose when there are no items to check\u201d."},
     "empty-scope-close": {
       SCOPE_AVAILABLE: "Current verification items exist; record the repair instead.",
-      INVALID_TRANSITION: "This problem is no longer Open, In Progress or Awaiting External Dependency. Refresh history."
+      INVALID_TRANSITION: "This problem's status changed. Refresh its history."
     }
   };
   function errorText(form, code) {
@@ -179,7 +179,7 @@
     }
     if (kind === "report") {
       body.vehicle_id = config.vehicle_id;
-      var target = required(value(form, "target"), "Choose the affected scope.");
+      var target = required(value(form, "target"), "Choose an item, kit, compartment, or vehicle system.");
       var parts = target.split(":");
       if (parts[0] === "systems") {
         var systems = Array.prototype.map.call(form.querySelectorAll('[name="system_ids"]:checked'), function (e) { return e.value; });
@@ -187,7 +187,7 @@
         body.target = {vehicle: true, system_ids: systems};
       } else {
         var targetKey = {item: "item_id", kit: "kit_id", compartment: "compartment_id"}[parts[0]];
-        if (!targetKey || !parts[1]) { throw new Error("Choose a valid affected scope."); }
+        if (!targetKey || !parts[1]) { throw new Error("Choose a valid item, kit, compartment, or vehicle system."); }
         body.target = {}; body.target[targetKey] = parts[1];
         if (parts[0] === "item" && parts[2]) { body.target.item_requirement_id = parts[2]; }
       }

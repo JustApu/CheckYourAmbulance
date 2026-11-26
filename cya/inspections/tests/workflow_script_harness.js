@@ -66,8 +66,9 @@ function field(form, name, value = "", type = "text") {
   form.fields[name] = node; return node;
 }
 function environment(config, forms = []) {
-  const elements = {}, requests = [], sockets = [], timers = [];
+  const elements = {}, requests = [], sockets = [], timers = [], frames = [];
   const window = {scrollY: 0, innerHeight: 200, simulateListJump: false,
+    requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
     CyaTimezones: {
       toUtc(text) { return new Date(text + "Z").toISOString(); },
       formatUtc(text) { const date = new Date(text); return isNaN(date) ? "" : date.toISOString(); },
@@ -112,7 +113,7 @@ function environment(config, forms = []) {
     },
   };
   vm.createContext(context);
-  return {context, document, window, elements, requests, sockets, timers,
+  return {context, document, window, elements, requests, sockets, timers, frames,
     get: id => document.getElementById(id), posts: () => requests.filter(r => r.body),
     run(file, transform = source => source) { vm.runInContext(transform(fs.readFileSync(path.join(root, file), "utf8")), context); },
   };
@@ -199,6 +200,8 @@ function generic(kind) {
     assert.equal(run.document.activeElement.dataset.itemKey, "item-5|kit-a");
     response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
+    assert.equal(run.frames.length, 1, "focus restoration waits until the replacement button is rendered");
+    run.frames.splice(0).forEach(callback => callback(0));
     assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
     response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
@@ -210,6 +213,8 @@ function generic(kind) {
     assert.equal(run.document.activeElement.type, "li", "deficiency submission moves focus to the failed item while its action is disabled");
     response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
+    assert.equal(run.frames.length, 1, "failed check focus waits until the replacement button is rendered");
+    run.frames.splice(0).forEach(callback => callback(0));
     assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
     assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
@@ -417,7 +422,7 @@ function generic(kind) {
     assert(outcomeButtons(item()).every(button => !isPrimary(button)), "a marked result never uses the primary-action style");
 
     run.context.testUI.setRows([{...row, obligation_state: null, obligation_outcome: null, latest_check_id: null, deficiencies: []}]); run.context.testUI.render();
-    assert.equal(findClass(item(), "window-status").textContent, "No current requirement");
+    assert.equal(findClass(item(), "window-status").textContent, "No check is currently required");
   }
   {
     const run = checklist(), item = () => run.elements.items.children.find(child => child.dataset.itemKey);
@@ -561,7 +566,7 @@ function generic(kind) {
     run.form.fire("submit");
     response(run.posts()[0], 422, {status: "REJECTED", code: "EMPTY_SCOPE"}); await tick();
     const text = run.form.querySelector(".workflow-result").textContent;
-    assert(text.includes("Close: no current verification items"), text);
+    assert(text.includes("Close when there are no items to check"), text);
     assert(!text.includes("Ask a supervisor"), text);
   }
   {
@@ -629,7 +634,7 @@ function generic(kind) {
   for (const [code, expected] of [
     ["SCOPE_AVAILABLE", "Current verification items exist; record the repair instead."],
     ["DEFICIENCY_CHANGED", "This problem changed. Refresh history"],
-    ["INVALID_TRANSITION", "no longer Open, In Progress or Awaiting External Dependency"],
+    ["INVALID_TRANSITION", "This problem's status changed. Refresh its history."],
   ]) {
     const run = generic("empty-scope-close"); run.form.dataset.expectedEvent = "event-seen";
     field(run.form, "explanation", "Synthetic explanation.");
@@ -731,9 +736,9 @@ function generic(kind) {
     assert(run.get("session-message").textContent.includes("back in progress"));
   }
   for (const [verification, expected] of [
-    [{status: "PENDING_VERIFICATION", counts_toward_scope: true, remaining_scope_rows: 2}, "2 scope rows remain"],
-    [{status: "PENDING_VERIFICATION", counts_toward_scope: false}, "does not count"],
-    [{status: "PENDING_VERIFICATION", closure_withheld: true, remaining_scope_rows: 0}, "closure withheld"],
+    [{status: "PENDING_VERIFICATION", counts_toward_scope: true, remaining_scope_rows: 2}, "2 verification items still need a check"],
+    [{status: "PENDING_VERIFICATION", counts_toward_scope: false}, "did not verify the repair"],
+    [{status: "PENDING_VERIFICATION", closure_withheld: true, remaining_scope_rows: 0}, "did not close automatically"],
   ]) {
     const run = checklist("OPEN", {verification_for_deficiency_id: "deficiency"});
     run.context.testUI.setRows([row]); run.context.testUI.startCheck(row, null, "PASSED");
@@ -790,7 +795,7 @@ function generic(kind) {
     const body = run.posts()[0].body;
     assert.deepEqual(body.items, [{item_id: "item-1"}, {item_id: "item-2", kit_instance_id: "kit-9"}]); assert(!("explanation" in body));
     response(run.posts()[0], 409, {status: "REJECTED", code: "ITEM_NOT_IN_SCOPE"}); await tick();
-    assert(run.form.querySelector(".workflow-result").textContent.includes("outside this problem's affected scope"));
+    assert(run.form.querySelector(".workflow-result").textContent.includes("An item you chose is not part of this problem. Refresh this page."));
   }
   {
     // SUS-5: one suspension per form; the explanation is optional and sent only when given.
@@ -897,7 +902,7 @@ function generic(kind) {
     run.context.testUI.setRows([{...row, obligation_state: "SATISFIED"}]);
     run.context.testUI.setGroups([{key: "vehicle", label: "Vehicle-wide checks", total: 3, checked: 1, due: 2, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0}]);
     run.context.testUI.render(); run.get("next-unchecked").fire("click");
-    assert(run.get("checklist-bar-status").textContent.includes("Turn off Needs Attention Only"));
+    assert(run.get("checklist-bar-status").textContent.includes("Turn off ‘Needs attention only’"));
   }
   {
     // Verification has no bar: its controls are never wired.
@@ -945,7 +950,7 @@ function generic(kind) {
     {
       const first = run.get("area-cards").children[0];
       assert.equal(findClass(first, "area-card-summary").textContent, "0 of 1 checked · 1 due · 0 overdue · 0 open problems");
-      assert.equal(findClass(first, "area-card-breakdown").textContent, "0 due soon · 0 not due · 0 without an obligation · 0 exceptions");
+      assert.equal(findClass(first, "area-card-breakdown").textContent, "0 due soon · 0 not due · 0 not required · 0 exceptions");
       assert.equal(findClass(first, "area-card-details").children[0].textContent, "Details for Driver-side exterior compartment");
       findClass(first, "area-card-details").open = true;
       run.context.testUI.render();

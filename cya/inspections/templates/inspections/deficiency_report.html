@@ -6,14 +6,14 @@
 <form class="panel workflow-write" data-kind="report" data-url="{% url 'api-deficiencies' %}" novalidate>
 {% csrf_token %}
 <label>What is affected? <select name="target" required>
-<option value="">Choose the affected scope</option>
+<option value="">Choose an item, kit, compartment, or vehicle system</option>
 <optgroup label="Item">
 {% for id,label in items %}
 <option value="item:{{ id }}">{{ label }}</option>
 {% endfor %}
 </optgroup>
 {% if kits %}
-<optgroup label="Physical kit">
+<optgroup label="Specific kit">
 {% for id,label in kits %}
 <option value="kit:{{ id }}">{{ label }}</option>
 {% endfor %}
@@ -38,9 +38,9 @@
 {% endfor %}
 </fieldset>
 {% endif %}
-<p class="muted">An item report covers that item across its kit instances. Choose a physical kit to report on that kit's current contents.</p>
+<p class="muted">An item report applies to that item in every kit where it is stocked. Choose a specific kit to report on the items it currently holds.</p>
 {% include "inspections/report_fields.html" %}
-<label>Related existing reports (optional; choose explicitly) <select name="related_deficiency_ids" multiple size="4" aria-describedby="match-note">
+<label>Related reports (optional) <select name="related_deficiency_ids" multiple size="4" aria-describedby="match-note">
 </select>
 </label>
 <p id="match-note" role="status">Loading possible matches…</p>

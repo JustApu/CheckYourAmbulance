@@ -69,7 +69,7 @@ class WorkflowUiTests(CrewUiCase):
 
         detail = self.history(check=passed, outcome="PASSED", history_page="1")
         self.assertTrue(detail.context["detail"])
-        self.assertContains(detail, "Full check chain history")
+        self.assertContains(detail, "Full check history")
         self.assertContains(
             detail, f"history_page=1#check-{detail.context['checks'][0]['record'].root_check_id}"
         )
@@ -150,7 +150,7 @@ class WorkflowUiTests(CrewUiCase):
         for level in response.context["options"]["severities"]:
             self.assertIn(level["label"], html)
             self.assertIn(level["description"], html)
-        self.assertIn("Choose the affected scope", html)
+        self.assertIn("Choose an item, kit, compartment, or vehicle system", html)
         self.assertIn('name="related_deficiency_ids" multiple', html)
         self.assertIn("not merge or close", html)
 
@@ -768,7 +768,7 @@ class DeficiencyListTests(CrewUiCase):
         invalid = self.client.get("/problems/", {"status": "UNKNOWN"})
         self.assertEqual(invalid.status_code, 200)
         self.assertEqual(invalid.context["page"]["total"], 0)
-        self.assertContains(invalid, "Choose a valid lifecycle status.")
+        self.assertContains(invalid, "Choose a valid problem status.")
         overlong = self.client.get("/problems/", {"q": "x" * 101})
         self.assertEqual(overlong.context["page"]["total"], 0)
         self.assertContains(overlong, "Filter text is limited to 100 characters.")

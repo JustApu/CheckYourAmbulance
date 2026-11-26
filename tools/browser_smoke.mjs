@@ -49,7 +49,7 @@ const html = `<!doctype html>
 <section id="status" class="status-line" aria-label="Vehicle status"><span class="pill status-pill" data-status="IN_SERVICE">In service</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span><span class="pill pill-attention">Open problem</span></section>
 <ul class="vehicle-list"><li><a class="vehicle-link" href="#status"><span class="vehicle-name">Unit 12 — Synthetic Regional Response Ambulance</span><span class="vehicle-badges"><span class="pill pending-pill" data-count="2">2 pending requests</span><span class="pill status-pill" data-status="OUT_OF_SERVICE">Out of service</span></span></a></li></ul>
 <section id="deficiency" class="item item-attention" aria-labelledby="item-title"><div class="item-head"><h2 id="item-title">Synthetic oxygen cylinder</h2><span class="pill pill-attention">Known problem</span></div><p>Pressure below the approved range.</p><div class="item-controls" aria-label="Inspection actions"><button class="button primary" type="button" aria-label="Record passed">Passed</button><button class="button" type="button" aria-label="Record unable to inspect">Unable to inspect</button></div><label class="panel">Inspection note<input aria-label="Inspection note" type="text" value="Synthetic check"></label><p id="save-state" class="save-state" role="status"><span class="indicator-icon" aria-hidden="true">?</span><span class="save-state-text">Unconfirmed</span></p></section>
-<section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title"><h2 id="deficiency-overview-title">Synthetic oxygen cylinder pressure issue</h2><p class="deficiency-state"><strong>In Progress</strong> · High severity</p><p>Synthetic Ambulance 12</p><dl class="deficiency-facts"><dt>Affected scope</dt><dd>Synthetic oxygen cylinder</dd><dt>Assignee</dt><dd>Sam Example</dd><dt>Governing deadline</dt><dd>2026-11-15 12:00 UTC · Overdue</dd></dl></section>
+<section class="panel deficiency-overview" aria-labelledby="deficiency-overview-title"><h2 id="deficiency-overview-title">Synthetic oxygen cylinder pressure issue</h2><p class="deficiency-state"><strong>In Progress</strong> · High severity</p><p>Synthetic Ambulance 12</p><dl class="deficiency-facts"><dt>Affected item or area</dt><dd>Synthetic oxygen cylinder</dd><dt>Assignee</dt><dd>Sam Example</dd><dt>Current deadline</dt><dd>2026-11-15 12:00 UTC · Overdue</dd></dl></section>
 <section class="panel deficiency-next-action" aria-labelledby="next-action-title"><h2 id="next-action-title">Next action</h2><form class="workflow-write"><p>Record that the repair is complete and request verification.</p><button class="button primary" type="button">Record repair</button></form></section>
 <details class="panel deficiency-details" id="deficiency-work-updates"><summary>Work updates and dependencies</summary><form class="panel workflow-write"><h2>Add progress note</h2><label>Progress note<textarea aria-label="Progress note"></textarea></label><button class="button" type="button">Add note</button></form></details>
 
@@ -80,7 +80,7 @@ function inspectionMarkup(userId, sessionId, timeZone = "America/New_York") {
   <div id="live-banner" hidden><span id="live-detail"></span></div><div id="stale" hidden></div><p id="session-message" role="status"></p>
   <form id="csrf-holder"><input name="csrfmiddlewaretoken" value="synthetic"></form>
   <section aria-labelledby="odo-heading" class="panel vehicle-readings"><h2 id="odo-heading">Vehicle readings</h2><form id="odometer-form" novalidate><div class="vehicle-readings-fields"><label class="vehicle-reading-field" for="odo-value"><span>Mileage <span class="muted">(miles)</span></span><input id="odo-value" class="number-input" type="text" inputmode="decimal" autocomplete="off" required></label><input id="odo-unit" type="hidden" value="mi"><label class="vehicle-reading-field" for="odo-hours"><span>Engine hours (optional)</span><input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off"></label><button type="submit" class="button primary" aria-describedby="readings-save-help">Record readings</button></div></form><p id="readings-save-help" class="muted readings-save-note">Audited history: select Record after entering complete values.</p><div id="odo-confirm" hidden><label for="odo-why">Why is this reading correct? (optional)</label><textarea id="odo-why" rows="2" maxlength="1000"></textarea><button id="odo-confirm-button" class="button" type="button">The reading is correct. Save it.</button></div><p id="odometer-state" class="save-state" role="status" hidden><span class="indicator-icon"></span><span class="save-state-text"></span></p></section>
-  <section><h2 id="checklist-heading" tabindex="-1">Checklist</h2><div class="view-controls"><button id="view-normal" class="button" type="button">Normal</button><button id="view-priority" class="button" type="button">Priority</button><label><input id="only-attention" type="checkbox"> Needs Attention Only</label></div><p id="pref-state" role="status"></p>
+  <section><h2 id="checklist-heading" tabindex="-1">Checklist</h2><div class="view-controls"><button id="view-normal" class="button" type="button">Normal</button><button id="view-priority" class="button" type="button">Priority</button><label><input id="only-attention" type="checkbox"> Needs attention only</label></div><p id="pref-state" role="status"></p>
   <div id="layout-controls" class="view-controls" role="group" aria-label="Inspection layout"><button id="layout-compartments" class="button" type="button">Compartments</button><button id="layout-flat" class="button" type="button">All items</button></div>
   <div id="checklist-body" class="checklist-body"><section id="area-overview"><h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3><p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p><div id="area-cards" class="area-cards"></div></section>
   <section id="area-detail" hidden><button id="area-overview-button" class="button" type="button">All areas and compartments</button><h3 id="area-heading" tabindex="-1"></h3></section><p id="screen-notice" hidden></p><ol id="items" class="items"></ol></div></section>
@@ -405,7 +405,7 @@ async function testInspectionNavigation(viewport) {
     const cabDetails = page.locator(".area-card-item", { has: cab }).locator("details");
     assert.equal(await cabDetails.locator(".area-card-breakdown").isVisible(), false, `${viewport.name}: Details starts closed`);
     await cabDetails.locator("summary").click();
-    assert.match(await cabDetails.locator(".area-card-breakdown").innerText(), /0 due soon · 0 not due · 0 without an obligation · 1 exception$/);
+    assert.match(await cabDetails.locator(".area-card-breakdown").innerText(), /0 due soon · 0 not due · 0 not required · 1 exception$/);
     const metrics = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth, cardTarget: document.querySelector(".area-card").getBoundingClientRect().height }));
     assert.ok(metrics.document <= viewport.width, `${viewport.name}: inspection overview overflows horizontally ${JSON.stringify(metrics)}`);
     assert.ok(metrics.body <= viewport.width, `${viewport.name}: inspection body overflows horizontally ${JSON.stringify(metrics)}`);
@@ -447,13 +447,13 @@ async function testInspectionNavigation(viewport) {
       const url = new URL(response.url());
       return url.pathname === "/api/checklist" && url.searchParams.get("needs_attention_only") === "true";
     });
-    await page.getByRole("checkbox", { name: "Needs Attention Only" }).check();
+    await page.getByRole("checkbox", { name: "Needs attention only" }).check();
     await filteredChecklist;
     await radio.waitFor({ state: "detached" });
     assert.equal(await radio.count(), 0, `${viewport.name}: suspended red row escaped the attention filter`);
     await page.getByRole("button", { name: "All areas and compartments" }).click();
     await page.locator("#area-overview").waitFor({ state: "visible" });
-    await page.getByRole("checkbox", { name: "Needs Attention Only" }).uncheck();
+    await page.getByRole("checkbox", { name: "Needs attention only" }).uncheck();
     await page.getByRole("button", { name: "All items" }).click();
     assert.equal(await page.getByText("Radio", { exact: true }).count(), 1, `${viewport.name}: flat view did not show unfiltered groups`);
     await page.goto("http://inspection.test/another-user", { waitUntil: "load" });
@@ -784,7 +784,7 @@ async function testDeficiencyFilters(viewport) {
         <label for="deficiency-vehicle">Vehicle name or number<input id="deficiency-vehicle" type="search" name="vehicle" value="Medic 6" maxlength="100"></label>
         <label for="deficiency-severity">Severity<select id="deficiency-severity" name="severity"><option value="">Any severity</option><option value="URGENT" selected>Urgent (URGENT)</option><option value="RETIRED">Legacy (RETIRED, retired)</option></select></label>
         <label for="deficiency-assignee">Assigned to<input id="deficiency-assignee" type="search" name="assignee" value="Sam Example" maxlength="100"></label>
-        <label for="deficiency-status">Lifecycle status<select id="deficiency-status" name="status"><option value="active">Outstanding only</option><option value="all">All statuses, including closed and Reported in Error</option><option value="OPEN">Open</option><option value="REPORTED_IN_ERROR">Reported in Error</option></select></label>
+        <label for="deficiency-status">Problem status<select id="deficiency-status" name="status"><option value="active">Outstanding only</option><option value="all">All statuses, including closed and Reported in Error</option><option value="OPEN">Open</option><option value="REPORTED_IN_ERROR">Reported in Error</option></select></label>
         <label class="check" for="deficiency-overdue"><input id="deficiency-overdue" type="checkbox" name="overdue" value="1"> Overdue only</label>
       </div><div class="deficiency-filter-actions"><button class="button primary" type="submit">Apply filters</button><a class="button" href="/problems/">Clear filters</a></div>
     </form><p class="deficiency-applied-filters"><strong>Applied filters:</strong> Text: brake · Vehicle: Medic 6</p>
@@ -797,11 +797,11 @@ async function testDeficiencyFilters(viewport) {
     await page.goto("http://deficiencies.test/", { waitUntil: "load" });
     assert.equal(await page.getByRole("heading", { name: "Problems" }).count(), 1);
     assert.equal(await page.getByRole("searchbox", { name: "Problem text" }).inputValue(), "brake");
-    assert.equal(await page.getByLabel("Lifecycle status").locator('option[value="REPORTED_IN_ERROR"]').textContent(), "Reported in Error");
+    assert.equal(await page.getByLabel("Problem status").locator('option[value="REPORTED_IN_ERROR"]').textContent(), "Reported in Error");
     assert.equal(await page.getByLabel("Severity").inputValue(), "URGENT");
     assert.equal(await page.getByRole("link", { name: "Older results" }).getAttribute("href"), "/problems/?q=brake&results_page=2");
     assert.match(await page.getByText("42 matching problems").innerText(), /showing 25/);
-    for (const label of ["Problem text", "Vehicle name or number", "Severity", "Assigned to", "Lifecycle status"]) {
+    for (const label of ["Problem text", "Vehicle name or number", "Severity", "Assigned to", "Problem status"]) {
       const control = page.getByLabel(label);
       const box = await control.boundingBox();
       assert.ok(box && box.height >= 48, `${viewport.name}: ${label} target is shorter than 48 CSS pixels`);

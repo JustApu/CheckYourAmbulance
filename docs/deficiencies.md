@@ -35,7 +35,7 @@ adds [Awaiting External Dependency and progress notes](#awaiting-external-depend
 
 `GET /problems/` is the read-only organization-wide list available to each built-in role.
 It defaults to active deficiencies and offers GET filters for summary/description text, vehicle
-name or number, configured severity code, assignee name, lifecycle status, and the
+name or number, configured severity code, assignee name, problem status, and the
 governing deadline being overdue. Choose **All statuses, including closed and Reported in Error**
 to search history; the default outstanding view does not remove those records. Text search is
 case-insensitive, treats `%` and `_` as literal characters, and is limited to 100 characters.
@@ -519,7 +519,7 @@ event is neutral for correction effects: closure does not imply repair and does 
 check correction into repair evidence.
 
 On the problem page ([issue #21](https://github.com/JustApu/CheckYourAmbulance/issues/21)), Supervisors and Administrators see a
-"Close: no current verification items" form directly under Record repair while the deficiency is
+"Close when there are no items to check" form directly under Record repair while the deficiency is
 Open, In Progress or Awaiting External Dependency. It requires an explanation, states that the
 deficiency closes as Closed — No current verification items and that only an Administrator can
 reopen it, and posts with a fresh operation id and the page's expected event (a lost response
