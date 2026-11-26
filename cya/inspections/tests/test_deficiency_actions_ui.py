@@ -103,7 +103,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertContains(opened, "Affected item or area")
         self.assertContains(opened, self.suction.label)
         self.assertContains(opened, "Next action")
-        self.assertContains(opened, "Work updates and dependencies")
+        self.assertContains(opened, "Work updates and delays")
         self.assertContains(opened, 'data-kind="note"')
         self.assertContains(
             opened, '<details class="panel deficiency-details" id="work-updates">', html=False
@@ -128,7 +128,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertEqual(markup.count('data-kind="repair"'), 1)
         self.assertLess(markup.index("Next action"), markup.index('data-kind="repair"'))
         self.assertLess(
-            markup.index('data-kind="repair"'), markup.index("Work updates and dependencies")
+            markup.index('data-kind="repair"'), markup.index("Work updates and delays")
         )
 
     def test_role_union_supply_context_and_assignee_control_visibility(self):
