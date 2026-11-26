@@ -4,30 +4,30 @@
 <p>
 <a href="{% url 'inspection-vehicle' vehicle.pk %}">{{ vehicle.display_name }} inspections</a> · <a href="{% url 'deficiencies' %}">Problems</a>
 </p>
-<p>Complete chains for the 200 most recent entries recorded in the last 14 days. Original entries remain in history.</p>
+<p>Shows up to 200 check entries recorded in the last 14 days, including corrections. Earlier entries remain in history.</p>
 {% if detail %}
 <p><a class="button" href="{{ detail_return }}">← Back to check results</a></p>
-<h2>Full check chain history</h2>
+<h2>Full check history</h2>
 {% else %}
 <p>
-<a class="button" href="{% url 'inspection-vehicle' vehicle.pk %}">Record a new check</a> A new check is independent. A correction revises an accidental entry in the same chain.</p>
+<a class="button" href="{% url 'inspection-vehicle' vehicle.pk %}">Record a new check</a> A new check records a separate result. Use a correction to fix a check entered by mistake; the original entry stays in history.</p>
 <form method="get" class="panel" aria-label="Filter check history">
 <label>Item or kit <input type="search" name="q" maxlength="100" value="{{ filters.q }}"></label>
 <label>Result <select name="outcome"><option value="">All results</option>{% for code,label in outcomes.items %}<option value="{{ code }}"{% if filters.outcome == code %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-<label>Actor <select name="actor"><option value="">All crew members</option>{% for actor_id,name in actors %}<option value="{{ actor_id }}"{% if filters.actor == actor_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label>Entered by <select name="actor"><option value="">All crew members</option>{% for actor_id,name in actors %}<option value="{{ actor_id }}"{% if filters.actor == actor_id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
 <label>From <input type="date" name="after" value="{{ filters.after }}"></label>
 <label>Through <input type="date" name="before" value="{{ filters.before }}"></label>
 <button class="button" type="submit">Filter history</button> <a href="{% url 'inspection-check-history' vehicle.pk %}">Clear filters</a>
 </form>
 {% for error in filter_errors %}<p class="notice" role="alert">{{ error }}</p>{% endfor %}
-<p>{{ page.total }} matching check chains</p>
+<p>{{ page.total }} matching checks</p>
 <ul class="plain">
 {% for check in checks %}
 <li class="panel" id="check-{{ check.record.root_check_id }}">
 <h2>{{ check.record.item.label }}{% if check.record.kit %} — {{ check.record.kit.label }}{% endif %}</h2>
 <p>{{ check.label }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time }} · {{ check.state }}</p>
 {% if check.record.explanation %}<p>{{ check.record.explanation }}</p>{% endif %}
-<a class="button" href="{{ check.detail_url }}">View full chain and authorized actions</a>
+<a class="button" href="{{ check.detail_url }}">View the check and available actions</a>
 </li>
 {% empty %}<li class="panel">{% if filter_errors %}No results because one or more filters are invalid.{% elif filter_query %}No checks match these filters. Adjust or clear the filters.{% else %}No recent checks.{% endif %}</li>
 {% endfor %}
@@ -41,7 +41,7 @@
 </h2>
 <p>
 <strong>{{ check.label }}</strong> · {{ check.state }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time }}</p>
-{% if check.record.predecessor_check_id %}<p>This is a correction within the same check chain. The earlier entry remains in the audit history.</p>{% endif %}
+{% if check.record.predecessor_check_id %}<p>This corrects an earlier check. The original entry stays in check history.</p>{% endif %}
 {% if check.record.explanation %}
 <p>{{ check.record.explanation }}</p>
 {% endif %}
@@ -78,14 +78,14 @@
 {% endif %}
 {% if check.can_invalidate %}
 <details>
-<summary>Administrator: invalidate this check chain</summary>
-<p>The entire chain is excluded. No earlier outcome revives, and invalidation does not close a problem.</p>
+<summary>Administrator: invalidate this check and its corrections</summary>
+<p>This check and its corrections are excluded from results. An earlier result does not become current again. This does not close a problem.</p>
 <form class="workflow-write" data-kind="explanation" data-url="{{ check.invalidation_url }}">
 {% csrf_token %}
 <label>Mandatory explanation <textarea name="explanation" required maxlength="4000">
 </textarea>
 </label>
-<button type="submit" class="button">Invalidate chain</button>
+<button type="submit" class="button">Invalidate check and corrections</button>
 <p class="workflow-result" role="status">
 </p>
 <a class="workflow-refresh" href="" hidden>Refresh history</a>
