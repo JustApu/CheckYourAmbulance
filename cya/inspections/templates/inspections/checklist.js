@@ -77,7 +77,7 @@
   var focusRestoreScheduled = false;
   function restoreFocusIntent(afterRender) {
     if (!focusIntent) { return; }
-    var intent = focusIntent, item = itemForKey(intent.key), target = item && actionIn(item, intent.action);
+    var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
     if (!target || target.disabled) { (item || list).focus({preventScroll: true}); return; }
     if (!afterRender) { target.focus({preventScroll: true}); focusIntent = null; return; }
     if (focusRestoreScheduled) { return; }
@@ -87,10 +87,10 @@
       function (callback) { setTimeout(callback, 0); };
     defer(function () {
       focusRestoreScheduled = false;
-      if (focusIntent !== intent) { return; }
-      var active = document.activeElement;
+      if (!focusIntent) { return; }
+      var intent = focusIntent, active = document.activeElement;
       if (active && active !== document.body && active !== list) { focusIntent = null; return; }
-      item = itemForKey(intent.key); target = item && actionIn(item, intent.action);
+      var item = itemForKey(intent.key), target = item && actionIn(item, intent.action);
       if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
       else { (item || list).focus({preventScroll: true}); }
     });
