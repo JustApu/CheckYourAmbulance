@@ -267,3 +267,40 @@ class RowsThreadTests(SimpleTestCase):
         self.assertEqual([n for n, _t in seen], list(range(publish.MAX_PENDING)))
         self.assertTrue(all(t.startswith("cya-rows") for _n, t in seen))
         self.assertTrue(publish._submit(lambda: None), "the queue drains")
+
+    def test_a_pool_that_cannot_take_work_releases_the_slot(self):
+        # Codex review (#296): submit raising must not lose the hint or leak a slot.
+        from cya.live_updates import publish
+
+        publish._submit(lambda: None)  # make sure the pool exists
+        before = publish._pending
+        with (
+            patch.object(publish._executor, "submit", side_effect=RuntimeError("shut down")),
+            self.assertLogs("cya.live_updates.publish", "ERROR"),
+        ):
+            self.assertFalse(publish._submit(lambda: None))
+        self.assertEqual(publish._pending, before, "the slot is released")
+
+
+class SubmitFailureFallbackTests(TestCase):
+    def test_the_hint_goes_out_when_the_rows_thread_cannot_take_the_job(self):
+        from cya.live_updates import publish
+
+        publish._submit(lambda: None)
+        org, vehicle, event = (str(uuid4()) for _ in range(3))
+        layer, read = RecordingLayer(), []
+        with (
+            patch("cya.live_updates.publish.get_channel_layer", return_value=layer),
+            patch.object(publish._executor, "submit", side_effect=RuntimeError("shut down")),
+            self.assertLogs("cya.live_updates.publish", "ERROR"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            publish_vehicle_update(
+                organization_id=org,
+                vehicle_id=vehicle,
+                event_id=event,
+                kind="check.recorded",
+                rows=lambda: read.append(1) or [],
+            )
+        self.assertEqual([g for g, _m in layer.sent], [f"vehicle.{org}.{vehicle}"])
+        self.assertEqual(read, [], "no rows were read")

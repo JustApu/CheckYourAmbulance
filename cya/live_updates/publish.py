@@ -43,7 +43,13 @@ def _submit(job):
             with _pending_lock:
                 _pending -= 1
 
-    _executor.submit(run)
+    try:
+        _executor.submit(run)
+    except Exception as error:  # a pool that cannot take work: release the slot, send directly
+        with _pending_lock:
+            _pending -= 1
+        logger.error("pushed rows thread unavailable (%s)", type(error).__name__)
+        return False
     return True
 
 
