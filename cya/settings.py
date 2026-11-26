@@ -10,6 +10,8 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
+from cya.core.shared_store import channel_layers
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -161,9 +163,12 @@ CYA_MAIL_RELAY_TRANSPORT = env("MAIL_RELAY_TRANSPORT", "cya.notifications.relay.
 ROOT_URLCONF = "cya.urls"
 ASGI_APPLICATION = "cya.asgi.application"
 
-# DEP-2 assumes one application process initially. The in-memory layer is
-# process-local; a multi-process deployment must select a shared backend.
-CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+# DEP-2 (amendment 8.2.0): one process uses the in-memory layer (the default). Several
+# processes share live updates and the sign-in counters through a Redis-compatible server on
+# this host, named by CYA_SHARED_STORE_URL with CYA_SHARED_STORE_PASSWORD (cya.core.shared_store).
+CYA_SHARED_STORE_URL = env("SHARED_STORE_URL", "")
+CYA_SHARED_STORE_PASSWORD = env("SHARED_STORE_PASSWORD", "")
+CHANNEL_LAYERS = channel_layers(CYA_SHARED_STORE_URL, CYA_SHARED_STORE_PASSWORD)
 CYA_LIVE_MAX_CONNECTIONS_PER_USER = env_int("LIVE_MAX_CONNECTIONS_PER_USER", 4, 1, 32)
 CYA_LIVE_AUTH_RECHECK_SECONDS = env_int("LIVE_AUTH_RECHECK_SECONDS", 60, 10, 300)
 CYA_LIVE_MAX_MESSAGE_BYTES = 64 * 1024
