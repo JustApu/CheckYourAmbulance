@@ -14,6 +14,8 @@ The 2026-11-22 Rocky rehearsal run, with direct per-operation measurements, is r
 [its own section](#rocky-rehearsal-1-run-with-direct-measurements-2026-11-22); the targets are still **not met**.
 The 2026-11-25 re-run after issue #278 Parts A–C, with the database working set and new direct measurements, is recorded in
 [its own section](#issue-278-part-e-1-re-run-after-parts-ac-2026-11-25); the targets are still **not met**.
+The re-run with issue #278 Parts F–H is recorded in
+[its own section](#issue-278-parts-fh-1-re-run-2026-11-26); the targets are still **not met**.
 The local synthetic measurements below do not establish the owner targets.
 
 After review, the rehearsal operator should deploy the reviewed head with traffic
@@ -25,6 +27,102 @@ readiness. Record request counts, failures, p50/p90/p95, proportions below one
 and two seconds, single-process CPU and MariaDB CPU. Retain the owner's p90 >3 s
 cutoff before trying higher load steps. Record any remaining bottleneck instead
 of treating a faster isolated query as a passing shift-change result.
+
+## Issue #278 Parts F–H: 1× re-run (2026-11-26)
+
+Claude re-ran the [Part E](#issue-278-part-e-1-re-run-after-parts-ac-2026-11-25) scenario on the same Rocky rehearsal
+host with three more changes from [issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278):
+- Part F ([PR #286](https://github.com/JustApu/CheckYourAmbulance/pull/286)): a save reads its obligations once.
+- Part G ([PR #288](https://github.com/JustApu/CheckYourAmbulance/pull/288)): checklist reads batch the newest-check
+  lookups and resolve the checklist once.
+- Part H ([PR #289](https://github.com/JustApu/CheckYourAmbulance/pull/289)): a one-row read reads only that item's
+  obligations and deficiencies.
+
+The release was Part E's `81bd69b` with the changed files of `0718e39` (Part F) and `ecb7244` (Parts G and H, stacked).
+Their checksums matched those commits. Parts G and H were not yet merged when the run took place. The arms ran from
+2026-11-25 23:41 to 2026-11-26 02:07 UTC.
+
+Everything else was as in Part E: the same base snapshot (111,884 buffer-pool pages after each restore, as in every
+Part E arm) and the same 1× step. It used the same client settings, A/B/C/C/B/A order, synthetic data only and one
+host, so the results are directional. The run does **not** satisfy issue #70's 1× acceptance: the targets are still
+**not met**.
+
+**Results** (seconds, client-side wall time):
+
+| Arm | Workers | Saves in window | Pages and saves p50 / p95 | Under 1 s / under 2 s | Live reload p50 / p95 | Row reads p50 (count) | Full checklist reads p50 (count) | Panel p50 (count) | Readiness page p50 | App / DB cores | App memory peak |
+|---|---:|---|---|---|---|---|---|---|---|---|---|
+| W1a | 1 | 629 of 750 (600 s, stopped at the limit) | 7.5 / 10.9 | 1.3% / 2.4% | 4.8 / 7.1 | 4.7 (1,618) | 8.2 (33) | 22.0 (54) | 22.9 | 1.03 / 0.66 | 325 MB |
+| W2a | 2 | 750 (393 s) | 1.2 / 3.3 | 40.6% / 76.1% | 0.7 / 5.5 | 0.66 (1,362) | 4.2 (30) | 9.4 (87) | 6.1 | 1.52 / 1.20 | 480 MB |
+| W3a | 3 | 750 (361 s) | 0.65 / 2.3 | 70.9% / 92.7% | 0.34 / 4.0 | 0.31 (1,169) | 2.8 (30) | 3.9 (110) | 5.4 | 1.59 / 1.25 | 621 MB |
+| W3b | 3 | 750 (369 s) | 0.71 / 2.5 | 67.5% / 91.9% | 0.36 / 4.1 | 0.32 (1,152) | 2.8 (30) | 4.1 (114) | 4.4 | 1.57 / 1.18 | 629 MB |
+| W2b | 2 | 750 (393 s) | 1.1 / 3.5 | 44.5% / 75.5% | 0.69 / 5.0 | 0.63 (1,380) | 3.7 (30) | 6.2 (94) | 17.3 | 1.52 / 1.18 | 516 MB |
+| W1b | 1 | 614 of 750 (600 s, stopped at the limit) | 7.8 / 11.0 | 1.2% / 2.0% | 4.8 / 7.5 | 4.8 (1,587) | 9.1 (30) | 17.5 (54) | 28.5 | 1.03 / 0.63 | 386 MB |
+
+Both supervisors started in every arm. In Part E's 1-worker arms, each supervisor's first readiness page hit the
+reverse proxy's 60 s timeout. Here the readiness page took about 23 to 32 s at 1 worker (two loads per arm), under that
+limit. Swap stayed at 1,548 to 7,728 KB, and the highest 5-second I/O-wait sample was 36% (W3a).
+
+**Save attempts with no answer.** The client recorded 7 to 16 save attempts per 2- and 3-worker arm that got no answer
+(status 0), and 3 to 10 row reads. Each such save was retried, and every arm saved all 750.
+
+The proxy's access log for each of those four arms holds exactly 750 `POST /api/v1/checks` requests, all `201`. It has
+no `5xx` and no `499` inside the arms, so the failed attempts never reached the proxy. The cause is on the client's
+side, most likely a pooled connection that failed when reused; it was not diagnosed further. The client ran on the
+application host, as in Part E. Part E's W3a had one such save, and the 1-worker arms had none in either run. These
+attempts are included in the percentiles above.
+
+**Database working set.** Counters sampled after each arm's preparation and at its end:
+
+| Workers | Pool pages holding data, before → after (of 194,688) | Pages read from disk during the arm | Page read requests | Served from memory |
+|---|---|---|---|---|
+| 1 | 148,455–148,647 → 175,170–176,000 | 12,946–13,253 | 55.9–58.5 million | over 99.97% |
+| 2 | 148,501–148,605 → 179,135–179,697 | 15,306–15,385 | 73.6–75.0 million | over 99.97% |
+| 3 | 148,491–148,678 → 179,216–179,408 | 15,238–15,278 | 73.8–75.1 million | over 99.97% |
+
+Page read requests per arm fell by about a third at 2 and 3 workers (from 113–117 million in Part E). The 1-worker arms
+made more page read requests than in Part E (55.9–58.5 against 50.6–51.2 million) because they completed nearly twice as many saves.
+
+**Against Part E** (same host, data, snapshot and client; only the release changed):
+
+| Workers | Pages and saves p50 | Under 1 s | Under 2 s | Pages and saves p95 | Saves in window | App cores |
+|---:|---|---|---|---|---|---|
+| 1 | 16.6–17.5 → 7.5–7.8 | 1.8–2.3% → 1.2–1.3% | 2.8–2.9% → 2.0–2.4% | 21.5–22.3 → 10.9–11.0 | 338–348 → 614–629 of 750 | 1.04–1.05 → 1.03 |
+| 2 | 7.4–7.6 → 1.1–1.2 | 1.9–2.5% → 40.6–44.5% | 5.1% → 75.5–76.1% | 11.8–12.0 → 3.3–3.5 | 623–635 → all 750 (393 s) | 1.82 → 1.52 |
+| 3 | 3.5 → 0.65–0.71 | 6.5–7.4% → 67.5–70.9% | 18.3–20.2% → 91.9–92.7% | 6.9–7.4 → 2.3–2.5 | all 750: 514 s → 361–369 s | 2.16–2.17 → 1.57–1.59 |
+
+**Reading the results.**
+- **The targets are not met.** The target is at least 95% of page loads and saves under 1 s and at least 98% under
+  2 s, with a stop before higher steps if p90 exceeds 3 s. The best arms had 67.5–70.9% under 1 s and 91.9–92.7% under
+  2 s, with p90 at 1.8 s.
+- **The pairs agree.** Pages-and-saves p50 differed by 0.06 s between the 3-worker arms, 0.08 s between the 2-worker
+  arms and 0.3 s between the 1-worker arms.
+- **The 1-worker arms are still saturated.** The application used 1.03 cores at 1 worker, so a single process is CPU
+  bound at this load. It did nearly twice the work in the window, but its latency stays far from the targets.
+  Under the shipped in-memory channel layer, a single process is the only deployable configuration (SPEC DEP-2), so
+  the deployable configuration remains far from the targets.
+- **At 2 and 3 workers the application is no longer the only limit.** The application used about 1.5–1.6 cores, below
+  the 2.2 cores of Part E's 3-worker arms, and finished all 750 saves in 6 to 6.5 minutes. The database used
+  1.2–1.25 cores. This run does not show which resource limits the 3-worker arms; the load client shares the same four
+  cores.
+- **Row reads now cost little.** Single-row reads had p50 0.31–0.32 s at 3 workers, against 3.6–3.8 s in Part E.
+  Full checklist reads (one per crew member at start) had p50 2.8 s, against 5.7–8.0 s.
+- **Readiness is now the slowest read.** Panel p50 was 3.9–4.1 s at 3 workers and 17.5–22.0 s at 1 worker. A warm panel
+  read costs about 1.4–1.7 s of CPU with no load (Part E direct measurements), and Parts F–H do not change it. Part D (a
+  per-vehicle readiness cache) remains open for the owner to decide.
+
+**Deviations, recorded so the run can be judged.**
+- *First attempt.* The arms were first started as a transient systemd unit. SELinux denied that unit read access to the
+  snapshot, so every arm's restore failed within seconds and nothing was measured. The run was restarted from an
+  interactive root shell, as Part E's was. Each arm then restored the full snapshot.
+- *Settle gate, client placement, time limit.* As in Part E: every arm waited the gate's full 10 minutes
+  (`quiet_samples=0`). The client ran on the application host. The 1-worker arms stopped at the 600 s limit with saves
+  still to do, and their percentiles cover the requests completed by then.
+- *No direct measurements.* Per-operation measurements with no load were taken on this release while profiling Parts G
+  and H (see #288 and #289); they were not repeated after the arms.
+- *Working set.* Only the global buffer-pool counters, as in Part E.
+
+**Not claimed:** a worker count, a hosting layout or a channel layer (SPEC DEP-2 and section 17.7 item 7 remain owner
+decisions), any 4×/10× step, the cause of the unanswered save attempts, or any statistical statement.
 
 ## Issue #278 Part E: 1× re-run after Parts A–C (2026-11-25)
 
