@@ -425,7 +425,7 @@ class AdHocRaceTests(GenerationCase):
 
         from cya.checks import commands as check_commands
 
-        real = check_commands.choose_links
+        real = check_commands.links_and_conflict_obligation
         entered, release = Event(), Event()
 
         def paused(*args, **kwargs):
@@ -441,7 +441,7 @@ class AdHocRaceTests(GenerationCase):
                 connection.close()
 
         with (
-            mock.patch.object(check_commands, "choose_links", side_effect=paused),
+            mock.patch.object(check_commands, "links_and_conflict_obligation", side_effect=paused),
             ThreadPoolExecutor(max_workers=2) as pool,
         ):
             checking = pool.submit(run, self.check)
