@@ -1221,10 +1221,22 @@ function generic(kind) {
       const t = await rowsScenario();
       const before = t.reads().length;
       t.rows("e1", make("a", "c1", "SATISFIED"), "2026-06-01T00:00:05Z");   // read before the rows shown
-      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
-      await t.fire();
-      assert.equal(t.reads().length, before, "older rows: the page already shows a later read");
       assert.deepEqual(t.groups(), serverGroups(base), "older rows never replace newer ones");
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.equal(t.reads().length, before + 1, "rows not applied cover nothing: the hint reads");
+      assert.deepEqual(t.itemsOf(t.reads().at(-1)), ["a"]);
+    }
+    {
+      // Codex review (#296): read instants within one millisecond tie under Date.parse, so they
+      // are not applied, and the hint still reads.
+      const t = await rowsScenario();
+      const before = t.reads().length;
+      t.rows("e1", make("a", "c1", "SATISFIED"), "2026-06-01T00:00:10.000400Z");
+      assert.deepEqual(t.groups(), serverGroups(base), "a tied read is not applied");
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.equal(t.reads().length, before + 1, "and the hint reads");
     }
     {
       const t = await rowsScenario();
@@ -1258,6 +1270,14 @@ function generic(kind) {
       assert.equal(t.reads().length, before, "the saver waits briefly for its rows");
       await t.fire(1000);
       assert.deepEqual(t.itemsOf(t.reads().at(-1)), ["b"], "without them it reads the item, as before");
+      response(t.reads().at(-1), 200, {status: "OK", items: [make("b", "c1", "SATISFIED")], group_progress: null, vehicle_status: {status: "IN_SERVICE"}, as_of: "2026-06-01T00:00:30Z"});
+      await tick(); await tick();
+      const reads = t.reads().length;
+      tap("b");
+      response(t.run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "mine-b3", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:01Z"}}); await tick();
+      t.rows("mine-b3", make("b", "c1", "SATISFIED"), "2026-06-01T00:00:01Z");   // older than the rows shown
+      await t.fire(0);
+      assert.equal(t.reads().length, reads + 1, "own rows not applied: the saver reads at once");
     }
     {
       const t = await rowsScenario();

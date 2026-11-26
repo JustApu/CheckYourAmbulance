@@ -1159,15 +1159,22 @@
   function onRows(frame) {
     if (frame.session_id !== config.session_id || !Array.isArray(frame.items)) { return; }
     var at = Date.parse(frame.as_of);
-    if (!(at > 0) || !rowsApply()) { return; }   // the hint that follows makes the read
-    if (at > shownAt(frame.item_id)) {
-      if (!patchRows([frame.item_id], frame.items)) { return; }   // other shape: the hint reads
-      rowReadAt[frame.item_id] = at;
-      pushedRows[frame.item_id] = {at: at, items: frame.items};
-      $("stale").hidden = true; render();
+    var waiting = ownWaits[frame.event_id];
+    if (waiting) { clearTimeout(waiting.timer); delete ownWaits[frame.event_id]; }
+    // Applied only when read strictly later than the rows shown (Date.parse keeps milliseconds,
+    // so reads within one millisecond tie and are not applied), in a view that would make a
+    // one-row read, with the same row shape. Anything else covers nothing: the hint that follows
+    // reads as before, and a saver waiting for these rows reads now (SPEC 8.3.0: "otherwise it
+    // re-reads them").
+    if (!(at > 0) || !rowsApply() || !(at > shownAt(frame.item_id)) ||
+        !patchRows([frame.item_id], frame.items)) {
+      if (waiting) { scheduleItemRead(waiting.itemId, 0); }
+      return;
     }
+    rowReadAt[frame.item_id] = at;
+    pushedRows[frame.item_id] = {at: at, items: frame.items};
+    $("stale").hidden = true; render();
     cover(frame.event_id);
-    if (ownWaits[frame.event_id]) { clearTimeout(ownWaits[frame.event_id].timer); delete ownWaits[frame.event_id]; }
   }
   function reapplyPushed(readAt) {
     Object.keys(pushedRows).forEach(function (itemId) {
