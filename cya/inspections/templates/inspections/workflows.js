@@ -71,7 +71,7 @@
     ALREADY_SUSPENDED: "An item you chose is already suspended for this problem.",
     ITEM_NOT_IN_CHECKLIST: "An item you chose is no longer on the vehicle's checklist. Refresh.",
     ITEM_NOT_IN_SCOPE: "An item you chose is not part of this problem. Refresh this page.",
-    KIT_REQUIRED: "Choose the specific kit that contains this item. Refresh the list.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
+    KIT_REQUIRED: "Choose the specific kit that contains this item. Refresh this page.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
     TOO_MANY_SUSPENSIONS: "Too many suspensions at once. Choose fewer items.",
     SUSPENSION_ALREADY_ENDED: "This suspension has already ended. Refresh history.",
     SUSPENSION_NOT_FOUND: "This suspension is no longer available. Refresh history.",
