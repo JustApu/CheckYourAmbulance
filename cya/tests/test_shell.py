@@ -295,7 +295,13 @@ class NavigationTests(ShellTestCase):
         )
         self.assertEqual(
             titles["kits"],
-            ["Kit definitions", "Physical kit inventory", "Assign physical kits", "Kit library"],
+            [
+                "Kit definitions",
+                "Physical kit inventory",
+                "Find and move physical kits",
+                "Assign physical kits",
+                "Kit library",
+            ],
         )
         self.assertEqual(
             titles["system"], ["Outgoing mail", "Crew assignments", "Inspection sessions"]

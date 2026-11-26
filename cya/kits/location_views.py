@@ -3,8 +3,10 @@
 Supervisors, Supply Officers and Administrators (manage_kit_assignment, PERM-32) see every
 active physical kit, including unassigned stock, with its kit type and current vehicle and
 compartment. They search by label, kit type, vehicle or compartment, and narrow the list to
-stock or one vehicle. Each row has its own form: choose unassigned stock or a compartment of an
-active vehicle, then Save or Reset, as in role administration.
+stock or one vehicle. Each row has its own Change location step: the row then offers unassigned
+stock or a compartment of an active vehicle, with Save and Reset as in role administration. Only
+one row is open at a time, so the page carries one option list, not one per row (PR #295
+review); it needs no script.
 
 A Save is one record_kit_assignment call, so a move from one vehicle to another is a single
 appended assignment event that ends the old placement and starts the new one at the same
@@ -20,19 +22,19 @@ import logging
 from urllib.parse import urlencode
 
 from django.core.paginator import Paginator
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
 from cya.authorization.backend import canonical_id
-from cya.checklists.models import KitInstance, Vehicle
+from cya.checklists.models import Compartment, KitInstance, Vehicle
 from cya.core.audit_commands import CommandDenied, OperationConflict
 from cya.core.models import CommandReceipt
 from cya.kits import admin_pages
-from cya.kits import positions as position_rules
 from cya.kits.commands import ASSIGN_COMMAND, KitChanged, KitError, record_kit_assignment
 from cya.kits.models import KitAssignmentEvent, KitInstanceDefinition
 from cya.kits.views import UNAVAILABLE, _context_ids
@@ -94,50 +96,84 @@ def _vehicle_name(vehicle):
     return f"{vehicle.display_name} ({vehicle.number})" if vehicle.number else vehicle.display_name
 
 
-def _targets(org):
-    """Active vehicles' live compartments: (groups for the selects, {value: (vehicle, row)})."""
-    groups, by_value = [], {}
-    vehicles = Vehicle.objects.filter(organization_id=org, active=True).order_by(
-        "display_name", "id"
-    )[: admin_pages.LIST_LIMIT]
-    for vehicle in vehicles:
-        options = []
-        for row, _key in position_rules.positions(org, str(vehicle.pk), "COMPARTMENT"):
-            if row.retired:
-                continue
-            value = f"{vehicle.pk}:{row.pk}"
-            options.append({"value": value, "label": row.label})
-            by_value[value] = (vehicle, row)
-        if options:
-            groups.append({"label": _vehicle_name(vehicle), "options": options})
-    return groups, by_value
+class _Targets:
+    """Where a kit may go: each active vehicle's live, unretired compartments.
 
-
-def _slot_value(by_value, vehicle_id, compartment):
-    """The select value for a kit's current compartment slot, or "" when it cannot be chosen."""
-    if compartment is None:
-        return ""
-    for value, (vehicle, row) in by_value.items():
-        if str(vehicle.pk) == str(vehicle_id) and row.stable_slot_id == compartment.stable_slot_id:
-            return value
-    return ""
-
-
-def _compartment_match(query, by_value):
-    """Kits in a live compartment whose current label matches, by vehicle and slot.
-
-    A rename appends a revision row and leaves kit_instance.compartment on the older row, so
-    matching only that row's label would miss the name the page shows.
+    Read in one query (the latest revision of each slot effective now, as positions() does for
+    one vehicle), so the page costs the same however many vehicles there are (PR #295 review).
     """
-    needle = query.casefold()
-    found = Q(compartment__label__icontains=query)
-    for vehicle, row in by_value.values():
-        if needle in row.label.casefold():
-            found |= Q(vehicle_id=vehicle.pk, compartment__stable_slot_id=row.stable_slot_id)
-    return found
+
+    def __init__(self, org):
+        vehicles = list(
+            Vehicle.objects.filter(organization_id=org, active=True).order_by("display_name", "id")[
+                : admin_pages.LIST_LIMIT
+            ]
+        )
+        latest = {}
+        for row in Compartment.objects.filter(
+            organization_id=org,
+            vehicle_id__in=[v.pk for v in vehicles],
+            effective_at__lte=timezone.now(),
+        ).order_by("vehicle_id", "stable_slot_id", "-revision"):
+            latest.setdefault((row.vehicle_id, row.stable_slot_id), row)
+        per_vehicle = {}
+        for (vehicle_id, _slot), row in latest.items():
+            if not row.retired:
+                per_vehicle.setdefault(vehicle_id, []).append(row)
+        self.groups, self.by_value, self.by_slot = [], {}, {}
+        for vehicle in vehicles:
+            rows = sorted(
+                per_vehicle.get(vehicle.pk, []),
+                key=lambda r: (r.display_order is None, r.display_order or 0, r.label, str(r.pk)),
+            )
+            options = []
+            for row in rows:
+                value = f"{vehicle.pk}:{row.pk}"
+                options.append({"value": value, "label": row.label})
+                self.by_value[value] = (vehicle, row)
+                self.by_slot[(vehicle.pk, row.stable_slot_id)] = value
+            if options:
+                self.groups.append({"label": _vehicle_name(vehicle), "options": options})
+
+    def slot_value(self, vehicle_id, compartment):
+        """The select value for a kit's current slot, or "" when it cannot be chosen again."""
+        if compartment is None:
+            return ""
+        return self.by_slot.get((vehicle_id, compartment.stable_slot_id), "")
+
+    def live_pks(self, query=None):
+        needle = query.casefold() if query else None
+        return [
+            row.pk
+            for _vehicle, row in self.by_value.values()
+            if needle is None or needle in row.label.casefold()
+        ]
 
 
-def _kit_rows(org, filters, by_value):
+def _same_slot_in(pks):
+    """A kit whose (vehicle, compartment slot) has one of these compartment rows."""
+    return Exists(
+        Compartment.objects.filter(
+            pk__in=pks,
+            vehicle_id=OuterRef("vehicle_id"),
+            stable_slot_id=OuterRef("compartment__stable_slot_id"),
+        )
+    )
+
+
+def _compartment_match(query, targets):
+    """Kits whose compartment, by its current name, matches.
+
+    A rename appends a revision row and leaves kit_instance.compartment on the older row. A kit
+    in a live slot matches that slot's current label; only a kit whose slot cannot be offered
+    (an inactive vehicle, a retired compartment) matches the label stored on its row.
+    """
+    live = _same_slot_in(targets.live_pks(query))
+    stored = Q(compartment__label__icontains=query) & ~_same_slot_in(targets.live_pks())
+    return live | stored
+
+
+def _kit_rows(org, filters, targets):
     kit_type = KitInstanceDefinition.objects.filter(kit=OuterRef("pk")).values("definition__label")[
         :1
     ]
@@ -156,7 +192,7 @@ def _kit_rows(org, filters, by_value):
             | Q(kit_type__icontains=query)
             | Q(vehicle__display_name__icontains=query)
             | Q(vehicle__number__icontains=query)
-            | _compartment_match(query, by_value)
+            | _compartment_match(query, targets)
         )
     if filters["location"] == STOCK:
         kits = kits.filter(vehicle__isnull=True)
@@ -165,12 +201,12 @@ def _kit_rows(org, filters, by_value):
     return kits.order_by("label", "id")
 
 
-def _row(kit, by_value, row_message, pending):
+def _row(kit, targets, row_message, pending, editing):
     current = (
-        STOCK if kit.vehicle_id is None else _slot_value(by_value, kit.vehicle_id, kit.compartment)
+        STOCK if kit.vehicle_id is None else targets.slot_value(kit.vehicle_id, kit.compartment)
     )
-    if current in by_value:
-        compartment = by_value[current][1].label
+    if current in targets.by_value:
+        compartment = targets.by_value[current][1].label
     else:
         compartment = kit.compartment.label if kit.compartment else ""
     message = row_message if row_message and row_message["kit"] == str(kit.pk) else None
@@ -183,32 +219,56 @@ def _row(kit, by_value, row_message, pending):
         "kit_type": kit.kit_type or NO_KIT_TYPE,
         "vehicle": _vehicle_name(kit.vehicle) if kit.vehicle else None,
         "vehicle_inactive": bool(kit.vehicle and not kit.vehicle.active),
+        # On an active vehicle but in no offered slot: the compartment has been retired.
+        "compartment_retired": bool(kit.vehicle and kit.vehicle.active and not current),
         "compartment": compartment,
         "current": current,
         "selected": selected,
+        # Every kit has history from add_kit_instance; one without cannot be moved here.
+        "movable": kit.latest_event is not None,
+        "editing": editing == str(kit.pk) and kit.latest_event is not None,
         "expected_event": str(kit.latest_event) if kit.latest_event else "",
         "operation_id": admin_pages.new_operation_id(),
         "message": message,
+        "invalid": bool(message and message["kind"] == "error" and message.get("invalid")),
     }
 
 
-def _page(request, user, *, filters, status=200, error=None, row_message=None, pending=None):
+def _edit_target(value):
+    try:
+        return canonical_id(value) if value else None
+    except ValueError:
+        return None
+
+
+def _page(
+    request,
+    user,
+    *,
+    filters,
+    status=200,
+    error=None,
+    row_message=None,
+    pending=None,
+    editing=None,
+):
     """row_message is {"kit": id, "kind": "saved" | "error", "text": ...}.
 
-    pending is the location the user chose in that row; it is shown again after a refusal
-    that leaves the choice valid, so the user need not choose it again.
+    Only the row named by editing shows the location choice, so the page carries one option
+    list rather than one per row (PR #295 review). pending is the location the user chose in
+    that row; it is shown again after a refusal that leaves the choice valid.
     """
     org = str(user.organization_id)
-    groups, by_value = _targets(org)
+    targets = _Targets(org)
     vehicles = list(
         Vehicle.objects.filter(organization_id=org)
         .order_by("-active", "display_name", "id")
         .values("id", "display_name", "number", "active")[: admin_pages.LIST_LIMIT]
     )
-    listing = _kit_rows(org, filters, by_value)
+    listing = _kit_rows(org, filters, targets)
     paginator = Paginator(listing, PAGE_SIZE)
     page = paginator.get_page(filters["page"])
-    rows = [_row(kit, by_value, row_message, pending) for kit in page.object_list]
+    rows = [_row(kit, targets, row_message, pending, editing) for kit in page.object_list]
     page_message = row_message if row_message and not any(r["message"] for r in rows) else None
     searched = bool(filters["q"] or filters["location"])
     title = "Find and move physical kits"
@@ -219,8 +279,10 @@ def _page(request, user, *, filters, status=200, error=None, row_message=None, p
         "filters": {**filters, "page": str(page.number) if page.number > 1 else ""},
         "searched": searched,
         "vehicles": [{**v, "id": str(v["id"])} for v in vehicles],
-        "groups": groups,
+        "groups": targets.groups if any(r["editing"] for r in rows) else [],
         "rows": rows,
+        "list_query": _query_string(filters),
+        "query_prefix": _query_string(filters) + "&" if _query_string(filters) else "?",
         "page": page,
         "total": paginator.count,
         "page_size": PAGE_SIZE,
@@ -324,8 +386,15 @@ def _save(request, user):
         return failed("INVALID", 400)
     target = request.POST.get("target", "")
 
-    def refused(kind, status, *, keep_choice=True, text=None):
-        message = {"kit": kit_id, "kind": "error", "text": text or ROW_MESSAGES[kind]}
+    def refused(kind, status, *, keep_choice=True, text=None, invalid=False):
+        # The row stays open with the refusal beside its choice. invalid marks the choice
+        # itself as the problem (aria-invalid on the select).
+        message = {
+            "kit": kit_id,
+            "kind": "error",
+            "text": text or ROW_MESSAGES[kind],
+            "invalid": invalid,
+        }
         return _page(
             request,
             user,
@@ -333,6 +402,7 @@ def _save(request, user):
             status=status,
             row_message=message,
             pending=target if keep_choice else None,
+            editing=kit_id,
         )
 
     kit = KitInstance.objects.filter(organization_id=org, pk=kit_id, active=True).first()
@@ -348,11 +418,10 @@ def _save(request, user):
     if target == "":
         # The "keep current location" choice of a kit whose place cannot be offered again.
         return refused("NO_CHANGE", 400)
-    _groups, by_value = _targets(org)
     try:
-        vehicle_id, compartment_id, row = _parse_target(target, by_value)
+        vehicle_id, compartment_id, row = _parse_target(target, _Targets(org).by_value)
     except ValueError:
-        return refused("INVALID_TARGET", 400, keep_choice=False)
+        return refused("INVALID_TARGET", 400, keep_choice=False, invalid=True)
     if _same_place(shown, vehicle_id, row):
         return refused("NO_CHANGE", 400)
     try:
@@ -375,7 +444,7 @@ def _save(request, user):
         logger.error("kit move unavailable (%s)", type(error).__name__)
         return failed("UNAVAILABLE", 503)
     except (KitError, ValueError) as error:
-        return refused("RULE", 400, text=f"Not saved: {error}.")
+        return refused("RULE", 400, text=f"Not saved: {error}.", invalid=True)
     if result.operation_reused:
         # The same user sent this operation id with another request: run_command replayed the
         # earlier receipt and applied nothing, so this is not a save.
@@ -407,4 +476,5 @@ def kit_locations(request):
     except _BadFilter as error:
         return _filter_error_page(request, user, str(error), 400)
     saved = _saved_message(user, request.GET["saved"]) if "saved" in request.GET else None
-    return _page(request, user, filters=filters, row_message=saved)
+    editing = None if saved else _edit_target(request.GET.get("edit", ""))
+    return _page(request, user, filters=filters, row_message=saved, editing=editing)

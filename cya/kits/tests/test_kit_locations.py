@@ -59,7 +59,7 @@ class KitLocationTests(KitAdminCase):
         )
 
     def labels(self, response):
-        return re.findall(r"<h3>([^<]+)</h3>", response.content.decode())
+        return re.findall(r"<h3[^>]*>([^<]+)</h3>", response.content.decode())
 
     # Listing and search
 
@@ -271,3 +271,78 @@ class KitLocationTests(KitAdminCase):
                 self.assertEqual(response.status_code, 400)
         self.assertEqual(self.post(self.client_, URL, stage="other").status_code, 400)
         self.assertEqual(KitAssignmentEvent.objects.count(), before)
+
+    # Edit mode, bounds and edge cases (PR #295 review)
+
+    def test_only_the_opened_row_offers_locations(self):
+        page = self.client_.get(URL)
+        self.assertNotContains(page, 'name="target"')
+        self.assertContains(page, f'edit={self.on_a}#kit-{self.on_a}"')
+        opened = self.client_.get(URL, {"edit": self.on_a, "q": "Synthetic"})
+        body = opened.content.decode()
+        self.assertEqual(body.count('name="target"'), 1)
+        self.assertIn(f'id="kit-target-{self.on_a}"', body)
+        self.assertIn('<input type="hidden" name="q" value="Synthetic">', body)
+        self.assertNotContains(self.client_.get(URL, {"edit": "not-an-id"}), 'name="target"')
+
+    def test_page_queries_do_not_grow_with_the_fleet(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def count():
+            with CaptureQueriesContext(connection) as queries:
+                self.assertEqual(self.client_.get(URL, {"edit": self.on_a}).status_code, 200)
+            return len(queries)
+
+        before = count()
+        for number in range(4):
+            extra = Vehicle.objects.create(
+                organization=self.org, display_name=f"Synthetic extra {number}"
+            )
+            Compartment.objects.create(
+                organization=self.org,
+                vehicle=extra,
+                stable_slot_id=self.cabinet.stable_slot_id,
+                revision=1,
+                label=f"Synthetic extra cabinet {number}",
+                effective_at=self.cabinet.effective_at,
+            )
+        self.assertEqual(count(), before)
+
+    def test_a_kit_with_no_kit_type_says_so(self):
+        add_kit_instance(label="Synthetic untyped kit", **self.context(self.supervisor))
+        self.assertContains(self.client_.get(URL, {"q": "untyped"}), "Kit type: (no kit type)")
+
+    def test_a_kit_on_an_inactive_vehicle_keeps_its_place_until_moved(self):
+        Vehicle.objects.filter(pk=self.vehicle_b.pk).update(active=False)
+        opened = self.client_.get(URL, {"edit": self.on_b})
+        self.assertContains(opened, "(inactive vehicle)")
+        self.assertContains(opened, '<option value="" selected>Keep current location</option>')
+        keep = self.save(self.on_b, "")
+        self.assertContains(keep, "Nothing to save", status_code=400)
+        self.assertEqual(self.save(self.on_b, "stock").status_code, 302)
+        self.assertIsNone(KitInstance.objects.get(pk=self.on_b).vehicle_id)
+
+    def test_search_does_not_match_a_compartments_old_name(self):
+        old_name = self.cabinet.label
+        revise_position(
+            kind="COMPARTMENT",
+            vehicle_id=str(self.vehicle.pk),
+            stable_slot_id=str(self.cabinet.stable_slot_id),
+            label="Synthetic renamed shelf",
+            **self.context(self.supervisor),
+        )
+        self.assertEqual(self.labels(self.client_.get(URL, {"q": old_name})), [])
+
+    def test_supervisors_and_administrators_may_open_it(self):
+        for role in ("supervisor", "admin"):
+            with self.subTest(role=role):
+                client, _ = self.harness.sign_in(role)
+                self.assertEqual(client.get(URL).status_code, 200)
+
+    def test_another_users_saved_receipt_shows_nothing(self):
+        operation_id = str(uuid.uuid4())
+        self.save(self.on_a, "stock", operation_id=operation_id)
+        supervisor, _ = self.harness.sign_in("supervisor")
+        page = supervisor.get(URL, {"saved": operation_id})
+        self.assertNotContains(page, "Saved:")

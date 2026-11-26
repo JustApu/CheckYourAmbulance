@@ -30,10 +30,11 @@
   {% for kit in rows %}
   <li class="kit-location-row" id="kit-{{ kit.id }}">
     <div class="kit-location-details">
-      <h3>{{ kit.label }}</h3>
+      <h3 id="kit-name-{{ kit.id }}">{{ kit.label }}</h3>
       <p>Kit type: {{ kit.kit_type }}</p>
-      <p>Current location: {% if kit.vehicle %}{{ kit.vehicle }}{% if kit.vehicle_inactive %} (inactive vehicle){% endif %}, {{ kit.compartment }}{% else %}Unassigned stock{% endif %}</p>
+      <p>Current location: {% if kit.vehicle %}{{ kit.vehicle }}{% if kit.vehicle_inactive %} (inactive vehicle){% endif %}, {{ kit.compartment }}{% if kit.compartment_retired %} (retired compartment){% endif %}{% else %}Unassigned stock{% endif %}</p>
     </div>
+    {% if kit.editing %}
     <form method="post" action="{% url 'kit-instance-locations' %}" class="kit-location-form admin-form">
       {% csrf_token %}
       <input type="hidden" name="stage" value="save">
@@ -44,7 +45,7 @@
       {% if filters.location %}<input type="hidden" name="location" value="{{ filters.location }}">{% endif %}
       {% if filters.page %}<input type="hidden" name="page" value="{{ filters.page }}">{% endif %}
       <p><label for="kit-target-{{ kit.id }}">Move {{ kit.label }} to</label><br>
-        <select id="kit-target-{{ kit.id }}" name="target">
+        <select id="kit-target-{{ kit.id }}" name="target"{% if kit.message %} aria-describedby="kit-message-{{ kit.id }}"{% else %} data-focus-on-load{% endif %}{% if kit.invalid %} aria-invalid="true"{% endif %}>
           {% if not kit.current %}<option value=""{% if not kit.selected %} selected{% endif %}>Keep current location</option>{% endif %}
           <option value="{{ stock }}"{% if kit.selected == stock %} selected{% endif %}>Unassigned stock</option>
           {% for group in groups %}<optgroup label="{{ group.label }}">{% for option in group.options %}<option value="{{ option.value }}"{% if kit.selected == option.value %} selected{% endif %}>{{ group.label }}: {{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
@@ -52,9 +53,15 @@
       <div class="kit-location-actions">
         <button type="submit" class="button primary">Save</button>
         <button type="reset" class="button">Reset</button>
+        <a href="{% url 'kit-instance-locations' %}{{ list_query }}#kit-{{ kit.id }}">Cancel</a>
       </div>
     </form>
-    {% if kit.message %}{% if kit.message.kind == "saved" %}<p class="save-state save-state-saved kit-location-message" role="status" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ kit.message.text }}</span></p>{% else %}<p class="banner banner-error kit-location-message" role="alert" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ kit.message.text }}</p>{% endif %}{% endif %}
+    {% elif kit.movable %}
+    <p class="kit-location-form"><a class="button" href="{% url 'kit-instance-locations' %}{{ query_prefix }}edit={{ kit.id }}#kit-{{ kit.id }}" aria-describedby="kit-name-{{ kit.id }}">Change location</a></p>
+    {% else %}
+    <p class="kit-location-form">This kit has no assignment history, so its location cannot be changed here.</p>
+    {% endif %}
+    {% if kit.message %}{% if kit.message.kind == "saved" %}<p id="kit-message-{{ kit.id }}" class="save-state save-state-saved kit-location-message" role="status" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ kit.message.text }}</span></p>{% else %}<p id="kit-message-{{ kit.id }}" class="banner banner-error kit-location-message" role="alert" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ kit.message.text }}</p>{% endif %}{% endif %}
   </li>
   {% endfor %}
 </ul>
@@ -72,8 +79,9 @@
 {% endblock %}
 {% block scripts %}
 <script>
-// Move focus to the one saved, refused or invalid-search message so it is read first (as in
-// role administration). The server renders at most one; without script it is still shown.
+// Move focus to the one saved, refused or invalid-search message, or else to the open row's
+// location choice, so it is read first (as in role administration). The server marks at most
+// one; without script the page still works.
 (function () {
   var message = document.querySelector("[data-focus-on-load]");
   if (message) { message.focus(); }
