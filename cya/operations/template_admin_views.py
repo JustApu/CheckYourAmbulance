@@ -538,12 +538,12 @@ def _run(request, user, call, error_page):
     ids = {**_context_ids(user), "operation_id": operation_id}
     try:
         result = call(ids)
+    except OperationConflict:
+        return None, error_page(409, [admin_pages.REUSED])
     except REFUSALS as error:
         return None, error_page(400, [str(error)])
     except CommandDenied:
         return None, render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return None, error_page(409, [admin_pages.REUSED])
     except UNAVAILABLE as error:
         logger.error("checklist template change unavailable (%s)", type(error).__name__)
         return None, error_page(

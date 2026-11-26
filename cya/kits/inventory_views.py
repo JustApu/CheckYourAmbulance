@@ -100,12 +100,12 @@ def inventory(request):
             definition_id=form["definition_id"],
             **{**_context_ids(user), "operation_id": operation_id},
         )
+    except OperationConflict:
+        return _page(request, user, status=409, errors=[admin_pages.REUSED], form=form)
     except (KitError, ValueError) as error:
         return _page(request, user, status=400, errors=[str(error)], form=form)
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(request, user, status=409, errors=[admin_pages.REUSED], form=form)
     except UNAVAILABLE as error:
         logger.error("kit stock creation unavailable (%s)", type(error).__name__)
         return _page(

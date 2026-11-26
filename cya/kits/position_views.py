@@ -186,13 +186,13 @@ def _command(request, user, vehicle, stage):
                 retired=True,
                 **ids,
             )
+    except OperationConflict:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     except (PositionError, KeyRuleError, ValueError) as error:
         keep = form if stage == "add" else None
         return _page(request, user, vehicle, status=400, errors=[str(error)], form=keep)
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     except UNAVAILABLE as error:
         logger.error("position change unavailable (%s)", type(error).__name__)
         return _page(

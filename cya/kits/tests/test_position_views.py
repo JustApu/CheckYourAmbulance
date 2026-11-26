@@ -106,6 +106,23 @@ class PositionPagesTests(KitCase):
         self.assertContains(reused, "Nothing was changed.", status_code=409)
         self.assertFalse(PositionKey.objects.filter(key="shelf").exists())
 
+    def test_another_users_operation_id_is_refused_without_saying_why(self):
+        # PR #298 review: the conflict is a ValueError and must not fall into the 400 handler.
+        operation = str(uuid.uuid4())
+        fields = {"stage": "add", "kind": "COMPARTMENT", "display_order": "3"}
+        first = self.post(label="Synthetic drawer", key="drawer", operation_id=operation, **fields)
+        self.assertEqual(first.status_code, 302)
+        admin, _ = self.harness.sign_in("admin")
+
+        reused = self.post(
+            admin, label="Synthetic shelf", key="shelf", operation_id=operation, **fields
+        )
+
+        self.assertContains(reused, "already used for a different change", status_code=409)
+        self.assertContains(reused, "Nothing was changed.", status_code=409)
+        self.assertNotContains(reused, "OPERATION_CONFLICT", status_code=409)
+        self.assertFalse(PositionKey.objects.filter(key="shelf").exists())
+
     def test_the_page_explains_each_kind_and_what_a_key_is_for(self):
         # Issue #238 F1, F1a, F1b, F1c.
         page = self.client_.get(self.url)

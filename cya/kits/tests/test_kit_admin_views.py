@@ -303,6 +303,52 @@ class ReusedOperationIdTests(KitAdminCase):
         self.assert_refused(reused)
         self.assertFalse(KitDefinition.objects.filter(label="Synthetic kit two").exists())
 
+    def test_another_users_operation_id_is_refused_without_saying_why(self):
+        # PR #298 review: OperationConflict is a ValueError. Each page must catch it before its
+        # broad ValueError handler, or the page shows a 400 naming OPERATION_CONFLICT.
+        supervisor, _ = self.harness.sign_in("supervisor")
+        stocked, placed = self.kit("Synthetic kit B"), self.kit("Synthetic kit C", self.vehicle)
+        operation = str(uuid.uuid4())
+        saved = self.post(
+            self.client_,
+            self.url,
+            stage="assign",
+            kit_id=str(self.kit("Synthetic kit A").pk),
+            compartment_id=str(self.cabinet.pk),
+            operation_id=operation,
+        )
+        self.assertEqual(saved.status_code, 302)
+        attempts = {
+            "assign": (
+                self.url,
+                {
+                    "stage": "assign",
+                    "kit_id": str(stocked.pk),
+                    "compartment_id": str(self.cabinet.pk),
+                },
+            ),
+            "stock": (self.url, {"stage": "stock", "kit_id": str(placed.pk)}),
+            "create": (
+                self.inventory_url,
+                {"stage": "create", "definition_id": self.definition, "label": "Synthetic kit D"},
+            ),
+            "definition": (
+                "/administration/kit-definitions/",
+                {"stage": "create", "label": "Synthetic kit two"},
+            ),
+        }
+        for name, (url, fields) in attempts.items():
+            with self.subTest(page=name):
+                reused = self.post(supervisor, url, operation_id=operation, **fields)
+                self.assert_refused(reused)
+                self.assertNotContains(reused, "OPERATION_CONFLICT", status_code=409)
+        stocked.refresh_from_db()
+        placed.refresh_from_db()
+        self.assertIsNone(stocked.vehicle_id)
+        self.assertEqual(placed.vehicle_id, self.vehicle.pk)
+        self.assertFalse(KitInstance.objects.filter(label="Synthetic kit D").exists())
+        self.assertFalse(KitDefinition.objects.filter(label="Synthetic kit two").exists())
+
 
 @override_settings(**real_collaborator_settings())
 class AdministrationLandingTests(KitAdminCase):

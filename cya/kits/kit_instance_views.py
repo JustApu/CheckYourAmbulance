@@ -151,12 +151,12 @@ def _assign(request, user, vehicle):
             compartment_id=form["compartment_id"],
             **{**_context_ids(user), "operation_id": operation_id},
         )
+    except OperationConflict:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED], form=form)
     except (KitError, ValueError) as error:
         return _page(request, user, vehicle, status=400, errors=[str(error)], form=form)
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED], form=form)
     except UNAVAILABLE as error:
         logger.error("kit assignment unavailable (%s)", type(error).__name__)
         return _page(
@@ -187,12 +187,12 @@ def _return_to_stock(request, user, vehicle):
             expected_vehicle_id=str(vehicle.pk),
             **{**_context_ids(user), "operation_id": operation_id},
         )
+    except OperationConflict:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     except (KitError, ValueError) as error:
         return _page(request, user, vehicle, status=400, errors=[str(error)])
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     except UNAVAILABLE as error:
         logger.error("kit return to stock unavailable (%s)", type(error).__name__)
         return _page(
