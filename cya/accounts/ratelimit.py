@@ -15,12 +15,18 @@ The proxy limits sign-in too; this is the second, application layer DEP-10 requi
   address in the same minute while still bounding scripted attempts.
 - **Over the limit:** 429 with Retry-After and a fixed page, decided before the view runs, so no
   sign-in cookie, session, audit record or call to Google is made.
-- **Storage:** process memory, which suits the approved single process (DEP-2). Counters reset on
-  restart. At most MAX_KEYS addresses are tracked; past that, expired windows are dropped first
-  and then the oldest entries, so memory stays bounded under many addresses.
+- **Storage:** with one process, process memory; counters reset on restart. At most MAX_KEYS
+  addresses are tracked; past that, expired windows are dropped first and then the oldest
+  entries, so memory stays bounded under many addresses. With several processes (DEP-2,
+  amendment 8.2.0) the counters live in the shared store (CYA_SHARED_STORE_URL), so the limit
+  applies across processes: one key per route, address and window, which expires with the
+  window. If the store fails, each process counts on its own (the in-memory limiter) and the
+  proxy's limit still applies; the failure is logged without the address.
 """
 
+import hashlib
 import ipaddress
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -29,6 +35,7 @@ from functools import wraps
 from django.conf import settings
 from django.utils.html import format_html
 
+logger = logging.getLogger(__name__)
 MAX_KEYS = 10000
 REFUSED_HTML = format_html(
     "<p>{}</p>", "Too many sign-in attempts from this address. Wait a minute and try again."
@@ -68,7 +75,54 @@ class FixedWindowLimiter:
             self._counts.clear()
 
 
-LIMITER = FixedWindowLimiter()
+class SharedWindowLimiter:
+    """Fixed-window counters in the shared store, so several processes share one limit.
+
+    Windows are aligned to the epoch (one key per route, address and window start), so every
+    process counts into the same key without coordination. Keys are hashed so addresses are not
+    stored in clear. Any store error falls back to this process's own counters.
+    """
+
+    def __init__(self, client, fallback, clock=time.time):
+        self._client, self._fallback, self._clock = client, fallback, clock
+
+    def hit(self, key, limit, window):
+        import redis
+
+        now = self._clock()
+        start = int(now // window) * window
+        name = "cya:signin:" + hashlib.sha256(repr((key, window, start)).encode()).hexdigest()
+        try:
+            pipe = self._client.pipeline()
+            pipe.incr(name)
+            pipe.expire(name, window + 1)
+            count, _ok = pipe.execute()
+        except redis.RedisError:
+            logger.error("shared sign-in counters unavailable; counting in this process")
+            return self._fallback.hit(key, limit, window)
+        return count <= limit, max(1, int(start + window - now) + 1)
+
+    def reset(self):
+        self._fallback.reset()
+
+
+def make_limiter():
+    """The limiter for this deployment: shared with a configured store, else process memory."""
+    local = FixedWindowLimiter()
+    if not settings.CYA_SHARED_STORE_URL:
+        return local
+    import redis
+
+    client = redis.Redis.from_url(
+        settings.CYA_SHARED_STORE_URL,
+        password=settings.CYA_SHARED_STORE_PASSWORD,
+        socket_timeout=0.5,
+        socket_connect_timeout=0.5,
+    )
+    return SharedWindowLimiter(client, local)
+
+
+LIMITER = make_limiter()
 
 
 def client_address(request):

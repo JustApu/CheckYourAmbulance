@@ -5,6 +5,19 @@ channels==4.3.2 \
     --hash=sha256:fef47e9055a603900cf16cef85f050d522d9ac4b3daccf24835bd9580705c176 \
     --hash=sha256:f2bb6bfb73ad7fb4705041d07613c7b4e69528f01ef8cb9fb6c21d9295f15667
     # Django's WebSocket routing and in-memory group layer (SPEC 17.7 item 7; spike-tested 4.3.2)
+channels-redis==4.3.0 \
+    --hash=sha256:48f3e902ae2d5fef7080215524f3b4a1d3cea4e304150678f867a1a822c0d9f5 \
+    --hash=sha256:740ee7b54f0e28cf2264a940a24453d3f00526a96931f911fcb69228ef245dd2
+    # shared channel layer for several processes (SPEC DEP-2, amendment 8.2.0; cya.core.shared_store)
+msgpack==1.2.4 \
+    --hash=sha256:c4d5bbdbea8f5669b3a734d6c226772804fb120848f99cbe63a0ddee63b049c9 \
+    --hash=sha256:7fabd415c41e62006c6641fcdf5b3e866f581c4e11c58328c0d0f69584b9577d \
+    --hash=sha256:475c44e12f2a5de766a8448783f149c9b33f3f49b88953c6cd739a77d93c732c
+    # via channels-redis (CPython 3.12 and 3.13 x86_64 wheels, and the source archive)
+redis==8.1.0 \
+    --hash=sha256:a4fe1aac3d3b3cc791d4b3d5931c5a956045dc951ee74d1c913ee3ac4d2ee9fb \
+    --hash=sha256:6e1a19beef9225c83efd689c7e6b7da2d5215b1f42cd13b7fc3714d0a09c7b25
+    # via channels-redis; also the shared sign-in counters (cya.accounts.ratelimit)
 Django==6.1.2 \
     --hash=sha256:141efee6ec64d1db6db90683bf734c550102450f444fb099063b0be1bd27d991 \
     --hash=sha256:a1e92451ccb8b514e91bbb3b6d186d20b4030558f116b5d9de6535455ff210b7
