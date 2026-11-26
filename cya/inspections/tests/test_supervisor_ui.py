@@ -714,7 +714,7 @@ class EmptyScopeCloseUiTests(SupervisorUiCase):
         page = self.page(self.sup, pk).content.decode()
         form = re.search(rf"<form [^>]*{self.FORM}.*?</form>", page, re.S).group(0)
         self.assertIn("Close with no items to check", form)
-        self.assertIn("only an Administrator can reopen it", form)
+        self.assertIn("Only an administrator can reopen it", form)
         self.assertIn('name="explanation" required', form)
 
     def test_empty_scope_surfaces_its_closure_action_instead_of_an_invalid_repair(self):
