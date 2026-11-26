@@ -127,9 +127,7 @@ class DeficiencyActionsUiTests(CrewUiCase):
         self.assertContains(page, "Record repair")
         self.assertEqual(markup.count('data-kind="repair"'), 1)
         self.assertLess(markup.index("Next action"), markup.index('data-kind="repair"'))
-        self.assertLess(
-            markup.index('data-kind="repair"'), markup.index("Work updates and delays")
-        )
+        self.assertLess(markup.index('data-kind="repair"'), markup.index("Work updates and delays"))
 
     def test_role_union_supply_context_and_assignee_control_visibility(self):
         pk = self.report()
