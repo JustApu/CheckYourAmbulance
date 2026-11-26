@@ -424,10 +424,14 @@ class Hints:
     (`item_ids`); anything else, and the first read, owes the whole list.
     """
 
-    def __init__(self, reloader, wait=2.0):
+    def __init__(self, reloader, wait=2.0, apply_rows=None, own_rows_wait=1.0):
         self.reloader, self.wait = reloader, wait
         self.own, self.in_flight, self.waiting, self.timer = set(), 0, False, None
         self.need_full, self.items = True, set()
+        # SPEC 8.3.0 (checklist.js): pushed rows for this session replace a read; the hint they
+        # cover needs none, and a save waits up to own_rows_wait for its own rows.
+        self.apply_rows, self.own_rows_wait = apply_rows, own_rows_wait
+        self.covered, self.own_waits = set(), {}
 
     def read_started(self):
         """The items to read, or None for the whole list; the read covers what was owed."""
@@ -455,6 +459,13 @@ class Hints:
         if committed:
             if check_id:
                 self.own.add(check_id)
+            if item_id and check_id and check_id in self.covered:
+                return  # its pushed rows are already shown
+            if item_id and check_id and self.apply_rows is not None:
+                self.own_waits[check_id] = asyncio.get_running_loop().call_later(
+                    self.own_rows_wait, self._own_rows_missing, check_id, item_id
+                )
+                return
             if item_id:
                 self.items.add(item_id)
             else:
@@ -469,6 +480,13 @@ class Hints:
             hint = {}
         if hint.get("type") == "connection.ready":
             return  # the socket's accept already scheduled a read
+        if hint.get("type") == "checklist.rows":
+            self._rows(hint)
+            return
+        if hint.get("type") == "vehicle.update" and hint.get("event_id") in self.covered:
+            self.covered.discard(hint["event_id"])
+            self.own.discard(hint["event_id"])
+            return
         if hint.get("type") == "vehicle.update" and hint.get("event_id") in self.own:
             self.own.discard(hint["event_id"])
             return
@@ -492,9 +510,26 @@ class Hints:
         if self.waiting:
             self.reloader.schedule(0)
 
+    def _rows(self, frame):
+        if self.apply_rows is None or not isinstance(frame.get("items"), list):
+            return
+        self.apply_rows(frame["items"])
+        event_id = frame.get("event_id")
+        self.covered.add(event_id)
+        waiting = self.own_waits.pop(event_id, None)
+        if waiting is not None:
+            waiting.cancel()
+
+    def _own_rows_missing(self, check_id, item_id):
+        self.own_waits.pop(check_id, None)
+        self.items.add(item_id)
+        self.reloader.schedule(0)
+
     def stop(self):
         if self.timer:
             self.timer.cancel()
+        for waiting in self.own_waits.values():
+            waiting.cancel()
 
 
 async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_reload=True):
@@ -552,12 +587,17 @@ async def crew_member(site, user, member_index, plan, recorder, think, rng, ack_
             hints.read_failed(items)
 
     reloader = Reloader(reload)
+
     # Without the post-save reload (--no-ack-reload) nothing covers a skipped hint, so every
     # push is read, as before issue #278.
-    hints = Hints(reloader) if ack_reload else None
+    def apply_rows(items):
+        rows.update({(r["item_id"], r.get("kit_id")): r for r in items})
+
+    hints = Hints(reloader, apply_rows=apply_rows) if ack_reload else None
     live = Live(
         browser,
-        config["urls"]["socket"],
+        # SPEC 8.3.0: a session page names its session, so its socket gets the pushed rows.
+        config["urls"]["socket"] + f"?session={config['session_id']}",
         hints.full if hints else reloader.schedule,  # a (re)connect reconciles the whole list
         recorder,
         on_text=hints.on_text if hints else None,

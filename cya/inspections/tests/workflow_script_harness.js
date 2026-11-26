@@ -1197,6 +1197,79 @@ function generic(kind) {
       await t.fire();
       assert.equal(t.itemsOf(t.reads()[1]), null, "a reconnect's reconciliation is always the whole list");
     }
+    // SPEC 8.3.0 §17.3: rows pushed for this session replace the re-read where a one-row read
+    // would be made, and only when read later than the rows shown.
+    const rowsScenario = async (extra = {}) => {
+      const t = await scenario(extra);
+      t.run.sockets[0].onopen(); await t.fire();   // connected: the reconciling read stamps the rows
+      response(t.reads().at(-1), 200, {status: "OK", items: base, group_progress: serverGroups(base), vehicle_status: {status: "IN_SERVICE"}, as_of: "2026-06-01T00:00:10Z"});
+      await tick(); await tick();
+      t.rows = (eventId, item, asOf, extraFields = {}) => t.push({type: "checklist.rows", event_id: eventId, session_id: "session", item_id: item.item_id, as_of: asOf, items: [item], ...extraFields});
+      return t;
+    };
+    {
+      const t = await rowsScenario();
+      const before = t.reads().length;
+      const fresh = make("a", "c1", "SATISFIED");
+      t.rows("e1", fresh, "2026-06-01T00:00:20Z");
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire();
+      assert.equal(t.reads().length, before, "pushed rows replace another crew member's re-read");
+      assert.deepEqual(t.groups(), serverGroups([fresh, ...base.slice(1)]), "the pushed row is shown and counted");
+    }
+    {
+      const t = await rowsScenario();
+      const before = t.reads().length;
+      t.rows("e1", make("a", "c1", "SATISFIED"), "2026-06-01T00:00:05Z");   // read before the rows shown
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire();
+      assert.equal(t.reads().length, before, "older rows: the page already shows a later read");
+      assert.deepEqual(t.groups(), serverGroups(base), "older rows never replace newer ones");
+    }
+    {
+      const t = await rowsScenario();
+      t.rows("e1", make("a", "c1", "SATISFIED"), "2026-06-01T00:00:20Z", {session_id: "another"});
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.deepEqual(t.itemsOf(t.reads().at(-1)), ["a"], "rows for another session are ignored: the hint reads");
+    }
+    {
+      const t = await rowsScenario({needs_attention_only: true});
+      const before = t.reads().length;
+      t.rows("e1", make("a", "c1", "SATISFIED"), "2026-06-01T00:00:20Z");
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});
+      await t.fire(250);
+      assert.equal(t.reads().length, before + 1, "a filtered list does not apply pushed rows");
+    }
+    {
+      const t = await rowsScenario();
+      t.run.context.testUI.setRows(base); t.run.context.testUI.render();
+      const tap = id => findAction(t.run.elements.items.children.find(n => n.dataset.itemKey && n.dataset.itemKey.startsWith(id + "|")), "pass").fire("click");
+      const before = t.reads().length;
+      tap("b");
+      t.rows("mine-b", make("b", "c1", "SATISFIED"), "2026-06-01T00:00:20Z");   // the rows come with the answer
+      response(t.run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "mine-b", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:19Z"}}); await tick();
+      t.push({type: "vehicle.update", event_id: "mine-b", kind: "check.recorded", item_id: "b"});
+      await t.fire();
+      assert.equal(t.reads().length, before, "the saver shows its own pushed rows and makes no read");
+      tap("b");
+      response(t.run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "mine-b2", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:29Z"}}); await tick();
+      await t.fire(0);
+      assert.equal(t.reads().length, before, "the saver waits briefly for its rows");
+      await t.fire(1000);
+      assert.deepEqual(t.itemsOf(t.reads().at(-1)), ["b"], "without them it reads the item, as before");
+    }
+    {
+      const t = await rowsScenario();
+      t.push({type: "vehicle.update", event_id: "e1", kind: "check.recorded", item_id: "a"});   // no rows: a read
+      await t.fire(250);
+      const inFlight = t.reads().at(-1);
+      const pushed = make("a", "c1", "SATISFIED");
+      t.rows("e2", pushed, "2026-06-01T00:00:30Z");   // pushed while that read is in flight
+      response(inFlight, 200, {status: "OK", items: [make("a", "c1", "OVERDUE")], group_progress: null, vehicle_status: {status: "IN_SERVICE"}, as_of: "2026-06-01T00:00:25Z"});
+      await tick(); await tick();
+      assert.deepEqual(t.groups(), serverGroups([pushed, ...base.slice(1)]), "a read that started earlier never shows older rows");
+    }
   }
-  console.log("Offline workflow script regressions passed: checklist item reads (issue #278 B), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  console.log("Offline workflow script regressions passed: checklist item reads (issue #278 B), checklist pushed rows (SPEC 8.3.0), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

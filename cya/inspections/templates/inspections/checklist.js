@@ -244,7 +244,7 @@
         // Issue #278 B: an item check changes only its item's rows; a kit presence check can
         // change its kit's contents, so it re-reads the whole list (as its push names no item).
         if (row.kit_presence || row.kit_requirement_id) { scheduleReload(0); }
-        else { scheduleItemRead(row.item_id, 0); }
+        else { awaitOwnRows(entry.checkId, row.item_id); }
       } else if (answer.kind === "conflict") {
         entry.status = "idle"; entry.text = "";
         askConflict(row, entry, answer.body.newest_check);
@@ -1085,15 +1085,20 @@
     }).then(function (a) {
       if (a === null) { return; }
       if (!a.ok || a.body.status !== "OK") { throw new Error("checklist"); }
+      var readAt = Date.parse(a.body.as_of);
       if (partial) {
         if (!Array.isArray(a.body.items)) { throw new Error("checklist"); }
         setStatus(a.body.vehicle_status);
-        if (patchRows(itemIds, a.body.items)) { $("stale").hidden = true; render(); }
+        if (patchRows(itemIds, a.body.items)) {
+          itemIds.forEach(function (id) { rowReadAt[id] = readAt; });
+          reapplyPushed(readAt); $("stale").hidden = true; render();
+        }
         else { needFull = true; reloadAgain = true; }   // the rows changed shape: read them all
         return;
       }
       if (!Array.isArray(a.body.group_progress)) { throw new Error("checklist groups"); }
       rows = a.body.items; groupProgressRows = a.body.group_progress; setStatus(a.body.vehicle_status);
+      listReadAt = readAt; rowReadAt = {}; reapplyPushed(readAt);
       if (config.verification_for_deficiency_id) {
         // An acknowledgement may be lost after the row was satisfied or removed. Keep its
         // exact request reachable until Retry resolves, even after automatic closure.
@@ -1135,10 +1140,63 @@
   // answer is slow, the hint gets its own read: SPEC §17.3 allows a client to delay a re-read
   // by up to 2 seconds.
   var HINT_WAIT_MS = 2000, hintTimer = null;
+  // SPEC 8.3.0 §17.3 (issue #278): after a check commits, the server pushes that item's rows,
+  // read for this session, before the hint. They replace the re-read only where this page would
+  // make a one-row read (Normal order, no filter, rows loaded), and only when they were read
+  // later than the rows shown; the hint they cover then needs no read. Pushed rows are kept
+  // briefly so a read that started before them, and answers after, cannot show older rows.
+  var OWN_ROWS_WAIT_MS = 1000, listReadAt = 0, rowReadAt = {}, pushedRows = {}, covered = {}, coveredOrder = [];
+  var ownWaits = {};
+  function shownAt(itemId) { return rowReadAt[itemId] || listReadAt; }
+  function rowsApply() {
+    return loadedOnce && config.session_id && !config.verification_for_deficiency_id &&
+      currentListView() === "NORMAL" && !onlyAttention;
+  }
+  function cover(eventId) {
+    covered[eventId] = true; coveredOrder.push(eventId);
+    while (coveredOrder.length > OWN_EVENT_LIMIT) { delete covered[coveredOrder.shift()]; }
+  }
+  function onRows(frame) {
+    if (frame.session_id !== config.session_id || !Array.isArray(frame.items)) { return; }
+    var at = Date.parse(frame.as_of);
+    if (!(at > 0) || !rowsApply()) { return; }   // the hint that follows makes the read
+    if (at > shownAt(frame.item_id)) {
+      if (!patchRows([frame.item_id], frame.items)) { return; }   // other shape: the hint reads
+      rowReadAt[frame.item_id] = at;
+      pushedRows[frame.item_id] = {at: at, items: frame.items};
+      $("stale").hidden = true; render();
+    }
+    cover(frame.event_id);
+    if (ownWaits[frame.event_id]) { clearTimeout(ownWaits[frame.event_id].timer); delete ownWaits[frame.event_id]; }
+  }
+  function reapplyPushed(readAt) {
+    Object.keys(pushedRows).forEach(function (itemId) {
+      var pushed = pushedRows[itemId];
+      if (pushed.at > readAt && pushed.at > shownAt(itemId) && patchRows([itemId], pushed.items)) {
+        rowReadAt[itemId] = pushed.at;
+      }
+      if (pushed.at <= readAt) { delete pushedRows[itemId]; }
+    });
+  }
+  // The saver's own check: its pushed rows usually arrive with or before the answer. Wait briefly
+  // for them; without them, read the item as before.
+  function awaitOwnRows(checkId, itemId) {
+    if (checkId && covered[checkId]) { return; }
+    if (!checkId || !rowsApply() || !socketOpen) { scheduleItemRead(itemId, 0); return; }
+    ownWaits[checkId] = {itemId: itemId, timer: setTimeout(function () {
+      delete ownWaits[checkId]; scheduleItemRead(itemId, 0);
+    }, OWN_ROWS_WAIT_MS)};
+  }
   function onHint(message) {
     var hint = null;
     try { hint = JSON.parse(message.data); } catch (error) { hint = null; }
     if (hint && hint.type === "connection.ready") { return; }   // onopen already reconciles
+    if (hint && hint.type === "checklist.rows") { onRows(hint); return; }
+    if (hint && hint.type === "vehicle.update" && covered[hint.event_id]) {
+      delete covered[hint.event_id];   // its rows are already shown
+      if (ownEvents[hint.event_id]) { delete ownEvents[hint.event_id]; }
+      return;
+    }
     if (hint && hint.type === "vehicle.update" && ownEvents[hint.event_id]) {
       delete ownEvents[hint.event_id];
       return;
@@ -1158,15 +1216,23 @@
     }
   }
 
-  var socket = null, backoff = 1000, stopped = false;
+  var socket = null, backoff = 1000, stopped = false, socketOpen = false;
   function connect() {
     if (stopped) { return; }
     var scheme = location.protocol === "https:" ? "wss://" : "ws://";
-    socket = new WebSocket(scheme + location.host + config.urls.socket);
-    socket.onopen = function () { backoff = 1000; liveBanner.hidden = true; scheduleReload(0); };  // reconcile (17.3)
+    // SPEC 8.3.0: a session page names its session, so a participant also gets its pushed rows.
+    var sessionPart = config.session_id && !config.verification_for_deficiency_id ?
+      "?session=" + encodeURIComponent(config.session_id) : "";
+    socket = new WebSocket(scheme + location.host + config.urls.socket + sessionPart);
+    socket.onopen = function () { backoff = 1000; socketOpen = true; liveBanner.hidden = true; scheduleReload(0); };  // reconcile (17.3)
     socket.onmessage = onHint;
     socket.onclose = function (event) {
       if (socket && socket.retired) { return; }
+      socketOpen = false;
+      // Rows can no longer arrive: a save still waiting for its own reads its item now.
+      Object.keys(ownWaits).forEach(function (id) {
+        clearTimeout(ownWaits[id].timer); scheduleItemRead(ownWaits[id].itemId, 0); delete ownWaits[id];
+      });
       liveBanner.hidden = false;
       if (event.code === 4401 || event.code === 4403) {
         // No further attempts will be made, so do not promise any.

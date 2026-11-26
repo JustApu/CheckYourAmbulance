@@ -23,7 +23,7 @@ def _valid_id(value, field):
         raise ValueError(f"{field} must be a canonical UUID")
 
 
-def publish_vehicle_update(*, organization_id, vehicle_id, event_id, kind, item_id=None):
+def publish_vehicle_update(*, organization_id, vehicle_id, event_id, kind, item_id=None, rows=None):
     """Publish a small hint after commit; reconnecting clients re-read authoritative state.
 
     Delivery is intentionally best-effort. A channel-layer failure cannot roll back an
@@ -32,6 +32,11 @@ def publish_vehicle_update(*, organization_id, vehicle_id, event_id, kind, item_
     item_id, when given, promises that the change can alter only that item's checklist rows, so
     a page may re-read just those (issue #278). Leave it out whenever the change may reach
     other rows; a page then re-reads the whole checklist.
+
+    rows, when given, is called after the commit and returns [(group, message)]: the changed
+    rows for each open session's group (SPEC 8.3.0, cya.attention.live_rows). They are sent
+    before the hint, so a page that receives both sees the rows first and need not re-read. A
+    failure there only loses the rows: the hint is still sent.
     """
     _valid_id(organization_id, "organization_id")
     _valid_id(vehicle_id, "vehicle_id")
@@ -55,6 +60,12 @@ def publish_vehicle_update(*, organization_id, vehicle_id, event_id, kind, item_
             channel_layer = get_channel_layer()
             if channel_layer is None:
                 raise RuntimeError("channel layer is unavailable")
+            if rows is not None:
+                try:
+                    for group, rows_message in rows():
+                        async_to_sync(channel_layer.group_send)(group, rows_message)
+                except Exception as error:
+                    logger.error("pushed rows unavailable (%s)", type(error).__name__)
             async_to_sync(channel_layer.group_send)(
                 f"vehicle.{organization_id}.{vehicle_id}", message
             )
