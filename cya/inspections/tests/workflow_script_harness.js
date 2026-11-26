@@ -634,7 +634,7 @@ function generic(kind) {
   for (const [code, expected] of [
     ["SCOPE_AVAILABLE", "Current verification items exist; record the repair instead."],
     ["DEFICIENCY_CHANGED", "This problem changed. Refresh history"],
-    ["INVALID_TRANSITION", "no longer Open, In Progress or Awaiting External Dependency"],
+    ["INVALID_TRANSITION", "This problem's status changed. Refresh its history."],
   ]) {
     const run = generic("empty-scope-close"); run.form.dataset.expectedEvent = "event-seen";
     field(run.form, "explanation", "Synthetic explanation.");
