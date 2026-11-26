@@ -192,6 +192,9 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
 .kit-location-details p { margin: .125rem 0; overflow-wrap: anywhere; }
 .kit-location-form { min-width: 0; margin: 0; }
 .kit-location-form p { margin: 0; }
+.kit-location-form form + form { margin-top: .75rem; }
+.kit-location-vehicle { padding-bottom: .75rem; border-bottom: 1px solid var(--line-soft); }
+.kit-location-note { color: var(--muted); }
 .kit-location-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .5rem; }
 .kit-location-message { grid-column: 1 / -1; margin: 0; }
 .kit-location-pages { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }

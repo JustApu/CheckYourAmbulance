@@ -16,6 +16,7 @@
       <option value="{{ stock }}"{% if filters.location == stock %} selected{% endif %}>Unassigned stock</option>
       {% for vehicle in vehicles %}<option value="{{ vehicle.id }}"{% if filters.location == vehicle.id %} selected{% endif %}>{{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} (inactive){% endif %}</option>{% endfor %}
     </select></p>
+  {% if vehicles_more %}<p class="kit-location-note">The location list shows the first {{ vehicle_limit }} vehicles. Search by vehicle name or number to find kits on any other.</p>{% endif %}
   <p><button type="submit" class="button">Search kits</button>{% if searched %} <a href="{% url 'kit-instance-locations' %}">Show all kits</a>{% endif %}</p>
 </form>
 
@@ -35,7 +36,23 @@
       <p>Current location: {% if kit.vehicle %}{{ kit.vehicle }}{% if kit.vehicle_inactive %} (inactive vehicle){% endif %}, {{ kit.compartment }}{% if kit.compartment_retired %} (retired compartment){% endif %}{% else %}Unassigned stock{% endif %}</p>
     </div>
     {% if kit.editing %}
-    <form method="post" action="{% url 'kit-instance-locations' %}" class="kit-location-form admin-form">
+    <div class="kit-location-form">
+    <form method="get" action="{% url 'kit-instance-locations' %}#kit-{{ kit.id }}" class="admin-form kit-location-vehicle" aria-label="Choose a vehicle for {{ kit.label }}">
+      <input type="hidden" name="edit" value="{{ kit.id }}">
+      {% if filters.q %}<input type="hidden" name="q" value="{{ filters.q }}">{% endif %}
+      {% if filters.location %}<input type="hidden" name="location" value="{{ filters.location }}">{% endif %}
+      {% if filters.page %}<input type="hidden" name="page" value="{{ filters.page }}">{% endif %}
+      {% if kit.choice.more or kit.choice.to_q %}<p><label for="kit-to-q-{{ kit.id }}">Find a vehicle by name or number</label><br>
+        <input id="kit-to-q-{{ kit.id }}" name="to_q" type="search" maxlength="{{ max_query }}" value="{{ kit.choice.to_q }}" autocomplete="off"></p>{% endif %}
+      <p><label for="kit-to-{{ kit.id }}">Vehicle</label><br>
+        <select id="kit-to-{{ kit.id }}" name="to">
+          <option value=""{% if not kit.choice.to %} selected{% endif %}>(choose a vehicle)</option>
+          {% for vehicle in kit.choice.vehicles %}<option value="{{ vehicle.id }}"{% if kit.choice.to == vehicle.id %} selected{% endif %}>{{ vehicle.name }}</option>{% endfor %}
+        </select></p>
+      {% if kit.choice.more %}<p class="kit-location-note">Showing the first {{ kit.choice.limit }} matching active vehicles. Search by name or number to find any other.</p>{% elif kit.choice.to_q and not kit.choice.vehicles %}<p class="kit-location-note">No active vehicle matches that search.</p>{% endif %}
+      <p><button type="submit" class="button">Show compartments</button></p>
+    </form>
+    <form method="post" action="{% url 'kit-instance-locations' %}" class="admin-form">
       {% csrf_token %}
       <input type="hidden" name="stage" value="save">
       <input type="hidden" name="operation_id" value="{{ kit.operation_id }}">
@@ -48,14 +65,16 @@
         <select id="kit-target-{{ kit.id }}" name="target"{% if kit.message %} aria-describedby="kit-message-{{ kit.id }}"{% else %} data-focus-on-load{% endif %}{% if kit.invalid %} aria-invalid="true"{% endif %}>
           {% if not kit.current %}<option value=""{% if not kit.selected %} selected{% endif %}>Keep current location</option>{% endif %}
           <option value="{{ stock }}"{% if kit.selected == stock %} selected{% endif %}>Unassigned stock</option>
-          {% for group in groups %}<optgroup label="{{ group.label }}">{% for option in group.options %}<option value="{{ option.value }}"{% if kit.selected == option.value %} selected{% endif %}>{{ group.label }}: {{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
+          {% if kit.choice.options %}<optgroup label="{{ kit.choice.vehicle_label }}">{% for option in kit.choice.options %}<option value="{{ option.value }}"{% if kit.selected == option.value %} selected{% endif %}>{{ kit.choice.vehicle_label }}: {{ option.label }}</option>{% endfor %}</optgroup>{% endif %}
         </select></p>
+      {% if kit.choice.to and not kit.choice.options %}<p class="kit-location-note">{{ kit.choice.vehicle_label }} has no compartments to choose.</p>{% elif not kit.choice.to %}<p class="kit-location-note">Choose a vehicle and Show compartments to move the kit onto a vehicle.</p>{% endif %}
       <div class="kit-location-actions">
         <button type="submit" class="button primary">Save</button>
         <button type="reset" class="button">Reset</button>
         <a href="{% url 'kit-instance-locations' %}{{ list_query }}#kit-{{ kit.id }}">Cancel</a>
       </div>
     </form>
+    </div>
     {% elif kit.movable %}
     <p class="kit-location-form"><a class="button" href="{% url 'kit-instance-locations' %}{{ query_prefix }}edit={{ kit.id }}#kit-{{ kit.id }}" aria-describedby="kit-name-{{ kit.id }}">Change location</a></p>
     {% else %}

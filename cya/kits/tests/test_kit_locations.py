@@ -346,3 +346,55 @@ class KitLocationTests(KitAdminCase):
         supervisor, _ = self.harness.sign_in("supervisor")
         page = supervisor.get(URL, {"saved": operation_id})
         self.assertNotContains(page, "Saved:")
+
+    # Beyond the vehicle-list bound (PR #295 review, Codex P2)
+
+    def test_a_kit_past_the_vehicle_limit_shows_its_compartment_not_retired(self):
+        # Vehicles sort "Synthetic A", "Synthetic B"; a limit of 1 leaves B off every list.
+        with mock.patch("cya.kits.location_views.VEHICLE_LIMIT", 1):
+            page = self.client_.get(URL, {"q": "kit on B"})
+        self.assertContains(page, f"Current location: {self.vehicle_b.display_name}")
+        self.assertContains(page, self.cabinet_b.label)
+        self.assertNotContains(page, "(retired compartment)")
+        self.assertContains(page, "The location list shows the first 1 vehicles.")
+
+    def test_any_active_vehicle_can_be_chosen_past_the_limit(self):
+        with mock.patch("cya.kits.location_views.VEHICLE_LIMIT", 1):
+            opened = self.client_.get(URL, {"edit": self.on_a})
+            self.assertContains(opened, "Showing the first 1 matching active vehicles.")
+            self.assertNotContains(opened, f'<option value="{self.vehicle_b.pk}"')
+            found = self.client_.get(URL, {"edit": self.on_a, "to_q": self.vehicle_b.display_name})
+            self.assertContains(found, f'<option value="{self.vehicle_b.pk}"')
+            chosen = self.client_.get(URL, {"edit": self.on_a, "to": str(self.vehicle_b.pk)})
+            self.assertContains(chosen, f'value="{self.target(self.vehicle_b)}"')
+            saved = self.save(self.on_a, self.target(self.vehicle_b))
+        self.assertEqual(saved.status_code, 302)
+        self.assertEqual(KitInstance.objects.get(pk=self.on_a).vehicle_id, self.vehicle_b.pk)
+
+    def test_the_open_row_offers_only_the_chosen_vehicles_compartments(self):
+        opened = self.client_.get(URL, {"edit": self.on_a})
+        self.assertContains(opened, f'value="{self.target(self.vehicle)}" selected')
+        self.assertNotContains(opened, f'value="{self.target(self.vehicle_b)}"')
+        other = self.client_.get(URL, {"edit": self.on_a, "to": str(self.vehicle_b.pk)})
+        self.assertContains(other, f'value="{self.target(self.vehicle_b)}"')
+        self.assertNotContains(other, f'value="{self.target(self.vehicle)}"')
+        stock = self.client_.get(URL, {"edit": self.in_stock})
+        self.assertContains(stock, '<option value="" selected>(choose a vehicle)</option>')
+        self.assertContains(stock, '<option value="stock" selected>Unassigned stock</option>')
+
+    def test_a_retired_compartment_is_marked_and_kept_until_moved(self):
+        Compartment.objects.create(
+            organization=self.org,
+            vehicle=self.vehicle,
+            stable_slot_id=self.cabinet.stable_slot_id,
+            revision=2,
+            label=self.cabinet.label,
+            effective_at=self.cabinet.effective_at,
+            retired=True,
+        )
+        page = self.client_.get(URL, {"edit": self.on_a})
+        self.assertContains(page, "(retired compartment)")
+        self.assertContains(page, '<option value="" selected>Keep current location</option>')
+        refused = self.save(self.on_a, f"{self.vehicle.pk}:{self.cabinet.pk}")
+        self.assertEqual(refused.status_code, 400)  # a retired compartment is never offered
+        self.assertEqual(self.save(self.on_a, "stock").status_code, 302)
