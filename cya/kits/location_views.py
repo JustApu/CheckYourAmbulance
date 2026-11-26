@@ -298,6 +298,20 @@ def _page(
     for row in rows:
         if row["editing"]:
             row["choice"] = _choice(org, row, to, to_q)
+            offered = {STOCK} | {option["value"] for option in row["choice"]["options"]}
+            # When the selected value is not an option (a place that cannot be offered again,
+            # or another vehicle chosen in the first step), an explicit empty choice is shown
+            # selected. Otherwise the browser would select the first option, stock, and an
+            # untouched Save would move the kit there (PR #295 review, Codex P2). The server
+            # treats an empty choice as "nothing to save", never as stock.
+            row["placeholder"] = (
+                None
+                if row["selected"] in offered
+                # A place that can never be offered again; otherwise, another vehicle.
+                else "Keep current location"
+                if not row["current"]
+                else "Choose a destination"
+            )
     page_message = row_message if row_message and not any(r["message"] for r in rows) else None
     searched = bool(filters["q"] or filters["location"])
     title = "Find and move physical kits"

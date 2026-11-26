@@ -63,7 +63,7 @@
       {% if filters.page %}<input type="hidden" name="page" value="{{ filters.page }}">{% endif %}
       <p><label for="kit-target-{{ kit.id }}">Move {{ kit.label }} to</label><br>
         <select id="kit-target-{{ kit.id }}" name="target"{% if kit.message %} aria-describedby="kit-message-{{ kit.id }}"{% else %} data-focus-on-load{% endif %}{% if kit.invalid %} aria-invalid="true"{% endif %}>
-          {% if not kit.current %}<option value=""{% if not kit.selected %} selected{% endif %}>Keep current location</option>{% endif %}
+          {% if kit.placeholder %}<option value="" selected>{{ kit.placeholder }}</option>{% endif %}
           <option value="{{ stock }}"{% if kit.selected == stock %} selected{% endif %}>Unassigned stock</option>
           {% if kit.choice.options %}<optgroup label="{{ kit.choice.vehicle_label }}">{% for option in kit.choice.options %}<option value="{{ option.value }}"{% if kit.selected == option.value %} selected{% endif %}>{{ kit.choice.vehicle_label }}: {{ option.label }}</option>{% endfor %}</optgroup>{% endif %}
         </select></p>

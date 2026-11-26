@@ -398,3 +398,29 @@ class KitLocationTests(KitAdminCase):
         refused = self.save(self.on_a, f"{self.vehicle.pk}:{self.cabinet.pk}")
         self.assertEqual(refused.status_code, 400)  # a retired compartment is never offered
         self.assertEqual(self.save(self.on_a, "stock").status_code, 302)
+
+    # Switching vehicle never defaults the destination to stock (PR #295 review, Codex P2)
+
+    def test_switching_vehicle_selects_an_empty_destination_not_stock(self):
+        switched = self.client_.get(URL, {"edit": self.on_a, "to": str(self.vehicle_b.pk)})
+        body = switched.content.decode()
+        self.assertIn('<option value="" selected>Choose a destination</option>', body)
+        self.assertIn('<option value="stock">Unassigned stock</option>', body)
+        target = re.search(
+            r'<select id="kit-target-[^"]+" name="target"[^>]*>(.*?)</select>', body, re.S
+        )
+        self.assertEqual(target.group(1).count(" selected"), 1)  # exactly one, the placeholder
+
+    def test_an_untouched_save_after_switching_vehicle_moves_nothing(self):
+        before = KitAssignmentEvent.objects.count()
+        # What the browser submits for the untouched destination: the empty placeholder.
+        response = self.save(self.on_a, "")
+        self.assertContains(response, "Nothing to save", status_code=400)
+        self.assertEqual(KitAssignmentEvent.objects.count(), before)
+        self.assertEqual(KitInstance.objects.get(pk=self.on_a).vehicle_id, self.vehicle.pk)
+
+    def test_the_current_place_stays_selected_without_a_placeholder(self):
+        opened = self.client_.get(URL, {"edit": self.on_a})
+        self.assertContains(opened, f'value="{self.target(self.vehicle)}" selected')
+        self.assertNotContains(opened, "Choose a destination")
+        self.assertNotContains(opened, "Keep current location")
