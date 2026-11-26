@@ -11,7 +11,7 @@ from cya.accounts.models import Organization
 from cya.checklists.models import Compartment, KitInstance, Vehicle
 from cya.core.audit_commands import CommandDenied
 from cya.core.models import AuditEvent
-from cya.kits.commands import KitError, add_kit_instance, record_kit_assignment
+from cya.kits.commands import KitChanged, KitError, add_kit_instance, record_kit_assignment
 from cya.kits.models import KitAssignmentEvent
 from cya.kits.tests.support import KitCase
 
@@ -190,6 +190,51 @@ class AssignKitTests(KitCase):
         foreign = KitInstance.objects.create(organization=other, label="Foreign")
         with self.assertRaises(KitError):
             self.move(str(foreign.pk), self.vehicle)
+
+    def assign(self, vehicle, expected_event_id, **context):
+        return record_kit_assignment(
+            kit_id=self.kit_id,
+            active=True,
+            vehicle_id=str(vehicle.pk) if vehicle else None,
+            compartment_id=str(self.compartment_of(vehicle).pk) if vehicle else None,
+            expected_event_id=expected_event_id,
+            **(context or self.context(self.supervisor)),
+        )
+
+    def test_an_expected_event_that_is_still_latest_allows_the_move(self):
+        # Issue #277: the global list sends the event it showed; a direct move is one event.
+        shown = str(self.events()[-1].pk)
+        self.assign(self.vehicle_b, shown)
+        first, second = self.events()
+        self.assertEqual((second.prior_event_id, second.vehicle_id), (first.pk, self.vehicle_b.pk))
+        audit = AuditEvent.objects.get(action="KIT_ASSIGNMENT_RECORD", outcome="SUCCEEDED")
+        self.assertEqual(audit.prior_snapshot["values"]["event_id"], shown)
+
+    def test_a_stale_expected_event_is_refused_and_writes_nothing(self):
+        shown = str(self.events()[-1].pk)
+        self.move(self.kit_id, self.vehicle_b)  # changed after it was shown
+        with mock.patch("cya.kits.commands.reconcile_vehicle") as reconcile:
+            with self.assertRaises(KitChanged):
+                self.assign(None, shown)  # to stock, from a stale screen
+            reconcile.assert_not_called()
+        self.assertEqual(len(self.events()), 2)
+        self.assertEqual(KitInstance.objects.get(pk=self.kit_id).vehicle_id, self.vehicle_b.pk)
+        failed = AuditEvent.objects.filter(action="KIT_ASSIGNMENT_RECORD", outcome="FAILED")
+        self.assertEqual(failed.count(), 1)
+        with self.assertRaises(ValueError):  # not a canonical id
+            self.assign(None, "not-an-id")
+
+    def test_the_expected_event_is_part_of_the_request_digest(self):
+        # The same operation id with another expected event is a different request: the
+        # earlier result is replayed, marked reused, and nothing more is written.
+        context = self.context(self.supervisor)
+        shown = str(self.events()[-1].pk)
+        first = self.assign(self.vehicle_b, shown, **context)
+        again = self.assign(self.vehicle_b, str(uuid4()), **context)
+        self.assertTrue(again.replayed)
+        self.assertTrue(again.operation_reused)
+        self.assertFalse(first.operation_reused)
+        self.assertEqual(len(self.events()), 2)
 
     def test_a_replay_changes_nothing_and_triggers_no_reconciliation(self):
         context = self.context(self.supervisor)

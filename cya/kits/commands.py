@@ -43,6 +43,10 @@ class KitError(ValueError):
     """A rule was violated; the command rolls back and is audited as failed."""
 
 
+class KitChanged(KitError):
+    """The kit's assignment changed after the caller read it; nothing was recorded (issue #277)."""
+
+
 def _authorize(organization_id, actor_id):
     backend = DatabaseRoleBackend()
 
@@ -257,17 +261,31 @@ def add_kit_instance(*, label, vehicle_id=None, compartment_id=None, definition_
 
 
 def record_kit_assignment(
-    *, kit_id, active, vehicle_id=None, compartment_id=None, expected_vehicle_id=None, **context
+    *,
+    kit_id,
+    active,
+    vehicle_id=None,
+    compartment_id=None,
+    expected_vehicle_id=None,
+    expected_event_id=None,
+    **context,
 ):
     """Move a kit instance to a compartment of a vehicle (active), or deactivate it (not on any).
 
     Deactivating names no vehicle or compartment. Re-activating or moving names both. A move
-    to another vehicle is a removal from the first and an addition to the second (TIME-1a).
+    to another vehicle is a removal from the first and an addition to the second (TIME-1a):
+    one appended event ends the old placement and starts the new one at the same instant.
+
+    expected_event_id, when given, is the latest assignment event the caller showed. If the
+    kit's latest event is any other, the command raises KitChanged and records nothing, so a
+    stale screen cannot overwrite a move made since it was read (issue #277).
     """
     org = context["organization_id"]
     canonical_id(kit_id)
     if expected_vehicle_id is not None:
         canonical_id(expected_vehicle_id)
+    if expected_event_id is not None:
+        canonical_id(expected_event_id)
     if type(active) is not bool:
         raise KitError("active must be true or false")
     if active and (vehicle_id is None) != (compartment_id is None):
@@ -299,7 +317,9 @@ def record_kit_assignment(
             .first()
         )
         if prior.pk != previous.pk:
-            raise KitError("kit instance changed while locking; retry")
+            raise KitChanged("kit instance changed while locking; retry")
+        if expected_event_id is not None and str(prior.pk) != expected_event_id:
+            raise KitChanged("kit instance assignment changed since it was read")
         if expected_vehicle_id is not None and (
             not prior.active or str(prior.vehicle_id or "") != expected_vehicle_id
         ):
@@ -361,4 +381,7 @@ def record_kit_assignment(
     }
     if expected_vehicle_id is not None:
         request["expected_vehicle_id"] = expected_vehicle_id
+    if expected_event_id is not None:
+        # Only when given, so the digest of an existing kind of request is unchanged.
+        request["expected_event_id"] = expected_event_id
     return _execute(context, ASSIGN_COMMAND, request, build, lambda body: body["vehicle_ids"])

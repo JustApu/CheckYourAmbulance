@@ -17,6 +17,7 @@ from cya.kits import (
     definition_admin_views,
     inventory_views,
     kit_instance_views,
+    location_views,
     position_views,
     vehicle_views,
 )
@@ -160,6 +161,11 @@ urlpatterns = [
         "administration/kit-instances/",
         inventory_views.inventory,
         name="kit-instance-inventory",
+    ),
+    path(
+        "administration/kit-instances/locations/",
+        location_views.kit_locations,
+        name="kit-instance-locations",
     ),
     path(
         "administration/kit-instances/vehicles/",

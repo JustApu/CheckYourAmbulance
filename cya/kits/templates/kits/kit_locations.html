@@ -1,0 +1,82 @@
+{% extends "shell/base.html" %}
+{% block main_class %} class="main-wide"{% endblock %}
+{% block content %}
+{% if page_message %}{% if page_message.kind == "saved" %}<p class="save-state save-state-saved" role="status" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ page_message.text }}</span></p>{% else %}<p class="banner banner-error" role="alert" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ page_message.text }}</p>{% endif %}{% endif %}
+{% if error %}<p class="banner banner-error" role="alert"><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ error }}</p>{% endif %}
+
+<div class="kit-locations">
+<p>Find any active physical kit, including unassigned stock, and move it to stock or to a compartment of an active vehicle. A move from one vehicle to another is saved as one change and does not pass through stock. <a href="{% url 'kit-instance-inventory' %}">Create physical kits</a> in the inventory first.</p>
+
+<form method="get" action="{% url 'kit-instance-locations' %}" role="search" class="admin-form kit-location-search" aria-label="Find physical kits">
+  <p><label for="kit-location-search">Search by kit label, kit type, vehicle or compartment</label><br>
+    <input id="kit-location-search" name="q" type="search" maxlength="{{ max_query }}" value="{{ filters.q }}" autocomplete="off"></p>
+  <p><label for="kit-location-filter">Location</label><br>
+    <select id="kit-location-filter" name="location">
+      <option value="">All locations</option>
+      <option value="{{ stock }}"{% if filters.location == stock %} selected{% endif %}>Unassigned stock</option>
+      {% for vehicle in vehicles %}<option value="{{ vehicle.id }}"{% if filters.location == vehicle.id %} selected{% endif %}>{{ vehicle.display_name }}{% if vehicle.number %} ({{ vehicle.number }}){% endif %}{% if not vehicle.active %} (inactive){% endif %}</option>{% endfor %}
+    </select></p>
+  <p><button type="submit" class="button">Search kits</button>{% if searched %} <a href="{% url 'kit-instance-locations' %}">Show all kits</a>{% endif %}</p>
+</form>
+
+{% if filter_error %}
+<p class="banner banner-error" role="alert" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ filter_error }}</p>
+<p>The kit list is hidden until you correct the search.</p>
+{% else %}
+<h2 id="kit-locations-heading">Physical kits</h2>
+<p class="kit-location-result" role="status">{% if searched %}{{ total }} matching physical kit{{ total|pluralize }}{% else %}{{ total }} active physical kit{{ total|pluralize }}{% endif %}{% if page.paginator.num_pages > 1 %}; page {{ page.number }} of {{ page.paginator.num_pages }}, {{ page_size }} per page{% endif %}.</p>
+{% if rows %}
+<ul class="kit-location-list" aria-labelledby="kit-locations-heading">
+  {% for kit in rows %}
+  <li class="kit-location-row" id="kit-{{ kit.id }}">
+    <div class="kit-location-details">
+      <h3>{{ kit.label }}</h3>
+      <p>Kit type: {{ kit.kit_type }}</p>
+      <p>Current location: {% if kit.vehicle %}{{ kit.vehicle }}{% if kit.vehicle_inactive %} (inactive vehicle){% endif %}, {{ kit.compartment }}{% else %}Unassigned stock{% endif %}</p>
+    </div>
+    <form method="post" action="{% url 'kit-instance-locations' %}" class="kit-location-form admin-form">
+      {% csrf_token %}
+      <input type="hidden" name="stage" value="save">
+      <input type="hidden" name="operation_id" value="{{ kit.operation_id }}">
+      <input type="hidden" name="kit_id" value="{{ kit.id }}">
+      <input type="hidden" name="expected_event" value="{{ kit.expected_event }}">
+      {% if filters.q %}<input type="hidden" name="q" value="{{ filters.q }}">{% endif %}
+      {% if filters.location %}<input type="hidden" name="location" value="{{ filters.location }}">{% endif %}
+      {% if filters.page %}<input type="hidden" name="page" value="{{ filters.page }}">{% endif %}
+      <p><label for="kit-target-{{ kit.id }}">Move {{ kit.label }} to</label><br>
+        <select id="kit-target-{{ kit.id }}" name="target">
+          {% if not kit.current %}<option value=""{% if not kit.selected %} selected{% endif %}>Keep current location</option>{% endif %}
+          <option value="{{ stock }}"{% if kit.selected == stock %} selected{% endif %}>Unassigned stock</option>
+          {% for group in groups %}<optgroup label="{{ group.label }}">{% for option in group.options %}<option value="{{ option.value }}"{% if kit.selected == option.value %} selected{% endif %}>{{ group.label }}: {{ option.label }}</option>{% endfor %}</optgroup>{% endfor %}
+        </select></p>
+      <div class="kit-location-actions">
+        <button type="submit" class="button primary">Save</button>
+        <button type="reset" class="button">Reset</button>
+      </div>
+    </form>
+    {% if kit.message %}{% if kit.message.kind == "saved" %}<p class="save-state save-state-saved kit-location-message" role="status" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#10003;</span> <span class="save-state-text">{{ kit.message.text }}</span></p>{% else %}<p class="banner banner-error kit-location-message" role="alert" tabindex="-1" data-focus-on-load><span class="indicator-icon" aria-hidden="true">&#9888;</span> {{ kit.message.text }}</p>{% endif %}{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if page.has_previous or page.has_next %}
+<nav class="kit-location-pages" aria-label="Physical kit pages">
+  {% if page.has_previous %}<a class="button" href="{% url 'kit-instance-locations' %}{{ previous_query }}">Previous page</a>{% endif %}
+  {% if page.has_next %}<a class="button" href="{% url 'kit-instance-locations' %}{{ next_query }}">Next page</a>{% endif %}
+</nav>
+{% endif %}
+{% elif searched %}<p>No active physical kits match that search.</p>
+{% else %}<p>There are no active physical kits yet. Create one in the <a href="{% url 'kit-instance-inventory' %}">physical kit inventory</a>.</p>
+{% endif %}
+{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+// Move focus to the one saved, refused or invalid-search message so it is read first (as in
+// role administration). The server renders at most one; without script it is still shown.
+(function () {
+  var message = document.querySelector("[data-focus-on-load]");
+  if (message) { message.focus(); }
+})();
+</script>
+{% endblock %}
