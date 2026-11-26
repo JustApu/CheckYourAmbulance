@@ -136,7 +136,7 @@ successful form reloads the page (issue #235 A1), so the next form always carrie
 scope, absent deadline, invalid dates, transition changes and permission denial. An empty scope
 on the repair form says there are no current items left to verify and to ask a supervisor or
 administrator to close the deficiency; for a Supervisor or Administrator it says to refresh the
-page and use "Close: no current verification items" (issue #21). That form is offered only when
+page and use "Close when there are no items to check" (issue #21). That form is offered only when
 nothing is left to verify (issue #235 A3), in place of the repair form; while an item is still on
 the checklist it is not shown, and the server still refuses it (`SCOPE_AVAILABLE`). That form requires an explanation and answers `SCOPE_AVAILABLE` ("record the repair
 instead"), `DEFICIENCY_CHANGED` and `INVALID_TRANSITION` with their own messages. Other forms

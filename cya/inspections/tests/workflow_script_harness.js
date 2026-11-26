@@ -566,7 +566,7 @@ function generic(kind) {
     run.form.fire("submit");
     response(run.posts()[0], 422, {status: "REJECTED", code: "EMPTY_SCOPE"}); await tick();
     const text = run.form.querySelector(".workflow-result").textContent;
-    assert(text.includes("Close: no current verification items"), text);
+    assert(text.includes("Close when there are no items to check"), text);
     assert(!text.includes("Ask a supervisor"), text);
   }
   {
@@ -795,7 +795,7 @@ function generic(kind) {
     const body = run.posts()[0].body;
     assert.deepEqual(body.items, [{item_id: "item-1"}, {item_id: "item-2", kit_instance_id: "kit-9"}]); assert(!("explanation" in body));
     response(run.posts()[0], 409, {status: "REJECTED", code: "ITEM_NOT_IN_SCOPE"}); await tick();
-    assert(run.form.querySelector(".workflow-result").textContent.includes("This item is not part of the problem. Refresh the list."));
+    assert(run.form.querySelector(".workflow-result").textContent.includes("An item you chose is not part of this problem. Refresh this page."));
   }
   {
     // SUS-5: one suspension per form; the explanation is optional and sent only when given.

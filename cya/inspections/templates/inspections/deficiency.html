@@ -19,7 +19,7 @@
 <dt>Age since original report</dt><dd>{{ age_days }} days · {{ deadline.extension_count }} extension requests{% if deadline.long_running %} · Long-running{% endif %}</dd>
 {% if status == "Pending Verification" %}<dt>Verification progress</dt><dd>{{ verification_progress.verified }} of {{ verification_progress.total }} verified · {{ verification_progress.outstanding }} outstanding</dd>{% endif %}
 </dl>
-{% if dependency %}<p>Work waiting on: {{ dependency.explanation }}</p><p>Next update: {% if dependency.follow_up_at %}{{ dependency.follow_up_at|station_time }}{% else %}Not set{% endif %}. The app will not send a reminder.</p>{% endif %}
+{% if dependency %}<p>Work waiting on: {{ dependency.explanation }}</p><p>Follow-up: {% if dependency.follow_up_at %}{{ dependency.follow_up_at|station_time }}{% else %}Not set{% endif %}. The app will not send a reminder.</p>{% endif %}
 </section>
 <section class="panel deficiency-next-action" aria-labelledby="next-action-title">
 <h2 id="next-action-title">Next action</h2>
@@ -48,7 +48,7 @@
 {% elif status == "Open" %}
 <p>A supervisor or administrator can start work. Use Work updates below to record what work is waiting on or add a progress note.</p>
 {% elif dependency %}
-<p>Work is waiting on the item above. Check its next update date. The app will not send a reminder.</p>
+<p>Work is waiting on the item above. Check its follow-up date. The app will not send a reminder.</p>
 {% else %}
 <p>Review the current status and history below for the next update.</p>
 {% endif %}

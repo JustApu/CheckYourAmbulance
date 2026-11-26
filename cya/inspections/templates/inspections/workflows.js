@@ -51,7 +51,7 @@
     INVALID_EXTENSION_DATE: "Choose a future date later than the current deadline.",
     NO_DEADLINE: "A supervisor must set a deadline before an extension can be requested.",
     INVALID_FOLLOW_UP: "Choose a future follow-up date.",
-    DEPENDENCY_UNCHANGED: "Change what work is waiting on or its next update date.",
+    DEPENDENCY_UNCHANGED: "Change what work is waiting on or its follow-up date.",
     NO_ACTIVE_DEPENDENCY: "The waiting work has ended. Refresh history.",
     DEPENDENCY_ALREADY_RECORDED: "Waiting work is already recorded. Refresh to update it.",
     MALFORMED_REQUEST: "Check the form values and try again.",
@@ -70,7 +70,7 @@
     ALREADY_IN_SCOPE: "An item you chose is already in the verification scope.",
     ALREADY_SUSPENDED: "An item you chose is already suspended for this problem.",
     ITEM_NOT_IN_CHECKLIST: "An item you chose is no longer on the vehicle's checklist. Refresh.",
-    ITEM_NOT_IN_SCOPE: "This item is not part of the problem. Refresh the list.",
+    ITEM_NOT_IN_SCOPE: "An item you chose is not part of this problem. Refresh this page.",
     KIT_REQUIRED: "Choose the specific kit that contains this item. Refresh the list.", KIT_NOT_ALLOWED: "That item is not in a kit. Refresh.",
     TOO_MANY_SUSPENSIONS: "Too many suspensions at once. Choose fewer items.",
     SUSPENSION_ALREADY_ENDED: "This suspension has already ended. Refresh history.",
@@ -85,7 +85,7 @@
     // The repair form carries data-can-close-empty when this user may use the empty-scope close
     // (issue 21). The close is offered only once nothing is left to verify (issue #235 A3), so a
     // scope that emptied after the page loaded needs a refresh to show it.
-    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Refresh this page, then use \u201cClose: no current verification items\u201d."},
+    "repair-closable": {EMPTY_SCOPE: "There are no current checklist items left to verify for this problem, so a repair cannot be recorded. Refresh this page, then use \u201cClose when there are no items to check\u201d."},
     "empty-scope-close": {
       SCOPE_AVAILABLE: "Current verification items exist; record the repair instead.",
       INVALID_TRANSITION: "This problem's status changed. Refresh its history."
