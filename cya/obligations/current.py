@@ -122,7 +122,9 @@ class CurrentFacts(dict):
     applicable to its read. Equality is the plain dict's, so the facts compare as before.
     """
 
-    __slots__ = ("evidence",)
+    # instants: the sorted evidence instants the evaluator compares the read instant with,
+    # computed once for a cached row by the evaluated-state cache (issue #278 Part I).
+    __slots__ = ("evidence", "instants")
 
 
 def _evidence(facts, statuses=(), activities=()):
@@ -180,6 +182,53 @@ class _FactsCache:
 
 FACTS_CACHE = _FactsCache()
 FETCH_BATCH = 2000  # stored facts fetched per query on a cache miss
+
+# Evaluated states of cached rows (issue #278 Part I): {(obligation id, facts digest, applicable
+# status event id, applicable activity event id): (state, valid from, valid until)}. The same
+# bounded least-recently-used map as the facts cache, sized by CYA_CURRENT_STATES_CACHE_ROWS.
+STATES_CACHE = _FactsCache()
+
+
+def evidence_instants(evidence):
+    """Every instant of this evidence that evaluate_obligation compares the read instant with.
+
+    The evaluator reads the instant T only through comparisons with these (E, D and G; check,
+    determination, rule, suspension and seal instants; L is added although only the read's own
+    Missed rule compares with it). A status or activity event is compared at min(D, T), so its
+    own instant matters only through D and through which event applies, which the cache key
+    names. The list is deliberately over-inclusive: an extra instant only ends an entry sooner.
+    """
+    obligation, checks, determinations, suspensions, _statuses, seals, inspections, _a = evidence
+    found = {obligation.recorded_at, obligation.early_at, obligation.due_at, obligation.grace_at}
+    found.add(obligation.late_limit_at)
+    for check in checks:
+        found.update((check.recorded_at, check.voided_at))
+        if check.na_rule is not None:
+            found.update((check.na_rule.recorded_at, check.na_rule.effective_at))
+    for determination in determinations:
+        found.add(determination.recorded_at)
+        if determination.rule is not None:
+            found.update((determination.rule.recorded_at, determination.rule.effective_at))
+    for suspension in suspensions:
+        found.update((suspension.recorded_at, suspension.ended_at))
+    for seal in (*seals, *inspections):
+        found.add(seal.recorded_at)
+    found.discard(None)
+    return tuple(sorted(found))
+
+
+def state_validity(instants, instant):
+    """(valid from, valid until) of a state evaluated at `instant`, or None if it is a boundary.
+
+    Between two consecutive instants every comparison the evaluator makes has the same result,
+    so a state evaluated at T holds for every T' with T <= T' < the next instant after T (None:
+    no later instant, so it holds from T on). At an instant itself a comparison such as
+    T <= G may differ from just after it, so a state evaluated exactly there is not cached.
+    """
+    index = bisect_right(instants, instant)
+    if index and instants[index - 1] == instant:
+        return None
+    return instant, instants[index] if index < len(instants) else None
 
 
 def facts_digest():
@@ -254,6 +303,10 @@ def evaluate_facts(facts, instant):
             tuple(_restore(StatusEvidence, r) for r in facts.get("statuses", ())),
             tuple(_restore(ActivityEvidence, r) for r in facts.get("activities", ())),
         )
+    return _evaluate(evidence, instant)
+
+
+def _evaluate(evidence, instant):
     obligation, checks, determinations, suspensions, statuses, seals, inspections, activities = (
         evidence
     )
@@ -552,22 +605,14 @@ def attach_status_fact(facts, vehicle_id, due_at, instant, timelines, activity_t
     return result
 
 
-def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False, item_ids=None):
-    """Read current facts, or return None for a missing, partially selected or outdated cache.
+def _current_read(
+    organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False, item_ids=None
+):
+    """The reads behind current_rows and current_states (see current_rows), or None.
 
-    Comparing all in-scope source IDs protects first deployment/recovery from a partial
-    cache. Selection flags are transactional projection facts; the immutable selection stream
-    is re-read only when a row refreshed after the captured instant may be newer than it.
-    Rows refreshed after the captured instant are replayed individually at that instant.
-    Historical requests never call this function. No cache population occurs in a reader.
-
-    With item_ids, both the source and the projection reads are limited to those items'
-    obligations, so a one-row checklist read does not load the vehicle's whole window
-    (issue #278 Part H). Every check above then holds per item: the result is the full
-    read's rows for those items. Only the row bound sees fewer rows.
+    Returns (rows, selected, newer, stored, replayed, status timelines, activity timelines).
     """
     aware(instant)
-    vehicle_ids = [str(v) for v in vehicle_ids]
     if len(vehicle_ids) > 50:
         raise ValueError("current projection accepts at most 50 vehicles")
     start, end = instant - timedelta(days=7), instant + timedelta(hours=48)
@@ -665,6 +710,34 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
         page_limit,
     )
     activity_timelines = activity_timeline(activities)
+    return rows, selected, newer, stored, replayed, timelines, activity_timelines
+
+
+def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=False, item_ids=None):
+    """Read current facts, or return None for a missing, partially selected or outdated cache.
+
+    Comparing all in-scope source IDs protects first deployment/recovery from a partial
+    cache. Selection flags are transactional projection facts; the immutable selection stream
+    is re-read only when a row refreshed after the captured instant may be newer than it.
+    Rows refreshed after the captured instant are replayed individually at that instant.
+    Historical requests never call this function. No cache population occurs in a reader.
+
+    With item_ids, both the source and the projection reads are limited to those items'
+    obligations, so a one-row checklist read does not load the vehicle's whole window
+    (issue #278 Part H). Every check above then holds per item: the result is the full
+    read's rows for those items. Only the row bound sees fewer rows.
+    """
+    vehicle_ids = [str(v) for v in vehicle_ids]
+    read = _current_read(
+        organization_id,
+        vehicle_ids,
+        instant,
+        include_all_ad_hoc=include_all_ad_hoc,
+        item_ids=item_ids,
+    )
+    if read is None:
+        return None
+    rows, selected, newer, stored, replayed, timelines, activity_timelines = read
     result = {v: [] for v in vehicle_ids}
     for oid, vehicle, _digest, _newer, _selected in rows:
         if oid not in selected:
@@ -677,4 +750,75 @@ def current_rows(organization_id, vehicle_ids, instant, *, include_all_ad_hoc=Fa
         )
     for found in result.values():
         _bounded(found)
+    return result
+
+
+def current_states(organization_id, vehicle_ids, instant):
+    """{vehicle id: [(facts, state at instant), ...]} for the window, or None like current_rows.
+
+    The rows, their order and every fallback are current_rows' own; each state equals
+    evaluate_facts of the row current_rows returns. For readers that need the evaluated states
+    (the readiness picture, issue #278 Part I). A row served from stored facts is evaluated at
+    most once while its state cannot change: its state is cached under the row's content digest
+    and the status and activity events that apply to it, until the next instant of its evidence
+    (state_validity). The facts given back are the stored ones, without the read's status and
+    activity attached; replayed rows are evaluated as current_rows would give them, and are
+    never cached.
+    """
+    vehicle_ids = [str(v) for v in vehicle_ids]
+    read = _current_read(organization_id, vehicle_ids, instant)
+    if read is None:
+        return None
+    rows, selected, newer, stored, replayed, timelines, activity_timelines = read
+    limit = settings.CYA_CURRENT_STATES_CACHE_ROWS
+    wanted = []
+    for oid, vehicle, digest, _newer, _selected in rows:
+        if oid not in selected:
+            continue
+        if oid in newer:
+            facts = attach_status_fact(
+                replayed[oid],
+                vehicle,
+                _due_at(replayed[oid]),
+                instant,
+                timelines,
+                activity_timelines,
+            )
+            wanted.append((str(vehicle), facts, None, None))
+            continue
+        facts = stored[str(oid)]
+        due_at = _due_at(facts)
+        _status, statuses = _at(timelines, vehicle, due_at, instant)
+        _activity, activities = _at(activity_timelines, vehicle, due_at, instant)
+        key = (
+            str(oid),
+            digest,
+            statuses[0].id if statuses else None,
+            activities[0].id if activities else None,
+        )
+        wanted.append((str(vehicle), facts, key, (statuses, activities)))
+    found = STATES_CACHE.lookup(w[2] for w in wanted if w[2] is not None) if limit > 0 else {}
+    result, fresh = {v: [] for v in vehicle_ids}, {}
+    for vehicle, facts, key, events in wanted:
+        if key is None:
+            result[vehicle].append((facts, evaluate_facts(facts, instant)))
+            continue
+        entry = found.get(key)
+        if entry is not None:
+            state, valid_from, valid_until = entry
+            if valid_from <= instant and (valid_until is None or instant < valid_until):
+                result[vehicle].append((facts, state))
+                continue
+        evidence = facts.evidence
+        state = _evaluate((*evidence[:4], events[0], *evidence[5:7], events[1]), instant)
+        result[vehicle].append((facts, state))
+        instants = getattr(facts, "instants", None)
+        if instants is None:
+            instants = facts.instants = evidence_instants(evidence)
+        validity = state_validity(instants, instant)
+        if validity is not None:
+            fresh[key] = (state, *validity)
+    STATES_CACHE.store(fresh, limit)
+    for states in result.values():
+        _bounded(states)
     return result

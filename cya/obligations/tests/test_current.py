@@ -19,11 +19,15 @@ from cya.checks.commands import correct_check, invalidate_chain
 from cya.checks.state import CheckDecision, CheckSnapshot
 from cya.obligations import current as current_module
 from cya.obligations.current import (
+    _evaluate,
     attach_status_fact,
     compile_history,
     current_rows,
+    current_states,
     evaluate_facts,
+    evidence_instants,
     refresh_obligations,
+    state_validity,
     status_timeline,
 )
 from cya.obligations.history import RecordedCheck, RecordedLink
@@ -31,8 +35,14 @@ from cya.obligations.models import ObligationProjection
 from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import (
     NO_KIT,
+    ActivityEvidence,
+    CheckEvidence,
+    DeterminationEvidence,
     ObligationEvidence,
     ProjectionHistory,
+    RuleEvidence,
+    SealInspectionEvidence,
+    SealSubstitutionEvidence,
     SelectionEvidence,
     State,
     StatusEvidence,
@@ -299,6 +309,175 @@ class CompiledEvidenceTests(SimpleTestCase):
             evaluate_facts({**facts, "version": 100}, at)
 
 
+class StateValidityTests(SimpleTestCase):
+    """Issue #278 Part I: a state evaluated at T holds until the next instant of its evidence."""
+
+    base = datetime(2026, 6, 10, tzinfo=UTC)
+
+    def random_evidence(self, rng, instant):
+        def when():
+            return self.base + timedelta(minutes=rng.randint(-600, 600))
+
+        early = when()
+        due = early + timedelta(minutes=rng.randint(0, 120))
+        grace = due + timedelta(minutes=rng.randint(0, 120))
+        obligation = ObligationEvidence(
+            "o",
+            "org",
+            "v",
+            "i",
+            "r",
+            "p",
+            None,
+            None,
+            self.base - timedelta(days=1),
+            early,
+            due,
+            grace,
+            routine=rng.random() < 0.8,
+            late_limit_at=grace + timedelta(minutes=rng.randint(0, 120)),
+        )
+
+        def rule():
+            return RuleEvidence(f"rule{rng.random()}", when(), when())
+
+        checks = tuple(
+            CheckEvidence(
+                f"c{n}",
+                "org",
+                "v",
+                "i",
+                "o",
+                when(),
+                rng.choice(("PASSED", "FAILED", "UNABLE_TO_INSPECT", "NOT_APPLICABLE")),
+                voided_at=when() if rng.random() < 0.3 else None,
+                na_rule=rule() if rng.random() < 0.5 else None,
+                late_eligible=rng.random() < 0.5,
+            )
+            for n in range(rng.randint(0, 3))
+        )
+        determinations = tuple(
+            DeterminationEvidence(
+                "d",
+                "o",
+                when(),
+                rng.choice(("WAIVED", "INVALIDATED")),
+                rule=rule() if rng.random() < 0.8 else None,
+            )
+            for _ in range(rng.randint(0, 1))
+        )
+        suspensions = tuple(
+            SuspensionEvidence(
+                "o", when(), ended_at=when() if rng.random() < 0.5 else None, suspension_id=f"s{n}"
+            )
+            for n in range(rng.randint(0, 2))
+        )
+        seals = tuple(
+            SealSubstitutionEvidence(f"ss{n}", "org", "o", when(), rng.random() < 0.5)
+            for n in range(rng.randint(0, 1))
+        )
+        inspections = tuple(
+            SealInspectionEvidence(
+                f"si{n}", "org", "o", when(), rng.choice(("PASSED", "FAILED")), rng.random() < 0.5
+            )
+            for n in range(rng.randint(0, 1))
+        )
+        # current_states passes only the status and activity events that apply at min(D, T).
+        cap = min(due, instant)
+        statuses = (
+            (
+                StatusEvidence(
+                    "st",
+                    "v",
+                    1,
+                    cap - timedelta(minutes=rng.randint(0, 600)),
+                    rng.choice(("IN_SERVICE", "OUT_OF_SERVICE")),
+                ),
+            )
+            if rng.random() < 0.5
+            else ()
+        )
+        activities = (
+            (
+                ActivityEvidence(
+                    "ac", "v", 1, cap - timedelta(minutes=rng.randint(0, 600)), rng.random() < 0.7
+                ),
+            )
+            if rng.random() < 0.3
+            else ()
+        )
+        return (
+            obligation,
+            checks,
+            determinations,
+            suspensions,
+            statuses,
+            seals,
+            inspections,
+            activities,
+        )
+
+    def test_a_state_holds_from_its_instant_until_the_next_evidence_instant(self):
+        reused = 0
+        for seed in range(2000):
+            rng = Random(seed)
+            instant = self.base + timedelta(minutes=rng.randint(-700, 700))
+            if rng.random() < 0.2:  # land exactly on an instant of the window
+                instant = self.base + timedelta(minutes=rng.randint(-600, 600))
+            evidence = self.random_evidence(rng, instant)
+            try:
+                state = _evaluate(evidence, instant)
+            except ValueError:
+                continue  # evidence the evaluator itself refuses
+            instants = evidence_instants(evidence)
+            validity = state_validity(instants, instant)
+            with self.subTest(seed=seed):
+                if validity is None:
+                    self.assertIn(instant, instants)
+                    continue
+                valid_from, valid_until = validity
+                self.assertEqual(valid_from, instant)
+                end = valid_until or instant + timedelta(days=60)
+                later = [
+                    instant,
+                    instant + timedelta(microseconds=1),
+                    end - timedelta(microseconds=1),
+                    instant + (end - instant) / 2,
+                ]
+                for other in later:
+                    if instant <= other < end:
+                        self.assertEqual(_evaluate(evidence, other), state)
+                        reused += 1
+        self.assertGreater(reused, 1000)
+
+    def test_a_state_evaluated_exactly_at_an_instant_is_not_cached(self):
+        at = self.base
+        obligation = ObligationEvidence(
+            "o",
+            "org",
+            "v",
+            "i",
+            "r",
+            "p",
+            None,
+            None,
+            at - timedelta(days=1),
+            at - timedelta(hours=2),
+            at - timedelta(hours=1),
+            at,
+            late_limit_at=at + timedelta(hours=1),
+        )
+        evidence = (obligation, (), (), (), (), (), (), ())
+        instants = evidence_instants(evidence)
+        self.assertEqual(_evaluate(evidence, at).state, State.DUE)
+        self.assertIsNone(state_validity(instants, at))  # at G: DUE, just after: OVERDUE
+        just_before = at - timedelta(microseconds=1)
+        self.assertEqual(state_validity(instants, just_before), (just_before, at))
+        self.assertEqual(
+            state_validity(instants, at + timedelta(hours=2)), (at + timedelta(hours=2), None)
+        )
+
+
 class CurrentProjectionTests(AttentionCase):
     def assert_current_matches_replay(self):
         at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
@@ -319,9 +498,13 @@ class CurrentProjectionTests(AttentionCase):
             },
         )
         # Full readiness includes the same window counts, deficiency facts, status and suspensions.
+        # The live read uses the evaluated-state cache, warm from earlier reads of the same test
+        # at earlier instants (issue #278 Part I); it must equal a read without that cache.
         live = fleet_readiness(org, now=at)
         historical = fleet_readiness(org, now=at, as_of=at)
         self.assertEqual(live, historical)
+        with self.settings(CYA_CURRENT_STATES_CACHE_ROWS=0):
+            self.assertEqual(fleet_readiness(org, now=at), live)
 
     def test_an_outdated_facts_version_falls_back_to_replay_without_reader_writes(self):
         # PR #96 review 6761273052: rows written before facts version 2 (issue #80) must not
@@ -406,6 +589,70 @@ class CurrentProjectionTests(AttentionCase):
             self.assertEqual(current_rows(org, [vehicle], at), first)
             self.assertEqual(len(current_module.FACTS_CACHE), 3)
         current_module.FACTS_CACHE.clear()
+
+    # Issue #278 Part I: the evaluated-state cache.
+
+    def assert_states_match_rows(self, org, vehicle, at):
+        expected = current_rows(org, [vehicle], at)[vehicle]
+        actual = current_states(org, [vehicle], at)[vehicle]
+        self.assertEqual(
+            [(f["obligation"]["id"], s) for f, s in actual],
+            [(f["obligation"]["id"], evaluate_facts(f, at)) for f in expected],
+        )
+
+    def test_current_states_equal_evaluated_current_rows_cold_warm_and_across_boundaries(self):
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        self.clock.set(self.at(hours=5, minutes=15))
+        self.record(self.suction)
+        current_module.STATES_CACHE.clear()
+        instants = (
+            self.at(hours=5, minutes=20),
+            self.at(hours=6) - timedelta(microseconds=1),
+            self.at(hours=6),  # on the hour: an E, D or G of the fixture's obligations
+            self.at(hours=6) + timedelta(microseconds=1),
+            self.at(hours=7, minutes=30),
+            self.at(days=2, hours=1),
+        )
+        for at in instants:
+            self.clock.set(at)
+            with self.subTest(at=at):
+                self.assert_states_match_rows(org, vehicle, at)  # cold for this instant
+                self.assert_states_match_rows(org, vehicle, at)  # warm
+        self.assertGreater(len(current_module.STATES_CACHE), 0)
+        with self.settings(CYA_CURRENT_STATES_CACHE_ROWS=0):
+            current_module.STATES_CACHE.clear()
+            self.assert_states_match_rows(org, vehicle, self.clock.now)
+            self.assertEqual(len(current_module.STATES_CACHE), 0)
+
+    def test_a_status_change_between_reads_is_never_served_from_the_cache(self):
+        from cya.operations.commands import set_vehicle_status
+
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        self.clock.set(self.at(hours=5))
+        current_module.STATES_CACHE.clear()
+        before = current_states(org, [vehicle], self.clock.now)[vehicle]  # fills the cache
+        self.assertNotIn(State.EXEMPT, {s.state for _f, s in before})
+        self.clock.set(self.at(hours=5, minutes=1))
+        set_vehicle_status(
+            vehicle_id=vehicle,
+            status="OUT_OF_SERVICE",
+            explanation="Synthetic outage.",
+            **self.context(self.supervisor),
+        )
+        self.clock.set(self.at(hours=5, minutes=2))
+        self.assert_states_match_rows(org, vehicle, self.clock.now)
+        after = current_states(org, [vehicle], self.clock.now)[vehicle]
+        self.assertIn(State.EXEMPT, {s.state for _f, s in after})
+
+    def test_the_state_cache_keeps_at_most_the_configured_number_of_rows(self):
+        at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
+        current_module.STATES_CACHE.clear()
+        with self.settings(CYA_CURRENT_STATES_CACHE_ROWS=3):
+            first = current_states(org, [vehicle], at)
+            self.assertEqual(len(current_module.STATES_CACHE), 3)
+            self.assertEqual(current_states(org, [vehicle], at), first)
+            self.assertEqual(len(current_module.STATES_CACHE), 3)
+        current_module.STATES_CACHE.clear()
 
     def test_stored_facts_reports_changed_missing_and_outdated_rows_without_returning_them(self):
         at, org, vehicle = self.clock.now, str(self.org.pk), str(self.vehicle.pk)
