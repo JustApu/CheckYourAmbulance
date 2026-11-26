@@ -242,7 +242,7 @@ def _deficiency_filters(
     status = values["status"] or "active"
     valid_statuses = {*allowed_statuses, "active", "all"}
     if status not in valid_statuses:
-        errors.append("Choose a valid lifecycle status.")
+        errors.append("Choose a valid problem status.")
     elif status == "active":
         queryset = queryset.filter(status__in=ACTIVE_STATUSES)
     elif status != "all":
