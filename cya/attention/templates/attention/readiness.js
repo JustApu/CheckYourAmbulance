@@ -43,9 +43,10 @@
         config.refresh_seconds + " seconds.";
       return;
     }
-    // SPEC 8.1.0 §17.3: hint-driven reads are at most 10 seconds apart, so not "at once".
-    state.textContent = every + (n >= total ? " Changes show within 10 seconds." :
-      " Changes on the first " + n + " vehicles show within 10 seconds.");
+    // SPEC 8.1.0 §17.3: a hint-driven read starts at most 10 seconds after the previous read
+    // started, and the panel changes when that read ends: 10 seconds plus the refresh itself.
+    state.textContent = every + (n >= total ? " Changes show within 10 seconds plus the time to refresh." :
+      " Changes on the first " + n + " vehicles show within 10 seconds plus the time to refresh.");
   }
   function refresh() {
     if (signedOut) { return; }
