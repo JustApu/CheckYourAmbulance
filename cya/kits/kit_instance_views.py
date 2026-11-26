@@ -144,26 +144,19 @@ def _assign(request, user, vehicle):
             form=form,
         )
     try:
-        record_kit_assignment(
+        result = record_kit_assignment(
             kit_id=form["kit_id"],
             active=True,
             vehicle_id=str(vehicle.pk),
             compartment_id=form["compartment_id"],
             **{**_context_ids(user), "operation_id": operation_id},
         )
+    except OperationConflict:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED], form=form)
     except (KitError, ValueError) as error:
         return _page(request, user, vehicle, status=400, errors=[str(error)], form=form)
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(
-            request,
-            user,
-            vehicle,
-            status=409,
-            errors=["this form was already used for a different change; try again"],
-            form=form,
-        )
     except UNAVAILABLE as error:
         logger.error("kit assignment unavailable (%s)", type(error).__name__)
         return _page(
@@ -174,6 +167,8 @@ def _assign(request, user, vehicle):
             errors=["the change could not be completed; nothing was changed. Try again."],
             form=form,
         )
+    if result.operation_reused:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED], form=form)
     url = reverse("vehicle-kit-instances", args=[vehicle.pk])
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "assign"}))
 
@@ -186,20 +181,18 @@ def _return_to_stock(request, user, vehicle):
             request, user, vehicle, status=400, errors=["the form was not valid; try again"]
         )
     try:
-        record_kit_assignment(
+        result = record_kit_assignment(
             kit_id=kit_id,
             active=True,
             expected_vehicle_id=str(vehicle.pk),
             **{**_context_ids(user), "operation_id": operation_id},
         )
+    except OperationConflict:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     except (KitError, ValueError) as error:
         return _page(request, user, vehicle, status=400, errors=[str(error)])
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(
-            request, user, vehicle, status=409, errors=["this form was already used; try again"]
-        )
     except UNAVAILABLE as error:
         logger.error("kit return to stock unavailable (%s)", type(error).__name__)
         return _page(
@@ -209,6 +202,8 @@ def _return_to_stock(request, user, vehicle):
             status=503,
             errors=["the change could not be completed; nothing was changed. Try again."],
         )
+    if result.operation_reused:
+        return _page(request, user, vehicle, status=409, errors=[admin_pages.REUSED])
     url = reverse("vehicle-kit-instances", args=[vehicle.pk])
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "stock"}))
 

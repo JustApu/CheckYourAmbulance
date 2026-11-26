@@ -21,6 +21,11 @@ from cya.shell.views import deny_section
 
 LIST_LIMIT = 500
 LOCAL_DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?")
+# A form's operation id already used for a different change: run_command either refuses it
+# (OperationConflict) or, for the same user, replays the earlier receipt with
+# operation_reused=True and applies nothing (issue #297). Neither is a save. The pages' error
+# banner already says "Nothing was changed."
+REUSED = "this form was already used for a different change; reload the page and try again"
 
 
 def allowed(request, action, denial):

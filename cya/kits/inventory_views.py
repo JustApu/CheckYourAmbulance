@@ -95,19 +95,17 @@ def inventory(request):
     if not form["definition_id"]:
         return _page(request, user, status=400, errors=["choose the kit type"], form=form)
     try:
-        add_kit_instance(
+        result = add_kit_instance(
             label=form["label"],
             definition_id=form["definition_id"],
             **{**_context_ids(user), "operation_id": operation_id},
         )
+    except OperationConflict:
+        return _page(request, user, status=409, errors=[admin_pages.REUSED], form=form)
     except (KitError, ValueError) as error:
         return _page(request, user, status=400, errors=[str(error)], form=form)
     except CommandDenied:
         return render(request, "shell/forbidden.html", {"title": "Not permitted"}, status=403)
-    except OperationConflict:
-        return _page(
-            request, user, status=409, errors=["this form was already used; try again"], form=form
-        )
     except UNAVAILABLE as error:
         logger.error("kit stock creation unavailable (%s)", type(error).__name__)
         return _page(
@@ -117,5 +115,7 @@ def inventory(request):
             errors=["the change could not be completed; nothing was changed. Try again."],
             form=form,
         )
+    if result.operation_reused:
+        return _page(request, user, status=409, errors=[admin_pages.REUSED], form=form)
     url = reverse("kit-instance-inventory")
     return HttpResponseRedirect(url + "?" + urlencode({"saved": "created"}))

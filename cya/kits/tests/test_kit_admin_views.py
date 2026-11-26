@@ -15,6 +15,7 @@ from cya.kits.definitions import (
 )
 from cya.kits.models import (
     KitAssignmentEvent,
+    KitDefinition,
     KitInstanceDefinition,
 )
 from cya.kits.tests.support import KitCase
@@ -195,6 +196,158 @@ class KitInstancePageTests(KitAdminCase):
         self.assertEqual(chooser.status_code, 200)
         self.assertContains(chooser, f'href="{self.url}"')
         self.assertContains(chooser, self.vehicle.display_name)
+
+
+@override_settings(**real_collaborator_settings())
+class ReusedOperationIdTests(KitAdminCase):
+    """A form's operation id reused for a different change saves nothing (issue #297).
+
+    run_command replays the earlier receipt for the same user with operation_reused=True and
+    applies nothing; the page must say so (409), not redirect as if it saved.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client_, _ = self.harness.sign_in("officer")
+        self.inventory_url = "/administration/kit-instances/"
+        self.url = f"/administration/kit-instances/{self.vehicle.pk}/"
+
+    def kit(self, label, vehicle=None):
+        placement = (
+            {"vehicle_id": str(vehicle.pk), "compartment_id": str(self.compartment_of(vehicle).pk)}
+            if vehicle is not None
+            else {}
+        )
+        return KitInstance.objects.get(
+            pk=add_kit_instance(
+                label=label,
+                definition_id=self.definition,
+                **placement,
+                **self.context(self.supervisor),
+            ).body["kit_id"]
+        )
+
+    def assert_refused(self, response):
+        self.assertContains(response, "already used for a different change", status_code=409)
+        self.assertContains(response, "Nothing was changed.", status_code=409)
+
+    def test_assigning_a_second_kit_with_the_same_operation_id_is_refused(self):
+        first, second = self.kit("Synthetic kit A"), self.kit("Synthetic kit B")
+        operation = str(uuid.uuid4())
+        fields = {"stage": "assign", "compartment_id": str(self.cabinet.pk)}
+        saved = self.post(
+            self.client_, self.url, kit_id=str(first.pk), operation_id=operation, **fields
+        )
+        self.assertEqual(saved.status_code, 302)
+
+        reused = self.post(
+            self.client_, self.url, kit_id=str(second.pk), operation_id=operation, **fields
+        )
+
+        self.assert_refused(reused)
+        second.refresh_from_db()
+        self.assertIsNone(second.vehicle_id)
+        self.assertEqual(KitAssignmentEvent.objects.filter(kit=second).count(), 1)
+        # An exact resubmission is still an ordinary replay of the saved assignment.
+        again = self.post(
+            self.client_, self.url, kit_id=str(first.pk), operation_id=operation, **fields
+        )
+        self.assertEqual(again.status_code, 302)
+        self.assertEqual(KitAssignmentEvent.objects.filter(kit=first).count(), 2)
+
+    def test_returning_a_second_kit_with_the_same_operation_id_is_refused(self):
+        first = self.kit("Synthetic kit A", self.vehicle)
+        second = self.kit("Synthetic kit B", self.vehicle)
+        operation = str(uuid.uuid4())
+        saved = self.post(
+            self.client_, self.url, stage="stock", kit_id=str(first.pk), operation_id=operation
+        )
+        self.assertEqual(saved.status_code, 302)
+
+        reused = self.post(
+            self.client_, self.url, stage="stock", kit_id=str(second.pk), operation_id=operation
+        )
+
+        self.assert_refused(reused)
+        second.refresh_from_db()
+        self.assertEqual(second.vehicle_id, self.vehicle.pk)
+        self.assertEqual(KitAssignmentEvent.objects.filter(kit=second).count(), 1)
+
+    def test_creating_a_second_kit_with_the_same_operation_id_is_refused(self):
+        operation = str(uuid.uuid4())
+        fields = {"stage": "create", "definition_id": self.definition, "operation_id": operation}
+        saved = self.post(self.client_, self.inventory_url, label="Synthetic kit A", **fields)
+        self.assertEqual(saved.status_code, 302)
+
+        reused = self.post(self.client_, self.inventory_url, label="Synthetic kit B", **fields)
+
+        self.assert_refused(reused)
+        self.assertContains(reused, 'value="Synthetic kit B"', status_code=409)
+        self.assertFalse(KitInstance.objects.filter(label="Synthetic kit B").exists())
+        self.assertEqual(KitInstance.objects.filter(label="Synthetic kit A").count(), 1)
+
+    def test_a_kit_definition_form_reused_for_another_definition_is_refused(self):
+        # The kit definition pages share the checklist template pages' command helper.
+        supervisor, _ = self.harness.sign_in("supervisor")
+        url = "/administration/kit-definitions/"
+        operation = str(uuid.uuid4())
+        saved = self.post(
+            supervisor, url, stage="create", label="Synthetic kit one", operation_id=operation
+        )
+        self.assertEqual(saved.status_code, 302)
+
+        reused = self.post(
+            supervisor, url, stage="create", label="Synthetic kit two", operation_id=operation
+        )
+
+        self.assert_refused(reused)
+        self.assertFalse(KitDefinition.objects.filter(label="Synthetic kit two").exists())
+
+    def test_another_users_operation_id_is_refused_without_saying_why(self):
+        # PR #298 review: OperationConflict is a ValueError. Each page must catch it before its
+        # broad ValueError handler, or the page shows a 400 naming OPERATION_CONFLICT.
+        supervisor, _ = self.harness.sign_in("supervisor")
+        stocked, placed = self.kit("Synthetic kit B"), self.kit("Synthetic kit C", self.vehicle)
+        operation = str(uuid.uuid4())
+        saved = self.post(
+            self.client_,
+            self.url,
+            stage="assign",
+            kit_id=str(self.kit("Synthetic kit A").pk),
+            compartment_id=str(self.cabinet.pk),
+            operation_id=operation,
+        )
+        self.assertEqual(saved.status_code, 302)
+        attempts = {
+            "assign": (
+                self.url,
+                {
+                    "stage": "assign",
+                    "kit_id": str(stocked.pk),
+                    "compartment_id": str(self.cabinet.pk),
+                },
+            ),
+            "stock": (self.url, {"stage": "stock", "kit_id": str(placed.pk)}),
+            "create": (
+                self.inventory_url,
+                {"stage": "create", "definition_id": self.definition, "label": "Synthetic kit D"},
+            ),
+            "definition": (
+                "/administration/kit-definitions/",
+                {"stage": "create", "label": "Synthetic kit two"},
+            ),
+        }
+        for name, (url, fields) in attempts.items():
+            with self.subTest(page=name):
+                reused = self.post(supervisor, url, operation_id=operation, **fields)
+                self.assert_refused(reused)
+                self.assertNotContains(reused, "OPERATION_CONFLICT", status_code=409)
+        stocked.refresh_from_db()
+        placed.refresh_from_db()
+        self.assertIsNone(stocked.vehicle_id)
+        self.assertEqual(placed.vehicle_id, self.vehicle.pk)
+        self.assertFalse(KitInstance.objects.filter(label="Synthetic kit D").exists())
+        self.assertFalse(KitDefinition.objects.filter(label="Synthetic kit two").exists())
 
 
 @override_settings(**real_collaborator_settings())
