@@ -95,6 +95,12 @@ ADMINISTRATION_LINKS = (
         "manage_kit_assignment",
     ),
     (
+        "kit-instance-locations",
+        "Find and move physical kits",
+        "Search every physical kit and move it to stock or another vehicle in one step.",
+        "manage_kit_assignment",
+    ),
+    (
         "kit-instance-vehicles",
         "Assign physical kits",
         "Assign an existing physical kit from stock to a vehicle and compartment.",
@@ -129,7 +135,13 @@ ADMINISTRATION_GROUPS = (
         "kits",
         "Kits",
         "Define kit contents, create physical units, assign them to vehicles, then use the shared library.",
-        ("kit-definitions", "kit-instance-inventory", "kit-instance-vehicles", "kit-library"),
+        (
+            "kit-definitions",
+            "kit-instance-inventory",
+            "kit-instance-locations",
+            "kit-instance-vehicles",
+            "kit-library",
+        ),
     ),
     (
         "system",

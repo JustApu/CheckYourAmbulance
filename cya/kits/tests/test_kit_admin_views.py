@@ -207,8 +207,13 @@ class AdministrationLandingTests(KitAdminCase):
     def test_each_role_sees_only_the_pages_it_may_open(self):
         self.assertEqual(
             self.links("officer"),
-            {"/administration/kit-instances/", "/administration/kit-instances/vehicles/"},
+            {
+                "/administration/kit-instances/",
+                "/administration/kit-instances/locations/",
+                "/administration/kit-instances/vehicles/",
+            },
         )
+        self.assertNotIn("/administration/kit-instances/locations/", self.links("crew"))
         supervisor = self.links("supervisor")
         self.assertNotIn("/administration/kit-lists/", supervisor)
         self.assertIn("/administration/kit-instances/vehicles/", supervisor)

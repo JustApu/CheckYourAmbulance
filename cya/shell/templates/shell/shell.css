@@ -184,6 +184,20 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
 .role-change-status { flex: 1 1 100%; margin: 0; }
 .role-change-actions [hidden] { display: none; }
 .role-history-pages { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }
+/* Find and move physical kits (issue #277): one row per kit, laid out like role rows. */
+.kit-location-list { display: grid; list-style: none; margin: 1rem 0; padding: 0; }
+.kit-location-row { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr); align-items: center; gap: .5rem 1rem; min-width: 0; padding: .75rem 0; border-bottom: 1px solid var(--line-soft); }
+.kit-location-details { min-width: 0; }
+.kit-location-details h3 { margin: 0 0 .125rem; overflow-wrap: anywhere; }
+.kit-location-details p { margin: .125rem 0; overflow-wrap: anywhere; }
+.kit-location-form { min-width: 0; margin: 0; }
+.kit-location-form p { margin: 0; }
+.kit-location-form form + form { margin-top: .75rem; }
+.kit-location-vehicle { padding-bottom: .75rem; border-bottom: 1px solid var(--line-soft); }
+.kit-location-note { color: var(--muted); }
+.kit-location-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .5rem; }
+.kit-location-message { grid-column: 1 / -1; margin: 0; }
+.kit-location-pages { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }
 @media (forced-colors: active) {
   :focus-visible { outline-color: Highlight; }
   input[type="date"]:focus, input[type="date"]:focus-within, input[type="time"]:focus, input[type="time"]:focus-within, input[type="datetime-local"]:focus, input[type="datetime-local"]:focus-within, input[type="month"]:focus, input[type="month"]:focus-within, input[type="week"]:focus, input[type="week"]:focus-within { outline-color: Highlight; }
@@ -192,6 +206,7 @@ h2 { font-size: 1.25rem; line-height: 1.3; }
     border-color: CanvasText;
   }
   .role-user-row, .role-option, .role-option.is-assigned { background: Canvas; color: CanvasText; }
+  .kit-location-row { border-color: CanvasText; background: Canvas; color: CanvasText; }
   .role-user-email { color: CanvasText; }
   .role-administration input[type="search"], .role-administration select {
     background: Field; color: FieldText;
@@ -295,6 +310,7 @@ th[aria-sort="descending"] .sort-button::after { content: "\25BC" / ""; color: v
 }
 @media (max-width: 47.999rem) {
   .role-user-row { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+  .kit-location-row { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
   .role-options { gap: .25rem; }
   .role-option { padding: .2rem .4rem; }
   .site-header { gap: .25rem .5rem; padding: .25rem .5rem; }
