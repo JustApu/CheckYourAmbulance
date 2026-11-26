@@ -522,8 +522,9 @@ signed session, current role, organization and vehicle access, then rechecks
 authorization at the configured interval. These messages are identifier-only
 hints, not inspection state; clients must reread authoritative state after
 reconnect. See [live updates](live-updates.md) for the event and recovery
-contract. Do not deploy multiple application processes without an approved
-shared channel layer and connection accounting.
+contract. Run several application processes only with the shared store configured
+([several application processes](#several-application-processes-spec-dep-2-amendment-820));
+the per-user socket limit is then counted per process.
 
 Keep access/error logs private and bounded. Exclude OAuth codes/query strings,
 authorization headers, cookies, tokens and request bodies from logs and error

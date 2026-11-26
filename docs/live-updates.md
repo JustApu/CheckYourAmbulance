@@ -24,19 +24,21 @@ every 60 seconds by default (configurable through
 when authorization is no longer valid or cannot be checked.
 
 At most four live connections per user per application process are accepted by
-default (`CYA_LIVE_MAX_CONNECTIONS_PER_USER`, bounded to 1–32). This matches the
-initial single-process deployment assumption. A multi-process deployment needs
-a shared channel layer and shared connection accounting. Client frames are
+default (`CYA_LIVE_MAX_CONNECTIONS_PER_USER`, bounded to 1–32). The count is
+kept in each process. With several processes (SPEC DEP-2, amendment 8.2.0) a
+user may therefore hold up to that many sockets on each process; the bound
+still limits what one user can hold open in any one process. Client frames are
 limited to 64 KiB; this protocol is server-to-client only, so all client data
 frames are closed as invalid (oversized frames use close code 1009).
 
-The default channel layer is in-memory and process-local, as required by the
-current single-process deployment decision. It is suitable for local use and
-tests, not for multiple application processes. The HTTP publisher and WebSocket
-consumer must run in the same ASGI process for hints to reach connected clients.
-Serving the publisher through WSGI or splitting HTTP and sockets across processes
-loses those hints. A deployment change needs a shared channel layer and an
-approved update to the single-process decision.
+The default channel layer is in-memory and process-local: one process, the
+default configuration. The HTTP publisher and WebSocket consumer must then run
+in the same ASGI process for hints to reach connected clients. Several processes
+(SPEC DEP-2, amendment 8.2.0) share a Redis-compatible layer on the same host,
+named by `CYA_SHARED_STORE_URL` and `CYA_SHARED_STORE_PASSWORD`
+(`cya/core/shared_store.py`), so a hint published by any process reaches sockets
+on every process. See the runbook's
+[several application processes](deployment-runbook.md#several-application-processes-spec-dep-2-amendment-820).
 
 `CYA_ALLOWED_HOSTS` supplies the allowed host names for the HTTP application and
 WebSocket Origin validation. The wildcard value `*` is rejected; list the
