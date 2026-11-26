@@ -35,7 +35,7 @@ adds [Awaiting External Dependency and progress notes](#awaiting-external-depend
 
 `GET /problems/` is the read-only organization-wide list available to each built-in role.
 It defaults to active deficiencies and offers GET filters for summary/description text, vehicle
-name or number, configured severity code, assignee name, lifecycle status, and the
+name or number, configured severity code, assignee name, problem status, and the
 governing deadline being overdue. Choose **All statuses, including closed and Reported in Error**
 to search history; the default outstanding view does not remove those records. Text search is
 case-insensitive, treats `%` and `_` as literal characters, and is limited to 100 characters.
