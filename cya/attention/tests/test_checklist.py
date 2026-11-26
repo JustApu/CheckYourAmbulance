@@ -74,6 +74,41 @@ class ItemReadTests(AttentionCase):
         self.assertGreater(whole, len(calls), "the whole read used the current projection")
         self.assertTrue(calls)
 
+    def test_the_projection_read_is_limited_to_the_items(self):  # issue #278 Part H
+        from cya.attention.checklist import _fact_item_id
+        from cya.obligations.current import current_rows, evaluate_facts
+
+        self.history()
+        org, vehicle, now = str(self.org.pk), str(self.vehicle.pk), self.clock.now
+        whole = current_rows(org, [vehicle], now, include_all_ad_hoc=True)[vehicle]
+        for item in (self.suction, self.masks, self.kit_item):
+            item = str(item.pk)
+            part = current_rows(org, [vehicle], now, include_all_ad_hoc=True, item_ids={item})
+            expected = [f for f in whole if _fact_item_id(f) == item]
+            self.assertTrue(expected)
+            self.assertEqual(
+                [evaluate_facts(f, now) for f in part[vehicle]],
+                [evaluate_facts(f, now) for f in expected],
+            )
+
+    def test_the_deficiency_read_is_limited_to_the_items(self):  # issue #278 Part H
+        from cya.attention.facts import deficiency_facts
+
+        self.history()
+        org, vehicle = str(self.org.pk), str(self.vehicle.pk)
+        for as_of in (None, self.clock.now):
+            whole = deficiency_facts(org, vehicle, as_of)
+            self.assertTrue(whole)
+            for item in (self.suction, self.masks, self.kit_item):
+                item = str(item.pk)
+                expected = [
+                    d
+                    for d in whole
+                    if item in d.item_ids or any(i == item for i, _unit in d.item_units)
+                ]
+                with self.subTest(as_of=as_of, item=item):
+                    self.assertEqual(deficiency_facts(org, vehicle, as_of, {item}), expected)
+
     def test_bad_item_lists_are_refused(self):
         org, vehicle = str(self.org.pk), str(self.vehicle.pk)
         too_many = [str(uuid4()) for _ in range(21)]
