@@ -417,7 +417,7 @@ function generic(kind) {
     assert(outcomeButtons(item()).every(button => !isPrimary(button)), "a marked result never uses the primary-action style");
 
     run.context.testUI.setRows([{...row, obligation_state: null, obligation_outcome: null, latest_check_id: null, deficiencies: []}]); run.context.testUI.render();
-    assert.equal(findClass(item(), "window-status").textContent, "No current requirement");
+    assert.equal(findClass(item(), "window-status").textContent, "No check is currently required");
   }
   {
     const run = checklist(), item = () => run.elements.items.children.find(child => child.dataset.itemKey);
@@ -731,7 +731,7 @@ function generic(kind) {
     assert(run.get("session-message").textContent.includes("back in progress"));
   }
   for (const [verification, expected] of [
-    [{status: "PENDING_VERIFICATION", counts_toward_scope: true, remaining_scope_rows: 2}, "2 scope rows remain"],
+    [{status: "PENDING_VERIFICATION", counts_toward_scope: true, remaining_scope_rows: 2}, "2 verification items still need a check"],
     [{status: "PENDING_VERIFICATION", counts_toward_scope: false}, "does not count"],
     [{status: "PENDING_VERIFICATION", closure_withheld: true, remaining_scope_rows: 0}, "closure withheld"],
   ]) {
@@ -897,7 +897,7 @@ function generic(kind) {
     run.context.testUI.setRows([{...row, obligation_state: "SATISFIED"}]);
     run.context.testUI.setGroups([{key: "vehicle", label: "Vehicle-wide checks", total: 3, checked: 1, due: 2, due_soon: 0, overdue: 0, not_due: 0, no_obligation: 0, exceptions: 0, open_deficiencies: 0}]);
     run.context.testUI.render(); run.get("next-unchecked").fire("click");
-    assert(run.get("checklist-bar-status").textContent.includes("Turn off Needs Attention Only"));
+    assert(run.get("checklist-bar-status").textContent.includes("Turn off ‘Needs attention only’"));
   }
   {
     // Verification has no bar: its controls are never wired.
@@ -945,7 +945,7 @@ function generic(kind) {
     {
       const first = run.get("area-cards").children[0];
       assert.equal(findClass(first, "area-card-summary").textContent, "0 of 1 checked · 1 due · 0 overdue · 0 open problems");
-      assert.equal(findClass(first, "area-card-breakdown").textContent, "0 due soon · 0 not due · 0 without an obligation · 0 exceptions");
+      assert.equal(findClass(first, "area-card-breakdown").textContent, "0 due soon · 0 not due · 0 not required · 0 exceptions");
       assert.equal(findClass(first, "area-card-details").children[0].textContent, "Details for Driver-side exterior compartment");
       findClass(first, "area-card-details").open = true;
       run.context.testUI.render();
