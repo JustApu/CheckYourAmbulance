@@ -191,27 +191,79 @@ class RecordingLayer(InMemoryChannelLayer):
         await super().group_send(group, message)
 
 
+def inline(job):
+    job()
+    return True
+
+
 class PublishRowsTests(TestCase):
-    def test_rows_go_out_before_the_hint_and_a_failure_keeps_the_hint(self):
+    def publish(self, rows, submit=inline):
         org, vehicle, event = (str(uuid4()) for _ in range(3))
-        for rows, expected in (
-            (
-                lambda: [("session.g", {"type": "live.rows"})],
-                ["session.g", f"vehicle.{org}.{vehicle}"],
-            ),
-            (lambda: 1 / 0, [f"vehicle.{org}.{vehicle}"]),
+        layer = RecordingLayer()
+        with (
+            patch("cya.live_updates.publish.get_channel_layer", return_value=layer),
+            patch("cya.live_updates.publish._submit", side_effect=submit) as submitted,
+            self.captureOnCommitCallbacks(execute=True),
         ):
-            layer = RecordingLayer()
-            with (
-                patch("cya.live_updates.publish.get_channel_layer", return_value=layer),
-                self.captureOnCommitCallbacks(execute=True),
-            ):
-                publish_vehicle_update(
-                    organization_id=org,
-                    vehicle_id=vehicle,
-                    event_id=event,
-                    kind="check.recorded",
-                    rows=rows,
-                )
-                self.assertEqual(layer.sent, [], "nothing before the commit")
-            self.assertEqual([group for group, _m in layer.sent], expected)
+            publish_vehicle_update(
+                organization_id=org,
+                vehicle_id=vehicle,
+                event_id=event,
+                kind="check.recorded",
+                rows=rows,
+            )
+            self.assertEqual(layer.sent, [], "nothing before the commit")
+        return [group for group, _m in layer.sent], submitted, f"vehicle.{org}.{vehicle}"
+
+    def test_rows_go_out_before_the_hint_and_a_failure_keeps_the_hint(self):
+        sent, _s, hint = self.publish(lambda: [("session.g", {"type": "live.rows"})])
+        self.assertEqual(sent, ["session.g", hint])
+        sent, _s, hint = self.publish(lambda: 1 / 0)
+        self.assertEqual(sent, [hint])
+
+    def test_rows_are_read_off_the_request_path(self):
+        # Issue #278: the command's answer does not wait for the rows; the rows thread sends both.
+        queued = []
+        sent, submitted, _hint = self.publish(
+            lambda: [("session.g", {})], submit=lambda job: queued.append(job) or True
+        )
+        self.assertEqual(sent, [], "neither rows nor hint is sent in the request")
+        self.assertEqual(submitted.call_count, 1)
+
+    def test_a_thread_too_far_behind_sends_the_hint_at_once_without_rows(self):
+        read = []
+        sent, _s, hint = self.publish(lambda: read.append(1) or [], submit=lambda job: False)
+        self.assertEqual((sent, read), ([hint], []))
+
+    def test_no_rows_means_no_thread(self):
+        sent, submitted, hint = self.publish(None)
+        self.assertEqual(sent, [hint])
+        submitted.assert_not_called()
+
+
+class RowsThreadTests(SimpleTestCase):
+    def test_jobs_run_in_order_on_one_thread_and_the_queue_is_bounded(self):
+        import threading
+
+        from cya.live_updates import publish
+
+        gate, done, seen = threading.Event(), threading.Event(), []
+
+        def job(n):
+            def run():
+                if n == 0:
+                    gate.wait(5)
+                seen.append((n, threading.current_thread().name))
+                if n == publish.MAX_PENDING - 1:
+                    done.set()
+
+            return run
+
+        with patch.object(publish, "connections"):
+            accepted = [publish._submit(job(n)) for n in range(publish.MAX_PENDING + 2)]
+            self.assertEqual(accepted, [True] * publish.MAX_PENDING + [False, False])
+            gate.set()
+            self.assertTrue(done.wait(5))
+        self.assertEqual([n for n, _t in seen], list(range(publish.MAX_PENDING)))
+        self.assertTrue(all(t.startswith("cya-rows") for _n, t in seen))
+        self.assertTrue(publish._submit(lambda: None), "the queue drains")

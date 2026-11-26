@@ -53,12 +53,14 @@ def open_sessions(organization_id, vehicle_id):
     )
 
 
-def row_messages(organization_id, vehicle_id, item_id, event_id):
+def row_messages(organization_id, vehicle_id, item_id, event_id, sessions=None):
     """[(group, message)] for each open session: the item's rows read after the commit."""
     from cya.attention.api import _stamp, check_authors, checklist_row
 
     messages = []
-    for session in open_sessions(organization_id, vehicle_id):
+    if sessions is None:
+        sessions = open_sessions(organization_id, vehicle_id)
+    for session in sessions:
         result = vehicle_checklist(
             organization_id,
             vehicle_id,
