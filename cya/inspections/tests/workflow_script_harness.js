@@ -213,6 +213,8 @@ function generic(kind) {
     assert.equal(run.document.activeElement.type, "li", "deficiency submission moves focus to the failed item while its action is disabled");
     response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
+    assert.equal(run.frames.length, 1, "failed check focus waits until the replacement button is rendered");
+    run.frames.splice(0).forEach(callback => callback(0));
     assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
     assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
