@@ -179,7 +179,7 @@
     }
     if (kind === "report") {
       body.vehicle_id = config.vehicle_id;
-      var target = required(value(form, "target"), "Choose the affected scope.");
+      var target = required(value(form, "target"), "Choose an item, kit, compartment, or vehicle system.");
       var parts = target.split(":");
       if (parts[0] === "systems") {
         var systems = Array.prototype.map.call(form.querySelectorAll('[name="system_ids"]:checked'), function (e) { return e.value; });
@@ -187,7 +187,7 @@
         body.target = {vehicle: true, system_ids: systems};
       } else {
         var targetKey = {item: "item_id", kit: "kit_id", compartment: "compartment_id"}[parts[0]];
-        if (!targetKey || !parts[1]) { throw new Error("Choose a valid affected scope."); }
+        if (!targetKey || !parts[1]) { throw new Error("Choose a valid item, kit, compartment, or vehicle system."); }
         body.target = {}; body.target[targetKey] = parts[1];
         if (parts[0] === "item" && parts[2]) { body.target.item_requirement_id = parts[2]; }
       }
