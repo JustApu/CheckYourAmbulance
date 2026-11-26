@@ -1086,7 +1086,7 @@
           if (entries[k] && ["pending", "unconfirmed"].indexOf(entries[k].status) !== -1 &&
               !rows.some(function (r) { return key(r) === k; })) { rows.push(verificationRows[k]); }
         });
-        $("session-message").textContent = verificationNotice + " Current report: " + a.body.verification_status + ". "+ " Verification items still needing a check: " + a.body.remaining_scope_rows + "." +
+        $("session-message").textContent = verificationNotice + " Current report: " + a.body.verification_status + ". Verification items still needing a check: " + a.body.remaining_scope_rows + "." +
           (a.body.unavailable_scope_rows ? " Some items are unavailable on the current checklist. Contact a supervisor; they remain outstanding." : "");
       }
       $("stale").hidden = true; loadedOnce = true; clearLoading(); render();
