@@ -82,7 +82,9 @@
     if (!afterRender) { target.focus({preventScroll: true}); focusIntent = null; return; }
     if (focusRestoreScheduled) { return; }
     focusRestoreScheduled = true;
-    var defer = window.requestAnimationFrame || function (callback) { return setTimeout(callback, 0); };
+    var defer = typeof window.requestAnimationFrame === "function" ?
+      function (callback) { window.requestAnimationFrame(callback); } :
+      function (callback) { setTimeout(callback, 0); };
     defer(function () {
       focusRestoreScheduled = false;
       if (focusIntent !== intent) { return; }
