@@ -103,7 +103,7 @@ class PositionPagesTests(KitCase):
         reused = self.post(label="Synthetic shelf", key="shelf", operation_id=operation, **fields)
 
         self.assertContains(reused, "already used for a different change", status_code=409)
-        self.assertContains(reused, "nothing was changed", status_code=409)
+        self.assertContains(reused, "Nothing was changed.", status_code=409)
         self.assertFalse(PositionKey.objects.filter(key="shelf").exists())
 
     def test_the_page_explains_each_kind_and_what_a_key_is_for(self):

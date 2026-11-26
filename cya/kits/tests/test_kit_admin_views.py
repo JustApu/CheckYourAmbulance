@@ -229,7 +229,7 @@ class ReusedOperationIdTests(KitAdminCase):
 
     def assert_refused(self, response):
         self.assertContains(response, "already used for a different change", status_code=409)
-        self.assertContains(response, "nothing was changed", status_code=409)
+        self.assertContains(response, "Nothing was changed.", status_code=409)
 
     def test_assigning_a_second_kit_with_the_same_operation_id_is_refused(self):
         first, second = self.kit("Synthetic kit A"), self.kit("Synthetic kit B")
