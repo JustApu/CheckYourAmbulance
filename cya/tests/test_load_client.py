@@ -341,6 +341,28 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(reads), 2, "that read covers the gathered push")
         await reloader.stop()
 
+    async def test_panel_pushes_wait_for_the_floor(self):
+        # SPEC 8.1.0 §17.3 (OQ-86), mirroring readiness.js: a push-driven read starts no sooner
+        # than the floor after the previous read began, and one read covers the pushes meanwhile.
+        loop = asyncio.get_running_loop()
+        starts = []
+
+        async def fetch():
+            starts.append(loop.time())
+
+        reloader = load_client.Reloader(fetch)
+        reloader.gather(0.01, 0.2)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(starts), 1, "the first push opens the short window")
+        for _ in range(3):
+            reloader.gather(0.01, 0.2)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(starts), 1, "pushes inside the floor wait")
+        await asyncio.sleep(0.25)
+        self.assertEqual(len(starts), 2, "one read when the floor ends")
+        self.assertGreaterEqual(starts[1] - starts[0], 0.19)  # the floor, less timer rounding
+        await reloader.stop()
+
     async def test_hints_owe_item_reads_or_the_whole_list(self):
         # Issue #278 B, mirroring checklist.js.
         class Reloader:

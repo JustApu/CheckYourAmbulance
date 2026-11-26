@@ -72,7 +72,7 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.equal(page.nodes["readiness-live-state"].textContent, "Updates every 60 seconds.");  // one still pending
     page.sockets[1].onopen();
     assert.equal(page.nodes["readiness-live-state"].textContent,
-      "Updates every 60 seconds. Changes on the first 2 vehicles show at once.");
+      "Updates every 60 seconds. Changes on the first 2 vehicles show within 10 seconds plus the time to refresh.");
     page.fire();  // the reconcile after (re)connecting
     assert.equal(page.requests.length, 1);
     assert.equal(page.requests[0].url, "/fleet/readiness/panel/");
@@ -109,7 +109,7 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     const page = run({...config, sockets: ["/ws/a/"], vehicle_count: 1});  // every vehicle instant
     page.sockets[0].onopen();
     assert.equal(page.nodes["readiness-live-state"].textContent,
-      "Updates every 60 seconds. Changes show at once.");
+      "Updates every 60 seconds. Changes show within 10 seconds plus the time to refresh.");
   }
   {
     const page = run({...config, sockets: []});  // nothing live: say so plainly
@@ -146,8 +146,8 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.equal(page.sockets.length, sockets);  // no reconnect
   }
   {
-    // Issue #278 C: hints are gathered for 2 s (SPEC §17.3's limit) and read once; later hints
-    // never push the read back, and a read that starts meanwhile covers them.
+    // Issue #278 C: a burst of hints is gathered for 2 s and read once; later hints never push
+    // the read back.
     const page = run(config);
     page.sockets[0].onmessage({data: "{}"});
     page.sockets[1].onmessage({data: "{}"});
@@ -155,23 +155,59 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.deepEqual(page.live().map(t => t.ms), [2000], "one 2-second window for a burst of hints");
     page.fire();
     assert.equal(page.requests.length, 1, "a burst costs one panel read");
+    // SPEC 8.1.0 §17.3 (OQ-86): the next hint-driven read waits until 10 s after that read began.
+    assert.deepEqual(page.live().map(t => t.ms), [10000], "the floor starts with the read");
     page.requests[0].resolve({ok: true, text: async () => "a"}); await tick(); await tick();
     page.sockets[1].onmessage({data: "{}"});
-    page.intervals[0].fn();  // the timer's read starts inside the window
-    assert.equal(page.requests.length, 2);
-    assert.deepEqual(page.live(), [], "the gathering window is dropped: that read covers the hint");
-    page.requests[1].resolve({ok: true, text: async () => "b"}); await tick(); await tick();
-    page.fire();
-    assert.equal(page.requests.length, 2);
     page.sockets[0].onmessage({data: "{}"});
+    assert.deepEqual(page.live().map(t => t.ms), [10000], "hints inside the floor open no window");
+    assert.equal(page.requests.length, 1);
+    page.fire();  // the floor ends: one read covers both hints
+    assert.equal(page.requests.length, 2);
+    page.sockets[1].onmessage({data: "{}"});  // a hint during a read no longer forces a re-read
+    page.requests[1].resolve({ok: true, text: async () => "b"}); await tick(); await tick();
+    assert.equal(page.requests.length, 2, "the hint waits for the floor, not the read's end");
     page.fire();
-    assert.equal(page.requests.length, 3);
-    page.sockets[1].onmessage({data: "{}"});
-    page.fire();  // a read is in flight: this hint waits for it
-    assert.equal(page.requests.length, 3);
+    assert.equal(page.requests.length, 3, "a hint during a read is never lost");
     page.requests[2].resolve({ok: true, text: async () => "c"}); await tick(); await tick();
-    page.fire();
-    assert.equal(page.requests.length, 4, "a hint during a read is never lost");
+    page.fire();  // the floor passes with nothing waiting: no read
+    assert.equal(page.requests.length, 3);
+    page.sockets[0].onmessage({data: "{}"});  // past the floor: the 2-second window again
+    assert.deepEqual(page.live().map(t => t.ms), [2000]);
   }
-  console.log("Offline readiness script regressions passed: sockets, hints (2-second window), timer, stale notice, sign-in end, single read, signed-out stop.");
+  {
+    // The timer is not a hint: it reads at once inside the floor, covers the waiting hint, and
+    // restarts the floor.
+    const page = run(config);
+    page.sockets[0].onmessage({data: "{}"}); page.fire();
+    page.requests[0].resolve({ok: true, text: async () => "a"}); await tick(); await tick();
+    page.sockets[0].onmessage({data: "{}"});
+    page.intervals[0].fn();
+    assert.equal(page.requests.length, 2, "the timer's read is not delayed");
+    page.requests[1].resolve({ok: true, text: async () => "b"}); await tick(); await tick();
+    const floors = page.live();
+    assert.deepEqual(floors.map(t => t.ms), [10000], "one floor, restarted by the timer's read");
+    page.fire();
+    assert.equal(page.requests.length, 2, "the timer's read covered the hint");
+  }
+  {
+    // A read slower than the floor: a hint during it is read as soon as it ends.
+    const page = run(config);
+    page.sockets[0].onmessage({data: "{}"}); page.fire();
+    page.sockets[1].onmessage({data: "{}"});
+    page.fire();  // the floor ends while the read is still in flight
+    assert.equal(page.requests.length, 1);
+    page.requests[0].resolve({ok: true, text: async () => "a"}); await tick(); await tick();
+    assert.equal(page.requests.length, 2, "read at once: the floor has passed");
+  }
+  {
+    // Reconnect and showing the tab again read at once, inside the floor.
+    const page = run(config);
+    page.sockets[0].onmessage({data: "{}"}); page.fire();
+    page.requests[0].resolve({ok: true, text: async () => "a"}); await tick(); await tick();
+    page.sockets[1].onopen();
+    page.timeouts.filter(t => t.ms === 0 && !t.cancelled).forEach(t => { t.cancelled = true; t.fn(); });
+    assert.equal(page.requests.length, 2, "a (re)connect is reconciled at once");
+  }
+  console.log("Offline readiness script regressions passed: sockets, hints (2-second window, 10-second floor), timer, stale notice, sign-in end, single read, signed-out stop.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
