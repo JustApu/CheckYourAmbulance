@@ -37,6 +37,7 @@ class FakeSite:
         self.conflict_first_save_of = ITEMS[1]  # answer 409 once: the client acknowledges
         self.refused = []
         self.stall = None  # a path whose requests are read but never answered
+        self.push_rows = False  # SPEC 8.3.0: push each check's rows before its hint
         self.release = asyncio.Event()
 
     async def handle(self, reader, writer):
@@ -177,7 +178,8 @@ class FakeSite:
         ws.receive_data(data)
         accepted = False
         for event in ws.events():
-            if isinstance(event, Request) and event.target == SOCKET:
+            # A session page's socket names its session (SPEC 8.3.0): ?session=<id>.
+            if isinstance(event, Request) and event.target.split("?")[0] == SOCKET:
                 writer.write(ws.send(AcceptConnection()))
                 accepted = True
         if not accepted:
@@ -187,6 +189,23 @@ class FakeSite:
         writer.write(ws.send(TextMessage(data='{"type": "connection.ready"}')))
 
         def push(check_id, item_id):
+            if self.push_rows:
+                # SPEC 8.3.0: the item's rows for the session, before the hint.
+                rows = {
+                    "type": "checklist.rows",
+                    "event_id": check_id,
+                    "session_id": SESSION,
+                    "item_id": item_id,
+                    "as_of": "2026-06-01T00:00:00Z",
+                    "items": [
+                        {
+                            "item_id": item_id,
+                            "checklist_version_id": "v1",
+                            "latest_check_id": check_id,
+                        }
+                    ],
+                }
+                writer.write(ws.send(TextMessage(data=json.dumps(rows))))
             hint = {
                 "type": "vehicle.update",
                 "event_id": check_id,
@@ -321,6 +340,42 @@ class LoadClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(reads), 5)
         hints.on_text("not json")
         self.assertEqual(reads[-1], 0.25)
+        hints.stop()
+
+    async def test_pushed_rows_replace_the_item_reads(self):
+        # SPEC 8.3.0, mirroring checklist.js: a session's pushed rows are shown without a read,
+        # the hint they cover needs none, and a save waits briefly for its own rows.
+        reads, shown = [], []
+
+        class Reloader:
+            def schedule(self, delay):
+                reads.append(delay)
+
+        def rows(event_id, item_id):
+            frame = {"type": "checklist.rows", "event_id": event_id, "item_id": item_id}
+            frame["items"] = [{"item_id": item_id}]
+            return json.dumps(frame)
+
+        def hint(event_id, item_id):
+            frame = {"type": "vehicle.update", "event_id": event_id, "kind": "check.recorded"}
+            return json.dumps({**frame, "item_id": item_id})
+
+        hints = load_client.Hints(Reloader(), apply_rows=shown.extend, own_rows_wait=0.02)
+        hints.read_started()
+        hints.on_text(rows("other", "a"))
+        hints.on_text(hint("other", "a"))
+        self.assertEqual((reads, shown), ([], [{"item_id": "a"}]), "another's save: no read")
+        hints.save_started()
+        hints.on_text(rows("mine", "b"))  # the rows come with the answer
+        hints.save_finished(True, "mine", "b")
+        hints.on_text(hint("mine", "b"))
+        self.assertEqual(reads, [], "the saver shows its own rows and makes no read")
+        hints.save_started()
+        hints.save_finished(True, "mine-2", "c")
+        self.assertEqual(reads, [], "the saver waits briefly for its rows")
+        await asyncio.sleep(0.05)
+        self.assertEqual(reads, [0], "without them it reads the item")
+        self.assertEqual(hints.read_started(), ["c"])
         hints.stop()
 
     async def test_panel_pushes_are_gathered_into_one_read(self):

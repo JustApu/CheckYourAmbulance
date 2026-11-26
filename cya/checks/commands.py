@@ -1251,12 +1251,32 @@ def record_check(
             # Issue #278: an item or kit-content check changes only its own item's rows. A kit
             # presence check (either source) can change its kit's content rows, so it names none.
             presence = shape["kit_presence"] or shape["kit_requirement_id"] is not None
+            item_rows = None
+            if not presence:
+                # SPEC 8.3.0: the item's rows, read after the commit for each session open now,
+                # on the publisher's rows thread. Without an open session there is nothing to
+                # read, and the hint goes out as before.
+                from cya.attention.live_rows import open_sessions, row_messages
+
+                sessions = open_sessions(organization_id, shape["vehicle_id"])
+                if sessions:
+
+                    def item_rows():
+                        return row_messages(
+                            organization_id,
+                            shape["vehicle_id"],
+                            shape["item_id"],
+                            check_id,
+                            sessions,
+                        )
+
             publish_vehicle_update(
                 organization_id=organization_id,
                 vehicle_id=shape["vehicle_id"],
                 event_id=check_id,
                 kind="check.recorded",
                 item_id=None if presence else shape["item_id"],
+                rows=item_rows,
             )
             if selection is not None or (verification and verification.event_type):
                 publish_vehicle_update(

@@ -520,7 +520,8 @@ handshake, read and idle timeouts using the selected proxy's documentation. The
 Origin allow-list comes from `CYA_ALLOWED_HOSTS`; the consumer also checks the
 signed session, current role, organization and vehicle access, then rechecks
 authorization at the configured interval. These messages are identifier-only
-hints, not inspection state; clients must reread authoritative state after
+hints, except the rows a check changed, which go only to that session's
+participants (SPEC 8.3.0); clients must reread authoritative state after
 reconnect. See [live updates](live-updates.md) for the event and recovery
 contract. Run several application processes only with the shared store configured
 ([several application processes](#several-application-processes-spec-dep-2-amendment-820));

@@ -42,6 +42,28 @@ def _current_access(user_id, vehicle_id, auth_time):
     return str(user.pk), str(user.organization_id)
 
 
+def _session_participant(user_id, organization_id, vehicle_id, session_id):
+    """Whether the user is a recorded participant of this session on this vehicle.
+
+    The rule the checklist API applies to session_id (cya.attention.api._session): only a
+    participant may read a session's rows, so only a participant's socket joins its group
+    (SPEC 8.3.0 §17.3).
+    """
+    from cya.inspections.models import InspectionSession, SessionParticipant
+
+    return SessionParticipant.objects.filter(
+        session__in=InspectionSession.objects.filter(
+            organization_id=organization_id, vehicle_id=vehicle_id, pk=session_id
+        ),
+        user_id=user_id,
+    ).exists()
+
+
+@database_sync_to_async
+def session_participant(user_id, organization_id, vehicle_id, session_id):
+    return _session_participant(user_id, organization_id, vehicle_id, session_id)
+
+
 @database_sync_to_async
 def socket_access(session, vehicle_id):
     return _active_socket_access(session, vehicle_id)

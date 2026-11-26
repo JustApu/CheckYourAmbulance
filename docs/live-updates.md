@@ -60,6 +60,28 @@ The allowed `kind` values are `check.recorded`, `check.corrected`,
 Messages contain no names, notes, check outcomes, or other business payload.
 The server rejects unsupported kinds and malformed identifiers.
 
+**Pushed rows (SPEC 8.3.0 §17.3, OQ-88; [issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278)).**
+A session page names its session when it connects: `/ws/v1/vehicles/<vehicle UUID>/live/?session=<session UUID>`.
+If the user is a recorded participant of that session on that vehicle, the socket also joins the
+session's group; otherwise the name is ignored, so the socket reveals nothing about the session.
+This is the rule the checklist API applies to `session_id` (`cya.live_updates.auth._session_participant`).
+After an item check commits (not a kit presence check), `cya.attention.live_rows` reads the item's
+rows once for each open session on the vehicle (at most 8), exactly as that session's participants
+would read them (`view=NORMAL`, no filter, `item_ids=<item>`), and sends them to the session's
+group before the vehicle hint:
+
+```json
+{"type":"checklist.rows","event_id":"<UUID>","session_id":"<UUID>","item_id":"<UUID>","as_of":"<read instant>","items":[...]}
+```
+
+`items` are the checklist API's rows. A set larger than 48 KiB is left out, and those pages re-read.
+The checklist page shows pushed rows only for its own session, in Normal order with no filter
+and rows already loaded, and only when `as_of` is later than the read its rows came from. The
+hint they cover then needs no read, and the saver waits up to a second for its own rows before
+reading as before. A read that started earlier and answers later cannot replace newer pushed
+rows. Every other frame is unchanged and identifier-only, and reconnection still reconciles from
+the authoritative query.
+
 Publishers register delivery with `transaction.on_commit`; a rolled-back
 business change emits no hint. Delivery is best-effort: channel-layer failures
 are logged without undoing the committed business change. Clients deduplicate
@@ -91,3 +113,7 @@ after validating the organization and vehicle scope.
 The offline tests use the in-memory channel layer and cover socket authorization,
 connection and frame bounds, supported event identifiers, and after-commit
 delivery including rollback. No external service is used.
+`cya/attention/tests/test_live_rows.py` checks that pushed rows equal the API's one-row read for the
+session, that only participants join a session's group, the consumer's checks, and that rows go
+out before the hint (and the hint still goes out if reading the rows fails).
+`workflow_script_harness.js` covers the page applying, ignoring and re-applying pushed rows.
