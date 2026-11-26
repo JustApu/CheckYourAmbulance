@@ -74,11 +74,24 @@
       (row.item_requirement_id ? "|r" + row.item_requirement_id : "");
   }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
-  function restoreFocusIntent() {
+  var focusRestoreScheduled = false;
+  function restoreFocusIntent(afterRender) {
     if (!focusIntent) { return; }
-    var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
-    if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
-    else { (item || list).focus({preventScroll: true}); }
+    var intent = focusIntent, item = itemForKey(intent.key), target = item && actionIn(item, intent.action);
+    if (!target || target.disabled) { (item || list).focus({preventScroll: true}); return; }
+    if (!afterRender) { target.focus({preventScroll: true}); focusIntent = null; return; }
+    if (focusRestoreScheduled) { return; }
+    focusRestoreScheduled = true;
+    var defer = window.requestAnimationFrame || function (callback) { return setTimeout(callback, 0); };
+    defer(function () {
+      focusRestoreScheduled = false;
+      if (focusIntent !== intent) { return; }
+      var active = document.activeElement;
+      if (active && active !== document.body && active !== list) { focusIntent = null; return; }
+      item = itemForKey(intent.key); target = item && actionIn(item, intent.action);
+      if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
+      else { (item || list).focus({preventScroll: true}); }
+    });
   }
   function itemForKey(itemKey) {
     for (var i = 0; i < list.children.length; i++) {
@@ -807,7 +820,7 @@
     var modalOpen = dialog.open || outcomeDialog.open;
     if (!modalOpen) {
       if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
-        restoreFocusIntent();
+        restoreFocusIntent(true);
       } else if (focusInList) {
         var restoredItem = itemForKey(focusKey);
         var target = restoredItem && actionIn(restoredItem, focusAction);
