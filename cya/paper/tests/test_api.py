@@ -88,6 +88,9 @@ class BatchApiTests(ApiCase):
             ({"performed_time": "7:30"}, "performed_time"),
             ({"performed_time": "19:30:00"}, "performed_time"),
             ({"performer_ids": "x"}, "performer_ids"),
+            ({"kit_definition_version_ids": None}, "kit_definition_version_ids"),
+            ({"kit_definition_version_ids": 7}, "kit_definition_version_ids"),
+            ({"kit_definition_version_ids": "x"}, "kit_definition_version_ids"),
             ({"actor_user_id": str(user.pk)}, "$"),
             ({"operation_id": ...}, "operation_id"),
         ):
