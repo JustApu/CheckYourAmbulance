@@ -77,7 +77,9 @@ def command(request, action):
         except SealAuditOpen:
             raise Rejected(422, "AUDIT_REQUIRES_SEAL") from None
         except CheckError as error:
-            # The paper-entry batch refusals (NOT_FOUND, PAPER_BATCH_MISMATCH, MALFORMED_REQUEST).
+            # The paper-entry batch refusals (NOT_FOUND, PAPER_BATCH_MISMATCH). A malformed
+            # batch id is a ValueError, so it gets 422 INVALID_SEAL_REQUEST like any other
+            # malformed seal-request id.
             raise Rejected(
                 error.status, error.code, [(error.path, error.code)] if error.path else []
             ) from None

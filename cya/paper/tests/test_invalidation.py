@@ -253,6 +253,54 @@ class LimitTests(InvalidationCase):
         self.assertFalse(CheckEvent.objects.exists())
         self.assertFalse(PaperEntryInvalidationEvent.objects.exists())
 
+    def three_readings_the_first_two_invalidated(self):
+        """A batch with three odometer chains, the two that sort first already invalidated."""
+        from cya.odometer.corrections import invalidate_reading
+
+        batch_id = self.batch(at=time(6, 15))
+        for value in ("40210", "40211", "40212"):
+            self.reading(value, batch_id, confirm_anomaly=True)
+        roots = sorted(
+            OdometerEntry.objects.filter(paper_entry_batch_id=batch_id), key=lambda row: row.pk
+        )
+        for root in roots[:2]:
+            invalidate_reading(
+                kind="odometer",
+                reading_id=str(root.pk),
+                explanation="Admin.",
+                **self.context(self.admin),
+            )
+        return batch_id, roots
+
+    def test_the_cap_counts_already_invalidated_reading_chains(self):
+        # Codex P2 on #309: filtering before the cap left the effective third chain unseen,
+        # and the batch event's completeness trigger refused with a database error.
+        from unittest import mock
+
+        batch_id, _roots = self.three_readings_the_first_two_invalidated()
+        with mock.patch("cya.paper.invalidation.MAX_CHAINS", 1):
+            with self.assertRaises(PaperEntryError) as caught:
+                self.invalidate(batch_id)
+        self.assertEqual(
+            (caught.exception.code, caught.exception.status), ("CONFIGURATION_UNAVAILABLE", 503)
+        )
+        self.assertFalse(PaperEntryInvalidationEvent.objects.exists())
+        self.assertEqual(ReadingEvent.objects.filter(event_type="INVALIDATION").count(), 2)
+
+    def test_an_effective_reading_after_invalidated_ones_is_invalidated(self):
+        from unittest import mock
+
+        batch_id, roots = self.three_readings_the_first_two_invalidated()
+        with mock.patch("cya.paper.invalidation.MAX_CHAINS", 3):
+            result = self.invalidate(batch_id)
+        self.assertEqual(result.body["invalidated_reading_root_ids"], [str(roots[2].pk)])
+        for root in roots:
+            self.assertEqual(
+                ReadingEvent.objects.filter(root_odometer=root, event_type="INVALIDATION").count(),
+                1,
+            )
+        self.assertTrue(PaperEntryInvalidationEvent.objects.filter(batch_id=batch_id).exists())
+
 
 class GuardTests(InvalidationCase):
     def receipt(self, actor, batch_id, command_type="PAPER_ENTRY_BATCH_INVALIDATION"):
