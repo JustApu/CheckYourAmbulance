@@ -831,16 +831,18 @@
     }
     replacementNodes = Array.prototype.slice.call(replacement.children);
     var preservedIndex = -1;
-    if (focusIntent && focusKey === focusIntent.key) {
+    var preserveKey = focusIntent && focusKey === focusIntent.key ? focusIntent.key : focusKey;
+    var preserveAction = focusIntent && focusKey === focusIntent.key ? focusIntent.action : focusAction;
+    if (preserveKey && preserveAction) {
       for (var nextIndex = 0; nextIndex < replacementNodes.length; nextIndex++) {
         var nextRow = replacementNodes[nextIndex];
-        if (nextRow.dataset && nextRow.dataset.itemKey === focusIntent.key) {
-          var nextAction = actionIn(nextRow, focusIntent.action);
+        if (nextRow.dataset && nextRow.dataset.itemKey === preserveKey) {
+          var nextAction = actionIn(nextRow, preserveAction);
           if (nextAction) {
             preservedRow = nextRow;
             preservedIndex = nextIndex;
             replacement.removeChild(preservedRow);
-            var previousRow = itemForKey(focusIntent.key);
+            var previousRow = itemForKey(preserveKey);
             if (previousRow) { list.insertBefore(preservedRow, previousRow); }
             else { list.appendChild(preservedRow); }
             nextAction.focus({preventScroll: true});
@@ -871,7 +873,7 @@
     notice.textContent = message; notice.hidden = !message;
     var modalOpen = dialog.open || outcomeDialog.open;
     if (!modalOpen) {
-      if (focusTransferred) {
+      if (focusTransferred && focusIntent) {
         if (entries[focusIntent.key] && entries[focusIntent.key].status !== "pending") { focusIntent = null; }
       } else if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
         restoreFocusIntent(true);

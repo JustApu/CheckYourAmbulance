@@ -204,10 +204,14 @@ function generic(kind) {
     assert.equal(run.window.scrollY, 500, "pending render keeps the active checklist item in place");
     assert.equal(run.document.activeElement.dataset.action, "pass", "pending save keeps focus on the same named action");
     assert.equal(run.document.activeElement.getAttribute("aria-disabled"), "true", "the pending action is announced as unavailable");
+    run.document.activeElement.fire("click");
+    assert.equal(run.posts().length, 1, "activating a pending Pass action does not send a duplicate save");
     response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
     assert.equal(run.frames.length, 0, "focus moves directly to the acknowledged replacement action");
     assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
+    run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
+    assert.equal(run.document.activeElement.dataset.action, "pass", "the follow-up live row refresh keeps the focused action connected");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
     response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
@@ -216,13 +220,32 @@ function generic(kind) {
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
     assert.equal(run.document.activeElement.dataset.action, "failed", "dialog submission keeps focus on the named Fail action while saving");
+    run.document.activeElement.fire("click");
+    assert.equal(run.posts().length, 2, "activating a pending Fail action does not send a duplicate save");
     response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
     assert.equal(run.frames.length, 0, "failed check focus transfers directly to the acknowledged action");
     assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
+    run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
+    assert.equal(run.document.activeElement.dataset.action, "failed", "the follow-up live row refresh keeps the Fail action focused");
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
     assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
     assert.equal(run.elements.items.children[4].getBoundingClientRect().top, 100, "removed active row keeps the nearest visible row in place");
+  }
+  {
+    const run = checklist(), item = () => run.elements.items.children[0];
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    findAction(item(), "unable_to_inspect").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run);
+    run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
+    run.get("outcome-form").fire("submit");
+    const unable = run.posts()[0]; assert.equal(unable.body.outcome, "UNABLE_TO_INSPECT");
+    assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable submission keeps its named action focused while saving");
+    run.document.activeElement.fire("click");
+    assert.equal(run.posts().length, 1, "activating a pending Unable action does not send a duplicate save");
+    response(unable, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable acknowledgement retains focus on its action");
   }
   {
     // Issue #140 (owner decision): the button matching the current window's recorded result is
