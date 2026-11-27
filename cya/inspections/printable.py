@@ -173,9 +173,10 @@ def versions(organization_id, rows):
 
 
 def _placed_kit_types(organization_id, version, as_of):
-    """[(kit definition label, [PrintRow])] for the kits the version places by definition.
+    """[(kit definition label, [PrintRow], kit definition version id)] for placed kits.
 
-    Each placed definition prints the contents of its version in force at as_of (KDEF-7).
+    Each placed definition prints the contents of its version in force at as_of (KDEF-7), and
+    that version's identifier, which a paper entry names (SPEC 8.0.0 DEP-11, LATE-4).
     """
     from cya.kits.models import ChecklistKitPlacement, KitDefinitionItem
     from cya.kits.placements import definition_version_at
@@ -208,12 +209,15 @@ def _placed_kit_types(organization_id, version, as_of):
         ]
         if len(rows) > REFERENCE_ITEM_LIMIT:
             raise ValueError(f"kit definition {definition.key} lists too many items to print")
-        kinds[(definition.label, definition.pk)] = rows
-    return [(name, rows) for (name, _pk), rows in kinds.items()]
+        kinds[(definition.label, definition.pk)] = (rows, str(version_id))
+    return [(name, rows, version_id) for (name, _pk), (rows, version_id) in kinds.items()]
 
 
 def _kit_types(version):
-    """[(kit type name, [PrintRow])] for one template version, in display order.
+    """[(kit type name, [PrintRow], None)] for one template version, in display order.
+
+    These legacy kit rows belong to the checklist version itself, so they have no separate kit
+    definition version identifier.
 
     A definition's kit names the kit type it describes (SPEC 4.2, OQ-53); every instance of that
     type should match this list. Vehicle overrides are not applied: this is the agency standard.
@@ -237,7 +241,7 @@ def _kit_types(version):
                 value_unit=None,
             )
         )
-    return [(name, rows) for (name, _kit_id), rows in kits.items()]
+    return [(name, rows, None) for (name, _kit_id), rows in kits.items()]
 
 
 def kit_reference(organization_id, as_of):

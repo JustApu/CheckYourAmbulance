@@ -26,9 +26,9 @@ revision and laminated. Standalone like the outage sheet, so it carries no perso
 <section class="kit-reference" aria-labelledby="template-{{ forloop.counter }}">
 <h2 id="template-{{ forloop.counter }}">{{ template.label }} <span class="version-id">{{ template.id }}</span></h2>
 <div class="kit-columns">
-{% for name, rows in template.kit_types %}
+{% for name, rows, kit_version_id in template.kit_types %}
 <section class="kit-type" aria-labelledby="kit-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">
-<h3 id="kit-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">{{ name }}</h3>
+<h3 id="kit-{{ forloop.parentloop.counter }}-{{ forloop.counter }}">{{ name }}{% if kit_version_id %} <span class="version-id">Kit version {{ kit_version_id }}</span>{% endif %}</h3>
 <ul>
 {% for row in rows %}<li>{{ row.label }}{% if row.expected %} ({{ row.expected }}){% endif %}{% if row.instructions %} <span class="kit-note">{{ row.instructions }}</span>{% endif %}</li>
 {% endfor %}</ul>
