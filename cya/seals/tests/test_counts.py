@@ -30,6 +30,7 @@ class KitCountCheckTests(SimpleTestCase):
             outcome="PASSED",
             quantity=2,
             recorded_at=self.at,
+            paper_entry_batch_id=None,  # a live check (SPEC 8.0.0 paper checks are refused here)
         )
         self.selections = [{"line_id": self.line_id, "check_id": self.check_id}]
 
@@ -72,6 +73,11 @@ class KitCountCheckTests(SimpleTestCase):
             self.run_case(invalid=[self.check_id])
         with self.assertRaises(ValueError):
             self.run_case(superseded=[self.check_id])
+
+    def test_a_paper_check_is_not_fresh_evidence_for_a_live_reseal(self):
+        self.check.paper_entry_batch_id = "batch"  # SPEC 8.0.0 LATE-7
+        with self.assertRaises(ValueError):
+            self.run_case()
 
     def test_missing_duplicate_or_unstarted_count_is_rejected(self):
         with self.assertRaises(ValueError):

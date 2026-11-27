@@ -172,7 +172,8 @@ def complete_unable_obligation(
         effective = _effective_tip(org_id, check)
         if effective is None or effective.invalidated or effective.check_id != str(check.pk):
             raise UnableCompletionError("INELIGIBLE_CHECK", "check_id")
-        if not obligation.early_at <= check.recorded_at:
+        # The check's qualifying time: a paper check's performance instant (SPEC 8.0.0 5.3).
+        if not obligation.early_at <= (check.performed_at or check.recorded_at):
             raise UnableCompletionError("INELIGIBLE_CHECK", "check_id")
         selected = effective_selection(
             org_id,

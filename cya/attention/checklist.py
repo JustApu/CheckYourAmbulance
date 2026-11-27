@@ -848,7 +848,8 @@ def _rows(
                 check_suspended=state is not None and state.suspension_in_force,
                 latest_check_id=last.check_id if last else None,
                 latest_check_outcome=last.outcome if last else None,
-                latest_check_at=last.recorded_at if last else None,
+                # Normalized performance time (SPEC 8.0.0 19.4), as the obligation's completion.
+                latest_check_at=(last.performed_at or last.recorded_at) if last else None,
             )
         )
     return rows

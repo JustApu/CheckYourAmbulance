@@ -62,6 +62,7 @@ def _effective_by_root(organization_id, roots, as_of):
                 str(row.predecessor_check_id) if row.predecessor_check_id else None,
                 row.recorded_at,
                 row.outcome,
+                row.performed_at,
             )
             for row in chain
         ],
@@ -102,11 +103,10 @@ def latest_effective_checks(organization_id, vehicle_id, keys, as_of):
         key = (str(row.item_id), check_unit_key(row, units))
         if (str(vehicle_id), *key) not in wanted:
             continue
-        fact = CheckFact(str(row.pk), key[0], key[1], row.recorded_at, row.outcome)
-        if key not in facts or (fact.recorded_at, fact.check_id) > (
-            facts[key].recorded_at,
-            facts[key].check_id,
-        ):
+        fact = CheckFact(
+            str(row.pk), key[0], key[1], row.recorded_at, row.outcome, row.performed_at
+        )
+        if key not in facts or fact.order_key > facts[key].order_key:
             facts[key] = fact
     return list(facts.values())
 

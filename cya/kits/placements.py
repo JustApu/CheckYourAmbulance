@@ -95,7 +95,7 @@ def definition_version_at(organization_id, definition_id, at, recorded_before=No
     return str(latest) if latest else None
 
 
-def placed_contents(organization_id, resolved, item_id, at, recorded_before=None):
+def placed_contents(organization_id, resolved, item_id, at, recorded_before=None, printed=None):
     """The item as content of each kit of each definition the checklist places (KDEF-4, KDEF-7).
 
     For each placement whose definition, in the version in force at `at`, lists the item: one
@@ -105,6 +105,10 @@ def placed_contents(organization_id, resolved, item_id, at, recorded_before=None
     check then reports that the kit is not on the vehicle). Its requirement's definition_id is
     the kit_definition_item id, its source KIT_DEFINITION, and its kit_id the placement id (so
     the item counts as inside a kit).
+
+    printed, when given, maps a kit definition id to the kit-definition version printed on the
+    kit reference a paper entry used (SPEC 8.0.0 LATE-4); that version is used in place of the
+    one in force, and a placement with no printed version contributes nothing.
     """
     # Imported late: overlay is imported by the checklists app, which the kits app depends on.
     from cya.checklists.models import Compartment
@@ -119,8 +123,10 @@ def placed_contents(organization_id, resolved, item_id, at, recorded_before=None
     }
     found = []
     for placement in resolved.placements:
-        version_id = definition_version_at(
-            organization_id, placement.definition_id, at, recorded_before
+        version_id = (
+            definition_version_at(organization_id, placement.definition_id, at, recorded_before)
+            if printed is None
+            else printed.get(str(placement.definition_id))
         )
         if version_id is None:
             continue

@@ -5,6 +5,14 @@ obligation of its item for which it is on time or late within that obligation's 
 checklist created it. Shared-satisfaction rules no longer create links; links recorded under them
 stay in history. Seal evidence keeps its earlier selection (choose_seal_links), which SPEC 6.0.0
 does not change.
+
+Two instants (SPEC 8.0.0 5.3, issue #9 Part B2). `recorded_at` is the check's qualifying time t_c:
+the windows E/G/L are judged at it. `known_at` is what the app knows: obligations, selections and
+the evidence that has already satisfied an obligation are read as recorded by it. For a live
+check both are its server instant. For a paper check t_c is the paper performance instant and
+known_at is the entry instant, so a paper check performed within an obligation's window links
+to it even when entered after L, and never to an obligation already satisfied by a record known
+when it is entered.
 """
 
 import json
@@ -139,13 +147,15 @@ def _eligible(
     include_satisfied=False,
     ignore_root_check_id=None,
     kit_requirement_id=None,
+    known_at=None,
 ):
+    known = recorded_at if known_at is None else known_at
     candidates = _selected_candidates(
         organization_id=organization_id,
         vehicle_id=vehicle_id,
         item_id=item_id,
         kit_keys=[kit_key],
-        recorded_at=recorded_at,
+        recorded_at=known,
         kit_requirement_id=kit_requirement_id,
     )
     if late:
@@ -157,7 +167,7 @@ def _eligible(
         candidates = candidates.filter(early_at__lte=recorded_at, grace_at__gte=recorded_at)
     if not include_satisfied:
         candidates = candidates.filter(
-            *(~done for done in _satisfied_by(recorded_at, ignore_root_check_id))
+            *(~done for done in _satisfied_by(known, ignore_root_check_id))
         )
     return _ordered(candidates)
 
@@ -174,7 +184,7 @@ def _current_rule(organization_id, recorded_at):
     )
 
 
-def _scope(check, recorded_at):
+def _scope(check, recorded_at, known_at=None):
     """The obligation stream a check can satisfy: its item and its unit key.
 
     The unit key is the check's kit, or for a kit presence check its line's unit key, which
@@ -208,6 +218,7 @@ def _scope(check, recorded_at):
         "kit_key": kit_key,
         "kit_requirement_id": str(kit_requirement) if kit_requirement else None,
         "recorded_at": recorded_at,
+        "known_at": recorded_at if known_at is None else known_at,
         "item_requirement_id": requirement,
     }
 
@@ -253,17 +264,18 @@ def _stream_windows(scope):
     bound and the caller must fall back to the separate reads.
     """
     t = scope["recorded_at"]
+    known = scope["known_at"]
     requirement = scope["item_requirement_id"]
     key = scope["kit_key"]
     keys = [key] if requirement is None else [key, NO_KIT]
-    done = _satisfied_by(t, None)
+    done = _satisfied_by(known, None)
     rows = _ordered(
         _selected_candidates(
             organization_id=scope["organization_id"],
             vehicle_id=scope["vehicle_id"],
             item_id=scope["item_id"],
             kit_keys=keys,
-            recorded_at=t,
+            recorded_at=known,
             kit_requirement_id=scope["kit_requirement_id"],
         )
         .filter(Q(early_at__lte=t, grace_at__gte=t) | Q(grace_at__lt=t, late_limit_at__gte=t))
@@ -289,7 +301,7 @@ def _stream_windows(scope):
     return split(True, False), split(True, True), split(False, True)
 
 
-def conflict_obligation(check, *, recorded_at):
+def conflict_obligation(check, *, recorded_at, known_at=None):
     """Of the obligations whose on-time window holds the instant, the one opened first, or None.
 
     This anchors the conflict warning (SPEC CON-3). A second crew member about to repeat a check
@@ -298,7 +310,7 @@ def conflict_obligation(check, *, recorded_at):
     of the item from any checklist (CON-7), so the anchor is the window that opened first and
     every check since then is in scope. The caller holds the vehicle/item lock.
     """
-    on_time = _candidates(_scope(check, recorded_at), late=False, include_satisfied=True)
+    on_time = _candidates(_scope(check, recorded_at, known_at), late=False, include_satisfied=True)
     return min(on_time, key=lambda o: (o.early_at, o.due_at, o.pk)) if on_time else None
 
 
@@ -362,7 +374,7 @@ def _anchor(check, candidates):
     return candidates[0]
 
 
-def choose_links(check, *, recorded_at, ignore_root_check_id=None):
+def choose_links(check, *, recorded_at, known_at=None, ignore_root_check_id=None):
     """Return a link to every eligible obligation, on-time ones first (SPEC 6.0.0 SCH-6).
 
     The caller holds the vehicle/item lock and supplies the exact timestamp that will be stored
@@ -374,10 +386,27 @@ def choose_links(check, *, recorded_at, ignore_root_check_id=None):
     interim guard (_requirement_key) keeps only obligations of the same requirement and place as
     the checklist the check was recorded from.
     """
-    scope = _scope(check, recorded_at)
+    scope = _scope(check, recorded_at, known_at)
     on_time = _candidates(scope, late=False, ignore_root_check_id=ignore_root_check_id)
     late = _candidates(scope, late=True, ignore_root_check_id=ignore_root_check_id)
     return _links(check, scope, on_time, late)
+
+
+def paper_links_and_obligations(check, *, performed_at, known_at):
+    """choose_links for a paper check, and every obligation its performance instant falls in.
+
+    The second list (on time and late, satisfied or not) scopes the paper conflict warning of
+    SPEC 8.0.0 LATE-6: only a check already linked to one of these obligations can warn.
+    """
+    scope = _scope(check, performed_at, known_at)
+    on_time = _candidates(scope, late=False)
+    late = _candidates(scope, late=True)
+    every = _candidates(scope, late=False, include_satisfied=True) + _candidates(
+        scope, late=True, include_satisfied=True
+    )
+    if len(every) > MAX_LINK_CANDIDATES:
+        raise LinkScopeTooLarge("too many eligible obligations")
+    return _links(check, scope, on_time, late), every
 
 
 def links_and_conflict_obligation(check, *, recorded_at):

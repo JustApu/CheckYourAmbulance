@@ -53,6 +53,7 @@ OPTIONAL = (
     "inspection_start_operation_id",
     "verification_for_deficiency_id",
     "deficiency",
+    "paper_entry_batch_id",
 )
 ALLOWED = frozenset(REQUIRED + OPTIONAL)
 
@@ -78,9 +79,9 @@ def _reply(status, code, correlation_id, field_errors=()):
 def _conflict(conflict, operation_id, correlation_id):
     """The dedicated warning shape; it carries only fields every signed-in user may see."""
     newest = dict(conflict.newest)
-    newest["server_recorded_at"] = (
-        newest["server_recorded_at"].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    )
+    for key in ("server_recorded_at", "performed_at"):
+        if key in newest:
+            newest[key] = newest[key].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     return JsonResponse(
         {
             "status": "CONFLICT",
@@ -160,6 +161,9 @@ def _acknowledgement(result, user):
 
     if "verification" in result.body:
         acknowledgement["verification"] = result.body["verification"]
+    if "paper_entry" in result.body:
+        # Only a paper check reports its batch and performance time (SPEC 8.0.0 LATE-1, LATE-2).
+        acknowledgement["paper_entry"] = result.body["paper_entry"]
     return acknowledgement
 
 

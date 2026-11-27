@@ -70,6 +70,8 @@ def validate_kit_counts(organization_id, vehicle_id, actor_id, lines, selections
             or check.outcome not in ("PASSED", "FAILED")
             or check.quantity is None
             or check.root_check.recorded_at <= start.recorded_at
+            # A paper check is not fresh evidence for a live inspection (SPEC 8.0.0 LATE-7).
+            or check.paper_entry_batch_id is not None
             or check.recorded_at > at
             or str(check.root_check_id) in invalid
             or str(check.pk) in superseded
@@ -143,6 +145,8 @@ def validate_kit_presence(organization_id, vehicle_id, actor_id, kits, selection
             or check.outcome not in ("PASSED", "FAILED")
             or (check.quantity == 1) != (check.outcome == "PASSED")
             or check.root_check.recorded_at <= start.recorded_at
+            # A paper check is not fresh evidence for a live inspection (SPEC 8.0.0 LATE-7).
+            or check.paper_entry_batch_id is not None
             or check.recorded_at > at
             or str(check.root_check_id) in invalid
             or str(check.pk) in superseded

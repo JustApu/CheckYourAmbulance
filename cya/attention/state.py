@@ -32,6 +32,13 @@ class CheckFact:
     kit_key: str
     recorded_at: object  # aware datetime of the effective row
     outcome: str
+    # SPEC 8.0.0 19.4: a paper check's performance instant; current order is by it.
+    performed_at: object = None
+
+    @property
+    def order_key(self):
+        """Normalized performance time, then server instant, then id (SPEC 19.4)."""
+        return (self.performed_at or self.recorded_at, self.recorded_at, self.check_id)
 
 
 @dataclass(frozen=True)
@@ -73,14 +80,15 @@ def applies(deficiency, item_id, kit_key):
 
 
 def latest_checks(checks):
-    """{(item_id, kit_key): CheckFact}: the greatest (recorded_at, check_id) of each key."""
+    """{(item_id, kit_key): CheckFact}: the greatest order_key of each key (SPEC 19.4).
+
+    For live checks that is the greatest (recorded_at, check_id) as before; a paper check
+    entered later but performed earlier does not become the latest.
+    """
     latest = {}
     for check in checks:
         key = (check.item_id, check.kit_key)
-        if key not in latest or (check.recorded_at, check.check_id) > (
-            latest[key].recorded_at,
-            latest[key].check_id,
-        ):
+        if key not in latest or check.order_key > latest[key].order_key:
             latest[key] = check
     return latest
 
@@ -88,7 +96,7 @@ def latest_checks(checks):
 def attention_states(keys, checks, deficiencies):
     """Return {(item_id, kit_key): Attention} for each requested key.
 
-    Input order has no effect: the latest check is the greatest (recorded_at, check_id), and
+    Input order has no effect: the latest check is the greatest order_key (SPEC 19.4), and
     deficiency ids are sorted.
     """
     unresolved = [d for d in deficiencies if d.status in ACTIVE_STATUSES]
