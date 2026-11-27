@@ -10,6 +10,10 @@ Code: `cya/odometer/commands.py`, `corrections.py`, `api.py`, `state.py`, `model
 guards in migrations `0002_odometer_guards.py`, `0003_reading_decisions.py` and
 `0004_downstream_anomaly.py`.
 
+[Issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B3 adds paper readings
+(`paper_entry_batch_id`, SPEC 8.0.0 ODO-6): placed in the sequence by their performance instant
+and compared with both neighbours; see [Paper entry](paper-entry.md#paper-readings-part-b3).
+
 ## What a call does
 
 1. The HTTP handler needs a signed-in user (401), a valid CSRF token, `Content-Type:

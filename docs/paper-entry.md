@@ -13,7 +13,8 @@ B lists them. This page grows with each part.
 |---|---|
 | B1: batch header, performer search, §3.3 permissions, kit-reference identifiers | this page |
 | B2: paper item checks | this page |
-| B3 to B6: readings, seal records, invalidation, crew UI | later |
+| B3: paper odometer and engine-hours readings | this page |
+| B4 to B6: seal records, invalidation, crew UI | later |
 
 ## Batch header (Part B1)
 
@@ -136,6 +137,39 @@ is not ROUTINE or is after its entry instant, and requires a printed kit version
 a correction must keep its batch and instant. The link trigger refuses a paper link whose
 obligation window does not hold the performance instant.
 
+## Paper readings (Part B3)
+
+`POST /api/v1/odometer-entries` accepts `paper_entry_batch_id` (SPEC 8.0.0 ODO-6). The entry, and
+its engine-hours entry if any, repeat the batch's performance instant in `performed_at` beside
+the server `recorded_at`; the response adds `paper_entry`. The same batch checks apply as for a
+paper check: only the batch's entry actor adds records, the SPEC 3.3 paper roles are checked
+again, and the vehicle must be the batch's.
+
+**Place in the sequence.** A reading's place in its vehicle's sequence is the key
+(performance instant or recorded instant, recorded instant, id) of its root reading. A live
+reading is placed at its server instant, after every other reading, exactly as before. A paper
+reading is placed at its performance instant, so it may fall between earlier and later readings.
+Its previous reading is the newest effective reading placed before it; a later live reading's
+previous reading is still the newest reading by place, not the paper reading entered last.
+
+**Anomalies against both neighbours.** A paper reading is anomalous, and needs `confirm_anomaly`,
+when it is lower than the previous reading, more than the plausibility threshold above it,
+higher than the next reading, or (odometer only) more than the threshold below the next reading.
+Later readings are never rewritten. Engine hours follow the same place, without a threshold.
+
+**Obligation.** The reading satisfies the odometer obligation whose window, or late interval up to
+L, holds its performance instant, even when entered after L, unless a reading known at entry
+already satisfied it. Odometer obligation state counts the link from its recorded instant and
+completes it at the performance instant, so a late paper reading clears the miss now while an
+earlier as-of view keeps it.
+
+**Corrections** keep the batch and place; the existing downstream-confirmation rule applies.
+
+**Database guards** (`cya/odometer/migrations/0005_paper_readings.py`): the reading insert trigger
+computes the expected previous reading and the next reading by place, applies the rules above,
+and requires a paper reading to match its batch; the link trigger judges the early window at the
+reading's qualifying instant and refuses a paper link past L.
+
 ## Performer search
 
 `GET /api/v1/paper-entry-performers?q=<2 to 100 characters>` finds users by display name or
@@ -157,4 +191,5 @@ to a checklist version itself have no separate kit version and print none.
 Offline tests in `cya/paper/tests/`: `test_batches.py` (time resolution, the command, its
 permissions, printed-version rules and the database guards), `test_api.py` (HTTP codes,
 replay, CSRF, and the performer search) and `test_paper_checks.py` (timing, current and as-of
-compliance, printed version, refusals, conflicts, ordering, corrections, guards).
+compliance, printed version, refusals, conflicts, ordering, corrections, guards) and
+`test_paper_readings.py` (obligations, sequence and both-neighbour anomalies, corrections).
