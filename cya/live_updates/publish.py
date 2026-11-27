@@ -39,9 +39,15 @@ def _submit(job):
         try:
             job()
         finally:
-            connections.close_all()  # this thread's own connections; it may wait a long time
-            with _pending_lock:
-                _pending -= 1
+            try:
+                connections.close_all()  # this thread's own connections; it may wait a long time
+            except Exception as error:  # never keep the slot: 16 lost slots would end row pushes
+                logger.error(
+                    "pushed rows thread could not close its connections (%s)", type(error).__name__
+                )
+            finally:
+                with _pending_lock:
+                    _pending -= 1
 
     try:
         _executor.submit(run)

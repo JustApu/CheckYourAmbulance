@@ -256,3 +256,7 @@ CYA_CURRENT_FACTS_CACHE_ROWS = env_int("CURRENT_FACTS_CACHE_ROWS", 50000, 0, 100
 # that apply to it, and is used only until the next instant of its evidence, so it never serves
 # a state the evaluator would not give; it only bounds memory. 0 turns it off.
 CYA_CURRENT_STATES_CACHE_ROWS = env_int("CURRENT_STATES_CACHE_ROWS", 50000, 0, 1000000)
+# SPEC 8.4.0 §17.3 (OQ-89, issue #278 Part J): a live re-read of the fleet-readiness panel may
+# show the organization's most recent picture if its instant is at most this many seconds before
+# the re-read began (cya.attention.shared_picture). The SPEC caps it at 15; 0 turns sharing off.
+CYA_READINESS_SHARED_PICTURE_SECONDS = env_int("READINESS_SHARED_PICTURE_SECONDS", 15, 0, 15)
