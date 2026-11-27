@@ -5,82 +5,21 @@ the 2026-06-02 obligation has E = 09:00Z, D = 10:00Z, G = 11:00Z and L = 23:00Z.
 entered on 2026-06-03, after that L.
 """
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from uuid import uuid4
 
 from django.db import DatabaseError, transaction
 
 from cya.attention.facts import latest_effective_checks
-from cya.checks.commands import CheckError, correct_check, record_check
+from cya.checks.commands import CheckError, correct_check
 from cya.checks.conflicts import CheckConflict
 from cya.checks.models import CheckObligationLink, CheckRecord
 from cya.core.audit_commands import CommandDenied
-from cya.obligations.projections import check_unit_key, get_vehicle_obligations_as_of
+from cya.obligations.projections import check_unit_key
 from cya.obligations.state import State
-from cya.paper.tests.support import PaperCase
+from cya.paper.tests.support import ENTRY, JUNE_2, PaperCheckCase
 
-JUNE_2 = datetime(2026, 6, 2, tzinfo=UTC)
-E, G, L = JUNE_2.replace(hour=9), JUNE_2.replace(hour=11), JUNE_2.replace(hour=23)
-ENTRY = datetime(2026, 6, 3, 12, tzinfo=UTC)
-
-
-class PaperCheckCase(PaperCase):
-    def setUp(self):
-        super().setUp()
-        self.publish_schedule("test-0600")
-        self.bind(template=self.checklist)
-        self.generate()
-        self.clock.set(ENTRY)
-
-    def batch(self, actor=None, performers=None, at=time(6, 15), on=date(2026, 6, 2)):
-        return self.enter(
-            actor=actor, performers=performers, performed_on=on, performed_time=at
-        ).body["batch_id"]
-
-    def paper(self, batch_id, actor=None, item=None, **fields):
-        args = {
-            "vehicle_id": str(self.vehicle.pk),
-            "item_id": str((item or self.suction).pk),
-            "checklist_version_id": self.version,
-            "outcome": "PASSED",
-            "paper_entry_batch_id": batch_id,
-            **fields,
-        }
-        return record_check(**args, **self.context(actor or self.crew))
-
-    def live(self, actor=None, at=None, **fields):
-        if at is not None:
-            self.clock.set(at)
-        args = {
-            "vehicle_id": str(self.vehicle.pk),
-            "item_id": str(self.suction.pk),
-            "checklist_version_id": self.version,
-            "outcome": "PASSED",
-            **fields,
-        }
-        result = record_check(**args, **self.context(actor or self.crew))
-        self.clock.set(ENTRY)
-        return result
-
-    def june_2_obligation(self):
-        found = [
-            o
-            for o in self.obligations(vehicle=self.vehicle)
-            if str(o.item_id) == str(self.suction.pk) and o.due_at == JUNE_2.replace(hour=10)
-        ]
-        self.assertEqual(len(found), 1)
-        return found[0]
-
-    def state_at(self, instant):
-        obligation = self.june_2_obligation()
-        states = get_vehicle_obligations_as_of(
-            str(self.vehicle.pk),
-            instant,
-            organization_id=str(self.org.pk),
-            start=JUNE_2,
-            end=JUNE_2 + timedelta(days=1),
-        )
-        return next(s for s in states if s.obligation.id == str(obligation.pk))
+L = JUNE_2.replace(hour=23)
 
 
 class TimingTests(PaperCheckCase):

@@ -116,7 +116,9 @@ def get_vehicle_odometer_states_as_of(
         if _exempt(statuses, obligation, instant_T):
             state = OdometerState(str(obligation.pk), obligation.due_at, State.EXEMPT)
         elif link is not None:
-            done = link.entry.recorded_at
+            # The qualifying instant: a paper reading's performance instant (SPEC 8.0.0 ODO-6);
+            # whether the link is known at T is still decided by its recorded instant.
+            done = link.entry.performed_at or link.entry.recorded_at
             late = max(0, (done - obligation.grace_at).total_seconds())
             state = OdometerState(
                 str(obligation.pk),

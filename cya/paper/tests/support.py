@@ -1,14 +1,16 @@
 """Fixtures for paper-entry tests (issue #9 Part B)."""
 
-from datetime import date, time
+from datetime import UTC, date, datetime, time, timedelta
 
 from cya.checklists import commands as checklist_commands
 from cya.checklists.models import Item
+from cya.checks.commands import record_check
 from cya.kits.definitions import (
     create_kit_definition,
     publish_kit_definition_version,
     save_kit_definition_draft,
 )
+from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.tests.support import ObligationCase
 from cya.paper.commands import PaperEntryError, record_paper_entry_batch
 from cya.paper.models import PaperEntryBatch
@@ -90,3 +92,66 @@ class PaperCase(ObligationCase):
         self.assertEqual(caught.exception.code, code)
         self.assertEqual(PaperEntryBatch.objects.count(), before)
         return caught.exception
+
+
+JUNE_2 = datetime(2026, 6, 2, tzinfo=UTC)
+ENTRY = datetime(2026, 6, 3, 12, tzinfo=UTC)
+
+
+class PaperCheckCase(PaperCase):
+    def setUp(self):
+        super().setUp()
+        self.publish_schedule("test-0600")
+        self.bind(template=self.checklist)
+        self.generate()
+        self.clock.set(ENTRY)
+
+    def batch(self, actor=None, performers=None, at=time(6, 15), on=date(2026, 6, 2)):
+        return self.enter(
+            actor=actor, performers=performers, performed_on=on, performed_time=at
+        ).body["batch_id"]
+
+    def paper(self, batch_id, actor=None, item=None, **fields):
+        args = {
+            "vehicle_id": str(self.vehicle.pk),
+            "item_id": str((item or self.suction).pk),
+            "checklist_version_id": self.version,
+            "outcome": "PASSED",
+            "paper_entry_batch_id": batch_id,
+            **fields,
+        }
+        return record_check(**args, **self.context(actor or self.crew))
+
+    def live(self, actor=None, at=None, **fields):
+        if at is not None:
+            self.clock.set(at)
+        args = {
+            "vehicle_id": str(self.vehicle.pk),
+            "item_id": str(self.suction.pk),
+            "checklist_version_id": self.version,
+            "outcome": "PASSED",
+            **fields,
+        }
+        result = record_check(**args, **self.context(actor or self.crew))
+        self.clock.set(ENTRY)
+        return result
+
+    def june_2_obligation(self):
+        found = [
+            o
+            for o in self.obligations(vehicle=self.vehicle)
+            if str(o.item_id) == str(self.suction.pk) and o.due_at == JUNE_2.replace(hour=10)
+        ]
+        self.assertEqual(len(found), 1)
+        return found[0]
+
+    def state_at(self, instant):
+        obligation = self.june_2_obligation()
+        states = get_vehicle_obligations_as_of(
+            str(self.vehicle.pk),
+            instant,
+            organization_id=str(self.org.pk),
+            start=JUNE_2,
+            end=JUNE_2 + timedelta(days=1),
+        )
+        return next(s for s in states if s.obligation.id == str(obligation.pk))

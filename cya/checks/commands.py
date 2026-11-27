@@ -492,7 +492,10 @@ def _paper_batch(organization_id, actor, shape):
             "the paper-entry batch is for another vehicle",
             path="paper_entry_batch_id",
         )
-    if str(batch.checklist_version_id) != shape["checklist_version_id"]:
+    if (
+        "checklist_version_id" in shape
+        and str(batch.checklist_version_id) != shape["checklist_version_id"]
+    ):
         raise CheckError(
             "PAPER_VERSION_MISMATCH",
             "the check names another checklist version than the one printed on its paper form",
