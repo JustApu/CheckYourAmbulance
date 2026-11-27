@@ -16,7 +16,8 @@ B lists them. This page grows with each part.
 | B3: paper odometer and engine-hours readings | this page |
 | B4: paper seal verification, seal break and paper reseal | this page |
 | B5: batch invalidation and mistaken-Normal invalidation | this page |
-| B6: crew UI | later |
+| B6a: crew setup page and paper checklist screen | this page |
+| B6b, B6c: history marks and invalidation UI; paper seal page | later |
 
 ## Batch header (Part B1)
 
@@ -357,6 +358,34 @@ batch; the paper-event guard ignores a voided substitution as later evidence; a 
 substitution may not rely on a paper reseal of an invalidated batch; and the
 `deficiency_event` trigger accepts an INV-7 reopening under a batch invalidation receipt.
 
+## Crew UI (Part B6a)
+
+The crew pages are described in [crew inspection screens](crew-inspection-ui.md#paper-entry-mode);
+this section lists what they read and send. Code: `cya/inspections/paper_views.py`,
+`cya/paper/readers.py`, `templates/inspections/paper_entry.js` and `checklist.js` in paper mode.
+
+- **Setup** (`/inspection/vehicles/{id}/paper-entry/?template={checklist}`): offers the
+  checklist's published versions and, per placed kit definition, its published kit versions
+  (`version_choices`, at most 10 each, the ones in force now preselected; the command still judges
+  them at the paper time). It sends the B1 header unchanged; `kit_definition_version_ids` only
+  when a kit version is chosen. A Crew member's `performer_ids` is themself; a Supervisor or
+  Administrator chooses by the performer search below.
+- **Paper checklist screen** (`/inspection/paper-entry/{batch}/`, the batch's entry actor only):
+  reads `GET /api/v1/vehicles/{id}/checklist?view=NORMAL&needs_attention_only=false&paper_entry_batch_id={batch}`
+  ([attention views](attention-views.md#the-checklist-query)): the rows of the printed version as
+  a paper check of the batch resolves them, each with the batch's effective check of it
+  (`paper_entry_check`). Each tap is a B2 paper check with `paper_entry_batch_id` and no
+  `session_id`; the readings form is a B3 paper reading. Nothing is saved per batch.
+- **Paper source on every row.** `latest_check_paper` names the performers, entry actor and entry
+  instant of a row's newest check when it is a paper check, so the paper marker shows in Normal
+  mode too (LATE-5).
+- **Fresh print (LATE-4, LATE-8, AC-43 (9)).** The page config says whether the batch already has
+  a record (`has_records`: a check, reading, seal event or seal substitution names it); if not,
+  the first acknowledged record shows the print offer once.
+
+Not in B6a: history marks, timing, batch and mistaken-Normal invalidation UI and the RPT-4
+participation note (B6b); paper seal records from the sheet (B6c).
+
 ## Performer search
 
 `GET /api/v1/paper-entry-performers?q=<2 to 100 characters>` finds users by display name or
@@ -384,3 +413,8 @@ compliance, printed version, refusals, conflicts, ordering, corrections, guards)
 evidence, paper kit and cabinet reseals, refusals and guards) and `test_invalidation.py`
 (batch invalidation of checks, readings and seal records, as-of history, deficiency effects,
 permissions, refusals, database guards, HTTP, and the mistaken-Normal invalidation).
+Part B6a: `cya/attention/tests/test_paper_rows.py` (printed-version rows after a replacement,
+printed kit content, a kit moved after the paper time, the batch's check through correction and
+invalidation, item reads, paper sources), `cya/inspections/tests/test_paper_entry_ui.py` (pages,
+access, config, escaping, the checklist read and its refusals), and the Node harnesses
+`paper_entry_script_harness.js` and `workflow_script_harness.js` (paper mode).

@@ -188,14 +188,20 @@ def placed_content_item_ids(placements):
     return list({*contents, *presence})
 
 
-def placed_items(organization_id, resolved, at, recorded_before=None):
-    """Every content entry of every placed kit present on the vehicle, one ResolvedItem per kit."""
+def placed_items(organization_id, resolved, at, recorded_before=None, printed=None):
+    """Every content entry of every placed kit present on the vehicle, one ResolvedItem per kit.
+
+    printed is as for placed_contents: the kit-definition versions printed on the kit reference
+    a paper entry used (SPEC 8.0.0 LATE-4); a placement with no printed version lists nothing.
+    """
     from cya.kits.models import KitDefinitionItem
 
     items = []
     for placement in resolved.placements:
-        version_id = definition_version_at(
-            organization_id, placement.definition_id, at, recorded_before
+        version_id = (
+            definition_version_at(organization_id, placement.definition_id, at, recorded_before)
+            if printed is None
+            else printed.get(str(placement.definition_id))
         )
         if version_id is None:
             continue
@@ -204,7 +210,7 @@ def placed_items(organization_id, resolved, at, recorded_before=None):
         ):
             items.extend(
                 placed_contents(
-                    organization_id, resolved, str(content.item_id), at, recorded_before
+                    organization_id, resolved, str(content.item_id), at, recorded_before, printed
                 )
             )
     unique = {}

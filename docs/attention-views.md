@@ -47,8 +47,9 @@ an item another checklist also lists (SPEC 6.0.0 VW-5, [issue #256](https://gith
 and group progress counts those rows. The obligation and attention state of a shared item are
 the vehicle's, the same in every checklist. An unknown version lists nothing, and a malformed
 one is `400 INVALID_CHECKLIST_VERSION`. A session's checklist screen reads its pinned version
-with `?session_id=` instead (CHK-4, see [crew inspection UI](crew-inspection-ui.md)); naming
-both parameters is `400 MALFORMED_REQUEST`. The kit instances
+with `?session_id=` instead (CHK-4, see [crew inspection UI](crew-inspection-ui.md)), and the
+paper checklist screen reads the version printed on its sheet with `?paper_entry_batch_id=`
+(below); naming two of these parameters is `400 MALFORMED_REQUEST`. The kit instances
 are read from the append-only assignment history as it stood at the instant, never from the
 mutable `kit_instance` row, so a past checklist keeps a kit that was later moved or deactivated
 and omits one added later (none when the vehicle has no such kit, which is also what the
@@ -104,6 +105,28 @@ Errors: `INVALID_VIEW`, `INVALID_FILTER`, `INVALID_AS_OF` (400), `NOT_FOUND` (40
 another organization's vehicle), `CHECKLIST_UNAVAILABLE` (409, a vehicle slot a definition
 needs is missing).
 
+**Paper entry rows (SPEC 8.0.0 LATE-4 to LATE-6, [issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B6a).**
+`vehicle_checklist(paper_batch=…)` lists the rows of the checklist version printed on a
+paper-entry batch's sheet, resolved exactly as a paper check of the batch is
+(`cya.checks.commands._paper_resolved_item`): the printed version as in force at the batch's
+performance instant t, even after a later version replaced it, with stocking deviations at t;
+kit content only through the kit-definition versions printed on the batch (a placed definition
+with none lists no content); and kits on the vehicle as at t, with every assignment known now,
+so a kit moved away since t is still listed (a check of it is then refused with
+`KIT_MOVED_SINCE_PAPER`). Obligations, attention, checks and deficiencies are still read at the
+query instant. Each row adds the batch's effective check of it (`paper_entry_check_id`,
+`paper_entry_check_outcome`; a correction's replacement, none once the chain or the batch is
+invalidated). `paper_batch` excludes `session` and `checklist_version_id` (`400
+INVALID_CHECKLIST_VERSION`); a batch of another vehicle is `404 NOT_FOUND`. `item_ids` works as
+for a session. Readers: `cya/paper/readers.py`.
+
+Every row on the wire also carries `paper_entry_check` (`{check_id, outcome}` on a paper-entry
+read, else null) and `latest_check_paper`: when the row's newest effective check is a paper
+check, `{performers, entered_by, entered_at}` (performer display names in name order, the entry
+actor and the server entry instant), else null (LATE-3, LATE-5: a paper check stays marked
+Paper entry with both times and its performers). Both are added keys; every existing key keeps
+its meaning, and the pushed rows of `cya/attention/live_rows.py` have the same shape.
+
 ## View preference
 
 `user_preference` (an M table, one row per user, `preferred_view` NORMAL or PRIORITY and
@@ -127,7 +150,7 @@ tables.
 
 | Route | Purpose |
 |---|---|
-| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=&checklist_version_id=&session_id=&item_ids=` | The query above at the present instant; the user's saved view and filter apply unless the query names them; `checklist_version_id` (optional) limits the rows to that checklist version's own. `item_ids` (optional, 1 to 20 comma-separated item ids, else `400 INVALID_ITEMS`) returns only those items' rows, each exactly as in the whole list, with `group_progress: null`: the checklist screen patches the rows a live update names instead of re-reading every row ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278)) |
+| `GET /api/v1/vehicles/{id}/checklist?view=&needs_attention_only=&checklist_version_id=&session_id=&paper_entry_batch_id=&item_ids=` | The query above at the present instant; the user's saved view and filter apply unless the query names them; `checklist_version_id` (optional) limits the rows to that checklist version's own. `item_ids` (optional, 1 to 20 comma-separated item ids, else `400 INVALID_ITEMS`) returns only those items' rows, each exactly as in the whole list, with `group_progress: null`: the checklist screen patches the rows a live update names instead of re-reading every row ([issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278)). `paper_entry_batch_id` (optional) lists the rows of the version printed on the signed-in user's own paper-entry batch on this vehicle (above): only its entry actor adds records to a batch, so a malformed id is `400 MALFORMED_REQUEST` and another user's, vehicle's or organization's batch `404 NOT_FOUND` |
 | `GET /api/v1/me/view-preferences` | The saved (or default) view and filter |
 | `POST /api/v1/me/view-preferences` | `{operation_id (a version 4 UUID, else 400), preferred_view, needs_attention_only}`; `200` with the stored values; a replay returns the stored result |
 

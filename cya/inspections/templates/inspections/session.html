@@ -8,7 +8,7 @@
     <span id="op-status" class="pill status-pill" data-status="{{ status.code }}">{{ status.label }}</span>
     <span id="op-restrictions" class="muted">{{ status.restrictions|default:"" }}</span>
   </p>
-  {% if verification %}<p class="muted">Verification checks</p>{% else %}<p class="muted">{{ template_label }} · Session {{ state_label|lower }}</p>{% endif %}
+  {% if verification %}<p class="muted">Verification checks</p>{% elif paper %}<p class="muted">{{ template_label }} · Paper entry</p>{% else %}<p class="muted">{{ template_label }} · Session {{ state_label|lower }}</p>{% endif %}
 </section>
 <div id="live-banner" class="banner banner-error" role="alert" hidden>
   <span class="indicator-icon" aria-hidden="true">&#9888;</span>
@@ -21,10 +21,13 @@
 <p id="session-message" class="notice" role="status"></p>
 <form id="csrf-holder">{% csrf_token %}</form>
 <p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent problem report</a></p>
-{% if not verification %}<p><a class="button" href="{% url 'inspection-vehicle-seals' vehicle.pk %}">Sealed kits and cabinets</a></p>{% endif %}
+{% if not verification and not paper %}<p><a class="button" href="{% url 'inspection-vehicle-seals' vehicle.pk %}">Sealed kits and cabinets</a></p>{% endif %}
 
 {% if verification %}
 <section class="notice"><p>Verification for <a href="{% url 'deficiencies-detail' verification.pk %}">{{ verification.summary }}</a>. Each outstanding row needs a Pass; a Fail returns the problem to In Progress. Unable to Inspect does not verify.</p></section>
+{% elif paper %}
+{% include "inspections/paper_banner.html" %}
+{% if state == "OPEN" %}{% include "inspections/readings_form.html" %}{% endif %}
 {% elif past_deadline %}
 <section class="notice" aria-label="Session ended" id="session-deadline-passed">
   <p>This inspection reached its time limit at <time datetime="{{ resume_deadline.isoformat }}">{{ resume_deadline|station_time }}</time> and can no longer be resumed. Its records are kept. To continue, start a new inspection from the vehicle page; checks already made still count.</p>
@@ -37,42 +40,11 @@
 </section>
 {% else %}
 <p class="muted" id="session-deadline">This inspection ends by <time datetime="{{ resume_deadline.isoformat }}">{{ resume_deadline|station_time }}</time>. After that, start a new one.</p>
-<section aria-labelledby="odo-heading" class="panel vehicle-readings">
-  <h2 id="odo-heading">Vehicle readings</h2>
-  <form id="odometer-form" novalidate>
-    <div class="vehicle-readings-fields">
-      <label class="vehicle-reading-field" for="odo-value">
-        <span>Mileage{% if odometer_unit_label %} <span class="muted">({{ odometer_unit_label }})</span>{% endif %}</span>
-        <input id="odo-value" class="number-input" type="text" inputmode="decimal" autocomplete="off" required>
-      </label>
-      {% if config.odometer_unit %}
-      <input id="odo-unit" type="hidden" value="{{ config.odometer_unit }}">
-      {% else %}
-      <label class="vehicle-reading-field" for="odo-unit">
-        <span>Distance unit</span>
-        <select id="odo-unit"><option value="mi">miles</option><option value="km">kilometres</option></select>
-      </label>
-      {% endif %}
-      <label class="vehicle-reading-field" for="odo-hours">
-        <span>Engine hours (optional)</span>
-        <input id="odo-hours" class="number-input" type="text" inputmode="decimal" autocomplete="off">
-      </label>
-      <button type="submit" class="button primary" aria-describedby="readings-save-help">Record readings</button>
-    </div>
-  </form>
-  <p id="readings-save-help" class="muted readings-save-note">Audited history: select Record after entering complete values.</p>
-  <div id="odo-confirm" hidden>
-    <label for="odo-why">Why is this reading correct? (optional)</label>
-    <textarea id="odo-why" rows="2" maxlength="1000"></textarea>
-    <button type="button" id="odo-confirm-button" class="button">The reading is correct. Save it.</button>
-  </div>
-  <p id="odometer-state" class="save-state" role="status" hidden><span class="indicator-icon" aria-hidden="true"></span><span class="save-state-text"></span></p>
-</section>
-{% endif %}
+{% include "inspections/readings_form.html" %}{% endif %}
 
 <section aria-labelledby="checklist-heading">
   <h2 id="checklist-heading">Checklist</h2>
-  {% if not verification %}<div class="view-controls" role="group" aria-label="Checklist view">
+  {% if not verification and not paper %}<div class="view-controls" role="group" aria-label="Checklist view">
     <button type="button" id="view-normal" class="button" aria-pressed="false">Normal</button>
     <button type="button" id="view-priority" class="button" aria-pressed="false">Priority</button>
     <label class="check"><input type="checkbox" id="only-attention"> Needs attention only</label>
@@ -89,7 +61,7 @@
   {% if not verification %}
   <section id="area-overview" aria-labelledby="area-overview-heading" hidden>
     <h3 id="area-overview-heading" tabindex="-1">Choose an area or compartment</h3>
-    <p class="muted">Progress counts checks for the current inspection window. Known problems remain open until resolved.</p>
+    <p class="muted">{% if paper %}Each area says how many of its rows were copied from this sheet. Known problems remain open until resolved.{% else %}Progress counts checks for the current inspection window. Known problems remain open until resolved.{% endif %}</p>
     <div id="area-cards" class="area-cards"></div>
   </section>
   <section id="area-detail" aria-labelledby="area-heading" hidden>
@@ -101,7 +73,7 @@
   <p id="checklist-loading" class="visually-hidden" role="status">Loading the checklist…</p>
   <div id="checklist-skeleton" class="checklist-skeleton" aria-hidden="true"><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>
   <ol id="items" class="items"></ol>
-  {% if not verification and state == "OPEN" %}
+  {% if not verification and not paper and state == "OPEN" %}
   <div id="checklist-bar" class="checklist-bar" role="group" aria-label="Checklist progress and navigation" hidden>
     <div class="checklist-bar-progress">
       <span id="checklist-progress-text" class="checklist-progress-text"></span>
@@ -120,6 +92,7 @@
   {% endif %}
   </div>
 </section>
+{% if paper %}{% include "inspections/paper_finish.html" %}{% endif %}
 
 <dialog id="conflict-dialog" aria-labelledby="conflict-title">
   <h2 id="conflict-title">Someone else already checked this</h2>

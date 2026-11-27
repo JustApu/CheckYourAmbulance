@@ -1,0 +1,66 @@
+{% extends "shell/base.html" %}
+{% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="{% url 'inspection-vehicle' vehicle.pk %}">&larr; {{ vehicle.display_name }}</a></p>
+<section class="paper-banner" aria-labelledby="paper-setup-heading">
+  <h2 id="paper-setup-heading"><span class="pill pill-paper">Paper entry</span> Copy an outage sheet: {{ template_label }}</h2>
+  <p>Use Paper entry only to copy checks written on a paper outage sheet. For checks you are doing now, go back and start a normal inspection.</p>
+  <p>Answer these questions once for the whole sheet. Each result you then copy is saved on its own as you tap it; there is no Submit button.</p>
+</section>
+<div id="paper-errors" class="banner banner-error" role="alert" tabindex="-1" hidden>
+  <strong>The paper entry was not started.</strong>
+  <ul id="paper-error-list"></ul>
+</div>
+<form id="csrf-holder">{% csrf_token %}</form>
+{% if not has_versions %}
+{% include "shell/empty_state.html" with message="This checklist has no published version yet." hint="A paper sheet can only be copied against a published version." %}
+{% else %}
+<form id="paper-setup" class="panel paper-setup" novalidate>
+  <fieldset>
+    <legend>Printed checklist</legend>
+    <label class="paper-field" for="paper-version">Version ID printed on the sheet</label>
+    <select id="paper-version" aria-describedby="paper-version-help"></select>
+    <p id="paper-version-help" class="muted">The sheet's header shows the checklist revision and its Version ID. The version in force now is chosen for you; change it if the sheet shows another.</p>
+  </fieldset>
+  <fieldset id="paper-kits" hidden>
+    <legend>Kit reference used</legend>
+    <p class="muted">For each kit, choose the kit version printed on the kit reference that was used. Choose "Kit reference not used" if it was not used; that kit's contents are then not listed.</p>
+    <div id="paper-kit-fields"></div>
+  </fieldset>
+  <fieldset>
+    <legend>When the checks were done</legend>
+    <p id="paper-time-help" class="muted">Copy the date and time written on the sheet. They are read as station time ({{ station_zone }}).</p>
+    <div class="paper-when">
+      <label class="paper-field" for="paper-date"><span>Date</span>
+        <input id="paper-date" type="date" required aria-describedby="paper-time-help">
+      </label>
+      <label class="paper-field" for="paper-time"><span>Time</span>
+        <input id="paper-time" type="time" step="60" required aria-describedby="paper-time-help">
+      </label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Who did the checks</legend>
+    {% if can_attribute %}
+    <label class="paper-field" for="performer-search">Search by name or email</label>
+    <input id="performer-search" type="search" autocomplete="off" aria-describedby="performer-search-help" aria-controls="performer-results">
+    <p id="performer-search-help" class="muted">Type at least 2 characters. People whose accounts are no longer active are included. Choose everyone who did the checks on the sheet, up to 20.</p>
+    <button type="button" id="performer-add-self" class="button">Add myself</button>
+    <p id="performer-search-status" class="muted" role="status"></p>
+    <ul id="performer-results" class="plain performer-results" aria-label="Search results"></ul>
+    <h3 id="performer-chosen-heading" class="paper-subheading">Chosen</h3>
+    <p id="performer-count" class="muted" role="status"></p>
+    <ul id="performer-chosen" class="plain performer-chips" aria-labelledby="performer-chosen-heading"></ul>
+    {% else %}
+    <p id="performer-self"></p>
+    <p class="muted">You can copy only your own paper records. A Supervisor or Administrator can copy records for other people.</p>
+    {% endif %}
+  </fieldset>
+  <p class="muted">You are recorded as the person entering these records, and the app records when each one is entered, separately from the time on the sheet.</p>
+  <button type="submit" id="paper-start" class="button primary">Start paper entry</button>
+  <p id="paper-state" class="save-state" role="status" hidden></p>
+</form>
+{% endif %}
+{{ config|json_script:"cya-config" }}
+{% endblock %}
+{% block scripts %}<script>{% include "inspections/paper_entry.js" %}</script>{% endblock %}

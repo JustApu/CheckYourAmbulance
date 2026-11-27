@@ -76,3 +76,28 @@ class VehicleScriptTests(SimpleTestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class PaperEntryScriptTests(SimpleTestCase):
+    def test_the_scripts_paper_path_is_the_servers_route(self):
+        # paper_entry.js navigates with a constant path rather than text read from the page.
+        script = (
+            Path(__file__).resolve().parents[1] / "templates" / "inspections" / "paper_entry.js"
+        ).read_text()
+        found = re.search(r'var PAPER_PATH = "([^"]+)";', script)
+        self.assertIsNotNone(found)
+        self.assertEqual(
+            found.group(1) + "SEGMENT/", reverse("inspection-paper-entry", args=["SEGMENT"])
+        )
+
+    @skipUnless(shutil.which("node"), "optional Node client harness is unavailable")
+    def test_offline_paper_entry_setup_regressions(self):
+        script = Path(__file__).with_name("paper_entry_script_harness.js")
+        result = subprocess.run(
+            [shutil.which("node"), str(script)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
