@@ -78,6 +78,11 @@ def _parse(request):
         problems.append(("$", "UNKNOWN_FIELD"))
     if problems:
         raise Rejected(400, "MALFORMED_REQUEST", problems)
+    if "kit_definition_version_ids" in body and not isinstance(
+        body["kit_definition_version_ids"], list
+    ):
+        # An explicit null or scalar is malformed; only an omitted key means none printed.
+        raise Rejected(400, "MALFORMED_REQUEST", [("kit_definition_version_ids", "INVALID")])
     body["performed_on"] = _parse_date(body["performed_on"])
     body["performed_time"] = _parse_time(body["performed_time"])
     return body

@@ -125,6 +125,8 @@ class RecordTests(PaperCase):
             ({"performed_time": time(19, 30, 15)}, "performed_time"),
             ({"performed_on": "2026-06-01"}, "performed_on"),
             ({"kit_definition_version_ids": [self.kit_version] * 2}, "kit_definition_version_ids"),
+            ({"kit_definition_version_ids": 7}, "kit_definition_version_ids"),
+            ({"kit_definition_version_ids": "x"}, "kit_definition_version_ids"),
         ):
             with self.subTest(path=path, overrides=overrides):
                 error = self.refused("MALFORMED_REQUEST", **overrides)
