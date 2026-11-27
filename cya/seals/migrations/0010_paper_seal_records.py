@@ -136,7 +136,9 @@ THEN {signal("paper seal inspection has no live start")}; END IF;"""
 
 
 def inspection_guard():
-    return guards.INSPECTION_GUARD + counts.START_GUARD + "\n" + PAPER_START
+    # The paper rule first: a paper reseal names no live start, and says so before the live
+    # start-receipt rule would refuse it with a less specific message.
+    return guards.INSPECTION_GUARD + "\n" + PAPER_START + counts.START_GUARD
 
 
 def old_inspection_guard():
