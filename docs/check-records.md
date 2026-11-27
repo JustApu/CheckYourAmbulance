@@ -72,6 +72,11 @@ retry with the same operation ID to recover a possible committed result. `ITEM_L
 lock, configuration, or audit service; do not automatically retry them. A manual retry after
 recovery uses the same operation ID.
 
+[Issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B2 adds paper checks
+(`paper_entry_batch_id`, SPEC 8.0.0 §7.9): a check copied from an outage form keeps its server
+`recorded_at` and adds the paper `performed_at`, which is its qualifying time for linking,
+compliance and current order; see [Paper entry](paper-entry.md#paper-item-checks-part-b2).
+
 ## What a call does
 
 Code: `cya/checks/commands.py` (`record_check`, `correct_check`), `cya/checks/api.py` (HTTP), `cya/checks/models.py`.

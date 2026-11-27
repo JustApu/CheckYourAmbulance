@@ -108,6 +108,20 @@ class CheckRecord(Evidence):
     # The scope revision of that deficiency this check was recorded against (VER-4): a Pass counts
     # only for rows of the same revision, so a Pass never carries over to a later revision.
     verification_scope_revision = models.PositiveIntegerField(null=True)
+    # SPEC 8.0.0 7.2, 7.9 (issue #9 Part B2): a check copied from an outage paper form names its
+    # paper-entry batch and repeats the batch's original performance instant. performed_at is
+    # the qualifying time t_c for compliance and current ordering (5.3, TIME-4, 19.4, 19.6);
+    # recorded_at stays the server entry instant for as-of history. Both are null for a live
+    # check. The insert trigger (migration 0022) keeps them equal to the batch's.
+    paper_entry_batch = models.ForeignKey(
+        "cya_paper.PaperEntryBatch",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0022.
+        db_constraint=False,
+    )
+    performed_at = models.DateTimeField(null=True)
 
     class Meta:
         db_table = "check_record"
@@ -222,6 +236,11 @@ class CheckRecord(Evidence):
                 name="check_vehicle_item_time",
             ),
         ]
+
+    @property
+    def qualifying_at(self):
+        """t_c of SPEC 5.3: the paper performance instant, else the server-recorded instant."""
+        return self.performed_at or self.recorded_at
 
     def __str__(self):
         return f"CheckRecord {self.pk}"

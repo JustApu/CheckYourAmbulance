@@ -565,6 +565,13 @@ def _attention_roots(organization_id, keys, since, instant, limit):
     jumps to each unresolved key's next older check, so a key's settled history before that
     chain is never read (issue #63). The result depends only on the evidence, never on how the
     windows fell, so a page and a single vehicle agree.
+
+    Chains rank by normalized performance time (SPEC 8.0.0 19.4): a paper chain ranks by its
+    performance instant, then its newest server instant and id. A key is resolved by a valid
+    chain only once that chain outranks everything not yet read: rows before `lower` were
+    recorded, and so performed, no later than `lower`. A recently entered paper chain performed
+    long ago therefore keeps the walk going to the older live check that outranks it. For live
+    chains the ranking is the old newest-first order, so their reads are unchanged.
     """
     since = min(since, instant)  # never read a check recorded after the instant
     units = _Units(keys)
@@ -588,7 +595,9 @@ def _attention_roots(organization_id, keys, since, instant, limit):
         limit,
     )
     roots = {str(root) for root, *key in recent if units.key(*key) in keys}
-    older_chains = {}  # key -> {root: (newest recorded_at, newest id)}, chains before `since`
+    # key -> {root: (rank instant, newest recorded_at, newest id)}, chains before `since`; the
+    # rank instant is the chain's performance instant (paper) or its newest recorded_at.
+    older_chains = {}
     invalidated = set()
     unresolved = set(keys)
     upper = lower = since
@@ -621,17 +630,19 @@ def _attention_roots(organization_id, keys, since, instant, limit):
                 "kit_requirement_id",
                 "item_requirement_version_id",
                 "recorded_at",
+                "performed_at",
             )[: limit + 1],
             limit,
         )
         seen = set()
-        for pk, root, vehicle_id, item_id, kit_id, line, version, recorded_at in window:
+        for pk, root, vehicle_id, item_id, kit_id, line, version, recorded_at, performed in window:
             key = units.key(vehicle_id, item_id, kit_id, line, version)
             if key not in unresolved:
                 continue
             by_root = older_chains.setdefault(key, {})
-            root, newest = str(root), (recorded_at, str(pk))
-            if root not in by_root or newest > by_root[root]:
+            # A correction repeats its chain's performance instant (cya_checks 0022).
+            root, newest = str(root), (performed or recorded_at, recorded_at, str(pk))
+            if root not in by_root or newest[1:] > by_root[root][1:]:
                 by_root[root] = newest
             seen.add(root)
         if seen:
@@ -648,13 +659,20 @@ def _attention_roots(organization_id, keys, since, instant, limit):
                 )
             )
         unresolved = {
-            k for k in unresolved if all(r in invalidated for r in older_chains.get(k, {}))
+            k
+            for k in unresolved
+            if not any(
+                rank[0] > lower
+                for r, rank in older_chains.get(k, {}).items()
+                if r not in invalidated
+            )
         }
     for by_root in older_chains.values():
-        for root, _newest in sorted(by_root.items(), key=lambda item: item[1], reverse=True):
-            roots.add(root)
-            if root not in invalidated:
-                break
+        valid = [rank for r, rank in by_root.items() if r not in invalidated]
+        best = max(valid) if valid else None
+        # Every chain that outranks the best valid one, and that one: for live chains, the
+        # newest chains down to and including the first valid one, as before.
+        roots.update(r for r, rank in by_root.items() if best is None or rank >= best)
     return roots
 
 
@@ -894,6 +912,7 @@ def _history_fields(
                     str(r.predecessor_check_id) if r.predecessor_check_id else None,
                     r.recorded_at,
                     r.outcome,
+                    r.performed_at,
                 ),
                 str(r.item_id),
                 check_unit_key(r, units),

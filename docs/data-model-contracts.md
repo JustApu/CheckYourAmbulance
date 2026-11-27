@@ -351,7 +351,7 @@ cannot fulfill the audit. Event-tip conflicts fail without writing.
 
 ### Paper entry
 
-[issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B1 implements the paper-entry batch header of SPEC 8.0.0 §18.4 (LATE-1 to LATE-4); see [Paper entry](paper-entry.md). The nullable `paper_entry_batch_id` references on checks, readings and seal records, `paper_entry_invalidation_event` and `check_event.replacement_paper_entry_batch_id` arrive with the later parts that write them.
+[issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B1 implements the paper-entry batch header of SPEC 8.0.0 §18.4 (LATE-1 to LATE-4); see [Paper entry](paper-entry.md). Part B2 adds `check_record.paper_entry_batch_id` and `check_record.performed_at` (both null for a live check; see [paper item checks](paper-entry.md#paper-item-checks-part-b2)). The references on readings and seal records, `paper_entry_invalidation_event` and `check_event.replacement_paper_entry_batch_id` arrive with the later parts that write them.
 
 | Table | Kind | Columns and keys beyond common identity |
 |---|---|---|

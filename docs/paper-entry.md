@@ -12,7 +12,8 @@ B lists them. This page grows with each part.
 | Part | Status |
 |---|---|
 | B1: batch header, performer search, §3.3 permissions, kit-reference identifiers | this page |
-| B2 to B6: paper checks, readings, seal records, invalidation, crew UI | later |
+| B2: paper item checks | this page |
+| B3 to B6: readings, seal records, invalidation, crew UI | later |
 
 ## Batch header (Part B1)
 
@@ -81,6 +82,60 @@ snapshot; and a kit version must be published, in force and placed by the batch'
 version. A batch is never edited: wrong metadata is corrected by invalidating the batch and
 entering a new one (LATE-6, INV-8; Part B5).
 
+## Paper item checks (Part B2)
+
+A paper check is an ordinary `POST /api/v1/checks` call naming `paper_entry_batch_id`. It is saved
+on its own, like every check (REC-1, LATE-6), with its own `operation_id`, and the response adds
+`paper_entry: {batch_id, performed_at}`. A live check's request, digest and response are
+unchanged.
+
+**Two times.** The check row keeps `recorded_at`, the server entry instant, and repeats the batch's
+performance instant in `performed_at` (null for a live check). The check's qualifying time t_c
+(SPEC 5.3) is `performed_at` for a paper check and `recorded_at` for a live one:
+
+- **Linking (SCH-1, SCH-2, SCH-6).** A paper check links to every obligation of its item
+  requirement whose on-time window (E to G) or late interval (G to L) holds the performance
+  instant, even when it is entered after L. It is On time or Late by that instant. One performed
+  after L does not complete that obligation. Obligations, selections and the evidence that has
+  already satisfied an obligation are read as the app knows them at entry, so a paper check never
+  links an obligation that a known check already satisfied.
+- **Compliance and as-of history (LATE-5, RPT-5a, AC-36).** Obligation state counts a check from
+  its `recorded_at` (as-of inclusion is by server time, 19.3) and judges it at t_c (completion
+  time, lateness, windows). An eligible paper check entered after L therefore clears Missed in
+  the current view, while an as-of view before its entry still shows the miss.
+- **Current item state (19.4).** The latest check of an item is the greatest
+  (t_c, `recorded_at`, id), so a paper check entered later but performed earlier never becomes
+  the item's current check. The attention walk ranks chains the same way.
+
+**Printed version (LATE-4).** The check must name the batch's vehicle and printed checklist
+version (`PAPER_BATCH_MISMATCH`, `PAPER_VERSION_MISMATCH`). It is resolved against that version as
+in force at the performance instant, even if a later version has replaced it, with stocking
+deviations and kit assignments as of then. Kit content resolves through the kit-definition
+version printed on the batch; kit content whose kit version the batch does not name is refused
+with `PRINTED_KIT_VERSION_MISSING`, and a kit that has since left the vehicle with
+`KIT_MOVED_SINCE_PAPER`. Each refusal leaves the batch's other records saveable.
+
+**Who and what.** Only the batch's entry actor adds records to it; another user's batch answers
+`404`. The SPEC 3.3 paper-entry roles are checked again for every record. A paper check takes no
+session and is ROUTINE (`400 MALFORMED_REQUEST` otherwise).
+
+**Conflict warning (LATE-6).** A paper check warns only about an effective check already linked to
+an obligation its performance instant falls in, newest by arrival; a check for another obligation
+of the item does not warn. It is not a conflict when that check's actor is one of the batch's
+performers (the entry actor alone does not count). The warning, proceed-or-cancel flow and
+operation-id rules are those of CON-3; the warning names the newer check's `performed_at` when it
+is a paper check.
+
+**Corrections.** A correction follows COR-1 to COR-4: the entry actor is the author. The
+replacement repeats the batch and performance instant and relinks at that instant.
+
+**Database guards** (`cya/checks/migrations/0022_paper_checks.py`). The check insert trigger judges
+publication, override, kit-content and kit-assignment effectiveness at t_c, refuses a paper row
+that does not match its batch (vehicle, version, entry actor, performance instant), has a session,
+is not ROUTINE or is after its entry instant, and requires a printed kit version for kit content;
+a correction must keep its batch and instant. The link trigger refuses a paper link whose
+obligation window does not hold the performance instant.
+
 ## Performer search
 
 `GET /api/v1/paper-entry-performers?q=<2 to 100 characters>` finds users by display name or
@@ -100,5 +155,6 @@ to a checklist version itself have no separate kit version and print none.
 ## Verification
 
 Offline tests in `cya/paper/tests/`: `test_batches.py` (time resolution, the command, its
-permissions, printed-version rules and the database guards) and `test_api.py` (HTTP codes,
-replay, CSRF, and the performer search).
+permissions, printed-version rules and the database guards), `test_api.py` (HTTP codes,
+replay, CSRF, and the performer search) and `test_paper_checks.py` (timing, current and as-of
+compliance, printed version, refusals, conflicts, ordering, corrections, guards).

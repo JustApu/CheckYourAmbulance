@@ -66,6 +66,7 @@ DATE_FIELDS = frozenset(
         "voided_at",
         "effective_at",
         "ended_at",
+        "performed_at",
     )
 )
 
@@ -99,6 +100,15 @@ def _obligation_facts(obligation):
     for optional in ("kit_key", "mapped_requirement_id"):  # absent when unset: digests unchanged
         if facts.get(optional) is None:
             facts.pop(optional, None)
+    return facts
+
+
+def _check_facts(check):
+    """A check's stored facts; performed_at only for a paper check (SPEC 8.0.0), so every live
+    check's facts, and so its obligation's digest, are unchanged."""
+    facts = asdict(check)
+    if facts.get("performed_at") is None:
+        facts.pop("performed_at", None)
     return facts
 
 
@@ -389,7 +399,7 @@ def compile_history(history, instant):
             {
                 "version": FACTS_VERSION,
                 "obligation": _obligation_facts(obligation),
-                "checks": [asdict(c) for c in by_check.get(obligation.id, ())],
+                "checks": [_check_facts(c) for c in by_check.get(obligation.id, ())],
                 "determinations": [asdict(d) for d in determinations.get(obligation.id, ())],
                 "statuses": [asdict(status)] if status else [],
                 "suspensions": [asdict(s) for s in suspensions.get(obligation.id, ())],

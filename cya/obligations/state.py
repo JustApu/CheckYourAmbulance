@@ -134,6 +134,14 @@ class CheckEvidence:
     late_eligible: bool = False
     supervisor_determination_id: str | None = None
     author_user_id: str | None = None
+    # SPEC 8.0.0 5.3, LATE-5: a paper check's original performance instant. It is the check's
+    # qualifying time for windows, completion time and lateness; recorded_at (the server entry
+    # instant) still decides whether the check is known at an instant (19.3, 19.6).
+    performed_at: datetime | None = None
+
+    @property
+    def qualifying_at(self):
+        return self.performed_at or self.recorded_at
 
 
 @dataclass(frozen=True)
@@ -252,8 +260,11 @@ def _checks_for(obligation, checks, instant):
     result = []
     for check in checks:
         aware(check.recorded_at)
+        if check.performed_at is not None:
+            aware(check.performed_at)
         if check.voided_at is not None:
             aware(check.voided_at)
+        qualifying = check.qualifying_at
         if (
             (check.organization_id, check.vehicle_id, check.item_id, check.obligation_id)
             != (
@@ -262,13 +273,15 @@ def _checks_for(obligation, checks, instant):
                 obligation.item_id,
                 obligation.id,
             )
-            or not obligation.early_at <= check.recorded_at <= instant
+            or check.recorded_at > instant
+            or not obligation.early_at <= qualifying
             or (check.voided_at is not None and check.voided_at <= instant)
-            or (check.recorded_at > obligation.grace_at and check.late_eligible is not True)
+            or (qualifying > obligation.grace_at and check.late_eligible is not True)
         ):
             continue
         result.append(check)
-    return sorted(result, key=lambda c: (c.recorded_at, c.id))
+    # The earliest qualifying check satisfies (SCH-7), by qualifying time (19.4, 19.6).
+    return sorted(result, key=lambda c: (c.qualifying_at, c.recorded_at, c.id))
 
 
 def _determination_for(obligation, determinations, instant):
@@ -346,7 +359,7 @@ def _satisfaction(obligation, linked, determination):
         qualifies = check.outcome in ("PASSED", "FAILED")
         if check.outcome == "NOT_APPLICABLE":
             qualifies = check.na_rule is not None and check.na_rule.applies(
-                check.recorded_at, check.recorded_at
+                check.qualifying_at, check.qualifying_at
             )
         if qualifies:
             return ObligationState(
@@ -354,8 +367,8 @@ def _satisfaction(obligation, linked, determination):
                 State.SATISFIED,
                 check.id,
                 check.outcome,
-                check.recorded_at,
-                max(0, (check.recorded_at - obligation.grace_at).total_seconds()),
+                check.qualifying_at,
+                max(0, (check.qualifying_at - obligation.grace_at).total_seconds()),
             )
     if determination is not None and determination.determination_type == "SUPERVISOR_COMPLETED":
         if any(

@@ -108,7 +108,14 @@ def replay_checks(history, instant):
     )
     tips = {e.check_id: e for e in effective if not e.invalidated}
     facts = tuple(
-        CheckFact(pk, rows[pk].item_id, rows[pk].kit_key, rows[pk].snapshot.recorded_at, e.outcome)
+        CheckFact(
+            pk,
+            rows[pk].item_id,
+            rows[pk].kit_key,
+            rows[pk].snapshot.recorded_at,
+            e.outcome,
+            rows[pk].snapshot.performed_at,
+        )
         for pk, e in tips.items()
     )
     determinations = {d.id: d for d in history.determinations if aware(d.recorded_at) <= instant}
@@ -151,9 +158,11 @@ def replay_checks(history, instant):
                 obligation.id,
                 root.snapshot.recorded_at,
                 tip.outcome,
-                late_eligible=root.snapshot.recorded_at > obligation.grace_at,
+                late_eligible=(root.snapshot.performed_at or root.snapshot.recorded_at)
+                > obligation.grace_at,
                 supervisor_determination_id=supports.get((link.check_id, obligation.id)),
                 author_user_id=root.author_user_id,
+                performed_at=root.snapshot.performed_at,
             )
         )
     return tuple(checks), facts

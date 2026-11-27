@@ -23,8 +23,8 @@ and lists them in suspensions_ended (SPEC SUS-3). Every other unsupported field 
 rather than silently ignored, because accepting what is not built would fail open.
 """
 
-from dataclasses import replace
-from datetime import datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from uuid import UUID
@@ -37,14 +37,15 @@ from cya.authorization.backend import canonical_id, load_state
 from cya.authorization.guard import PermissionDenied, Principal, require_permission
 from cya.authorization.locking import locked_identities
 from cya.authorization.persistence import DatabaseRoleBackend, digest
-from cya.authorization.policy import ResourceContext, Role
+from cya.authorization.policy import ResourceContext, Role, permitted
 from cya.checklists.models import ChecklistPublication, ChecklistVersion, KitInstance, Vehicle
 from cya.checklists.overlay import ResolutionError, _active_deviations, resolve_checklist
-from cya.checks.conflicts import CheckConflict, conflicting_check
+from cya.checks.conflicts import CheckConflict, conflicting_check, paper_conflicting_check
 from cya.checks.linking import (
     LinkScopeTooLarge,
     choose_links,
     links_and_conflict_obligation,
+    paper_links_and_obligations,
     persist_links,
     response_links,
 )
@@ -332,6 +333,7 @@ def _resolved_item(
     kit_id=None,
     kit_requirement_id=None,
     kit_presence=False,
+    paper=None,
 ):
     """The item as the vehicle's governing checklist defines it; no silent version substitution.
 
@@ -340,7 +342,24 @@ def _resolved_item(
     (SPEC CHK-4, 5.7). Only an active stocking deviation is read as of now, so a count
     is judged against the target in force when it is recorded. Outside a session the vehicle's
     current checklist governs.
+
+    A paper check (paper is a PaperFacts) is resolved against the version printed on the form,
+    as in force at the paper performance instant, with the kit-definition versions printed on
+    its kit reference (SPEC 8.0.0 LATE-4): the printed version governs even if a later one has
+    replaced it since, and stocking deviations and kit assignments are read as of the instant
+    the work was done.
     """
+    if paper is not None:
+        return _paper_resolved_item(
+            organization_id,
+            vehicle_id,
+            version,
+            item_id,
+            paper,
+            kit_id,
+            kit_requirement_id,
+            kit_presence,
+        )
     pinned = session is not None and str(session.checklist_version_id) == str(version.pk)
     try:
         resolved = resolve_checklist(
@@ -432,6 +451,144 @@ def _resolved_item(
     raise CheckError(
         "ITEM_NOT_IN_CHECKLIST",
         "the item is not part of this vehicle's checklist version",
+        path="item_id",
+    )
+
+
+@dataclass(frozen=True)
+class PaperFacts:
+    """What a paper check takes from its batch header (SPEC 8.0.0 LATE-2 to LATE-4)."""
+
+    batch_id: str
+    performed_at: datetime
+    performer_ids: tuple
+    printed_kits: dict  # kit definition id -> printed kit-definition version id
+
+
+def _paper_batch(organization_id, actor, shape):
+    """The batch a paper check is copied under, locked, with its facts; or a refusal.
+
+    Only the batch's entry actor adds records to it: another user's batch answers as absent, so
+    its existence is not revealed. The batch row is locked (without updating it) so the records
+    of one batch and a later batch invalidation serialize (Part B5).
+    """
+    from cya.paper.models import PaperEntryBatch, PaperEntryKitVersion, PaperEntryPerformer
+
+    batch = (
+        PaperEntryBatch.objects.select_for_update()
+        .filter(organization_id=organization_id, pk=shape["paper_entry_batch_id"])
+        .first()
+    )
+    if batch is None or batch.actor_user_id != actor.user.pk:
+        raise CheckError(
+            "NOT_FOUND",
+            "paper-entry batch was not found",
+            status=404,
+            path="paper_entry_batch_id",
+        )
+    if str(batch.vehicle_id) != shape["vehicle_id"]:
+        raise CheckError(
+            "PAPER_BATCH_MISMATCH",
+            "the paper-entry batch is for another vehicle",
+            path="paper_entry_batch_id",
+        )
+    if str(batch.checklist_version_id) != shape["checklist_version_id"]:
+        raise CheckError(
+            "PAPER_VERSION_MISMATCH",
+            "the check names another checklist version than the one printed on its paper form",
+            path="checklist_version_id",
+        )
+    performers = tuple(
+        str(p)
+        for p in PaperEntryPerformer.objects.filter(batch=batch).values_list(
+            "performer_id", flat=True
+        )
+    )
+    kits = {
+        str(definition): str(version)
+        for definition, version in PaperEntryKitVersion.objects.filter(batch=batch).values_list(
+            "kit_definition_version__definition_id", "kit_definition_version_id"
+        )
+    }
+    return PaperFacts(str(batch.pk), batch.performed_at, performers, kits)
+
+
+def _paper_resolved_item(
+    organization_id, vehicle_id, version, item_id, paper, kit_id, kit_requirement_id, kit_presence
+):
+    """_resolved_item for a paper check: the printed version at the performance instant."""
+    at = paper.performed_at
+    try:
+        resolved = resolve_checklist(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            template_id=version.template_id,
+            as_of=at,
+            template_version_id=version.pk,
+        )
+    except ResolutionError as error:
+        raise CheckError(
+            "CHECKLIST_UNAVAILABLE",
+            f"the printed checklist cannot be resolved at the performance time: {error}",
+            status=409,
+            path="checklist_version_id",
+        ) from None
+    if kit_presence:
+        if kit_id is None:
+            raise CheckError(
+                "KIT_REQUIRED", "choose the physical kit for this presence check", path="kit_id"
+            )
+        from cya.kits.presence import instance_presence_resolved_item
+
+        for placement in resolved.placements:
+            presence = instance_presence_resolved_item(
+                organization_id,
+                resolved,
+                placement,
+                kit_id,
+                item_id,
+                compartment_labels={},
+                as_of=at,
+                recorded_before=None,
+            )
+            if presence is not None:
+                return presence
+        raise CheckError(
+            "ITEM_NOT_IN_CHECKLIST",
+            "the physical kit was not assigned to this vehicle for this checklist then",
+            path="kit_id",
+        )
+    if kit_requirement_id is not None:
+        presence = presence_resolved_item(
+            organization_id, resolved, kit_requirement_id, item_id, at
+        )
+        if presence is None:
+            raise CheckError(
+                "ITEM_NOT_IN_CHECKLIST",
+                "the kit list line is not a presence check of the printed checklist",
+                path="kit_requirement_id",
+            )
+        return presence
+    placed = placed_contents(organization_id, resolved, item_id, at, None, paper.printed_kits)
+    for content in placed:
+        if kit_id is not None and kit_id in [k for k, _label in content.kits]:
+            return content
+    for item in resolved.items:
+        if item.requirement.item_id == item_id:
+            return item
+    if placed:
+        return placed[0]
+    if placed_contents(organization_id, resolved, item_id, at):
+        # The item is kit content, but the kit reference version used was not named on the
+        # batch, so its identity cannot be mapped (SPEC 8.0.0 LATE-4).
+        raise CheckError(
+            "PRINTED_KIT_VERSION_MISSING",
+            "name the kit reference version used for this kit on the paper-entry batch",
+            path="kit_id",
+        )
+    raise CheckError(
+        "ITEM_NOT_IN_CHECKLIST",
+        "the item is not part of the printed checklist version",
         path="item_id",
     )
 
@@ -622,7 +779,23 @@ def chosen_kit_id(in_kit, kits, requested):
     return requested
 
 
-def _authorize(organization_id, actor_id, *extra_actions):
+def _paper_action(organization_id, actor_id, batch_id, roles, active):
+    """The SPEC 3.3 paper-entry action that covers adding a record to this batch now."""
+    from cya.paper.commands import OTHERS_ACTION, OWN_ACTION
+    from cya.paper.models import PaperEntryPerformer
+
+    performers = {
+        str(p)
+        for p in PaperEntryPerformer.objects.filter(
+            organization_id=organization_id, batch_id=batch_id
+        ).values_list("performer_id", flat=True)
+    }
+    if performers == {actor_id} and permitted(OWN_ACTION, actor_id, roles, active=active):
+        return OWN_ACTION
+    return OTHERS_ACTION
+
+
+def _authorize(organization_id, actor_id, *extra_actions, paper_batch_id=None):
     backend = DatabaseRoleBackend()
 
     def authorize(_org):
@@ -638,8 +811,20 @@ def _authorize(organization_id, actor_id, *extra_actions):
             principal = Principal(
                 organization_id, actor_id, roles, user.active and current_org.active
             )
+            actions = [ACTION, *extra_actions]
+            if paper_batch_id is not None:
+                # The roles that entered the batch are checked again for every record (3.2).
+                actions.append(
+                    _paper_action(
+                        organization_id,
+                        actor_id,
+                        paper_batch_id,
+                        roles,
+                        user.active and current_org.active,
+                    )
+                )
             try:
-                for action in (ACTION, *extra_actions):
+                for action in actions:
                     require_permission(principal, organization_id, action)
             except PermissionDenied:
                 raise CommandDenied(actor) from None
@@ -851,6 +1036,7 @@ def record_check(
     kit_requirement_id=None,
     kit_presence=False,
     inspection_start_operation_id=None,
+    paper_entry_batch_id=None,
     organization_id,
     actor_id,
     operation_id,
@@ -858,6 +1044,10 @@ def record_check(
     request_attempt_id,
 ):
     """Record one attributed item-level check (REC-1); idempotent on operation_id (REC-4).
+
+    paper_entry_batch_id makes it a paper check copied from an outage form (SPEC 8.0.0 7.9):
+    resolved against the printed version at the batch's performance instant, linked by that
+    instant, and stored with it as performed_at beside the server entry instant.
 
     kit_requirement_id names the kit list line a kit presence check counts (KDEF-12).
 
@@ -935,11 +1125,25 @@ def record_check(
         request["kit_requirement_id"] = kit_requirement_id
     if inspection_start_operation_id is not None:
         request["inspection_start_operation_id"] = inspection_start_operation_id
+    shape["paper_entry_batch_id"] = _optional_id(paper_entry_batch_id, "paper_entry_batch_id")
+    paper_entry = shape["paper_entry_batch_id"] is not None
+    if paper_entry:
+        # Paper entry neither opens nor resumes a session (LATE-1); it records routine checks.
+        for field, wrong in (
+            ("session_id", shape["session_id"] is not None),
+            ("purpose", purpose != "ROUTINE"),
+            ("checklist_version_id", standalone),
+        ):
+            if wrong:
+                raise _malformed(field, f"a paper check takes no {field} of this kind")
+        request["paper_entry_batch_id"] = paper_entry_batch_id
 
     def build(actor):
         _vehicle(
             organization_id, shape["vehicle_id"], lock=standalone or shape["session_id"] is not None
         )
+        # Lock order: vehicle, paper batch, item, deficiency.
+        paper = _paper_batch(organization_id, actor, shape) if paper_entry else None
         if standalone:
             from cya.checks.locks import ensure_item_locks
             from cya.seals.locking import lock_seal_inputs
@@ -983,6 +1187,7 @@ def record_check(
                 shape["kit_id"],
                 shape["kit_requirement_id"],
                 shape["kit_presence"],
+                paper,
             )
             raise CheckError(
                 "CONFIGURATION_UNAVAILABLE",
@@ -1013,6 +1218,7 @@ def record_check(
                 shape["kit_id"],
                 shape["kit_requirement_id"],
                 shape["kit_presence"],
+                paper,
             )
         )
         shape["derived"] = shape["outcome"] is None
@@ -1055,6 +1261,8 @@ def record_check(
             )
         session = _session_for_check(organization_id, actor, shape, version, now)
         chosen_kit = chosen_kit_id(item.requirement.kit_id is not None, item.kits, shape["kit_id"])
+        if paper is not None and chosen_kit is not None:
+            _paper_kit_still_on_vehicle(organization_id, shape["vehicle_id"], chosen_kit)
         kit_assignment_event_id = (
             getattr(item.requirement, "kit_event_id", None) if shape["kit_presence"] else None
         )
@@ -1087,10 +1295,16 @@ def record_check(
             checklist_version_id=version.pk if version else None,
         )
         try:
-            # One read serves both linking and the conflict anchor (issue #278 Part F).
-            links, scope_obligation = links_and_conflict_obligation(
-                prospective_check, recorded_at=now
-            )
+            if paper is None:
+                # One read serves both linking and the conflict anchor (issue #278 Part F).
+                links, scope_obligation = links_and_conflict_obligation(
+                    prospective_check, recorded_at=now
+                )
+            else:
+                # t_c is the paper performance instant; what is known is read now (SPEC 5.3).
+                links, paper_obligations = paper_links_and_obligations(
+                    prospective_check, performed_at=paper.performed_at, known_at=now
+                )
         except LinkScopeTooLarge:
             raise CheckError(
                 "CONFIGURATION_UNAVAILABLE",
@@ -1102,13 +1316,25 @@ def record_check(
         _checked_reference(
             prospective_check, shape["acknowledges_check_id"], "acknowledges_check_id"
         )
-        newer = conflicting_check(
-            prospective_check,
-            scope_obligation,
-            actor_id=actor.user.pk,
-            basis_check_id=shape["basis_check_id"],
-            acknowledges_check_id=shape["acknowledges_check_id"],
-        )
+        if paper is None:
+            newer = conflicting_check(
+                prospective_check,
+                scope_obligation,
+                actor_id=actor.user.pk,
+                basis_check_id=shape["basis_check_id"],
+                acknowledges_check_id=shape["acknowledges_check_id"],
+            )
+        else:
+            newer = paper_conflicting_check(
+                prospective_check,
+                paper_obligations,
+                performer_ids=paper.performer_ids,
+                basis_check_id=shape["basis_check_id"],
+                acknowledges_check_id=shape["acknowledges_check_id"],
+            )
+            scope_obligation = (
+                _linked_obligation(newer, paper_obligations) if newer is not None else None
+            )
         if newer is not None:
             # A warning is not a commit: it rolls back whole, so it writes no receipt and the
             # operation id stays free; an identical retry is evaluated again (REC-4, CON-3).
@@ -1191,6 +1417,8 @@ def record_check(
                 purpose=shape["purpose"],
                 verification_for_deficiency_id=verification_id,
                 verification_scope_revision=verification.revision if verification else None,
+                paper_entry_batch_id=paper.batch_id if paper else None,
+                performed_at=paper.performed_at if paper else None,
             )
             persist_links(check, receipt, current, links)
             if selection is not None:
@@ -1313,6 +1541,16 @@ def record_check(
         }
         if standalone:
             body["inspection_start_operation_id"] = inspection_start_operation_id
+        if paper is not None:
+            # Only a paper check reports its source, so a live response is unchanged (LATE-1).
+            body["paper_entry"] = {
+                "batch_id": paper.batch_id,
+                "performed_at": paper.performed_at.astimezone(UTC).isoformat(),
+            }
+            snapshot["values"] |= {
+                "paper_entry_batch_id": paper.batch_id,
+                "performed_at": paper.performed_at.astimezone(UTC).isoformat(),
+            }
         if verification is not None:
             # Only a verification check reports its effect, so a routine response is unchanged.
             body["verification"] = _verification_body(verification)
@@ -1348,9 +1586,36 @@ def record_check(
                 if shape["deficiency"] and shape["deficiency"][0] == "create"
                 else ()
             ),
+            paper_batch_id=shape["paper_entry_batch_id"],
         ),
         prepare=build,
     )
+
+
+def _linked_obligation(check, obligations):
+    """The first of `obligations` that `check` is linked to (the paper warning's obligation)."""
+    linked = set(
+        CheckObligationLink.objects.filter(check_record=check).values_list(
+            "obligation_id", flat=True
+        )
+    )
+    return next((o for o in obligations if o.pk in linked), None)
+
+
+def _paper_kit_still_on_vehicle(organization_id, vehicle_id, kit_id):
+    """A paper kit check needs the kit still on the vehicle: records name today's kit row.
+
+    A kit moved since the performance instant can no longer be matched to the record's place
+    (SPEC 8.0.0 LATE-4: an identity mapping that is missing refuses that record only).
+    """
+    if not KitInstance.objects.filter(
+        organization_id=organization_id, pk=kit_id, vehicle_id=vehicle_id, compartment__isnull=False
+    ).exists():
+        raise CheckError(
+            "KIT_MOVED_SINCE_PAPER",
+            "the kit has moved since the paper check; it cannot be entered for this vehicle",
+            path="kit_id",
+        )
 
 
 def _planned(call, *args):
@@ -1471,6 +1736,9 @@ def correct_check(
                     "CONFIGURATION_UNAVAILABLE", "physical kit is unavailable", status=503
                 )
         now = timezone.now()
+        # A paper chain keeps its performance instant (SPEC 8.0.0 LATE-6): the kit assignment it
+        # certifies is the one in force then, and links are re-derived at that instant.
+        assignment_at = root.performed_at or now
         if root.kit_presence:
             assignment = KitAssignmentEvent.objects.filter(
                 organization_id=organization_id,
@@ -1479,7 +1747,7 @@ def correct_check(
                 vehicle_id=root.vehicle_id,
                 active=True,
                 compartment_id__isnull=False,
-                effective_at__lte=now,
+                effective_at__lte=assignment_at,
                 recorded_at__lte=now,
             ).first()
             has_newer = (
@@ -1488,7 +1756,7 @@ def correct_check(
                     organization_id=organization_id,
                     kit_id=root.kit_id,
                     sequence__gt=assignment.sequence,
-                    effective_at__lte=now,
+                    effective_at__lte=assignment_at,
                     recorded_at__lte=now,
                 ).exists()
             )
@@ -1547,7 +1815,7 @@ def correct_check(
                 "CONFIGURATION_UNAVAILABLE", "Unable check has no deficiency evidence", status=503
             )
         deviations = _active_deviations(
-            organization_id, root.vehicle_id, [root.item_id], root.recorded_at
+            organization_id, root.vehicle_id, [root.item_id], root.qualifying_at
         )
         deviation = deviations.get(root.item_id)
         # The content the original check was recorded against: an item definition, or a
@@ -1623,7 +1891,8 @@ def correct_check(
         try:
             links = choose_links(
                 replacement,
-                recorded_at=root.recorded_at,
+                recorded_at=root.qualifying_at,
+                known_at=root.recorded_at,
                 ignore_root_check_id=str(root.pk),
             )
         except LinkScopeTooLarge:
@@ -1672,6 +1941,8 @@ def correct_check(
                 purpose=root.purpose,
                 verification_for_deficiency_id=root.verification_for_deficiency_id,
                 verification_scope_revision=root.verification_scope_revision,
+                paper_entry_batch_id=root.paper_entry_batch_id,
+                performed_at=root.performed_at,
                 root_check=root,
                 predecessor_check=tip,
             )
