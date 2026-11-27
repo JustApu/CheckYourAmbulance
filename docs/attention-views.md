@@ -212,13 +212,17 @@ a past picture and does not update.
   previous re-read (SPEC 8.1.0 §17.3, OQ-86): a hint inside those 10 seconds, or during a read,
   waits for their end, and one re-read covers every hint received meanwhile. A read slower than
   10 seconds is followed at once by the re-read its hints owe. So at shift change each
-  supervisor's panel is read at most about 6 times a minute, however often vehicles change, and a
-  change shows within 10 seconds plus the shared picture's age (below) plus one read;
+  supervisor's panel is read at most about 6 times a minute, however often vehicles change;
 - on reconnect and when the tab is shown again;
 - every 20 seconds, which also covers changes no event announces, such as a deadline passing or an
-  acknowledgement expiring, and is the only update for vehicles past the first 3. The timer plus
-  the shared picture's age plus one re-read must fit SPEC 8.4.0 §17.3's 45-second target; the timer
-  was 60 seconds before [issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278).
+  acknowledgement expiring, and is the only update for vehicles past the first 3. The timer was
+  60 seconds before [issue #278](https://github.com/JustApu/CheckYourAmbulance/issues/278).
+
+SPEC 8.4.0 §17.3 wants a change on the screen within 60 seconds, typically within 30. A re-read a
+hint prompts may be answered with a shared picture (below) computed just before the change, so it
+need not show the change; the change is certain to show at the first re-read that starts 15 seconds
+or more after it. Re-reads start at least every 20 seconds, so that is at most 15 + 20 seconds plus
+one read (2–4 seconds at 3 workers in the issue #278 Part J rehearsal).
 
 **Shared picture (SPEC 8.4.0 §17.3, OQ-89; issue #278 Part J).** The picture depends only on the
 organization and the instant, so a live re-read of the panel may show the organization's most recent
@@ -235,8 +239,7 @@ turns sharing off) before the re-read began. The panel's "Updated" line is that 
 - With one process the picture is kept in process memory; with several (DEP-2) in the shared
   store, so all processes share it. It is stored as JSON, never pickle. A store failure is logged
   and the reader computes its own picture: a read never fails because of the store.
-- The live line says "Changes show within 25 seconds plus the time to refresh" (the 10-second
-  push floor plus the 15-second age).
+- The live line says "Changes usually show within 30 seconds, and always within a minute."
 
 It says how many vehicles are live and shows a notice when a re-read fails. When sign-in ends it
 stops promising live updates. When a re-read gets 401 (the session ended), it stops the timer,

@@ -13,7 +13,6 @@ import logging
 import uuid
 from datetime import datetime
 
-from django.conf import settings
 from django.db import DatabaseError
 from django.http import Http404, JsonResponse
 from django.shortcuts import render
@@ -39,12 +38,12 @@ from cya.shell.views import deny_section
 logger = logging.getLogger(__name__)
 READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})
 LIVE_SOCKETS = 3  # one fewer than the default per-user socket limit, leaving room for one tab
-# Vehicles past the first LIVE_SOCKETS get no instant hint, only this timer. SPEC 8.4.0 §17.3
-# wants a change on the screen within 45 seconds, and a re-read may show a picture up to
-# CYA_READINESS_SHARED_PICTURE_SECONDS (15) old, so the timer plus that age plus one panel read
-# (2-4 s at 3 workers in the issue #278 rehearsal) must fit in 45 s. It was 60.
+# The screen re-reads at least this often, hints or not. SPEC 8.4.0 §17.3 wants a change on the
+# screen within 60 seconds. A re-read may show a picture up to CYA_READINESS_SHARED_PICTURE_SECONDS
+# (15) old, which can predate a change a hint announced, so a change is certain to show only at
+# the first re-read starting 15 s after it: at most 15 + this timer + one panel read (2-4 s at 3
+# workers in the issue #278 rehearsal), well inside 60 s. It was 60.
 REFRESH_SECONDS = 20
-PUSH_FLOOR_SECONDS = 10  # readiness.js PUSH_FLOOR_MS (SPEC 8.1.0 §17.3)
 
 
 def _as_of(request, station_zone=None):
@@ -230,10 +229,6 @@ def _screen(request, template, background=False):
                 else [],
                 "vehicle_count": len(picture.vehicles),
                 "refresh_seconds": REFRESH_SECONDS,
-                # A pushed change shows within the push floor plus the shared picture's age,
-                # plus the read itself (SPEC 8.4.0 §17.3).
-                "change_seconds": PUSH_FLOOR_SECONDS
-                + settings.CYA_READINESS_SHARED_PICTURE_SECONDS,
             },
         },
     )

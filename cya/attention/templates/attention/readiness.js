@@ -35,7 +35,7 @@
     if (ended) { state.textContent = "Live updates stopped: sign in again to resume."; return; }
     // Plain words (issue #235 C3): every vehicle re-reads on the timer; at most a few also get
     // instant updates, because each browser may hold only a few sockets.
-    var total = config.vehicle_count, n = config.sockets.length;
+    var n = config.sockets.length;
     var every = "Updates every " + config.refresh_seconds + " seconds.";
     if (!n || tried < n) { state.textContent = every; return; }
     if (open < n) {
@@ -43,12 +43,10 @@
         config.refresh_seconds + " seconds.";
       return;
     }
-    // SPEC 8.1.0 §17.3: a hint-driven read starts at most 10 seconds after the previous read
-    // started. SPEC 8.4.0: it may show a picture up to the shared age old. So a change shows
-    // within change_seconds (the two together) plus the refresh itself.
-    var within = " within " + config.change_seconds + " seconds plus the time to refresh.";
-    state.textContent = every + (n >= total ? " Changes show" + within :
-      " Changes on the first " + n + " vehicles show" + within);
+    // SPEC 8.4.0 §17.3: within 60 seconds, typically 30. A re-read may show a shared picture up
+    // to 15 seconds old, which can predate the change a hint announced; the change then shows at
+    // the first re-read starting 15 seconds after it, and the timer re-reads every 20 seconds.
+    state.textContent = every + " Changes usually show within 30 seconds, and always within a minute.";
   }
   function refresh() {
     if (signedOut) { return; }
