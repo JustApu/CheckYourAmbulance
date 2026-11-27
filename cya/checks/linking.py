@@ -126,6 +126,14 @@ def _satisfied_by(recorded_at, ignore_root_check_id):
         obligation_id=OuterRef("pk"),
         recorded_at__lte=recorded_at,
         inspection_item__outcome__in=("PASSED", "FAILED"),
+    ).exclude(
+        # So is a paper reseal's inspection of an invalidated batch (INV-8, LATE-7).
+        Exists(
+            PaperEntryInvalidationEvent.objects.filter(
+                batch_id=OuterRef("inspection_item__inspection__reseal__paper_entry_batch_id"),
+                recorded_at__lte=recorded_at,
+            )
+        )
     )
     return (
         Exists(already_satisfied),

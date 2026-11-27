@@ -2,9 +2,12 @@
 
 Once its paper-entry batch is invalidated, a paper seal substitution supports nothing: obligation
 state and linking read it as void from the invalidation, and it is no longer later evidence for
-a paper break, so the break guard of seal_event ignores it. A paper break of an invalidated batch
-stays in force (the seal stays open until a full inspection and reseal; fail closed), so it is
-still later evidence. Neither table accepts a new paper record of an invalidated batch.
+a paper event, so the paper-event guard of seal_event ignores it. A paper break of an
+invalidated batch stays in force (the seal stays open until a full inspection and reseal; fail
+closed), so it is still later evidence. A paper reseal of an invalidated batch cannot support
+reliance: no seal substitution may rely on it (the commands read the seal as open, and its
+inspection's obligation links as void). Neither table accepts a new paper record of an
+invalidated batch.
 
 The reverse refusal is the last operation, so on unapply it runs first.
 """
@@ -33,8 +36,14 @@ def event_guard():
     return sql + INVALIDATED_BATCH
 
 
+VOIDED_RESEAL = f"""
+IF EXISTS (SELECT 1 FROM seal_event e JOIN paper_entry_invalidation_event i
+ ON i.batch_id=e.paper_entry_batch_id WHERE e.id=NEW.seal_event_id)
+THEN {guards.signal("seal substitution relies on an invalidated paper reseal")}; END IF;"""
+
+
 def substitution_guard():
-    return previous.substitution_guard() + INVALIDATED_BATCH
+    return previous.substitution_guard() + INVALIDATED_BATCH + VOIDED_RESEAL
 
 
 REBUILT = (

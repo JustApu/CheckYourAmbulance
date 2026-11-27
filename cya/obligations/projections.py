@@ -110,11 +110,19 @@ def stored_seal_inspections(organization_id, obligation_ids, instant, *, limit=N
     ids = tuple(obligation_ids)
     if not ids:
         return ()
+    from cya.paper.models import PaperEntryInvalidationEvent
+
+    # SPEC 8.0.0 INV-8: a paper reseal's inspection is void from its batch's invalidation.
+    voided = PaperEntryInvalidationEvent.objects.filter(
+        batch_id=OuterRef("inspection_item__inspection__reseal__paper_entry_batch_id"),
+        recorded_at__lte=instant,
+    ).values("recorded_at")[:1]
     rows = _bounded(
         SealInspectionObligation.objects.filter(
             organization_id=organization_id, obligation_id__in=ids, recorded_at__lte=instant
         )
         .select_related("inspection_item__inspection__reseal")
+        .annotate(voided_at=Subquery(voided))
         .order_by("recorded_at", "id")[: limit + 1],
         limit,
     )
@@ -127,6 +135,7 @@ def stored_seal_inspections(organization_id, obligation_ids, instant, *, limit=N
             row.inspection_item.outcome,
             row.late_eligible,
             row.inspection_item.inspection.reseal.performed_at,
+            row.voided_at,
         )
         for row in rows
     )

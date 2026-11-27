@@ -28,6 +28,8 @@ from cya.seals.commands import (
     _paper_kit_assigned,
     _seal_authorizer,
     _subject,
+    invalidated_batches,
+    voided_reseal,
 )
 from cya.seals.counts import validate_kit_counts, validate_kit_presence
 from cya.seals.inspection import validate_inspection
@@ -214,8 +216,15 @@ def reseal(
         prior_break = next(
             (event for event in reversed(events) if event.event_type == "BREAK"), None
         )
+        # A paper reseal of an invalidated batch supports nothing: the seal is open (INV-8).
+        invalidated = invalidated_batches(events)
         last_reseal = next(
-            (event for event in reversed(events) if event.event_type == "RESEAL"), None
+            (
+                event
+                for event in reversed(events)
+                if event.event_type == "RESEAL" and not voided_reseal(event, invalidated)
+            ),
+            None,
         )
         if last_reseal is not None and (
             prior_break is None or prior_break.sequence < last_reseal.sequence

@@ -234,7 +234,7 @@ def evidence_instants(evidence):
         found.update((suspension.recorded_at, suspension.ended_at))
     for seal in (*seals, *inspections):
         found.add(seal.recorded_at)
-    for seal in seals:
+    for seal in (*seals, *inspections):
         found.add(getattr(seal, "voided_at", None))
     found.discard(None)
     return tuple(sorted(found))

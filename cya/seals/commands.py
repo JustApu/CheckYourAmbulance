@@ -166,12 +166,43 @@ def _events(organization_id, vehicle_id, kit_id, slot_id):
     return events
 
 
-def _event_state(events):
+def invalidated_batches(events, as_of=None):
+    """The paper-entry batches of these seal events invalidated (by `as_of`, if given).
+
+    A stream with no paper event asks nothing, so live reads are unchanged.
+    """
+    batch_ids = {e.paper_entry_batch_id for e in events if getattr(e, "paper_entry_batch_id", None)}
+    if not batch_ids:
+        return frozenset()
+    from cya.paper.models import PaperEntryInvalidationEvent
+
+    rows = PaperEntryInvalidationEvent.objects.filter(batch_id__in=batch_ids)
+    if as_of is not None:
+        rows = rows.filter(recorded_at__lte=as_of)
+    return frozenset(rows.values_list("batch_id", flat=True))
+
+
+def voided_reseal(event, invalidated):
+    """Whether this seal event belongs to one of the `invalidated` paper-entry batches."""
+    return getattr(event, "paper_entry_batch_id", None) in invalidated
+
+
+def _event_state(events, as_of=None):
+    """(the seal relied on, whether a full audit is pending) after these events.
+
+    SPEC 8.0.0 INV-8, LATE-7: a paper RESEAL of an invalidated batch cannot support reliance,
+    so from the invalidation the seal reads as open and a new full inspection and reseal are
+    required; that batch's paper AUDIT_FULFILLED does not end a pending audit (fail closed).
+    as_of limits the invalidations taken into account to those recorded by then.
+    """
+    invalidated = invalidated_batches(events, as_of)
     seal = None
     audit_pending = False
     for event in events:
         if event.event_type == "RESEAL":
-            seal = event
+            seal = None if voided_reseal(event, invalidated) else event
+        elif event.event_type == "AUDIT_FULFILLED" and voided_reseal(event, invalidated):
+            continue
         elif event.event_type == "BREAK":
             seal = None
         elif event.event_type == "AUDIT_REQUEST":

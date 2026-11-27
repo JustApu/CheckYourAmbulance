@@ -16,11 +16,12 @@ batch. In one transaction (cya.core.audit_commands.run_command) it appends, and 
 - last, one paper_entry_invalidation_event. Its insert trigger (migration 0003) refuses it
   unless every check, odometer and engine-hours chain of the batch is invalidated by then.
 
-Paper seal records are not given events of their own. A seal substitution of the batch is void
-from the batch event on (obligation state, linking and later-evidence rules read it), so it
-satisfies nothing and supports no reliance (LATE-7). A paper seal break stays in force: the seal
-stays open and a new full inspection and reseal are required before reliance resumes (INV-8;
-"cannot establish current reliance", fail closed).
+Paper seal records are not given events of their own; readers apply the batch event. A seal
+substitution of the batch, and the inspection of a paper reseal of the batch, are void from it
+(obligation state, linking and later-evidence rules read them so), so they satisfy nothing
+(LATE-7). A paper RESEAL of the batch no longer supports reliance and its paper AUDIT_FULFILLED
+no longer ends a pending audit: the seal reads as open. A paper break stays in force. Either
+way a new full inspection and reseal are required before reliance resumes (INV-8, fail closed).
 
 Every row keeps its original performance and server-entry times and stays visible; derived state
 is recomputed without it. The batch takes no further record (409 PAPER_BATCH_INVALIDATED), and an
@@ -186,13 +187,31 @@ def _lock_items(organization_id, vehicle_id, item_ids):
 
 
 def _seal_records(organization_id, batch):
-    from cya.seals.models import SealEvent, SealSubstitution, SealSubstitutionObligation
+    """The batch's seal records, by what the invalidation does to them, and their obligations.
 
-    substitutions = sorted(
-        str(pk)
-        for pk in SealSubstitution.objects.filter(
-            organization_id=organization_id, paper_entry_batch=batch
-        ).values_list("pk", flat=True)
+    Substitutions and the inspections of paper reseals are void (their obligations are
+    re-derived); a paper RESEAL no longer supports reliance and its AUDIT_FULFILLED no longer
+    ends an audit; a paper BREAK stays in force (LATE-7, INV-8).
+    """
+    from cya.seals.models import (
+        SealEvent,
+        SealInspection,
+        SealInspectionObligation,
+        SealSubstitution,
+        SealSubstitutionObligation,
+    )
+
+    def ids(rows):
+        return sorted(str(pk) for pk in rows.values_list("pk", flat=True))
+
+    substitutions = ids(
+        SealSubstitution.objects.filter(organization_id=organization_id, paper_entry_batch=batch)
+    )
+    events = SealEvent.objects.filter(organization_id=organization_id, paper_entry_batch=batch)
+    inspections = ids(
+        SealInspection.objects.filter(
+            organization_id=organization_id, reseal__paper_entry_batch=batch
+        )
     )
     obligations = {
         str(pk)
@@ -200,13 +219,21 @@ def _seal_records(organization_id, batch):
             organization_id=organization_id, substitution_id__in=substitutions
         ).values_list("obligation_id", flat=True)
     }
-    breaks = sorted(
+    obligations.update(
         str(pk)
-        for pk in SealEvent.objects.filter(
-            organization_id=organization_id, paper_entry_batch=batch
-        ).values_list("pk", flat=True)
+        for pk in SealInspectionObligation.objects.filter(
+            organization_id=organization_id, inspection_item__inspection_id__in=inspections
+        ).values_list("obligation_id", flat=True)
     )
-    return substitutions, obligations, breaks
+    return {
+        "voided_substitution_ids": substitutions,
+        "voided_inspection_ids": inspections,
+        # A paper reseal cannot support reliance: a new full inspection and reseal are required.
+        "voided_reseal_event_ids": ids(events.filter(event_type="RESEAL")),
+        "voided_audit_fulfillment_event_ids": ids(events.filter(event_type="AUDIT_FULFILLED")),
+        # A paper break stays in force: the seal stays open.
+        "seal_break_event_ids": ids(events.filter(event_type="BREAK")),
+    }, obligations
 
 
 def _reading_plan(organization_id, kind, model, root):
@@ -285,7 +312,7 @@ def invalidate_paper_entry_batch(*, batch_id, explanation, **context):
 
         batch = _locked_batch(organization_id, batch_id)
         checks, readings = _plans(organization_id, batch)
-        substitutions, seal_obligations, breaks = _seal_records(organization_id, batch)
+        seals, seal_obligations = _seal_records(organization_id, batch)
         now = timezone.now()  # after every lock wait
         event_id = new_id()
 
@@ -317,14 +344,21 @@ def invalidate_paper_entry_batch(*, batch_id, explanation, **context):
                 actor_user=current.user,
                 actor_roles_at_time=list(current.roles),
             )
-            if substitutions:
-                from cya.live_updates.publish import publish_vehicle_update
+            from cya.live_updates.publish import publish_vehicle_update
 
+            if seal_obligations:
                 publish_vehicle_update(
                     organization_id=organization_id,
                     vehicle_id=batch.vehicle_id,
                     event_id=event_id,
                     kind="obligations.changed",
+                )
+            if seals["voided_reseal_event_ids"]:  # the seal now reads as open
+                publish_vehicle_update(
+                    organization_id=organization_id,
+                    vehicle_id=batch.vehicle_id,
+                    event_id=event_id,
+                    kind="seal.changed",
                 )
 
         affected = set(seal_obligations)
@@ -339,9 +373,7 @@ def invalidate_paper_entry_batch(*, batch_id, explanation, **context):
             "invalidated_check_root_ids": [str(plan.root.pk) for plan in checks],
             "reading_invalidation_event_ids": [plan[3] for plan in readings],
             "invalidated_reading_root_ids": [str(plan[1].pk) for plan in readings],
-            "voided_substitution_ids": substitutions,
-            # A paper break stays in force: a new full inspection and reseal are required.
-            "seal_break_event_ids": breaks,
+            **seals,
             "affected_obligation_ids": sorted(affected),
             "voided_determination_ids": sorted(
                 str(e.prior.pk) for plan in checks for e in plan.completions

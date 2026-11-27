@@ -74,12 +74,19 @@ def refresh_for_receipt(receipt):
     if kind == PAPER_INVALIDATION:
         # The batch's substitutions are void from now: their obligations are re-derived.
         from cya.paper.models import PaperEntryInvalidationEvent
-        from cya.seals.models import SealSubstitutionObligation
+        from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
 
         batches = PaperEntryInvalidationEvent.objects.filter(command=receipt).values("batch_id")
         ids.update(
             SealSubstitutionObligation.objects.filter(
                 organization_id=org, substitution__paper_entry_batch_id__in=batches
+            ).values_list("obligation_id", flat=True)
+        )
+        # So are the inspections of its paper reseals.
+        ids.update(
+            SealInspectionObligation.objects.filter(
+                organization_id=org,
+                inspection_item__inspection__reseal__paper_entry_batch_id__in=batches,
             ).values_list("obligation_id", flat=True)
         )
     # Vehicle status is read-time evidence. Keeping it out of projection facts means a status

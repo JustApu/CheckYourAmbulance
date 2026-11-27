@@ -18,6 +18,7 @@ from cya.core.audit_repository import append_receipt
 from cya.deficiencies.models import DeficiencyCategory, DeficiencyEvent, DeficiencyProjection
 from cya.deficiencies.severity import ensure_default_severities
 from cya.obligations.models import ObligationProjection
+from cya.obligations.projections import get_vehicle_obligations_as_of
 from cya.obligations.state import State
 from cya.odometer.models import EngineHoursEntry, OdometerEntry, ReadingEvent
 from cya.paper.commands import PaperEntryError
@@ -26,9 +27,21 @@ from cya.paper.models import PaperEntryBatch, PaperEntryInvalidationEvent
 from cya.paper.tests.support import ENTRY, JUNE_2, PaperCheckCase
 from cya.paper.tests.test_api import ApiCase
 from cya.paper.tests.test_paper_readings import ReadingCase
-from cya.paper.tests.test_paper_seals import PaperSealCase
-from cya.seals.commands import SealError, SealRefusal
-from cya.seals.models import SealSubstitution, SealSubstitutionObligation
+from cya.paper.tests.test_paper_seals import PaperSealCase, ResealCase
+from cya.seals.commands import (
+    SealError,
+    SealRefusal,
+    _event_state,
+    request_seal_audit,
+    start_inspection,
+)
+from cya.seals.models import (
+    SealEvent,
+    SealInspectionObligation,
+    SealSubstitution,
+    SealSubstitutionObligation,
+)
+from cya.seals.readers import subjects
 
 
 class InvalidationCase(ReadingCase):
@@ -223,6 +236,23 @@ class PermissionTests(InvalidationCase):
         self.assertEqual(caught.exception.code, "MALFORMED_REQUEST")
 
 
+class LimitTests(InvalidationCase):
+    def test_a_batch_with_more_chains_than_supported_is_refused_whole(self):
+        from unittest import mock
+
+        batch_id = self.batch()
+        self.paper(batch_id)
+        self.paper(batch_id, item=self.masks, quantity=6)
+        with mock.patch("cya.paper.invalidation.MAX_CHAINS", 1):
+            with self.assertRaises(PaperEntryError) as caught:
+                self.invalidate(batch_id)
+        self.assertEqual(
+            (caught.exception.code, caught.exception.status), ("CONFIGURATION_UNAVAILABLE", 503)
+        )
+        self.assertFalse(CheckEvent.objects.exists())
+        self.assertFalse(PaperEntryInvalidationEvent.objects.exists())
+
+
 class GuardTests(InvalidationCase):
     def receipt(self, actor, batch_id, command_type="PAPER_ENTRY_BATCH_INVALIDATION"):
         with transaction.atomic():
@@ -389,6 +419,28 @@ class MistakenNormalTests(PaperCheckCase):
         )
         self.refused("REPLACEMENT_BATCH_INVALIDATED", check_id, batch_id)
 
+    def test_the_replacement_must_be_for_the_same_vehicle(self):
+        check_id = self.mistaken()
+        other = self.vehicles[1]
+        version = self.publish_own(checklist=self.vehicle_checklist(vehicle=other), vehicle=other)
+        self.clock.set(ENTRY + timedelta(hours=1))
+        batch_id = self.enter(
+            vehicle_id=str(other.pk),
+            checklist_version_id=version,
+            performed_on=ENTRY.date(),
+            performed_time=time(8, 30),  # 12:30Z, after that version took effect
+        ).body["batch_id"]
+        self.refused("REPLACEMENT_BATCH_MISMATCH", check_id, batch_id)
+
+    def test_only_a_routine_check_is_replaced(self):
+        from types import SimpleNamespace
+
+        from cya.checks.commands import _replacement_refusal
+
+        root = SimpleNamespace(paper_entry_batch_id=None, purpose="VERIFICATION")
+        code, _message = _replacement_refusal(str(self.org.pk), root, SimpleNamespace())
+        self.assertEqual(code, "REPLACEMENT_NOT_APPLICABLE")
+
     def test_a_live_invalidation_is_unchanged(self):
         from cya.checks.commands import invalidate_chain
 
@@ -552,3 +604,119 @@ class InvalidationApiTests(ApiCase):
             url, data=json.dumps(body), content_type="application/json", **headers
         )
         self.rejected(response, 403, "ADMINISTRATOR_REQUIRED")
+
+
+class ResealInvalidationTests(ResealCase):
+    """INV-8, LATE-7: a paper reseal of an invalidated batch cannot support current reliance."""
+
+    def invalidate(self, batch_id):
+        self.clock.set(self.at(hours=6, minutes=45))
+        return invalidate_paper_entry_batch(
+            batch_id=batch_id, explanation="Wrong paper time.", **self.context(self.supervisor)
+        )
+
+    def paper_reseal(self, batch_id):
+        broken = self.break_(batch_id)
+        result = self.reseal_(batch_id, broken.body["event_id"])
+        return SealEvent.objects.get(pk=result.body["event_id"])
+
+    def test_the_reseal_and_its_inspection_support_nothing_and_the_seal_reads_open(self):
+        batch_id = self.batch()
+        event = self.paper_reseal(batch_id)
+        link = SealInspectionObligation.objects.get(inspection_item__inspection__reseal=event)
+        body = self.invalidate(batch_id).body
+        self.assertEqual(body["voided_reseal_event_ids"], [str(event.pk)])
+        self.assertEqual(len(body["voided_inspection_ids"]), 1)
+        self.assertEqual(len(body["seal_break_event_ids"]), 1)
+        self.assertIn(str(link.obligation_id), body["affected_obligation_ids"])
+        voided = PaperEntryInvalidationEvent.objects.get().recorded_at
+        states = {
+            instant: next(
+                s
+                for s in get_vehicle_obligations_as_of(
+                    str(self.vehicle.pk), instant, organization_id=str(self.org.pk)
+                )
+                if s.obligation.id == str(link.obligation_id)
+            ).state
+            for instant in (voided - timedelta(microseconds=1), voided)
+        }
+        self.assertEqual(states[voided - timedelta(microseconds=1)], State.SATISFIED)
+        self.assertNotEqual(states[voided], State.SATISFIED)
+        facts = ObligationProjection.objects.get(obligation_id=link.obligation_id).facts
+        self.assertIn("voided_at", facts["seal_inspections"][0])
+        # Neither a live nor a paper verification may rely on the voided reseal.
+        with self.assertRaises(SealError):
+            self.verify(expected=event.pk)
+        with self.assertRaises(SealRefusal) as caught:
+            self.verify(self.batch(at=time(5, 45)), expected=event.pk)
+        self.assertEqual(caught.exception.code, "SEAL_NOT_INTACT_AT_PERFORMANCE")
+        # The seal reads as open: a fresh full inspection may start without a new break.
+        kit = next(
+            row
+            for row in subjects(str(self.org.pk), str(self.vehicle.pk))
+            if row["id"] == self.kit_id
+        )
+        self.assertEqual(kit["state"], "OPEN")
+        started = start_inspection(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            expected_tip_id=str(event.pk),
+            **self.context(self.crew),
+        )
+        self.assertEqual(started.status, 200)
+        # As-of the reader before the invalidation, the paper seal was in force.
+        before = next(
+            row
+            for row in subjects(
+                str(self.org.pk), str(self.vehicle.pk), at=voided - timedelta(microseconds=1)
+            )
+            if row["id"] == self.kit_id
+        )
+        self.assertEqual(before["state"], "SEALED")
+
+    def test_its_audit_fulfilment_does_not_end_a_pending_audit(self):
+        self.clock.set(self.at(hours=5, minutes=10))
+        request_seal_audit(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            expected_tip_id=str(self.seal.pk),
+            **self.context(self.supervisor),
+        )
+        self.clock.set(self.at(hours=6, minutes=30))
+        tip = SealEvent.objects.filter(kit_id=self.kit_id).order_by("-sequence")[0]
+        batch_id = self.batch()
+        broken = self.break_(batch_id, expected=tip.pk)
+        self.reseal_(batch_id, broken.body["event_id"])
+        self.assertEqual(self.kit_events()[-1], "AUDIT_FULFILLED")
+        events = list(SealEvent.objects.filter(kit_id=self.kit_id).order_by("sequence"))
+        self.assertEqual(_event_state(events)[1], False)
+        self.invalidate(batch_id)
+        self.assertEqual(_event_state(events), (None, True))
+
+    def test_the_database_refuses_a_substitution_relying_on_it(self):
+        batch_id = self.batch()
+        event = self.paper_reseal(batch_id)
+        self.invalidate(batch_id)
+        with transaction.atomic():
+            receipt = append_receipt(
+                organization=self.org,
+                operation_id=str(uuid4()),
+                actor_user=self.crew,
+                command_type="SEAL_SUBSTITUTE",
+                request_digest="0" * 64,
+                response_status=200,
+                response_body={"code": "SYNTHETIC"},
+                correlation_id=str(uuid4()),
+            )
+        with self.assertRaises(DatabaseError), transaction.atomic():
+            SealSubstitution.objects.create(
+                organization=self.org,
+                vehicle=self.vehicle,
+                seal_event=event,
+                entered_marking="paper-id",
+                intact_attestation=True,
+                command=receipt,
+                recorded_at=receipt.recorded_at,
+                actor_user=self.crew,
+                actor_roles_at_time=["CREW"],
+            )

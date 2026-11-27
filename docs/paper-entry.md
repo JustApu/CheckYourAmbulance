@@ -281,14 +281,24 @@ In one transaction it appends, and never modifies:
   check or reading chain of the batch is not invalidated, so the batch is invalidated as a unit.
 
 A chain an Administrator had already invalidated keeps its own event. Paper seal records get no
-event of their own:
+event of their own; every reader applies the batch event from its instant:
 
-- **Seal substitutions** (paper "Seal intact" verifications) are void from the batch event on:
-  they satisfy no obligation, a fresh check or seal verification can take the obligation, and
-  they are no longer "later evidence" that blocks a paper break.
+- **Seal substitutions** (paper "Seal intact" verifications) and the **full inspection of a paper
+  reseal** are void: they satisfy no obligation, so a fresh check, inspection or seal verification
+  can take the obligation, and a voided substitution is no longer "later evidence" that blocks a
+  paper seal event.
+- **A paper reseal cannot support reliance** (INV-8, LATE-7). From the invalidation the seal reads
+  as open: neither a live nor a paper verification may rely on that reseal (a paper verification
+  at an instant after it finds no intact seal), and a fresh full inspection and reseal may start
+  without a new break. Its paper `AUDIT_FULFILLED` no longer ends a pending audit, so the audit
+  stays pending until a live or valid paper reseal fulfils it (fail closed).
 - **Seal breaks stay in force.** The seal stays open, and a new full inspection and reseal are
   required before reliance resumes. Reviving the earlier seal would fabricate reliance no one
-  recorded (INV-8: an invalidated paper BREAK or RESEAL "cannot support current reliance").
+  recorded.
+
+The seal readers apply only the invalidations known at their instant, so an as-of view before
+the invalidation still shows the paper seal in force. A substitution recorded before the
+invalidation that relied on the paper reseal (a later live "Seal intact") is left as recorded.
 
 Every record keeps its original performance and server-entry times and stays visible. Derived
 compliance is recomputed without the batch's records; an as-of view before the invalidation still
@@ -304,7 +314,9 @@ FORBIDDEN`. Refusals are audited as the actor's denied action.
 
 **Response** (`201`): `batch_id`, `invalidation_event_id`, `check_invalidation_event_ids`,
 `invalidated_check_root_ids`, `reading_invalidation_event_ids`, `invalidated_reading_root_ids`,
-`voided_substitution_ids`, `seal_break_event_ids` (breaks that stay in force),
+`voided_substitution_ids`, `voided_inspection_ids` (inspections of the batch's paper reseals),
+`voided_reseal_event_ids` (paper reseals that no longer support reliance),
+`voided_audit_fulfillment_event_ids`, `seal_break_event_ids` (breaks that stay in force),
 `affected_obligation_ids`, `voided_determination_ids` and `reopened_deficiency_ids`. A replay with
 the same `operation_id` returns the stored result. The explanation is not copied into the audit
 snapshot.
@@ -338,7 +350,8 @@ Administrator role snapshot, an actor other than the entry actor, and every chec
 engine-hours chain of the batch invalidated. The `check_event` and `reading_event` triggers accept
 a batch invalidation's events only from such an actor for chains of the named batch. The check,
 reading, seal event and seal substitution insert triggers refuse a paper record of an invalidated
-batch; the paper-break guard ignores a voided substitution as later evidence; and the
+batch; the paper-event guard ignores a voided substitution as later evidence; a seal
+substitution may not rely on a paper reseal of an invalidated batch; and the
 `deficiency_event` trigger accepts an INV-7 reopening under a batch invalidation receipt.
 
 ## Performer search
