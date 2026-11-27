@@ -76,7 +76,11 @@
     SUSPENSION_ALREADY_ENDED: "This suspension has already ended. Refresh history.",
     SUSPENSION_NOT_FOUND: "This suspension is no longer available. Refresh history.",
     SCOPE_TOO_LARGE: "Too many items. Choose fewer.",
-    VEHICLE_INACTIVE: "This vehicle is inactive."
+    VEHICLE_INACTIVE: "This vehicle is inactive.",
+    EXPLANATION_REQUIRED: "An explanation is required.",
+    OPERATION_OWNED_BY_ANOTHER_ACTOR: "This request belongs to another person. Refresh the page and try again.",
+    PAPER_BATCH_INVALIDATED: "This paper entry was invalidated. Refresh history.",
+    BATCH_INVALIDATED: "This paper entry was already invalidated. Refresh history."
   };
   // Codes whose meaning depends on the form (issue 20): a repair with an empty scope has nothing
   // left to verify, which the report form's wording does not fit.
@@ -89,8 +93,54 @@
     "empty-scope-close": {
       SCOPE_AVAILABLE: "Current verification items exist; record the repair instead.",
       INVALID_TRANSITION: "This problem's status changed. Refresh its history."
+    },
+    // SPEC 8.0.0 INV-8, LATE-6 (issue #9 B6b): a paper entry is invalidated as a unit, never by
+    // the person who entered it.
+    "paper-batch": {
+      SELF_INVALIDATION_FORBIDDEN: "You entered this paper entry, so you cannot invalidate it. Ask another supervisor or administrator.",
+      FORBIDDEN: "Only a supervisor or administrator other than the person who entered it can invalidate a paper entry.",
+      NOT_FOUND: "This paper entry is no longer available. Refresh history."
+    },
+    // A check mistakenly saved in Normal mode, after the same work was copied in Paper entry.
+    "mistaken-normal": {
+      SELF_INVALIDATION_FORBIDDEN: "You recorded this check, so you cannot invalidate it. Ask another supervisor or administrator.",
+      FORBIDDEN: "Only a supervisor or administrator other than the person who recorded this check can do this.",
+      NOT_FOUND: "This check or the chosen paper entry is no longer available. Refresh history.",
+      PAPER_CHECK_NOT_NORMAL: "This check was entered in Paper entry mode. If its time or people are wrong, invalidate its paper entry instead.",
+      REPLACEMENT_NOT_APPLICABLE: "Only a routine check can be replaced by a paper entry.",
+      REPLACEMENT_BATCH_MISMATCH: "The chosen paper entry is for another vehicle. Choose a paper entry of this vehicle.",
+      REPLACEMENT_BATCH_INVALIDATED: "The chosen paper entry was invalidated. Choose another, or copy the sheet again through Paper entry.",
+      REPLACEMENT_PERFORMED_LATER: "The chosen paper entry was performed after this check was saved. Choose the sheet this check was copied from.",
+      REPLACEMENT_CHECK_MISSING: "The chosen paper entry has no saved paper check of this same item. Copy it through Paper entry first, or choose another.",
+      PAPER_BATCH_INVALIDATED: "The chosen paper entry was invalidated. Choose another, or copy the sheet again through Paper entry."
     }
   };
+  // Forms whose refusals go to their error summary (role=alert) and mark the named field
+  // aria-invalid. The fields a refusal names: field_errors paths are the field names.
+  var SUMMARY_KINDS = ["paper-batch", "mistaken-normal"];
+  var CODE_FIELDS = {
+    EXPLANATION_REQUIRED: "explanation",
+    REPLACEMENT_BATCH_MISMATCH: "replacement_paper_entry_batch_id",
+    REPLACEMENT_BATCH_INVALIDATED: "replacement_paper_entry_batch_id",
+    REPLACEMENT_PERFORMED_LATER: "replacement_paper_entry_batch_id",
+    REPLACEMENT_CHECK_MISSING: "replacement_paper_entry_batch_id"
+  };
+  // Paper-entry invalidations post to constant API paths, never to a URL read from the page: the
+  // id fills exactly one percent-encoded segment and is never empty, "." or ".." (the issue 27
+  // rule). test_workflow_scripts.py pins both paths to the server's routes.
+  var PAPER_BATCH_PATH = "/api/v1/paper-entry-batches/";
+  var CHECK_PATH = "/api/v1/checks/";
+  function segment(id) {
+    var encoded = typeof id === "string" ? encodeURIComponent(id) : "";
+    if (encoded === "" || encoded === "." || encoded === "..") { throw new Error("This record's link is not valid. Refresh history."); }
+    return encoded;
+  }
+  function target(form) {
+    if (form.dataset.kind === "paper-batch") { return PAPER_BATCH_PATH + segment(form.dataset.batch) + "/invalidations"; }
+    if (form.dataset.kind === "mistaken-normal") { return CHECK_PATH + segment(form.dataset.check) + "/invalidations"; }
+    return form.dataset.url;
+  }
+  function fieldError(name, message) { var error = new Error(message); error.field = name; return error; }
   function errorText(form, code) {
     var kind = form.dataset.kind;
     if (kind === "repair" && form.dataset.canCloseEmpty === "1") { kind = "repair-closable"; }
@@ -173,6 +223,14 @@
       }
       if (value(form, "explanation")) { body.explanation = value(form, "explanation"); }
     }
+    if (kind === "mistaken-normal") {
+      body.replacement_paper_entry_batch_id = value(form, "replacement_paper_entry_batch_id");
+      if (!body.replacement_paper_entry_batch_id) { throw fieldError("replacement_paper_entry_batch_id", "Choose the paper entry that replaces this check."); }
+    }
+    if (kind === "paper-batch" || kind === "mistaken-normal") {
+      body.explanation = value(form, "explanation");
+      if (!body.explanation) { throw fieldError("explanation", "An explanation is required."); }
+    }
     if (kind === "completion" || kind === "explanation") {
       body.explanation = required(value(form, "explanation"), "An explanation is required.");
       if (kind === "completion") { body.check_id = form.dataset.check; }
@@ -206,7 +264,10 @@
     }).then(function (response) {
       return response.json().then(function (data) {
         if (response.ok && data.status === "COMMITTED") { return {kind: "saved"}; }
-        if (response.status < 500 && data.status === "REJECTED") { return {kind: "failed", code: data.code}; }
+        if (response.status < 500 && data.status === "REJECTED") {
+          var paths = Array.isArray(data.field_errors) ? data.field_errors.map(function (e) { return e && e.path; }) : [];
+          return {kind: "failed", code: data.code, paths: paths};
+        }
         return {kind: "unconfirmed"};
       });
     }).catch(function () { return {kind: "unconfirmed"}; });
@@ -237,19 +298,41 @@
     });
   }
   Array.prototype.forEach.call(document.querySelectorAll(".workflow-write"), function (form) {
-    var request = null, busy = false, finished = false;
+    // REC-4: request and url are kept whole, with the operation id, until a definite answer.
+    var request = null, url = null, busy = false, finished = false;
     var message = form.querySelector(".workflow-result"), button = form.querySelector('button[type="submit"]');
     var original = button.textContent, csrf = field(form, "csrfmiddlewaretoken").value;
+    var summary = SUMMARY_KINDS.indexOf(form.dataset.kind) !== -1 ? form.querySelector(".workflow-errors") : null;
+    function clearErrors() {
+      if (!summary) { return; }
+      summary.textContent = ""; summary.hidden = true;
+      ["explanation", "replacement_paper_entry_batch_id"].forEach(function (name) {
+        var input = field(form, name); if (input) { input.removeAttribute("aria-invalid"); }
+      });
+    }
+    // The error summary takes focus; each named field is marked aria-invalid.
+    function showErrors(text, names) {
+      summary.textContent = text; summary.hidden = false;
+      names.forEach(function (name) {
+        var input = name ? field(form, name) : null; if (input) { input.setAttribute("aria-invalid", "true"); }
+      });
+      message.textContent = ""; focusMessage(summary);
+    }
     if (form.dataset.kind === "report") {
       field(form, "target").addEventListener("change", function () { matches(form); }); matches(form);
     }
     form.addEventListener("submit", function (event) {
       event.preventDefault(); if (busy || finished) { return; }
       if (!request) {
-        try { request = build(form); } catch (error) { message.textContent = error.message; return; }
+        clearErrors();
+        try { url = target(form); request = build(form); } catch (error) {
+          request = null; url = null;
+          if (summary) { showErrors(error.message, [error.field]); } else { message.textContent = error.message; }
+          return;
+        }
       }
       busy = true; controls(form, true, true); button.textContent = "Saving…"; message.textContent = "Pending — waiting for acknowledgement.";
-      post(form.dataset.url, request, csrf).then(function (answer) {
+      post(url, request, csrf).then(function (answer) {
         busy = false;
         if (answer.kind === "saved") {
           finished = true; button.textContent = "Saved";
@@ -263,7 +346,12 @@
           form.querySelector(".workflow-refresh").hidden = false;
           focusMessage(message);
         } else if (answer.kind === "failed") {
-          request = null; controls(form, false, false); button.textContent = original;
+          request = null; url = null; controls(form, false, false); button.textContent = original;
+          if (summary) {
+            var names = (answer.paths || []).concat([CODE_FIELDS[answer.code]]);
+            showErrors("Not saved. " + errorText(form, answer.code), names);
+            return;
+          }
           message.textContent = "Not saved. " + errorText(form, answer.code);
           focusMessage(message);
         } else {

@@ -40,6 +40,22 @@ class DeterminationHistoryTests(SimpleTestCase):
 
 
 class WorkflowScriptTests(SimpleTestCase):
+    def test_the_scripts_paper_invalidation_paths_are_the_servers_routes(self):
+        # workflows.js posts paper-entry invalidations to constant paths (issue 27 rule).
+        script = (
+            Path(__file__).resolve().parents[1] / "templates" / "inspections" / "workflows.js"
+        ).read_text()
+        for constant, route in (
+            ("PAPER_BATCH_PATH", "api-paper-entry-batch-invalidations"),
+            ("CHECK_PATH", "api-check-invalidations"),
+        ):
+            with self.subTest(constant=constant):
+                found = re.search(rf'var {constant} = "([^"]+)";', script)
+                self.assertIsNotNone(found)
+                self.assertEqual(
+                    found.group(1) + "SEGMENT/invalidations", reverse(route, args=["SEGMENT"])
+                )
+
     @skipUnless(shutil.which("node"), "optional Node client harness is unavailable")
     def test_offline_client_workflow_regressions(self):
         script = Path(__file__).with_name("workflow_script_harness.js")

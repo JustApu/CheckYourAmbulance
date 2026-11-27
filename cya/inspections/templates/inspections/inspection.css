@@ -222,3 +222,12 @@ html:has(#checklist-bar:not([hidden])) { scroll-padding-bottom: 8rem; }
 .paper-finish { margin-top: 1rem; }
 .paper-finish .button { min-height: 48px; }
 @media (forced-colors: active) { .paper-banner, .pill-paper, .performer-chip, .paper-print-offer { border-color: CanvasText; } }
+/* Check history paper marks and invalidation forms (issue #9 B6b). */
+.paper-source { overflow-wrap: anywhere; }
+.paper-source-link, .paper-continue { display: inline-flex; align-items: center; min-height: 48px; }
+.paper-batch { padding: .75rem 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.paper-batch h3 { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0 0 .25rem; }
+.paper-invalidation > summary, .mistaken-normal > summary { display: flex; align-items: center; min-height: 48px; cursor: pointer; font-weight: 700; }
+.paper-invalidation .button, .mistaken-normal .button { min-height: 48px; }
+.workflow-errors[hidden] { display: none; }
+.paper-invalidation [aria-invalid="true"], .mistaken-normal [aria-invalid="true"] { border-color: var(--danger); border-width: 3px; }
