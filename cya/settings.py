@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     "cya.odometer",
     "cya.kits",
     "cya.seals",
+    "cya.paper",
     "cya.inspections",
     "cya.shell",
 ]

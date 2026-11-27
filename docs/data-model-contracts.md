@@ -349,6 +349,16 @@ fresh verification of an intact nested kit seal, but a pending full-content audi
 requires direct inspection of every nested kit item; nested seal substitution
 cannot fulfill the audit. Event-tip conflicts fail without writing.
 
+### Paper entry
+
+[issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B1 implements the paper-entry batch header of SPEC 8.0.0 §18.4 (LATE-1 to LATE-4); see [Paper entry](paper-entry.md). The nullable `paper_entry_batch_id` references on checks, readings and seal records, `paper_entry_invalidation_event` and `check_event.replacement_paper_entry_batch_id` arrive with the later parts that write them.
+
+| Table | Kind | Columns and keys beyond common identity |
+|---|---|---|
+| `paper_entry_batch` | A | vehicle_id ref, checklist_version_id ref (the printed vehicle-checklist version: of that vehicle's own checklist, published by the entry instant and in force at the performance instant), performed_at (UTC, not after recorded_at), performed_local_date, performed_local_time, performed_zone, performed_utc_offset_minutes, performed_resolution (`EXACT`, `GAP_FORWARD`, `AMBIGUOUS_FIRST`); recorded_at and actor are the separate server entry instant and entry actor; one receipt (`PAPER_ENTRY_BATCH_RECORD`) per batch |
+| `paper_entry_performer` | A | batch_id ref, performer_id ref (any user of the organization, active or not); unique batch/performer; same receipt as its batch; a performer other than the entry actor needs a Supervisor or Administrator role snapshot |
+| `paper_entry_kit_version` | A | batch_id ref, kit_definition_version_id ref (printed on the kit reference: published by the entry instant, in force at the performance instant, placed by the batch's checklist version); unique batch/version; same receipt as its batch |
+
 ### Command, audit and delivery infrastructure
 
 | Table | Kind | Columns and keys |

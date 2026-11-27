@@ -35,6 +35,7 @@ from cya.operations import (
     vehicle_admin_views,
 )
 from cya.operations import views as operations_views
+from cya.paper import api as paper_api
 from cya.seals import api as seal_api
 from cya.seals import views as seal_views
 from cya.shell import brand_views
@@ -496,6 +497,9 @@ urlpatterns = [
         name="api-status-request-decisions",
     ),
     path("api/v1/odometer-entries", odometer_api.odometer_entries, name="api-odometer-entries"),
+    # SPEC 8.0.0 7.9 (issue #9 Part B): paper entry of outage records.
+    path("api/v1/paper-entry-batches", paper_api.batches, name="api-paper-entry-batches"),
+    path("api/v1/paper-entry-performers", paper_api.performers, name="api-paper-entry-performers"),
     path(
         "api/v1/readings/<str:kind>/<str:reading_id>/corrections",
         odometer_api.reading_corrections,

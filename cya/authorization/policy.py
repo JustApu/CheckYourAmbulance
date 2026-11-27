@@ -34,6 +34,13 @@ POLICY = MappingProxyType(
         "correct_check": ("own_only", "own_only", "own_only", "own_only"),
         "record_independent_check": ("allow", "allow", "allow", "allow"),
         "invalidate_others_check": ("deny", "deny", "deny", "other_only"),
+        # SPEC 8.0.0 3.3, LATE-3 (issue #9): paper entry. A Crew member enters their own paper
+        # records; a Supervisor or Administrator may attribute them to any user, themself included.
+        "enter_own_paper_record": ("allow", "deny", "deny", "deny"),
+        "enter_paper_record_for_others": ("deny", "allow", "deny", "allow"),
+        # SPEC 8.0.0 INV-8, LATE-6: never a batch or record the actor entered (other_only).
+        "invalidate_paper_entry_batch": ("deny", "other_only", "deny", "other_only"),
+        "invalidate_mistaken_normal_paper_check": ("deny", "other_only", "deny", "other_only"),
         "create_deficiency": ("allow", "allow", "allow", "allow"),
         "link_unlink_deficiencies": ("allow", "allow", "allow", "allow"),
         "assign_deficiency_deadline": ("deny", "allow", "supply_only", "allow"),
