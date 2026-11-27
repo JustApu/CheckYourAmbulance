@@ -44,9 +44,11 @@
       return;
     }
     // SPEC 8.1.0 §17.3: a hint-driven read starts at most 10 seconds after the previous read
-    // started, and the panel changes when that read ends: 10 seconds plus the refresh itself.
-    state.textContent = every + (n >= total ? " Changes show within 10 seconds plus the time to refresh." :
-      " Changes on the first " + n + " vehicles show within 10 seconds plus the time to refresh.");
+    // started. SPEC 8.4.0: it may show a picture up to the shared age old. So a change shows
+    // within change_seconds (the two together) plus the refresh itself.
+    var within = " within " + config.change_seconds + " seconds plus the time to refresh.";
+    state.textContent = every + (n >= total ? " Changes show" + within :
+      " Changes on the first " + n + " vehicles show" + within);
   }
   function refresh() {
     if (signedOut) { return; }

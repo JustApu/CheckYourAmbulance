@@ -59,7 +59,7 @@ function run(config) {
     fire() { const pending = timeouts.splice(0); pending.forEach(t => { if (!t.cancelled) { t.fn(); } }); }};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b/"], vehicle_count: 4, refresh_seconds: 60};
+const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b/"], vehicle_count: 4, refresh_seconds: 60, change_seconds: 25};
 
 (async () => {
   {
@@ -72,7 +72,7 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     assert.equal(page.nodes["readiness-live-state"].textContent, "Updates every 60 seconds.");  // one still pending
     page.sockets[1].onopen();
     assert.equal(page.nodes["readiness-live-state"].textContent,
-      "Updates every 60 seconds. Changes on the first 2 vehicles show within 10 seconds plus the time to refresh.");
+      "Updates every 60 seconds. Changes on the first 2 vehicles show within 25 seconds plus the time to refresh.");
     page.fire();  // the reconcile after (re)connecting
     assert.equal(page.requests.length, 1);
     assert.equal(page.requests[0].url, "/fleet/readiness/panel/");
@@ -109,7 +109,7 @@ const config = {panel_url: "/fleet/readiness/panel/", sockets: ["/ws/a/", "/ws/b
     const page = run({...config, sockets: ["/ws/a/"], vehicle_count: 1});  // every vehicle instant
     page.sockets[0].onopen();
     assert.equal(page.nodes["readiness-live-state"].textContent,
-      "Updates every 60 seconds. Changes show within 10 seconds plus the time to refresh.");
+      "Updates every 60 seconds. Changes show within 25 seconds plus the time to refresh.");
   }
   {
     const page = run({...config, sockets: []});  // nothing live: say so plainly
