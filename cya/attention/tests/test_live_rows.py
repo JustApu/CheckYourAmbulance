@@ -241,7 +241,43 @@ class PublishRowsTests(TestCase):
         submitted.assert_not_called()
 
 
+def wait_for_idle_rows_thread(test):
+    """Wait until no rows job holds a slot, so a test starts from an empty queue.
+
+    A job an earlier test queued may still be finishing on the rows thread (its slot is released
+    after the job and the connection cleanup). Failing here means a slot was never released.
+    """
+    import time
+
+    from cya.live_updates import publish
+
+    deadline = time.monotonic() + 5
+    while publish._pending and time.monotonic() < deadline:
+        time.sleep(0.01)
+    test.assertEqual(publish._pending, 0, "a rows job never released its slot")
+
+
 class RowsThreadTests(SimpleTestCase):
+    def setUp(self):
+        wait_for_idle_rows_thread(self)
+        self.addCleanup(wait_for_idle_rows_thread, self)
+
+    def test_a_cleanup_failure_still_releases_the_slot(self):
+        # Host full run on PR #302: a slot held after a job would end row pushes after 16.
+        import threading
+
+        from cya.live_updates import publish
+
+        ran = threading.Event()
+        with (
+            patch.object(publish.connections, "close_all", side_effect=RuntimeError("closing")),
+            self.assertLogs("cya.live_updates.publish", "ERROR") as logs,
+        ):
+            self.assertTrue(publish._submit(ran.set))
+            self.assertTrue(ran.wait(5))
+            wait_for_idle_rows_thread(self)
+        self.assertIn("could not close its connections (RuntimeError)", logs.output[0])
+
     def test_jobs_run_in_order_on_one_thread_and_the_queue_is_bounded(self):
         import threading
 
@@ -283,6 +319,10 @@ class RowsThreadTests(SimpleTestCase):
 
 
 class SubmitFailureFallbackTests(TestCase):
+    def setUp(self):
+        wait_for_idle_rows_thread(self)
+        self.addCleanup(wait_for_idle_rows_thread, self)  # its own queued job, before later tests
+
     def test_the_hint_goes_out_when_the_rows_thread_cannot_take_the_job(self):
         from cya.live_updates import publish
 

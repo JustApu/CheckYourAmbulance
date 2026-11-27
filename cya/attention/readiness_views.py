@@ -22,6 +22,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
 from cya.attention.readiness import CATEGORIES, fleet_readiness
+from cya.attention.shared_picture import live_picture
 from cya.authorization.policy import Role
 from cya.checks.api import _reply
 from cya.deficiencies.api import _stamp
@@ -37,9 +38,11 @@ from cya.shell.views import deny_section
 logger = logging.getLogger(__name__)
 READERS = frozenset({Role.SUPERVISOR.value, Role.ADMINISTRATOR.value})
 LIVE_SOCKETS = 3  # one fewer than the default per-user socket limit, leaving room for one tab
-# Vehicles past the first LIVE_SOCKETS get no instant hint, only this timer. SPEC §17.3 wants a
-# change on the screen within 30 seconds, so the timer plus one panel read (about 8 s in the
-# issue #70 rehearsal) must fit in 30 s (issue #278). It was 60.
+# The screen re-reads at least this often, hints or not. SPEC 8.4.0 §17.3 wants a change on the
+# screen within 60 seconds. A re-read may show a picture up to CYA_READINESS_SHARED_PICTURE_SECONDS
+# (15) old, which can predate a change a hint announced, so a change is certain to show only at
+# the first re-read starting 15 s after it: at most 15 + this timer + one panel read (2-4 s at 3
+# workers in the issue #278 rehearsal), well inside 60 s. It was 60.
 REFRESH_SECONDS = 20
 
 
@@ -65,8 +68,21 @@ def _as_of(request, station_zone=None):
     return value, None
 
 
-def _picture(user, as_of):
-    return fleet_readiness(str(user.organization_id), as_of=as_of, now=timezone.now())
+def _picture(user, as_of, share=None):
+    """The picture for this request. share=None: the API (never shared or stored).
+
+    share=False is the screen's live first load and share=True a live panel re-read
+    (SPEC 8.4.0 §17.3; cya.attention.shared_picture). As-of reads always compute their own.
+    """
+    organization_id = str(user.organization_id)
+    if as_of is not None or share is None:
+        return fleet_readiness(organization_id, as_of=as_of, now=timezone.now())
+    return live_picture(
+        organization_id,
+        lambda instant: fleet_readiness(organization_id, now=instant),
+        timezone.now,
+        share=share,
+    )
 
 
 def _json_vehicle(vehicle):
@@ -145,7 +161,7 @@ def _screen(request, template, background=False):
     if error:
         raise Http404
     try:
-        picture = _picture(user, as_of)
+        picture = _picture(user, as_of, share=background)
     except (DatabaseError, DeficiencyError, ValueError) as failure:
         logger.error("fleet readiness unavailable (%s)", type(failure).__name__)
         return render(
