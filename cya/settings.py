@@ -250,3 +250,8 @@ CYA_LATE_COMPLETION_HOURS = env_int("LATE_COMPLETION_HOURS", 12, 0, 168)
 # checklist and readiness reads. Rows are keyed on their content, so the cache never serves
 # stale facts; it only bounds memory. 0 turns it off.
 CYA_CURRENT_FACTS_CACHE_ROWS = env_int("CURRENT_FACTS_CACHE_ROWS", 50000, 0, 1000000)
+# Issue #278 Part I: how many evaluated states of those rows each worker process keeps for the
+# readiness picture. An entry is keyed on the row's content and the status and activity events
+# that apply to it, and is used only until the next instant of its evidence, so it never serves
+# a state the evaluator would not give; it only bounds memory. 0 turns it off.
+CYA_CURRENT_STATES_CACHE_ROWS = env_int("CURRENT_STATES_CACHE_ROWS", 50000, 0, 1000000)

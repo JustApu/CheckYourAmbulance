@@ -150,10 +150,12 @@ def _count_states(states, unable, rule_of, carry):
     return counts, {"checked": satisfied, "owed": owed}
 
 
-def _current_obligations(organization_id, at, facts, collect=None):
+def _current_obligations(organization_id, at, facts, collect=None, states=None):
+    """RPT-7 counts and progress from current facts; `states` are their states at `at` if known."""
     from cya.obligations.current import evaluate_facts
 
-    states = [evaluate_facts(f, at) for f in facts]
+    if states is None:
+        states = [evaluate_facts(f, at) for f in facts]
     if collect is not None:
         collect.extend(states)
     waived = {s.evidence_id for s in states if s.state == State.WAIVED}
@@ -381,9 +383,11 @@ def fleet_readiness(organization_id, *, as_of=None, now):
     )
     cached = None
     if as_of is None:
-        from cya.obligations.current import current_rows
+        from cya.obligations.current import current_states
 
-        cached = current_rows(organization_id, [str(v.pk) for v in listed], at)
+        # Each row's facts with its state at `at`; unchanged rows reuse their evaluated state
+        # while it cannot change (issue #278 Part I).
+        cached = current_states(organization_id, [str(v.pk) for v in listed], at)
     histories = None
     if cached is None:
         histories = load_projection_histories(
@@ -399,7 +403,13 @@ def fleet_readiness(organization_id, *, as_of=None, now):
         status = status_at(organization_id, vehicle_id, at)
         states = []
         counts, progress = (
-            _current_obligations(organization_id, at, cached[vehicle_id], states)
+            _current_obligations(
+                organization_id,
+                at,
+                [facts for facts, _state in cached[vehicle_id]],
+                states,
+                [state for _facts, state in cached[vehicle_id]],
+            )
             if cached is not None
             else _obligations(organization_id, vehicle_id, at, histories[vehicle_id], states)
         )

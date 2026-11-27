@@ -63,6 +63,30 @@ Readers treat cached entries as read-only; the status applicable to a read is at
 copy. `CYA_CURRENT_FACTS_CACHE_ROWS` bounds the entries per process (0 turns the cache off).
 The RPT-5a count's own stored-facts read uses the same cache. Explicit `as_of` reads replay and
 never use it.
+
+**Per-process evaluated-state cache (issue #278 Part I).** The readiness picture evaluates every
+row of its window on each read, though between two reads few rows change. `current_states`
+returns the same rows as `current_rows`, each with its state at the read instant T. For a row
+served from stored facts, the state comes from a second least-recently-used cache keyed on:
+- the obligation ID;
+- the row's digest;
+- the ID of the status event that applies to it at min(D, T);
+- the ID of the activity event that applies to it at min(D, T).
+
+The evaluator uses T only in comparisons with instants carried in the evidence:
+- the obligation's E, D, G and L;
+- check recording and voiding;
+- determination and rule instants;
+- suspension start and end;
+- seal instants.
+
+A state evaluated at T therefore holds for every T′ from T up to the next of those instants after
+T. An entry is used only in that interval. A state evaluated exactly at one of those instants is
+not cached, because a comparison such as T ≤ G can differ there from just after it. Any other
+change of evidence changes the digest or the applicable event, and so the key. Rows replayed at
+T (refreshed after it, or changed since their digest was read) are evaluated as before and never
+cached. `CYA_CURRENT_STATES_CACHE_ROWS` bounds the entries per process (0 turns the cache off).
+Explicit `as_of` reads never use it.
 Evidence queries carry their page cap into SQL before queryset evaluation, and
 per-vehicle caps still refuse an incomplete answer. Attention/known deficiencies remain separate from obligation satisfaction and
 use their existing readers; they are not copied into obligation projections.
