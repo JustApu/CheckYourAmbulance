@@ -10,6 +10,7 @@ from cya.checks import api as check_api
 from cya.conditions import api as condition_api
 from cya.deficiencies import api as deficiency_api
 from cya.inspections import api as inspection_api
+from cya.inspections import paper_views as inspection_paper_views
 from cya.inspections import settings_views as inspection_settings_views
 from cya.inspections import views as inspection_views
 from cya.inspections import workflow_views
@@ -72,6 +73,17 @@ urlpatterns = [
         "inspection/sessions/<str:session_id>/",
         inspection_views.session,
         name="inspection-session",
+    ),
+    # SPEC 8.0.0 REC-5, 7.9 (issue #9 Part B6): Paper entry setup and the paper checklist screen.
+    path(
+        "inspection/vehicles/<str:vehicle_id>/paper-entry/",
+        inspection_paper_views.paper_entry_new,
+        name="inspection-paper-entry-new",
+    ),
+    path(
+        "inspection/paper-entry/<str:batch_id>/",
+        inspection_paper_views.paper_entry,
+        name="inspection-paper-entry",
     ),
     path("problems/", workflow_views.deficiencies, name="deficiencies"),
     path("problems/queue/", workflow_views.queue, name="deficiency-queue"),

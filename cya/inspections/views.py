@@ -8,6 +8,7 @@ not join answers exactly like one that does not exist.
 """
 
 import logging
+from datetime import timedelta
 
 from django.db import DatabaseError
 from django.http import Http404, JsonResponse
@@ -123,7 +124,11 @@ def _templates(user, vehicle, instant):
     found = ChecklistTemplate.objects.filter(
         organization_id=user.organization_id, pk__in=ids, active=True
     ).order_by("label", "pk")
-    return [{"id": str(t.pk), "label": t.label} for t in found]
+    # own: the vehicle's own checklist, the only kind a paper-entry batch can name (Part B1).
+    return [
+        {"id": str(t.pk), "label": t.label, "own": str(t.vehicle_id or "") == str(vehicle.pk)}
+        for t in found
+    ]
 
 
 def _session_rows(user, vehicle, instant):
@@ -178,7 +183,13 @@ def _checklists(templates, sessions):
     join if the checklist is active.
     """
     entries = {
-        t["id"]: {"id": t["id"], "label": t["label"], "bound": True, "joinable": True}
+        t["id"]: {
+            "id": t["id"],
+            "label": t["label"],
+            "bound": True,
+            "joinable": True,
+            "paper": t["own"],
+        }
         for t in templates
     }
     for row in sessions:
@@ -188,6 +199,7 @@ def _checklists(templates, sessions):
                 "label": row["template_label"],
                 "bound": False,
                 "joinable": row["template_active"],
+                "paper": False,
             }
     for entry in entries.values():
         mine = [row for row in sessions if row["template_id"] == entry["id"]]
@@ -207,6 +219,42 @@ def _checklists(templates, sessions):
     return list(entries.values())
 
 
+RECENT_PAPER_DAYS, RECENT_PAPER_LIMIT = 14, 5
+
+
+def _paper_entries(user, vehicle, instant):
+    """(may enter paper records, the user's own recent batches on the vehicle) (REC-5).
+
+    The batches are the user's own (only their entry actor adds records, Part B2), entered in
+    the last RECENT_PAPER_DAYS days and not invalidated, newest first, at most
+    RECENT_PAPER_LIMIT, so a crew member can continue copying a sheet.
+    """
+    from cya.inspections.paper_views import paper_permissions
+    from cya.paper.readers import vehicle_batches
+
+    own, others = paper_permissions(user)
+    if not (own or others):
+        return False, []
+    found = vehicle_batches(
+        str(user.organization_id),
+        str(vehicle.pk),
+        instant - timedelta(days=RECENT_PAPER_DAYS),
+        limit=RECENT_PAPER_LIMIT,
+        actor_id=str(user.pk),
+        valid_only=True,
+    )
+    return True, [
+        {
+            "url": reverse("inspection-paper-entry", args=[batch.pk]),
+            "template_label": batch.checklist_version.template.label,
+            "revision": batch.checklist_version.revision,
+            "performed_at": batch.performed_at,
+            "recorded_at": batch.recorded_at,
+        }
+        for batch in found
+    ]
+
+
 @never_cache
 @require_GET
 def vehicle(request, vehicle_id):
@@ -217,6 +265,7 @@ def vehicle(request, vehicle_id):
     now = timezone.now()
     templates = _templates(user, found, now)
     sessions = _session_rows(user, found, now)
+    can_paper, paper_batches = _paper_entries(user, found, now)
     context = {
         "title": found.display_name,
         "vehicle": found,
@@ -224,6 +273,8 @@ def vehicle(request, vehicle_id):
         "templates": templates,
         "checklists": _checklists(templates, sessions),
         "sessions": sessions,
+        "can_paper": can_paper,
+        "paper_batches": paper_batches,
         "config": {
             "vehicle_id": str(found.pk),
             "sessions_url": reverse("api-inspection-sessions"),

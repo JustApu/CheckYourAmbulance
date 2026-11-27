@@ -55,7 +55,7 @@ def open_sessions(organization_id, vehicle_id):
 
 def row_messages(organization_id, vehicle_id, item_id, event_id, sessions=None):
     """[(group, message)] for each open session: the item's rows read after the commit."""
-    from cya.attention.api import _stamp, check_authors, checklist_row
+    from cya.attention.api import _stamp, check_authors, checklist_row, paper_sources
 
     messages = []
     if sessions is None:
@@ -70,6 +70,7 @@ def row_messages(organization_id, vehicle_id, item_id, event_id, sessions=None):
             item_ids=[item_id],
         )
         authors = check_authors(organization_id, result.rows)
+        paper = paper_sources(organization_id, result.rows)
         message = {
             "type": "live.rows",
             "organization_id": organization_id,
@@ -81,7 +82,10 @@ def row_messages(organization_id, vehicle_id, item_id, event_id, sessions=None):
             # The API's JSON values (ids, decimals, instants) as plain types for the channel layer.
             "items": json.loads(
                 json.dumps(
-                    [checklist_row(row, authors.get(row.latest_check_id)) for row in result.rows],
+                    [
+                        checklist_row(row, authors.get(row.latest_check_id), paper)
+                        for row in result.rows
+                    ],
                     cls=DjangoJSONEncoder,
                 )
             ),

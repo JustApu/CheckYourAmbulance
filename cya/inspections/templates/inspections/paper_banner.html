@@ -1,0 +1,23 @@
+{% load station_time tz %}<section id="paper-banner" class="paper-banner" aria-labelledby="paper-banner-heading">
+  <h2 id="paper-banner-heading" tabindex="-1"><span class="pill pill-paper">Paper entry</span> Copying an outage sheet</h2>
+  {% if state == "INVALIDATED" %}<p id="paper-invalidated" class="notice"><strong>This paper entry was invalidated.</strong> Its records stay in history but no longer count, and nothing more can be copied under it. If the sheet still needs entering, start a new paper entry from the vehicle page.</p>{% endif %}
+  <dl class="paper-facts">
+    <dt>Time on the sheet</dt>
+    <dd>{{ paper_written }} ({{ paper.performed_zone }}); saved as {{ paper.performed_at|utc|date:"Y-m-d H:i" }} UTC.{% if paper_note %} {{ paper_note }}{% endif %}</dd>
+    <dt>Performed by</dt>
+    <dd id="paper-performers"></dd>
+    <dt>Entered by</dt>
+    <dd>You are recorded as the person entering these records, and the app records when each one is entered.</dd>
+    <dt>Printed checklist</dt>
+    <dd>{{ paper.template_label }}, revision {{ paper.revision }} — Version ID {{ paper.checklist_version_id }}</dd>
+    <dt>Kit reference</dt>
+    <dd>{% for k in paper.kit_versions %}{{ k.label }}, revision {{ k.revision }} — Kit version {{ k.version_id }}{% if not forloop.last %}; {% endif %}{% empty %}No kit version named.{% endfor %}{% if paper.unprinted_kit_labels %} The contents of {{ paper.unprinted_kit_labels|join:", " }} are not listed, because no kit version was named for them.{% endif %}</dd>
+  </dl>
+  {% if state == "OPEN" %}<p>Tap each result as it is written on the sheet. Each tap saves one record, at the sheet's time; there is no Submit button.</p>{% endif %}
+  <div id="paper-print-offer" class="paper-print-offer" role="region" aria-labelledby="paper-print-heading" hidden>
+    <h3 id="paper-print-heading">Print fresh copies for the rig</h3>
+    <p>The first record from this sheet is saved. Print a current outage sheet and kit reference, so the copy kept for the next outage is as recent as possible.</p>
+    <p class="paper-print-actions"><a class="button" href="{% url 'inspection-vehicle-print' vehicle.pk %}">Print the current outage sheet</a> <a class="button" href="{% url 'inspection-kit-reference' %}">Print the kit reference</a> <button type="button" id="paper-print-dismiss" class="button">Dismiss</button></p>
+  </div>
+  <p id="paper-print-status" class="visually-hidden" role="status"></p>
+</section>
