@@ -3,7 +3,7 @@
   {% if state == "INVALIDATED" %}<p id="paper-invalidated" class="notice"><strong>This paper entry was invalidated.</strong> Its records stay in history but no longer count, and nothing more can be copied under it. If the sheet still needs entering, start a new paper entry from the vehicle page.</p>{% endif %}
   <dl class="paper-facts">
     <dt>Time on the sheet</dt>
-    <dd>{{ paper_written }}, station time ({{ paper.performed_zone }}); saved as {{ paper.performed_at|utc|date:"Y-m-d H:i" }} UTC.{% if paper_note %} {{ paper_note }}{% endif %}</dd>
+    <dd>{{ paper_written }} ({{ paper.performed_zone }}); saved as {{ paper.performed_at|utc|date:"Y-m-d H:i" }} UTC.{% if paper_note %} {{ paper_note }}{% endif %}</dd>
     <dt>Performed by</dt>
     <dd id="paper-performers"></dd>
     <dt>Entered by</dt>

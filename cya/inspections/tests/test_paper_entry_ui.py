@@ -136,7 +136,7 @@ class SetupPageTests(PaperUiCase):
         self.assertIn(f"Kit version {self.kit_version}", kit["versions"][0]["label"])
         self.assertIn('id="performer-self"', page)
         self.assertNotIn('id="performer-search"', page)
-        self.assertIn(f"station time ({ZONE})", page)
+        self.assertIn(f"They are read in the {ZONE} time zone.", page)
         self.assertIn(
             'id="paper-errors" class="banner banner-error" role="alert" tabindex="-1"', page
         )
@@ -216,7 +216,7 @@ class PaperScreenTests(PaperUiCase):
         self.assertNotIn("/seals/", json.dumps(config["urls"]), "paper seals come later (B6c)")
         self.assertIn("Paper entry", page)
         self.assertIn(
-            "2026-06-02 06:15, station time (America/New_York); saved as 2026-06-02 10:15 UTC.",
+            "2026-06-02 06:15 (America/New_York); saved as 2026-06-02 10:15 UTC.",
             page,
         )
         self.assertIn(f"Version ID {self.version}", page)
