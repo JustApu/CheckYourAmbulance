@@ -296,7 +296,11 @@
     if (dialog.close) { dialog.close(); }
     dialog.removeAttribute("open");
     // Keep the intent through the pending render; it will focus the named action after acknowledgement.
-    if (keepFocusIntent && focusIntent) { return; }
+    if (keepFocusIntent && focusIntent) {
+      var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
+      if (target) { target.focus({preventScroll: true}); }
+      return;
+    }
     else { restoreFocusIntent(); focusIntent = null; }
   }
   function nextConflict() {
@@ -367,7 +371,11 @@
     outcomeGeneration += 1;
     if (outcomeDialog.close) { outcomeDialog.close(); }
     outcomeDialog.removeAttribute("open");
-    if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
+    if (keepFocusIntent && focusIntent) {
+      var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
+      if (target) { target.focus({preventScroll: true}); }
+      return;
+    }
     else { restoreFocusIntent(); focusIntent = null; }
   }
   $("outcome-cancel").addEventListener("click", function () { closeOutcome(false); });
@@ -472,7 +480,10 @@
     var recorded = recordedOutcome(row, entry);
     var button = el("button", "button",
       row.kind === "QUANTITY" ? "Record count" : "Pass");
-    button.type = "button"; button.disabled = !!busy;
+    // Keep a busy action focusable so a pending-save render can retain focus on its named control.
+    // Its handler checks the pending state before sending, so aria-disabled is sufficient here.
+    button.type = "button";
+    if (busy) { button.setAttribute("aria-disabled", "true"); }
     button.dataset.action = row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
     button.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Record count for " : "Record Pass for ") + label);
     if (row.kind === "QUANTITY" || row.kind === "MEASUREMENT") {
@@ -506,7 +517,8 @@
     ["FAILED", "UNABLE_TO_INSPECT"].forEach(function (outcome) {
       if (row.allowed_outcomes.indexOf(outcome) === -1 || (config.verification_for_deficiency_id && outcome === "UNABLE_TO_INSPECT")) { return; }
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
-      action.type = "button"; action.disabled = !!busy;
+      action.type = "button";
+      if (busy) { action.setAttribute("aria-disabled", "true"); }
       action.dataset.action = outcome.toLowerCase();
       action.setAttribute("aria-label", "Record " + (outcome === "FAILED" ? "Fail" : "Unable to inspect") + " for " + label);
       action.addEventListener("click", function () { rememberFocus(row, outcome.toLowerCase()); openOutcome(row, outcome); });
@@ -808,11 +820,45 @@
     }
     var shown = allShown;
     if (detail) { shown = shown.filter(function (row) { return groupKeyForRow(row) === selectedGroupKey; }); }
-    while (list.firstChild) { list.removeChild(list.firstChild); }
+    // Build the replacement off-screen. If an action had focus, attach its new row first and
+    // transfer focus directly to the matching control before removing the old row. Removing the
+    // focused subtree first makes browsers report focus on the document; NVDA then announces the
+    // whole page before the save toast and restored button (#283).
+    var replacement = document.createElement("ol"), replacementNodes, preservedRow = null, focusTransferred = false;
     if (!overview) {
-      if (detail) { appendItemRows(list, shown); }
-      else { shown.forEach(function (row, index) { list.appendChild(itemNode(row, index)); }); }
+      if (detail) { appendItemRows(replacement, shown); }
+      else { shown.forEach(function (row, index) { replacement.appendChild(itemNode(row, index)); }); }
     }
+    replacementNodes = Array.prototype.slice.call(replacement.children);
+    var preservedIndex = -1;
+    if (focusIntent && focusKey === focusIntent.key) {
+      for (var nextIndex = 0; nextIndex < replacementNodes.length; nextIndex++) {
+        var nextRow = replacementNodes[nextIndex];
+        if (nextRow.dataset && nextRow.dataset.itemKey === focusIntent.key) {
+          var nextAction = actionIn(nextRow, focusIntent.action);
+          if (nextAction) {
+            preservedRow = nextRow;
+            preservedIndex = nextIndex;
+            replacement.removeChild(preservedRow);
+            var previousRow = itemForKey(focusIntent.key);
+            if (previousRow) { list.insertBefore(preservedRow, previousRow); }
+            else { list.appendChild(preservedRow); }
+            nextAction.focus({preventScroll: true});
+            focusTransferred = true;
+          }
+          break;
+        }
+      }
+    }
+    Array.prototype.slice.call(list.children).forEach(function (child) {
+      if (child !== preservedRow) { list.removeChild(child); }
+    });
+    replacementNodes.forEach(function (child, index) {
+      if (child.parentNode === replacement) { replacement.removeChild(child); }
+      if (child === preservedRow) { return; }
+      if (preservedRow && index < preservedIndex) { list.insertBefore(child, preservedRow); }
+      else { list.appendChild(child); }
+    });
     list.hidden = overview;
     var message = "";
     if (rows.length && !allShown.length) {
@@ -825,7 +871,9 @@
     notice.textContent = message; notice.hidden = !message;
     var modalOpen = dialog.open || outcomeDialog.open;
     if (!modalOpen) {
-      if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
+      if (focusTransferred) {
+        if (entries[focusIntent.key] && entries[focusIntent.key].status !== "pending") { focusIntent = null; }
+      } else if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
         restoreFocusIntent(true);
       } else if (focusInList) {
         var restoredItem = itemForKey(focusKey);

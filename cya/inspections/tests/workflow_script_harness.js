@@ -28,6 +28,12 @@ class Element {
     if (this.listeners[name]) this.listeners[name]({preventDefault() {}});
   }
   appendChild(node) { node.parentNode = this; node._document = this._document; this.children.push(node); return node; }
+  insertBefore(node, reference) {
+    const index = this.children.indexOf(reference);
+    if (index < 0) { return this.appendChild(node); }
+    node.parentNode = this; node._document = this._document;
+    this.children.splice(index, 0, node); return node;
+  }
   removeChild(node) {
     this.children.splice(this.children.indexOf(node), 1);
     if (this._document.activeElement && node.contains(this._document.activeElement)) this._document.activeElement = null;
@@ -196,11 +202,11 @@ function generic(kind) {
     run.window.scrollY = 500; run.window.simulateListJump = true;
     const target = run.elements.items.children[5], pass = findAction(target, "pass"); pass.fire("click");
     assert.equal(run.window.scrollY, 500, "pending render keeps the active checklist item in place");
-    assert.equal(run.document.activeElement, null, "pending save does not park focus on the row or list");
+    assert.equal(run.document.activeElement.dataset.action, "pass", "pending save keeps focus on the same named action");
+    assert.equal(run.document.activeElement.getAttribute("aria-disabled"), "true", "the pending action is announced as unavailable");
     response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
-    assert.equal(run.frames.length, 1, "focus restoration waits until the replacement button is rendered");
-    run.frames.splice(0).forEach(callback => callback(0));
+    assert.equal(run.frames.length, 0, "focus moves directly to the acknowledged replacement action");
     assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
     response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
@@ -209,11 +215,10 @@ function generic(kind) {
     newReport(run); run.get("outcome-form").fire("submit");
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
-    assert.equal(run.document.activeElement, null, "dialog submission does not park focus on the row or list while saving");
+    assert.equal(run.document.activeElement.dataset.action, "failed", "dialog submission keeps focus on the named Fail action while saving");
     response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
-    assert.equal(run.frames.length, 1, "failed check focus waits until the replacement button is rendered");
-    run.frames.splice(0).forEach(callback => callback(0));
+    assert.equal(run.frames.length, 0, "failed check focus transfers directly to the acknowledged action");
     assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
     assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
