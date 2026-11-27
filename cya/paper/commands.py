@@ -266,7 +266,7 @@ def record_paper_entry_batch(
     performed_on,
     performed_time,
     performer_ids,
-    kit_definition_version_ids=(),
+    kit_definition_version_ids=None,
     **context,
 ):
     """Save one paper-entry batch header; returns the run_command Result (status 201)."""
@@ -279,7 +279,8 @@ def record_paper_entry_batch(
         performed_on,
         performed_time,
         performer_ids,
-        list(kit_definition_version_ids),
+        # Only an omitted value means "none printed"; a supplied value is validated as given.
+        [] if kit_definition_version_ids is None else kit_definition_version_ids,
     )
 
     def build(actor):
