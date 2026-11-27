@@ -14,7 +14,7 @@ B lists them. This page grows with each part.
 | B1: batch header, performer search, §3.3 permissions, kit-reference identifiers | this page |
 | B2: paper item checks | this page |
 | B3: paper odometer and engine-hours readings | this page |
-| B4: paper seal verification and seal break | this page |
+| B4: paper seal verification, seal break and paper reseal | this page |
 | B5: batch invalidation and mistaken-Normal invalidation | this page |
 | B6: crew UI | later |
 
@@ -174,15 +174,17 @@ reading's qualifying instant and refuses a paper link past L.
 
 ## Paper seal records (Part B4)
 
-`POST /api/v1/seals/verify` and `POST /api/v1/seals/break` accept `paper_entry_batch_id` (SPEC 8.0.0
-LATE-7 and the §10 paper-record seal paragraph). The batch rules are those of paper checks. The
-response adds `paper_entry`. A paper reseal, full inspection or audit request is not accepted:
-SEAL-6 needs a fresh count and expiration for every item, which the outage sheet does not record,
-and the owner has been asked how to handle it ([issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9)).
+`POST /api/v1/seals/verify`, `POST /api/v1/seals/break` and `POST /api/v1/seals/reseal` accept
+`paper_entry_batch_id` (SPEC 8.5.0 LATE-7 and the §10 paper-record seal paragraph). The batch
+rules are those of paper checks. The response adds `paper_entry`. An audit request is never
+entered from paper.
 
 **Order of a seal's records.** A seal record's qualifying instant is its performance instant for
 paper, else its server instant. Within one kit's or cabinet's stream, sequence order stays
-qualifying-instant order, so every reader that orders a stream by sequence is unchanged.
+qualifying-instant order, so every reader that orders a stream by sequence is unchanged. A paper
+break or reseal is therefore appended only when no seal event or substitution of the same kit or
+cabinet has a later qualifying instant (`422 SEAL_LATER_EVIDENCE` otherwise): it never rewrites
+later evidence.
 
 **Paper seal verification ("Seal intact").** It is judged at the performance instant t:
 
@@ -199,19 +201,61 @@ qualifying-instant order, so every reader that orders a stream by sequence is un
 
 It writes no seal event, so it never changes the seal's current state.
 
-**Paper seal break.** It is appended with its performance instant only when no seal event or
-substitution of the subject has a later qualifying instant (`422 SEAL_LATER_EVIDENCE` otherwise),
-so it never rewrites later evidence. A paper verification at an instant after a paper break finds
-no intact seal; one before it still relies on the earlier reseal.
+**Paper seal break.** It is appended with its performance instant under the placement rule
+above. A paper verification at an instant after a paper break finds no intact seal; one before
+it still relies on the earlier reseal.
+
+**Paper reseal (SPEC 8.5.0 SEAL-1, CAB-9, LATE-7).** The outage sheet prints a paper reseal
+section for each sealed kit and sealable cabinet (see
+[Paper checklists for outages](crew-inspection-ui.md#paper-checklists-for-outages)). A reseal
+done during an outage is entered from it under the batch of the same sheet:
+
+1. If the seal was intact at t, enter its break from the sheet first (a paper break of the same
+   batch; it is taken as performed at t). A seal already broken earlier needs no new break.
+2. Enter each covered kit's presence and each applicable kit-list count as paper checks of the
+   same batch (Part B2), as for any paper check.
+3. `POST /api/v1/seals/reseal` with `paper_entry_batch_id`, the new seal's `marking`, both
+   attestations, `observations` (one per covered item: the result, the fresh count for a
+   quantity item and the fresh expiration date for an expiration-tracked item, copied from the
+   section) and `kit_count_checks` / `kit_presence_checks` naming the paper checks of step 2.
+   `start_operation_id` and `nested_substitution_ids` are refused with a paper batch: there is no
+   live inspection start, and a paper cabinet reseal inspects every covered kit's items (a kit
+   inside whose own seal was intact at t is first broken on paper, or the cabinet is resealed
+   live).
+
+The full inspection and the reseal are taken as performed at t. Scope, designation, compartment
+revision, kit assignments, kit-list lines and the expired-item rule (t's station-local date) are
+judged at t. Every covered item must come from the checklist version the batch names, or from the
+kit-definition version it names for that kit's definition, and that version must be the one in
+force at t: otherwise the item printed on the section is no longer identifiable under LATE-4 and
+the reseal is `422 PAPER_ITEM_UNIDENTIFIABLE`. A missing count or expiration date is refused like
+a live one (`422 INVALID_SEAL_REQUEST`). Every refusal writes nothing, so the seal stays open
+until a live full inspection and reseal. A pending audit is fulfilled by the paper reseal as by a
+live one (its `AUDIT_FULFILLED` event carries the batch and t). The inspection's obligation links
+are judged at t (late up to L), like a paper check's, and obligation state completes them at t.
+
+*Inspection evidence for a paper reseal (design).* The seal_inspection tables already require
+each kit-count and kit-presence row to name an immutable check record, so a paper reseal names
+paper checks of its own batch rather than carrying the values itself. Such a check was copied
+from the same sheet, by the same entry actor, at the same performance instant; that is what
+"fresh for that paper inspection" means here. A live check is not evidence for a paper reseal,
+and a paper check is never evidence for a live one. This reuses the check's own validation,
+printed-version mapping, deficiency on mismatch and obligation links, adds no columns to the
+seal_inspection tables (their rows reach the batch through their reseal event), and keeps a
+live reseal's request, digest and response unchanged.
 
 **Fresh evidence.** A paper verification or paper check is never fresh evidence for a live
-reseal (nested kit verifications and kit counts).
+reseal (nested kit verifications, kit counts and kit presence).
 
 **Database guards** (`cya/seals/migrations/0010_paper_seal_records.py`): seal events keep
-qualifying order along the chain and a paper event may only be a break, matching its batch and
-preceding no later substitution; a paper substitution must rely on the seal intact at its
-instant; a paper substitution link must hold the instant in the obligation's window; a paper
-substitution cannot be nested in a live cabinet inspection.
+qualifying order along the chain; a paper event is a break, reseal or audit fulfilment (never an
+audit request), matches its batch, has its kit designation and compartment revision judged at its
+instant and precedes no later substitution; a paper substitution must rely on the seal intact at
+its instant; a paper substitution or inspection link must hold the instant in the obligation's
+window; a paper inspection has no start receipt, names only kit-count and kit-presence checks of
+its own batch (a live one only live checks made after its start), with kit assignments current at
+its instant, and takes no nested kit verification; a paper substitution cannot be nested in a
+live cabinet inspection.
 
 ## Batch invalidation (Part B5)
 
@@ -321,6 +365,6 @@ replay, CSRF, and the performer search) and `test_paper_checks.py` (timing, curr
 compliance, printed version, refusals, conflicts, ordering, corrections, guards) and
 `test_paper_readings.py` (obligations, sequence and both-neighbour anomalies, corrections) and
 `test_paper_seals.py` (verification at the performance instant, seal intact then, breaks, later
-evidence) and `test_invalidation.py` (batch invalidation of checks, readings and seal records,
-as-of history, deficiency effects, permissions, refusals, database guards, HTTP, and the
-mistaken-Normal invalidation).
+evidence, paper kit and cabinet reseals, refusals and guards) and `test_invalidation.py`
+(batch invalidation of checks, readings and seal records, as-of history, deficiency effects,
+permissions, refusals, database guards, HTTP, and the mistaken-Normal invalidation).

@@ -5,7 +5,8 @@ optional paper_entry_batch_id. A paper verification is judged at the batch's per
 instant t against the seal intact then, and links the obligations whose windows hold t; a
 paper break is appended only when no record of the subject has a later qualifying instant, so
 a stream's sequence order stays its qualifying-instant order and no later evidence is
-rewritten. A paper reseal, inspection or audit is not accepted (owner question on issue #9).
+rewritten. A paper full inspection and reseal (cya.seals.reseal, SPEC 8.5.0 LATE-7) follows
+the same placement rule; an audit request is never entered from paper.
 """
 
 from zoneinfo import ZoneInfo
@@ -218,7 +219,7 @@ def _append_event(
     }
     if paper_entry_batch_id is not None:
         if event_type != "BREAK":
-            raise SealError("only a seal break or verification can be entered from paper")
+            raise SealError("an audit request is not entered from paper")
         canonical_id(paper_entry_batch_id)
         request["paper_entry_batch_id"] = paper_entry_batch_id  # live digests unchanged
 

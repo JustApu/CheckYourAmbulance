@@ -114,7 +114,7 @@ def stored_seal_inspections(organization_id, obligation_ids, instant, *, limit=N
         SealInspectionObligation.objects.filter(
             organization_id=organization_id, obligation_id__in=ids, recorded_at__lte=instant
         )
-        .select_related("inspection_item")
+        .select_related("inspection_item__inspection__reseal")
         .order_by("recorded_at", "id")[: limit + 1],
         limit,
     )
@@ -126,6 +126,7 @@ def stored_seal_inspections(organization_id, obligation_ids, instant, *, limit=N
             row.recorded_at,
             row.inspection_item.outcome,
             row.late_eligible,
+            row.inspection_item.inspection.reseal.performed_at,
         )
         for row in rows
     )
