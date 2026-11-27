@@ -55,9 +55,10 @@ def command(request, action):
                 "nested_substitution_ids",
                 "kit_count_checks",
                 "kit_presence_checks",
+                "paper_entry_batch_id",
             }
             if action == "reseal"
-            # SPEC 8.0.0 LATE-7: only a break or a verification is entered from paper.
+            # SPEC 8.5.0 LATE-7: a break, a verification or a reseal is entered from paper.
             else {"paper_entry_batch_id"}
             if action in ("break", "verify")
             else set()
