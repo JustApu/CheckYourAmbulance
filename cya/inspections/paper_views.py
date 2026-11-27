@@ -6,7 +6,8 @@
   POST /api/v1/paper-entry-batches (`inspections/paper_entry.js`).
 - /inspection/paper-entry/{batch_id}/: the paper checklist screen, the session screen's own
   script and template in paper mode (config.paper_entry): each tap saves one check naming the
-  batch; nothing is saved per batch (LATE-6).
+  batch; nothing is saved per batch (LATE-6). It links to the sheet's seal records,
+  /inspection/paper-entry/{batch_id}/seals/ (cya.seals.views.paper_seals, LATE-7).
 
 Hiding a control is a convenience only: every endpoint authorizes each record again (SPEC 3.2).
 Only the batch's entry actor may add records to it (Part B2), so another user's batch answers 404
@@ -142,6 +143,40 @@ def paper_entry_new(request, vehicle_id):
     return render(request, "inspections/paper_entry_new.html", context)
 
 
+def _written(summary):
+    """The date and time as written on the sheet (in the batch's station zone)."""
+    return (
+        f"{summary['performed_local_date'].isoformat()} "
+        f"{summary['performed_local_time'].strftime('%H:%M')}"
+    )
+
+
+def banner_context(summary):
+    """What paper_banner.html reads, for the paper checklist and paper seals pages."""
+    state = "INVALIDATED" if summary["invalidated"] else "OPEN"
+    return {
+        "paper": summary,
+        "paper_written": _written(summary),
+        "paper_note": RESOLUTION_NOTES.get(summary["performed_resolution"], ""),
+        "state": state,
+        "state_label": "Invalidated" if state == "INVALIDATED" else "Open",
+    }
+
+
+def paper_config(summary):
+    """config.paper_entry: the batch facts a paper-mode script reads (names as plain text)."""
+    return {
+        "batch_id": summary["batch_id"],
+        "performed_at": summary["performed_at"].isoformat(),
+        "performed_label": _written(summary),
+        "performers": [
+            p["display_name"] + ("" if p["active"] else " (inactive)")
+            for p in summary["performers"]
+        ],
+        "has_records": summary["has_records"],
+    }
+
+
 @never_cache
 @require_GET
 def paper_entry(request, batch_id):
@@ -155,11 +190,8 @@ def paper_entry(request, batch_id):
         raise Http404
     summary = readers.batch_summary(batch)
     now = timezone.now()
-    state = "INVALIDATED" if summary["invalidated"] else "OPEN"
-    written = (
-        f"{summary['performed_local_date'].isoformat()} "
-        f"{summary['performed_local_time'].strftime('%H:%M')}"
-    )
+    banner = banner_context(summary)
+    state = banner["state"]
     odometer_unit = _odometer_unit(user, batch.vehicle)
     config = {
         "user_id": str(user.pk),
@@ -172,16 +204,7 @@ def paper_entry(request, batch_id):
         "view": "NORMAL",
         "needs_attention_only": False,
         "odometer_unit": odometer_unit,
-        "paper_entry": {
-            "batch_id": summary["batch_id"],
-            "performed_at": summary["performed_at"].isoformat(),
-            "performed_label": written,
-            "performers": [
-                p["display_name"] + ("" if p["active"] else " (inactive)")
-                for p in summary["performers"]
-            ],
-            "has_records": summary["has_records"],
-        },
+        "paper_entry": paper_config(summary),
         "urls": {
             "checklist": reverse("api-vehicle-checklist", args=[batch.vehicle_id]),
             "checks": reverse("api-checks"),
@@ -192,6 +215,8 @@ def paper_entry(request, batch_id):
             "deficiency_detail": reverse("deficiencies-detail", args=["DEFICIENCY"]),
             "print_checklist": reverse("inspection-vehicle-print", args=[batch.vehicle_id]),
             "kit_reference": reverse("inspection-kit-reference"),
+            # The sheet's seal records: verifications, breaks and reseals (LATE-7; B6c).
+            "paper_seals": reverse("inspection-paper-entry-seals", args=[summary["batch_id"]]),
         },
     }
     try:
@@ -201,13 +226,9 @@ def paper_entry(request, batch_id):
     context = {
         "title": f"Paper entry: {batch.vehicle.display_name}",
         "vehicle": batch.vehicle,
-        "paper": summary,
-        "paper_written": written,
-        "paper_note": RESOLUTION_NOTES.get(summary["performed_resolution"], ""),
+        **banner,
         "odometer_unit_label": {"mi": "miles", "km": "kilometres"}.get(odometer_unit),
         "template_label": summary["template_label"],
-        "state": state,
-        "state_label": "Invalidated" if state == "INVALIDATED" else "Open",
         "past_deadline": False,
         "status": _status(user, batch.vehicle, now),
         "config": config,

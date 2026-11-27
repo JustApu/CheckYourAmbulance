@@ -85,6 +85,12 @@ urlpatterns = [
         inspection_paper_views.paper_entry,
         name="inspection-paper-entry",
     ),
+    # SPEC 8.5.0 LATE-7 (issue #9 Part B6c): the sheet's seal records.
+    path(
+        "inspection/paper-entry/<str:batch_id>/seals/",
+        seal_views.paper_seals,
+        name="inspection-paper-entry-seals",
+    ),
     path("problems/", workflow_views.deficiencies, name="deficiencies"),
     path("problems/queue/", workflow_views.queue, name="deficiency-queue"),
     path(

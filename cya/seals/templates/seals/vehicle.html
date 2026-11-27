@@ -1,10 +1,23 @@
 {% extends "shell/base.html" %}
 {% block head %}<style>{% include "inspections/inspection.css" %}</style>{% endblock %}
 {% block content %}
+{% if paper %}
+<p class="breadcrumb"><a href="{% url 'inspection-paper-entry' paper.batch_id %}">&larr; Back to the paper checklist</a></p>
+<h1>Seal records from this sheet</h1>
+{% include "inspections/paper_banner.html" %}
+<section id="paper-seal-order" class="notice" aria-labelledby="paper-seal-order-heading">
+  <h2 id="paper-seal-order-heading">Copy seal records in sheet order</h2>
+  <p>Enter the seal records in the order they are written on the sheet. If the sheet shows a seal broken and then resealed, save the break first, then the reseal.</p>
+  <p>A record from the sheet cannot be placed before a later seal record of the same kit or cabinet. If the app already has a later seal record, the record from the sheet is refused and stays on paper.</p>
+  <p>A reseal copied from the sheet takes every count and expiration date from its reseal section. A cabinet reseal covers each kit inside item by item; a kit seal inside is not verified on its own here.</p>
+</section>
+{% else %}
 <p class="breadcrumb"><a href="{% url 'inspection-vehicle' vehicle.pk %}">&larr; {{ vehicle.display_name }}</a></p>
 <h1>Sealed kits and cabinets</h1>
 <p>Check the seal itself or break it to inspect its contents. A seal never closes an open problem.</p>
+{% endif %}
 <form id="seal-csrf">{% csrf_token %}</form>
+<div id="seal-error" class="banner banner-error" role="alert" tabindex="-1" hidden></div>
 <p id="seal-message" class="notice" role="status" aria-live="polite"></p>
 <section aria-labelledby="seals-heading">
   <h2 id="seals-heading">{{ vehicle.display_name }} seals</h2>
@@ -15,6 +28,7 @@
   <div id="seal-form"></div>
   <button type="button" id="seal-cancel" class="button">Cancel</button>
 </section>
+{% if paper %}<p><a class="button" href="{% url 'inspection-paper-entry' paper.batch_id %}">Back to the paper checklist</a></p>{% endif %}
 {{ config|json_script:"seal-config" }}
 {% endblock %}
 {% block scripts %}<script>{% include "seals/vehicle.js" %}</script>{% endblock %}

@@ -22,6 +22,7 @@
 <form id="csrf-holder">{% csrf_token %}</form>
 <p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent problem report</a></p>
 {% if not verification and not paper %}<p><a class="button" href="{% url 'inspection-vehicle-seals' vehicle.pk %}">Sealed kits and cabinets</a></p>{% endif %}
+{% if paper %}<p><a id="paper-seals-link" class="button" href="{% url 'inspection-paper-entry-seals' paper.batch_id %}">Seal records from this sheet</a> <span class="muted">Seals written on the sheet as intact, broken or resealed.</span></p>{% endif %}
 
 {% if verification %}
 <section class="notice"><p>Verification for <a href="{% url 'deficiencies-detail' verification.pk %}">{{ verification.summary }}</a>. Each outstanding row needs a Pass; a Fail returns the problem to In Progress. Unable to Inspect does not verify.</p></section>
