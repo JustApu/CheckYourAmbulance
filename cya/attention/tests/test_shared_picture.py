@@ -125,6 +125,9 @@ class FakeRedis:
 
             def put(keys, args):
                 current = self.hashes.get(keys[0], {}).get("at")
+                if current is not None and not current.isdigit():
+                    # Lua's tonumber gives nil, and comparing nil is a script error.
+                    raise redis.ResponseError("attempt to compare nil with number")
                 if current is not None and int(current) >= int(args[0]):
                     return 0
                 self.hashes[keys[0]] = {"at": str(args[0]).encode(), "picture": args[1].encode()}
@@ -348,3 +351,46 @@ class SharedStoreTests(SimpleTestCase):
         self.store.put(ORG, _micros(T0), encode(picture_at(T0)))
         self.assertEqual(set(self.client.hashes), {f"cya:readiness:picture:{ORG}"})
         self.assertIsNone(self.store.get("00000000-0000-0000-0000-000000000002"))
+
+    def test_a_corrupted_entry_is_computed_again_never_a_failed_request(self):
+        good = encode(picture_at(T0)).encode()
+        stale = encode(picture_at(T0 - timedelta(seconds=16))).encode()
+        cases = {
+            "instant is not a number": (b"soon", good),
+            "picture is not UTF-8": (str(_micros(T0)).encode(), b"\xff\xfe\x00"),
+            "picture is not JSON": (str(_micros(T0)).encode(), b"{not json"),
+            "JSON scalar": (str(_micros(T0)).encode(), b"3"),
+            "JSON list": (str(_micros(T0)).encode(), b"[]"),
+            "vehicles not a list": (str(_micros(T0)).encode(), b'{"vehicles": 3}'),
+            "fields missing": (str(_micros(T0)).encode(), b'{"vehicles": []}'),
+            "unknown field": (
+                str(_micros(T0)).encode(),
+                good.replace(b'"truncated"', b'"surprise":1,"truncated"'),
+            ),
+            "instant not a datetime": (
+                str(_micros(T0)).encode(),
+                b'{"as_of":"2026","window_start":null,"window_end":null,'
+                b'"vehicles":[],"truncated":false,"totals":{}}',
+            ),
+            "stored instant newer than the picture": (str(_micros(T0)).encode(), stale),
+        }
+        key = f"cya:readiness:picture:{ORG}"
+        for name, (at, text) in cases.items():
+            with self.subTest(name):
+                self.client.hashes[key] = {"at": at, "picture": text}
+                self.client.strings.clear()
+                compute = Computer()
+                with self.assertLogs("cya.attention.shared_picture", "ERROR") as logs:
+                    picture = live_picture(
+                        ORG,
+                        compute,
+                        self.clock,
+                        share=True,
+                        store=self.store,
+                        sleep=lambda s: None,
+                    )
+                    shared_picture.logger.error("marker")  # assertLogs needs one for the age case
+                self.assertEqual(compute.instants, [T0])
+                self.assertEqual(picture.vehicles[0].display_name, "computed 1")
+                if name != "stored instant newer than the picture":
+                    self.assertIn("unreadable", logs.output[0])

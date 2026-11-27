@@ -72,11 +72,28 @@ def encode(picture):
     return json.dumps(_plain(asdict(picture)), separators=(",", ":"), allow_nan=False)
 
 
+class Unreadable(ValueError):
+    """A stored picture that is not one encode wrote; the reader computes its own instead."""
+
+
 def decode(text):
-    """A fresh FleetReadiness from encode's text; the caller may change it freely."""
-    data = _restored(json.loads(text))
-    vehicles = [VehicleReadiness(**v) for v in data.pop("vehicles")]
-    return FleetReadiness(vehicles=vehicles, **data)
+    """A fresh FleetReadiness from encode's text; the caller may change it freely.
+
+    Anything else (bytes that are not UTF-8, JSON that is not a picture) raises Unreadable.
+    """
+    try:
+        data = _restored(json.loads(text))
+        if not isinstance(data, dict) or not isinstance(data.get("vehicles"), list):
+            raise Unreadable("not a readiness picture")
+        vehicles = [VehicleReadiness(**v) for v in data.pop("vehicles")]
+        picture = FleetReadiness(vehicles=vehicles, **data)
+    except Unreadable:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError) as failure:
+        raise Unreadable(type(failure).__name__) from failure
+    if not isinstance(picture.as_of, datetime) or picture.as_of.utcoffset() is None:
+        raise Unreadable("a picture needs an aware instant")
+    return picture
 
 
 def _micros(instant):
@@ -153,7 +170,10 @@ class SharedStore:
         at, text = self._client.hmget(self._key("picture", organization_id), "at", "picture")
         if at is None or text is None:
             return None
-        return int(at), text.decode()
+        try:
+            return int(at), text.decode()
+        except ValueError as failure:  # includes UnicodeDecodeError
+            raise Unreadable(type(failure).__name__) from failure
 
     def put(self, organization_id, micros, text):
         self._put(keys=[self._key("picture", organization_id)], args=[micros, text, KEEP_SECONDS])
@@ -212,16 +232,17 @@ def live_picture(organization_id, compute, now, *, share, store=None, sleep=time
     def recent():
         try:
             found = store.get(organization_id)
+            if found is None or found[0] < oldest:
+                return None
+            picture = decode(found[1])
         except errors:
             logger.error("shared readiness picture unavailable; computing in this request")
             return None
-        if found is None or found[0] < oldest:
-            return None
-        try:
-            return decode(found[1])
-        except (ValueError, TypeError, KeyError):
+        except Unreadable:
             logger.error("shared readiness picture unreadable; computing in this request")
             return None
+        # The age bound holds for the picture itself, not only for the instant stored beside it.
+        return picture if _micros(picture.as_of) >= oldest else None
 
     def computed():
         picture = compute(now())
