@@ -196,8 +196,7 @@ function generic(kind) {
     run.window.scrollY = 500; run.window.simulateListJump = true;
     const target = run.elements.items.children[5], pass = findAction(target, "pass"); pass.fire("click");
     assert.equal(run.window.scrollY, 500, "pending render keeps the active checklist item in place");
-    assert.equal(run.document.activeElement.type, "li", "pending render moves focus to the item while its action is disabled");
-    assert.equal(run.document.activeElement.dataset.itemKey, "item-5|kit-a");
+    assert.equal(run.document.activeElement, null, "pending save does not park focus on the row or list");
     response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
     assert.equal(run.frames.length, 1, "focus restoration waits until the replacement button is rendered");
@@ -210,7 +209,7 @@ function generic(kind) {
     newReport(run); run.get("outcome-form").fire("submit");
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
-    assert.equal(run.document.activeElement.type, "li", "deficiency submission moves focus to the failed item while its action is disabled");
+    assert.equal(run.document.activeElement, null, "dialog submission does not park focus on the row or list while saving");
     response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
     assert.equal(run.frames.length, 1, "failed check focus waits until the replacement button is rendered");

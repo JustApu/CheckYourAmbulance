@@ -78,7 +78,10 @@
   function restoreFocusIntent(afterRender) {
     if (!focusIntent) { return; }
     var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
-    if (!target || target.disabled) { (item || list).focus({preventScroll: true}); return; }
+    if (!target) { (item || list).focus({preventScroll: true}); return; }
+    // While a save is pending, leave focus alone. Parking it on the row/list is announced
+    // as generic context by some screen readers; restore the named action after the result render.
+    if (target.disabled) { if (!afterRender) { (item || list).focus({preventScroll: true}); } return; }
     if (!afterRender) { target.focus({preventScroll: true}); focusIntent = null; return; }
     if (focusRestoreScheduled) { return; }
     focusRestoreScheduled = true;
@@ -292,7 +295,8 @@
     conflictShowing = false;
     if (dialog.close) { dialog.close(); }
     dialog.removeAttribute("open");
-    if (keepFocusIntent && focusIntent) { (itemForKey(focusIntent.key) || list).focus({preventScroll: true}); }
+    // Keep the intent through the pending render; it will focus the named action after acknowledgement.
+    if (keepFocusIntent && focusIntent) { return; }
     else { restoreFocusIntent(); focusIntent = null; }
   }
   function nextConflict() {
