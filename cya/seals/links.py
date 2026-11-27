@@ -17,7 +17,7 @@ class LinkTarget:
     item_requirement_version_id: str | None = None  # SPEC 6.0.0 CHK-11, a loose item's row
 
 
-def plan_links(organization_id, vehicle_id, targets, *, recorded_at):
+def plan_links(organization_id, vehicle_id, targets, *, recorded_at, known_at=None):
     """Select the same on-time and explicitly shared obligations as a normal check.
 
     The caller holds each target's item lock and uses this instant on the receipt. Presence
@@ -43,7 +43,9 @@ def plan_links(organization_id, vehicle_id, targets, *, recorded_at):
             kit_requirement_id=target.kit_requirement_id,
             item_requirement_version_id=target.item_requirement_version_id,
         )
-        links = choose_seal_links(prospective, recorded_at=recorded_at)
+        # recorded_at is the qualifying instant (a paper record's performance instant), known_at
+        # what the app knows (SPEC 8.0.0 5.3); None means the same instant.
+        links = choose_seal_links(prospective, recorded_at=recorded_at, known_at=known_at)
         total += len(links)
         if total > MAX_LINKS:
             raise ValueError("too many seal obligation links")

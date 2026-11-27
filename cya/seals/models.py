@@ -31,6 +31,17 @@ class SealEvent(Evidence):
     expiration = models.DateField(null=True)
     no_expiration = models.BooleanField(default=False)
     reason = models.TextField(null=True)  # noqa: DJ001
+    # SPEC 8.0.0 LATE-7 (issue #9 Part B4): a record copied from an outage paper form names its
+    # batch and repeats the batch's performance instant; its qualifying instant is
+    # COALESCE(performed_at, recorded_at). Both are null for a live record.
+    paper_entry_batch = models.ForeignKey(
+        "cya_paper.PaperEntryBatch",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,  # organization-pair key in migration 0010
+    )
+    performed_at = models.DateTimeField(null=True)
 
     class Meta:
         db_table = "seal_event"
@@ -106,6 +117,17 @@ class SealSubstitution(Evidence):
     seal_event = models.ForeignKey(SealEvent, on_delete=models.PROTECT, related_name="+")
     entered_marking = models.CharField(max_length=200)
     intact_attestation = models.BooleanField()
+    # SPEC 8.0.0 LATE-7 (issue #9 Part B4): a record copied from an outage paper form names its
+    # batch and repeats the batch's performance instant; its qualifying instant is
+    # COALESCE(performed_at, recorded_at). Both are null for a live record.
+    paper_entry_batch = models.ForeignKey(
+        "cya_paper.PaperEntryBatch",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,  # organization-pair key in migration 0010
+    )
+    performed_at = models.DateTimeField(null=True)
 
     class Meta:
         db_table = "seal_substitution"

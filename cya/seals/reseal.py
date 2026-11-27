@@ -234,6 +234,8 @@ def reseal(
                     pk__in=nested_substitution_ids,
                     actor_user_id=context["actor_id"],
                     vehicle_id=vehicle_id,
+                    # A paper verification is not fresh evidence for this inspection (LATE-7).
+                    performed_at__isnull=True,
                 ).select_related("seal_event")
             )
             if len(substitutions) != len(nested_substitution_ids):

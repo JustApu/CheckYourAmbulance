@@ -974,6 +974,35 @@ def suspensions_in_force(organization_id, deficiency_id):
     return rows
 
 
+def suspensions_in_force_at(organization_id, deficiency_id, at):
+    """The suspension STARTs in force at `at` as the records stood then (SPEC 8.0.0 LATE-7).
+
+    A paper seal verification is judged at its performance instant: a START recorded by then
+    that no END recorded by then names.
+    """
+    ended = CheckSuspension.objects.filter(
+        organization_id=organization_id,
+        deficiency_id=deficiency_id,
+        action="END",
+        recorded_at__lte=at,
+    ).values("prior_suspension_id")
+    rows = list(
+        CheckSuspension.objects.filter(
+            organization_id=organization_id,
+            deficiency_id=deficiency_id,
+            action="START",
+            recorded_at__lte=at,
+        )
+        .exclude(pk__in=ended)
+        .order_by("recorded_at", "id")[: MAX_SUSPENSIONS_IN_FORCE + 1]
+    )
+    if len(rows) > MAX_SUSPENSIONS_IN_FORCE:
+        raise DeficiencyError(
+            "CONFIGURATION_UNAVAILABLE", "check suspensions are unavailable", status=503
+        )
+    return rows
+
+
 def suspension_ids_in_force(organization_id, deficiency_id):
     """What a closing event lists in suspensions_ended: the ids in force, sorted (SUS-3, SUS-4)."""
     return sorted(str(row.pk) for row in suspensions_in_force(organization_id, deficiency_id))

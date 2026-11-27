@@ -172,11 +172,11 @@ def _eligible(
     return _ordered(candidates)
 
 
-def _current_rule(organization_id, recorded_at):
+def _current_rule(organization_id, recorded_at, known_at=None):
     return (
         SharedSatisfactionRule.objects.filter(
             organization_id=organization_id,
-            recorded_at__lte=recorded_at,
+            recorded_at__lte=recorded_at if known_at is None else known_at,
             effective_at__lte=recorded_at,
         )
         .order_by("-effective_at", "-revision", "-id")
@@ -451,7 +451,7 @@ def _links(check, scope, on_time, late):
     ]
 
 
-def choose_seal_links(check, *, recorded_at, ignore_root_check_id=None):
+def choose_seal_links(check, *, recorded_at, known_at=None, ignore_root_check_id=None):
     """Return primary and explicitly shared links for seal evidence, as before SPEC 6.0.0.
 
     The caller holds the vehicle/item lock and supplies the exact timestamp that will be stored
@@ -459,7 +459,7 @@ def choose_seal_links(check, *, recorded_at, ignore_root_check_id=None):
     considered. Completed obligations are skipped; on-time windows always take precedence over
     late completion, then due instant and stable obligation ID decide the primary link.
     """
-    scope = _scope(check, recorded_at)
+    scope = _scope(check, recorded_at, known_at)
     on_time = _candidates(scope, late=False, ignore_root_check_id=ignore_root_check_id)
     if len(on_time) > MAX_LINK_CANDIDATES:
         raise LinkScopeTooLarge("too many overlapping eligible obligations")
@@ -483,7 +483,7 @@ def choose_seal_links(check, *, recorded_at, ignore_root_check_id=None):
             "timing": timing,
         }
     ]
-    rule = _current_rule(str(check.organization_id), recorded_at)
+    rule = _current_rule(str(check.organization_id), recorded_at, known_at)
     if rule is None:
         return links
 

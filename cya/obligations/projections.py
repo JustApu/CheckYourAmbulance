@@ -78,7 +78,9 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
             organization_id=organization_id,
             obligation_id__in=ids,
             recorded_at__lte=instant,
-        ).order_by("recorded_at", "id")[: limit + 1],
+        )
+        .select_related("substitution")
+        .order_by("recorded_at", "id")[: limit + 1],
         limit,
     )
     return tuple(
@@ -88,6 +90,7 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
             str(row.obligation_id),
             row.recorded_at,
             row.late_eligible,
+            row.substitution.performed_at,
         )
         for row in rows
     )

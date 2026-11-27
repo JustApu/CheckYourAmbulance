@@ -157,6 +157,13 @@ class SealSubstitutionEvidence:
     obligation_id: str
     recorded_at: datetime
     late_eligible: bool = False
+    # SPEC 8.0.0 LATE-7: a paper substitution's performance instant; windows, completion and
+    # lateness are judged at it, while recorded_at still decides as-of inclusion.
+    performed_at: datetime | None = None
+
+    @property
+    def qualifying_at(self):
+        return self.performed_at or self.recorded_at
 
 
 @dataclass(frozen=True)
@@ -456,30 +463,34 @@ def evaluate_obligation(
     substitutions = []
     for evidence in seal_substitutions:
         aware(evidence.recorded_at)
+        if evidence.performed_at is not None:
+            aware(evidence.performed_at)
+        qualifying = evidence.qualifying_at
         if (
             evidence.organization_id == obligation.organization_id
             and evidence.obligation_id == obligation.id
-            and obligation.early_at <= evidence.recorded_at <= instant
+            and evidence.recorded_at <= instant
+            and obligation.early_at <= qualifying
             and (
-                evidence.recorded_at <= obligation.grace_at
+                qualifying <= obligation.grace_at
                 or (
                     evidence.late_eligible is True
                     and obligation.late_limit_at is not None
-                    and evidence.recorded_at <= obligation.late_limit_at
+                    and qualifying <= obligation.late_limit_at
                 )
             )
         ):
             substitutions.append(evidence)
     if substitutions:
-        first = min(substitutions, key=lambda e: (e.recorded_at, e.id))
-        if satisfaction is None or first.recorded_at < satisfaction.completed_at:
+        first = min(substitutions, key=lambda e: (e.qualifying_at, e.recorded_at, e.id))
+        if satisfaction is None or first.qualifying_at < satisfaction.completed_at:
             satisfaction = ObligationState(
                 obligation,
                 State.SATISFIED,
                 first.id,
                 "SEAL_SUBSTITUTION",
-                first.recorded_at,
-                max(0, (first.recorded_at - obligation.grace_at).total_seconds()),
+                first.qualifying_at,
+                max(0, (first.qualifying_at - obligation.grace_at).total_seconds()),
             )
     inspections = []
     for evidence in seal_inspections:

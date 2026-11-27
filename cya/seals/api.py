@@ -9,12 +9,14 @@ from django.views.decorators.http import require_http_methods
 
 from cya.authorization.backend import canonical_id
 from cya.checks.api import Rejected, _reply
+from cya.checks.commands import CheckError
 from cya.deficiencies.api import _json_body, _run
 from cya.seals import readers
 from cya.seals.commands import (
     SealAuditOpen,
     SealConflict,
     SealError,
+    SealRefusal,
     break_seal,
     request_seal_audit,
     start_inspection,
@@ -55,6 +57,9 @@ def command(request, action):
                 "kit_presence_checks",
             }
             if action == "reseal"
+            # SPEC 8.0.0 LATE-7: only a break or a verification is entered from paper.
+            else {"paper_entry_batch_id"}
+            if action in ("break", "verify")
             else set()
         )
         body = _json_body(request, required, optional)
@@ -70,6 +75,13 @@ def command(request, action):
             raise Rejected(409, "SEAL_CHANGED") from None
         except SealAuditOpen:
             raise Rejected(422, "AUDIT_REQUIRES_SEAL") from None
+        except CheckError as error:
+            # The paper-entry batch refusals (NOT_FOUND, PAPER_BATCH_MISMATCH, MALFORMED_REQUEST).
+            raise Rejected(
+                error.status, error.code, [(error.path, error.code)] if error.path else []
+            ) from None
+        except SealRefusal as error:
+            raise Rejected(422, error.code) from None
         except (SealLockError, SealScopeError):
             raise Rejected(503, "CONFIGURATION_UNAVAILABLE") from None
         except (SealError, ValueError):

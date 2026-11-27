@@ -14,7 +14,8 @@ B lists them. This page grows with each part.
 | B1: batch header, performer search, §3.3 permissions, kit-reference identifiers | this page |
 | B2: paper item checks | this page |
 | B3: paper odometer and engine-hours readings | this page |
-| B4 to B6: seal records, invalidation, crew UI | later |
+| B4: paper seal verification and seal break | this page |
+| B5 and B6: invalidation, crew UI | later |
 
 ## Batch header (Part B1)
 
@@ -170,6 +171,47 @@ computes the expected previous reading and the next reading by place, applies th
 and requires a paper reading to match its batch; the link trigger judges the early window at the
 reading's qualifying instant and refuses a paper link past L.
 
+## Paper seal records (Part B4)
+
+`POST /api/v1/seals/verify` and `POST /api/v1/seals/break` accept `paper_entry_batch_id` (SPEC 8.0.0
+LATE-7 and the §10 paper-record seal paragraph). The batch rules are those of paper checks. The
+response adds `paper_entry`. A paper reseal, full inspection or audit request is not accepted:
+SEAL-6 needs a fresh count and expiration for every item, which the outage sheet does not record,
+and the owner has been asked how to handle it ([issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9)).
+
+**Order of a seal's records.** A seal record's qualifying instant is its performance instant for
+paper, else its server instant. Within one kit's or cabinet's stream, sequence order stays
+qualifying-instant order, so every reader that orders a stream by sequence is unchanged.
+
+**Paper seal verification ("Seal intact").** It is judged at the performance instant t:
+
+- the seal relied on is the one intact at t (a reseal no later than t, with no break, reseal or
+  audit request after it by t); with none, `422 SEAL_NOT_INTACT_AT_PERFORMANCE`;
+- the kit or cabinet designation, compartment revision, covered scope, kit assignments and lines,
+  nested kit seals and expiration (t's station-local date) are those at t; a kit not on the
+  vehicle at t, or moved since, is `422 KIT_MOVED_SINCE_PAPER`;
+- deficiencies and suspensions block when they blocked at t, as recorded by then, or block now
+  (fail closed: the app cannot tell whether a deficiency still open was found after t);
+- it links the obligations whose window holds t (late up to L), skipping any already satisfied by
+  evidence known at entry. Obligation state completes them at t; as-of views before entry do not
+  see them.
+
+It writes no seal event, so it never changes the seal's current state.
+
+**Paper seal break.** It is appended with its performance instant only when no seal event or
+substitution of the subject has a later qualifying instant (`422 SEAL_LATER_EVIDENCE` otherwise),
+so it never rewrites later evidence. A paper verification at an instant after a paper break finds
+no intact seal; one before it still relies on the earlier reseal.
+
+**Fresh evidence.** A paper verification or paper check is never fresh evidence for a live
+reseal (nested kit verifications and kit counts).
+
+**Database guards** (`cya/seals/migrations/0010_paper_seal_records.py`): seal events keep
+qualifying order along the chain and a paper event may only be a break, matching its batch and
+preceding no later substitution; a paper substitution must rely on the seal intact at its
+instant; a paper substitution link must hold the instant in the obligation's window; a paper
+substitution cannot be nested in a live cabinet inspection.
+
 ## Performer search
 
 `GET /api/v1/paper-entry-performers?q=<2 to 100 characters>` finds users by display name or
@@ -192,4 +234,6 @@ Offline tests in `cya/paper/tests/`: `test_batches.py` (time resolution, the com
 permissions, printed-version rules and the database guards), `test_api.py` (HTTP codes,
 replay, CSRF, and the performer search) and `test_paper_checks.py` (timing, current and as-of
 compliance, printed version, refusals, conflicts, ordering, corrections, guards) and
-`test_paper_readings.py` (obligations, sequence and both-neighbour anomalies, corrections).
+`test_paper_readings.py` (obligations, sequence and both-neighbour anomalies, corrections) and
+`test_paper_seals.py` (verification at the performance instant, seal intact then, breaks, later
+evidence).
