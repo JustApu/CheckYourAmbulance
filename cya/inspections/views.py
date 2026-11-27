@@ -246,6 +246,8 @@ def vehicle_print(request, vehicle_id):
         listed = printable.versions(organization_id, result.rows)
         sealable, sealed = printable.sealable_designations(organization_id, result)
         sections, kits = printable.outage_sheet(result.rows, sealable, sealed)
+        # SPEC 8.5.0 SEAL-1, CAB-9: each seal also prints its paper reseal section.
+        printable.add_reseal_sections(organization_id, str(found.pk), result.as_of, sections, kits)
     except (DatabaseError, ValueError) as failure:
         # ChecklistQueryError is a ValueError; the sheet must never print a partial checklist.
         logger.error("printable checklist unavailable (%s)", type(failure).__name__)

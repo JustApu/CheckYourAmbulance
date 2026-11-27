@@ -28,15 +28,27 @@ def _eligible_seal(seal, pending, *, marking, today, open_deficiency, suspended)
 
 
 def current_certification(
-    organization_id, vehicle_id, seal, scope, assignments, *, at, today, open_deficiency, suspended
+    organization_id,
+    vehicle_id,
+    seal,
+    scope,
+    assignments,
+    *,
+    at,
+    today,
+    open_deficiency,
+    suspended,
+    events_at=None,
 ):
     """Return a refusal code when a recorded seal no longer covers its current contents.
 
     The caller holds the vehicle, kit, configuration, item and deficiency locks. This also
     rechecks nested kit seals against their own current event and certification; recording a
     prior nested verification cannot hide a subsequent break, audit or configuration change.
+    events_at judges each nested kit seal by its events up to that instant: a paper
+    verification's performance instant (SPEC 8.0.0 LATE-7).
     """
-    from cya.seals.commands import _event_state, _events
+    from cya.seals.commands import _event_state, _events, _events_at
 
     saved = stored_certification(organization_id, seal)
     nested_ids = []
@@ -55,7 +67,10 @@ def current_certification(
         )
         if substitution is None or kit_id not in kit_sealable(organization_id, [kit_id], at):
             return "NESTED_SEAL_INVALID"
-        nested_seal, pending = _event_state(_events(organization_id, vehicle_id, kit_id, None))
+        nested_events = _events(organization_id, vehicle_id, kit_id, None)
+        if events_at is not None:
+            nested_events = _events_at(nested_events, events_at)
+        nested_seal, pending = _event_state(nested_events)
         if nested_seal is None or nested_seal.pk != substitution.seal_event_id:
             return "NESTED_SEAL_INVALID"
         refusal = _eligible_seal(

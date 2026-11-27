@@ -2,7 +2,8 @@
 {% comment %}
 Standalone on purpose: the shell header shows the signed-in user's name, and a printed sheet must
 carry no personal data (issue #9). Repeated <thead> rows put the vehicle and checklist version on
-every printed page so loose pages can be matched up. Kit contents live on the kit reference.
+every printed page so loose pages can be matched up. Kit contents live on the kit reference, except
+in the paper reseal section each sealed kit and sealable compartment prints (SPEC 8.5.0).
 {% endcomment %}
 {% load station_time %}<html lang="en">
 <head>
@@ -63,6 +64,7 @@ every printed page so loose pages can be matched up. Kit contents live on the ki
   </tbody>
 </table>
 </section>
+{% if section.reseal %}{% include "inspections/reseal_section.html" with reseal=section.reseal reseal_prefix="section" reseal_id=forloop.counter %}{% endif %}
 {% endfor %}
 {% if kits %}
 <section class="sheet-section kits" aria-labelledby="kits-heading">
@@ -97,6 +99,7 @@ every printed page so loose pages can be matched up. Kit contents live on the ki
   </tbody>
 </table>
 </section>
+{% for kit in kits %}{% if kit.reseal %}{% include "inspections/reseal_section.html" with reseal=kit.reseal reseal_prefix="kit" reseal_id=forloop.counter %}{% endif %}{% endfor %}
 {% endif %}
 {% if not sections and not kits %}
 <p>No checklist is configured for this vehicle, so there is nothing to print.</p>

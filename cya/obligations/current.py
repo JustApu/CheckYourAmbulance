@@ -112,6 +112,15 @@ def _check_facts(check):
     return facts
 
 
+def _seal_facts(substitution):
+    """A substitution's or inspection's stored facts; performed_at only for a paper one
+    (SPEC 8.0.0 and 8.5.0 LATE-7), so every live record's facts and digests are unchanged."""
+    facts = asdict(substitution)
+    if facts.get("performed_at") is None:
+        facts.pop("performed_at", None)
+    return facts
+
+
 def _restore(kind, values):
     values = dict(values)
     for key in DATE_FIELDS & values.keys():
@@ -408,11 +417,11 @@ def compile_history(history, instant):
         )
         if obligation.id in seals:
             result[obligation.id]["seal_substitutions"] = _json(
-                [asdict(s) for s in seals[obligation.id]]
+                [_seal_facts(s) for s in seals[obligation.id]]
             )
         if obligation.id in inspections:
             result[obligation.id]["seal_inspections"] = _json(
-                [asdict(s) for s in inspections[obligation.id]]
+                [_seal_facts(s) for s in inspections[obligation.id]]
             )
     return result
 

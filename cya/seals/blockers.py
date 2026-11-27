@@ -1,15 +1,24 @@
 """Determine whether a seal's covered physical items can substitute for checks."""
 
+from types import SimpleNamespace
+
 from cya.deficiencies import service
 from cya.deficiencies.effects import NO_KIT_KEY
-from cya.deficiencies.models import Deficiency, DeficiencyAffectedItem
+from cya.deficiencies.models import Deficiency, DeficiencyAffectedItem, DeficiencyEvent
 from cya.deficiencies.transitions import ACTIVE_STATUSES
 from cya.kits.presence import line_unit_keys
 from cya.seals.locking import MAX_LOCK_ROWS, SealLockError
 
 
 def seal_blockers(
-    organization_id, projections, covered_pairs, *, at, presence_lines=(), covered_kit_ids=()
+    organization_id,
+    projections,
+    covered_pairs,
+    *,
+    at,
+    presence_lines=(),
+    covered_kit_ids=(),
+    suspensions_at=None,
 ):
     """Return (open deficiency, suspended check) for the already locked vehicle scope.
 
@@ -78,7 +87,11 @@ def seal_blockers(
                 raise SealLockError("deficiency scope is too large")
             # A seal pair is (item, kit or None): a place outside a kit is the item's None.
             has_open |= any((str(row[0]), str(row[2]) if row[2] else None) in pairs for row in rows)
-        suspensions = service.suspensions_in_force(organization_id, deficiency_id)
+        suspensions = (
+            service.suspensions_in_force(organization_id, deficiency_id)
+            if suspensions_at is None
+            else service.suspensions_in_force_at(organization_id, deficiency_id, suspensions_at)
+        )
         for row in suspensions:
             if row.kit_requirement_id is not None:
                 unit = units_for([row.kit_requirement_id])[str(row.kit_requirement_id)]
@@ -94,3 +107,48 @@ def seal_blockers(
         if has_open and has_suspension:
             break
     return has_open, has_suspension
+
+
+def _statuses_at(organization_id, deficiency_ids, at):
+    """{deficiency id: status} as recorded by `at`, for deficiencies reported by then."""
+    reported = set(
+        str(pk)
+        for pk in Deficiency.objects.filter(
+            organization_id=organization_id, pk__in=deficiency_ids, reported_at__lte=at
+        ).values_list("pk", flat=True)
+    )
+    statuses = {}
+    rows = (
+        DeficiencyEvent.objects.filter(
+            organization_id=organization_id,
+            deficiency_id__in=reported,
+            recorded_at__lte=at,
+            to_status__isnull=False,
+        )
+        .order_by("deficiency_id", "sequence")
+        .values_list("deficiency_id", "to_status")[: MAX_LOCK_ROWS * 50 + 1]
+    )
+    rows = list(rows)
+    if len(rows) > MAX_LOCK_ROWS * 50:
+        raise SealLockError("too many deficiency events to check")
+    for deficiency_id, status in rows:
+        statuses[str(deficiency_id)] = SimpleNamespace(status=status)
+    return statuses
+
+
+def paper_seal_blockers(organization_id, projections, covered_pairs, *, at, **scope):
+    """seal_blockers for a paper seal verification at performance instant `at` (LATE-7).
+
+    Fails closed: blocking if a covered deficiency or suspension blocked at `at`, as recorded
+    by then, or blocks now. A deficiency open then but closed since still blocks, because the
+    seal could not substitute then; one still open now blocks too, because the app cannot tell
+    whether it was first found after the paper check.
+    """
+    now_open, now_suspended = seal_blockers(
+        organization_id, projections, covered_pairs, at=at, **scope
+    )
+    then = _statuses_at(organization_id, list(projections), at)
+    then_open, then_suspended = seal_blockers(
+        organization_id, then, covered_pairs, at=at, suspensions_at=at, **scope
+    )
+    return now_open or then_open, now_suspended or then_suspended

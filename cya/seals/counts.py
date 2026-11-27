@@ -5,12 +5,30 @@ from cya.checks.models import CheckEvent, CheckRecord
 from cya.seals.scope import MAX_SCOPE
 
 
-def validate_kit_counts(organization_id, vehicle_id, actor_id, lines, selections, *, start, at):
+def _fresh(check, start, paper_batch_id):
+    """Whether a check is fresh evidence for this inspection.
+
+    Live: its chain began after the inspection start and it is not a paper check (SPEC 8.0.0
+    LATE-7). Paper reseal (paper_batch_id): the check and its root were copied from the same
+    paper batch, so they were performed at the paper inspection's instant; a live check is not
+    evidence for a paper inspection, nor a paper check for a live one (SPEC 8.5.0 LATE-7).
+    """
+    if paper_batch_id is not None:
+        return (
+            str(check.paper_entry_batch_id) == paper_batch_id
+            and str(check.root_check.paper_entry_batch_id) == paper_batch_id
+        )
+    return check.root_check.recorded_at > start.recorded_at and check.paper_entry_batch_id is None
+
+
+def validate_kit_counts(
+    organization_id, vehicle_id, actor_id, lines, selections, *, start, at, paper_batch_id=None
+):
     """Pair every current line with one current check made during this inspection.
 
     The caller holds the vehicle and all applicable item locks. A corrected check is accepted
     only when its root was also a fresh check by this actor; an invalidated or superseded check
-    cannot certify a cabinet count.
+    cannot certify a cabinet count. A paper reseal names its batch instead of a start.
     """
     if not isinstance(selections, list) or len(selections) > MAX_SCOPE:
         raise ValueError("invalid kit-count checks")
@@ -30,7 +48,7 @@ def validate_kit_counts(organization_id, vehicle_id, actor_id, lines, selections
         raise ValueError("each current kit-list line needs a fresh count check")
     if not selected:
         return []
-    if start is None:
+    if start is None and paper_batch_id is None:
         raise ValueError("kit counts require a started inspection")
     checks = {
         str(row.pk): row
@@ -69,9 +87,7 @@ def validate_kit_counts(organization_id, vehicle_id, actor_id, lines, selections
             or check.kit_id is not None
             or check.outcome not in ("PASSED", "FAILED")
             or check.quantity is None
-            or check.root_check.recorded_at <= start.recorded_at
-            # A paper check is not fresh evidence for a live inspection (SPEC 8.0.0 LATE-7).
-            or check.paper_entry_batch_id is not None
+            or not _fresh(check, start, paper_batch_id)
             or check.recorded_at > at
             or str(check.root_check_id) in invalid
             or str(check.pk) in superseded
@@ -81,7 +97,9 @@ def validate_kit_counts(organization_id, vehicle_id, actor_id, lines, selections
     return result
 
 
-def validate_kit_presence(organization_id, vehicle_id, actor_id, kits, selections, *, start, at):
+def validate_kit_presence(
+    organization_id, vehicle_id, actor_id, kits, selections, *, start, at, paper_batch_id=None
+):
     """Require a fresh per-unit presence check for every defined kit covered by a reseal."""
     if not isinstance(selections, list) or len(selections) > MAX_SCOPE:
         raise ValueError("invalid physical kit presence checks")
@@ -101,7 +119,7 @@ def validate_kit_presence(organization_id, vehicle_id, actor_id, kits, selection
         raise ValueError("each assigned physical kit needs a fresh presence check")
     if not expected:
         return []
-    if start is None:
+    if start is None and paper_batch_id is None:
         raise ValueError("physical kit presence checks require a started inspection")
     checks = {
         str(row.pk): row
@@ -144,9 +162,7 @@ def validate_kit_presence(organization_id, vehicle_id, actor_id, kits, selection
             or check.quantity not in (0, 1)
             or check.outcome not in ("PASSED", "FAILED")
             or (check.quantity == 1) != (check.outcome == "PASSED")
-            or check.root_check.recorded_at <= start.recorded_at
-            # A paper check is not fresh evidence for a live inspection (SPEC 8.0.0 LATE-7).
-            or check.paper_entry_batch_id is not None
+            or not _fresh(check, start, paper_batch_id)
             or check.recorded_at > at
             or str(check.root_check_id) in invalid
             or str(check.pk) in superseded
