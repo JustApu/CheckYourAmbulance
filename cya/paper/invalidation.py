@@ -152,8 +152,13 @@ def _check_roots(organization_id, batch):
 
 
 def _reading_roots(organization_id, batch):
-    """[(kind, model, root)] of the batch's reading chains not yet invalidated."""
-    from cya.odometer.corrections import MODELS, _invalidated
+    """[(kind, model, root)] of every reading chain of the batch, at most MAX_CHAINS + 1 a kind.
+
+    Like the check roots, these are all the chains, invalidated or not, so the cap counts the
+    batch's records; filtering before the cap could leave an effective chain unseen behind
+    already-invalidated ones, and the batch event's completeness trigger would then refuse.
+    """
+    from cya.odometer.corrections import MODELS
 
     found = []
     for kind in READING_KINDS:
@@ -161,8 +166,15 @@ def _reading_roots(organization_id, batch):
         rows = model.objects.filter(
             organization_id=organization_id, paper_entry_batch=batch, pk=F("root_entry_id")
         ).order_by("id")[: MAX_CHAINS + 1]
-        found += [(kind, model, row) for row in rows if not _invalidated(kind, row)]
+        found += [(kind, model, row) for row in rows]
     return found
+
+
+def _open_readings(readings):
+    """The reading chains not yet invalidated (an administrator's earlier one keeps its event)."""
+    from cya.odometer.corrections import _invalidated
+
+    return [(kind, model, row) for kind, model, row in readings if not _invalidated(kind, row)]
 
 
 def _too_many():
@@ -303,7 +315,7 @@ def _plans(organization_id, batch):
         )
     lock_deficiencies(organization_id, sorted(deficiency_ids))
     checks = [_plan_chain_invalidation(organization_id, root) for root in open_roots]
-    reading_plans = [_reading_plan(organization_id, *found) for found in readings]
+    reading_plans = [_reading_plan(organization_id, *found) for found in _open_readings(readings)]
     return checks, reading_plans
 
 
