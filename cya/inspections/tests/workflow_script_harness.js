@@ -1394,5 +1394,126 @@ function generic(kind) {
     run.context.testUI.reload();
     assert.ok(!run.requests.at(-1).url.includes("paper_entry_batch_id"), "a session read names no batch");
   }
-  console.log("Offline workflow script regressions passed: paper entry mode (issue #9 B6), checklist item reads (issue #278 B), checklist pushed rows (SPEC 8.3.0), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
+  {
+    // Issue #9 B6b, SPEC 8.0.0 INV-8: a paper entry is invalidated with an explanation, posted
+    // to the constant path with the batch id as one encoded segment; REC-4 keeps the request.
+    const paperForm = data => {
+      const run = generic("paper-batch"); delete run.form.dataset.url; Object.assign(run.form.dataset, data);
+      field(run.form, "explanation", "");
+      return {...run, summary: run.form.querySelector(".workflow-errors")};
+    };
+    const run = paperForm({batch: "batch/1"});
+    run.form.fire("submit");
+    assert.equal(run.posts().length, 0, "no explanation, no request");
+    assert.equal(run.summary.textContent, "An explanation is required.");
+    assert.equal(run.summary.hidden, false);
+    assert.equal(run.form.fields.explanation.getAttribute("aria-invalid"), "true");
+    run.form.fields.explanation.value = "Synthetic: the time on the entry is wrong.";
+    run.form.fire("submit");
+    assert.equal(run.summary.hidden, true, "a new attempt clears the summary");
+    assert.equal(run.form.fields.explanation.getAttribute("aria-invalid"), null);
+    const first = run.posts()[0];
+    assert.equal(first.url, "/api/v1/paper-entry-batches/batch%2F1/invalidations");
+    assert.deepEqual(Object.keys(first.body).sort(), ["explanation", "operation_id"]);
+    assert.equal(first.body.explanation, "Synthetic: the time on the entry is wrong.");
+    first.reject(new Error("synthetic lost response")); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.startsWith("Unconfirmed"));
+    assert.equal(run.form.fields.explanation.disabled, true, "the kept request cannot be edited");
+    run.form.fire("submit");
+    assert.equal(run.posts()[1].url, first.url);
+    assert.deepEqual(run.posts()[1].body, first.body, "the retry is identical");
+    response(run.posts()[1], 503, {status: "REJECTED", code: "RETRY_LATER"}); await tick();
+    run.form.fire("submit");
+    assert.deepEqual(run.posts()[2].body, first.body, "a 503 is not a definite answer");
+    response(run.posts()[2], 409, {status: "REJECTED", code: "BATCH_INVALIDATED", field_errors: []}); await tick();
+    assert.equal(run.summary.textContent, "Not saved. This paper entry was already invalidated. Refresh history.");
+    assert.equal(run.form.querySelector(".workflow-result").textContent, "");
+    run.form.fire("submit");
+    assert.notEqual(run.posts()[3].body.operation_id, first.body.operation_id, "after a definite refusal, a new request");
+    response(run.posts()[3], 201, {status: "COMMITTED", result: {}}); await tick();
+    assert(run.form.querySelector(".workflow-result").textContent.startsWith("Saved"));
+    for (const [code, expected] of [
+      ["SELF_INVALIDATION_FORBIDDEN", "You entered this paper entry, so you cannot invalidate it. Ask another supervisor or administrator."],
+      ["FORBIDDEN", "Only a supervisor or administrator other than the person who entered it can invalidate a paper entry."],
+      ["NOT_FOUND", "This paper entry is no longer available. Refresh history."],
+      ["PAPER_BATCH_INVALIDATED", "This paper entry was invalidated. Refresh history."],
+      ["OPERATION_REUSED", "This operation has different content. Refresh before making another decision."],
+    ]) {
+      const refused = paperForm({batch: "batch-1"});
+      refused.form.fields.explanation.value = "Synthetic reason."; refused.form.fire("submit");
+      response(refused.posts()[0], 403, {status: "REJECTED", code}); await tick();
+      assert.equal(refused.summary.textContent, "Not saved. " + expected, code);
+    }
+    {
+      const refused = paperForm({batch: "batch-1"});
+      refused.form.fields.explanation.value = "Synthetic reason."; refused.form.fire("submit");
+      response(refused.posts()[0], 422, {status: "REJECTED", code: "EXPLANATION_REQUIRED", field_errors: [{path: "explanation", code: "EXPLANATION_REQUIRED"}]}); await tick();
+      assert.equal(refused.summary.textContent, "Not saved. An explanation is required.");
+      assert.equal(refused.form.fields.explanation.getAttribute("aria-invalid"), "true");
+    }
+    for (const unsafe of ["", ".", ".."]) {
+      const refused = paperForm({batch: unsafe});
+      refused.form.fields.explanation.value = "Synthetic reason."; refused.form.fire("submit");
+      assert.equal(refused.posts().length, 0, `no request for the batch id ${JSON.stringify(unsafe)}`);
+      assert.equal(refused.summary.textContent, "This record's link is not valid. Refresh history.");
+    }
+  }
+  {
+    // A check mistakenly saved in Normal mode names its replacement paper entry (INV-8).
+    const paperForm = data => {
+      const run = generic("mistaken-normal"); delete run.form.dataset.url; Object.assign(run.form.dataset, data);
+      field(run.form, "replacement_paper_entry_batch_id", ""); field(run.form, "explanation", "");
+      return {...run, summary: run.form.querySelector(".workflow-errors")};
+    };
+    const run = paperForm({check: "check-1"});
+    run.form.fields.explanation.value = "Synthetic: copied from the outage sheet.";
+    run.form.fire("submit");
+    assert.equal(run.posts().length, 0);
+    assert.equal(run.summary.textContent, "Choose the paper entry that replaces this check.");
+    assert.equal(run.form.fields.replacement_paper_entry_batch_id.getAttribute("aria-invalid"), "true");
+    run.form.fields.replacement_paper_entry_batch_id.value = "batch-1";
+    run.form.fire("submit");
+    const first = run.posts()[0];
+    assert.equal(first.url, "/api/v1/checks/check-1/invalidations");
+    assert.deepEqual(first.body, {operation_id: first.body.operation_id, replacement_paper_entry_batch_id: "batch-1",
+      explanation: "Synthetic: copied from the outage sheet."});
+    first.reject(new Error("synthetic lost response")); await tick();
+    run.form.fire("submit");
+    assert.equal(run.posts()[1].url, first.url);
+    assert.deepEqual(run.posts()[1].body, first.body, "REC-4: the same request and operation id");
+    response(run.posts()[1], 422, {status: "REJECTED", code: "REPLACEMENT_CHECK_MISSING",
+      field_errors: [{path: "replacement_paper_entry_batch_id", code: "REPLACEMENT_CHECK_MISSING"}]}); await tick();
+    assert.equal(run.summary.textContent, "Not saved. The chosen paper entry has no saved paper check of this same item. Copy it through Paper entry first, or choose another.");
+    assert.equal(run.form.fields.replacement_paper_entry_batch_id.getAttribute("aria-invalid"), "true");
+    assert.equal(run.form.fields.replacement_paper_entry_batch_id.disabled, false, "a refused choice can be changed");
+    run.form.fields.replacement_paper_entry_batch_id.value = "batch-2"; run.form.fire("submit");
+    assert.notEqual(run.posts()[2].body.operation_id, first.body.operation_id);
+    assert.equal(run.posts()[2].body.replacement_paper_entry_batch_id, "batch-2");
+    for (const [code, expected, marked] of [
+      ["SELF_INVALIDATION_FORBIDDEN", "You recorded this check, so you cannot invalidate it. Ask another supervisor or administrator.", false],
+      ["FORBIDDEN", "Only a supervisor or administrator other than the person who recorded this check can do this.", false],
+      ["PAPER_CHECK_NOT_NORMAL", "This check was entered in Paper entry mode. If its time or people are wrong, invalidate its paper entry instead.", false],
+      ["REPLACEMENT_NOT_APPLICABLE", "Only a routine check can be replaced by a paper entry.", false],
+      ["REPLACEMENT_BATCH_MISMATCH", "The chosen paper entry is for another vehicle. Choose a paper entry of this vehicle.", true],
+      ["REPLACEMENT_BATCH_INVALIDATED", "The chosen paper entry was invalidated. Choose another, or copy the sheet again through Paper entry.", true],
+      ["REPLACEMENT_PERFORMED_LATER", "The chosen paper entry was performed after this check was saved. Choose the sheet this check was copied from.", true],
+      ["REPLACEMENT_CHECK_MISSING", "The chosen paper entry has no saved paper check of this same item. Copy it through Paper entry first, or choose another.", true],
+      ["PAPER_BATCH_INVALIDATED", "The chosen paper entry was invalidated. Choose another, or copy the sheet again through Paper entry.", false],
+      ["NOT_FOUND", "This check or the chosen paper entry is no longer available. Refresh history.", false],
+      ["CHAIN_INVALIDATED", "This chain was invalidated. Record a fresh check instead.", false],
+      ["EXPLANATION_REQUIRED", "An explanation is required.", false],
+    ]) {
+      const refused = paperForm({check: "check-1"});
+      refused.form.fields.replacement_paper_entry_batch_id.value = "batch-1";
+      refused.form.fields.explanation.value = "Synthetic reason."; refused.form.fire("submit");
+      response(refused.posts()[0], 422, {status: "REJECTED", code, field_errors: []}); await tick();
+      assert.equal(refused.summary.textContent, "Not saved. " + expected, code);
+      assert.equal(refused.form.fields.replacement_paper_entry_batch_id.getAttribute("aria-invalid"), marked ? "true" : null, code);
+    }
+    const unsafe = paperForm({check: ".."});
+    unsafe.form.fields.replacement_paper_entry_batch_id.value = "batch-1";
+    unsafe.form.fields.explanation.value = "Synthetic reason."; unsafe.form.fire("submit");
+    assert.equal(unsafe.posts().length, 0, "a '..' check id never posts");
+  }
+  console.log("Offline workflow script regressions passed: paper history invalidation forms (issue #9 B6b), paper entry mode (issue #9 B6), checklist item reads (issue #278 B), checklist pushed rows (SPEC 8.3.0), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

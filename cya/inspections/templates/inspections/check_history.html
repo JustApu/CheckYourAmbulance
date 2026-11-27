@@ -26,6 +26,7 @@
 <li class="panel" id="check-{{ check.record.root_check_id }}">
 <h2>{{ check.record.item.label }}{% if check.record.kit %} — {{ check.record.kit.label }}{% endif %}</h2>
 <p>{{ check.label }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time }} · {{ check.state }}</p>
+{% if check.paper %}{% include "inspections/paper_source.html" with paper=check.paper %}{% endif %}
 {% if check.record.explanation %}<p>{{ check.record.explanation }}</p>{% endif %}
 <a class="button" href="{{ check.detail_url }}">View the check and available actions</a>
 </li>
@@ -33,6 +34,46 @@
 {% endfor %}
 </ul>
 {% include "inspections/deficiency_pagination.html" with pagination_label="Check history result pages" %}
+<section class="panel paper-entries" aria-labelledby="paper-entries-heading">
+<h2 id="paper-entries-heading">Paper entries</h2>
+<p>Outage sheets copied into the app in the last 14 days, newest entry first (at most 20). Records copied from a sheet are marked Paper entry above. The people who did the checks are credited with them; the person who entered the sheet is shown only as entering it.</p>
+{% if paper_batches %}
+<ul class="plain">
+{% for b in paper_batches %}
+<li class="paper-batch" id="{{ b.anchor }}">
+<h3><span class="pill pill-paper">Paper entry</span> {{ b.template_label }}, revision {{ b.revision }}</h3>
+<p>performed <time datetime="{{ b.performed_at.isoformat }}">{{ b.performed_at|station_time }}</time> by {{ b.performers|join:", " }} · entered <time datetime="{{ b.recorded_at.isoformat }}">{{ b.recorded_at|station_time }}</time> by {{ b.entered_by }} · {{ b.check_entries }} check entr{{ b.check_entries|pluralize:"y,ies" }}</p>
+{% if b.invalidation %}
+<p><strong>Invalidated</strong> {{ b.invalidation.recorded_at|station_time }} by {{ b.invalidation.actor_user.display_name }}. Its records stay in history but no longer count.</p>
+<p>{{ b.invalidation.explanation }}</p>
+{% endif %}
+{% if b.continue_url %}<a class="button paper-continue" href="{{ b.continue_url }}">Continue copying</a>{% endif %}
+{% if b.can_invalidate %}
+<details class="paper-invalidation">
+<summary>Invalidate this paper entry and all its records</summary>
+<p>Use this when the time or the people written for this entry are wrong. Every check, reading and seal record copied under it stops counting, but stays in history, and its problems are not closed. A seal resealed on this sheet must be fully inspected and resealed again. This cannot be undone. Copy the sheet again afterwards as a new paper entry.</p>
+<form class="workflow-write" data-kind="paper-batch" data-batch="{{ b.batch_id }}">
+{% csrf_token %}
+<p class="workflow-errors banner banner-error" role="alert" tabindex="-1" hidden></p>
+<label>Mandatory explanation <textarea name="explanation" required maxlength="4000">
+</textarea>
+</label>
+<button type="submit" class="button">Invalidate paper entry</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+</details>
+{% elif b.own_needs_another %}
+<p>You entered this paper entry. If it is wrong, another supervisor or administrator must invalidate it.</p>
+{% endif %}
+</li>
+{% endfor %}
+</ul>
+{% else %}
+<p>No paper entries in the last 14 days.</p>
+{% endif %}
+</section>
 {% endif %}
 {% if detail %}
 {% for check in checks %}
@@ -41,6 +82,7 @@
 </h2>
 <p>
 <strong>{{ check.label }}</strong> · {{ check.state }} · {{ check.record.actor_user.display_name }} · {{ check.record.recorded_at|station_time }}</p>
+{% if check.paper %}{% include "inspections/paper_source.html" with paper=check.paper %}{% endif %}
 {% if check.record.predecessor_check_id %}<p>This corrects an earlier check. The original entry stays in check history.</p>{% endif %}
 {% if check.record.explanation %}
 <p>{{ check.record.explanation }}</p>
@@ -92,9 +134,39 @@
 </form>
 </details>
 {% endif %}
+{% if check.mistaken_normal %}
+<details class="mistaken-normal">
+<summary>Supervisor: invalidate a check mistakenly saved in Normal mode</summary>
+<p>Use this only when this result was copied from an outage paper sheet but saved as an ordinary check, so it carries the time it was entered instead of the time on the sheet. First copy the same work again through Paper entry, then choose that paper entry here. This check stays in history, marked invalidated, and its problems are not closed. This cannot be undone.</p>
+{% if check.mistaken_normal.candidates %}
+<form class="workflow-write" data-kind="mistaken-normal" data-check="{{ check.record.pk }}">
+{% csrf_token %}
+<p class="workflow-errors banner banner-error" role="alert" tabindex="-1" hidden></p>
+<label>Paper entry that replaces this check <select name="replacement_paper_entry_batch_id" required>
+<option value="">Choose the paper entry</option>
+{% for c in check.mistaken_normal.candidates %}
+<option value="{{ c.batch_id }}">{{ c.template_label }}, revision {{ c.revision }} — performed {{ c.performed_at|station_time }} by {{ c.performers|join:", " }}; entered {{ c.recorded_at|station_time }} by {{ c.entered_by }}</option>
+{% endfor %}
+</select>
+</label>
+<label>Mandatory explanation <textarea name="explanation" required maxlength="4000">
+</textarea>
+</label>
+<button type="submit" class="button">Invalidate the mistaken Normal check</button>
+<p class="workflow-result" role="status">
+</p>
+<a class="workflow-refresh" href="" hidden>Refresh history</a>
+</form>
+{% else %}
+<p>No paper entry of this same item on this vehicle, performed before this check was saved, is in the app yet. Copy the sheet through Paper entry first, then return here.</p>
+{% endif %}
+</details>
+{% endif %}
 {% for obligation in check.obligations %}
 <section class="panel">
 <p>Inspection due {{ obligation.due_at|station_time }}</p>
+{% if check.paper %}<p>Source: Paper entry</p>{% endif %}
+<p>Timing: {{ obligation.timing }}</p>
 {% if obligation.history %}
 <h3>Linked obligation history</h3>
 <ol>

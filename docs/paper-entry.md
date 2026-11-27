@@ -17,7 +17,8 @@ B lists them. This page grows with each part.
 | B4: paper seal verification, seal break and paper reseal | this page |
 | B5: batch invalidation and mistaken-Normal invalidation | this page |
 | B6a: crew setup page and paper checklist screen | this page |
-| B6b, B6c: history marks and invalidation UI; paper seal page | later |
+| B6b: history marks, timing and invalidation UI; participation credit note | this page |
+| B6c: paper seal page | later |
 
 ## Batch header (Part B1)
 
@@ -383,8 +384,64 @@ this section lists what they read and send. Code: `cya/inspections/paper_views.p
   a record (`has_records`: a check, reading, seal event or seal substitution names it); if not,
   the first acknowledged record shows the print offer once.
 
-Not in B6a: history marks, timing, batch and mistaken-Normal invalidation UI and the RPT-4
-participation note (B6b); paper seal records from the sheet (B6c).
+Not in B6a: paper seal records from the sheet (B6c).
+
+## History and invalidation UI (Part B6b)
+
+The check-history page (`/inspection/vehicles/{id}/check-history/`) is described in
+[crew inspection screens](crew-inspection-ui.md#paper-entries-in-check-history); this section
+lists what it reads and sends. Code: `cya/inspections/workflows.py` (`check_history`,
+`paper_batches`, `mistaken_normal_candidates`), `cya/inspections/workflow_views.py` (`checks`),
+`templates/inspections/check_history.html`, `paper_source.html` and `workflows.js`.
+
+- **Paper marks (LATE-1, LATE-5).** Each paper check (a row with `paper_entry_batch_id`,
+  including a correction of one) shows "Paper entry", the batch's performance instant and
+  performers, and its own server entry instant and entry actor, plus whether the batch is
+  invalidated. Performers and invalidations are read in one bulk query each.
+- **Timing (SCH-1, SCH-2).** For each obligation linked to the check, the detail view shows
+  "Timing: On time" when the qualifying instant t_c (`performed_at` for a paper check, otherwise
+  the server `recorded_at`) is at or before the obligation's grace deadline G, and "Late
+  completion" otherwise. A link exists only for an eligible check, so t_c is never before E or
+  after L. The source ("Source: Paper entry") is a separate line.
+- **Paper entries list.** The vehicle's batches entered in the last 14 days, newest entry first,
+  at most 20, with their checklist and revision, both times, performers, entry actor, the number
+  of check entries, and any invalidation (when, by whom, explanation). "Continue copying" is
+  offered only to the entry actor of a batch not invalidated (only they add records, Part B2).
+- **Batch invalidation form.** Offered when `invalidate_paper_entry_batch` is permitted with
+  `ResourceContext(author_id=<batch entry actor>)` and the batch is not invalidated, so the
+  entry actor never gets it (the server would answer `403 SELF_INVALIDATION_FORBIDDEN`); a
+  Supervisor or Administrator who entered it is told another must do it. The form
+  (`data-kind="paper-batch"`) sends `POST /api/v1/paper-entry-batches/{batch}/invalidations`
+  with `{operation_id, explanation}`.
+- **Mistaken-Normal form.** On the detail view of an effective check whose chain is a live
+  (not paper) `ROUTINE` check, when `invalidate_mistaken_normal_paper_check` is permitted with
+  the check's author as `author_id` (a Supervisor or Administrator other than its author). It
+  lists the candidate replacements: batches of the same vehicle, not invalidated, performed no
+  later than the check's chain was saved, holding a paper check of the same work (item, kit
+  instance, kit line or presence, item requirement) whose chain is not invalidated, newest
+  performance first, at most 20. These mirror the command's rules, which still judge the choice.
+  With no candidate, the page says to copy the sheet through Paper entry first. The form
+  (`data-kind="mistaken-normal"`) sends `POST /api/v1/checks/{check}/invalidations` with
+  `{operation_id, explanation, replacement_paper_entry_batch_id}`.
+- **Client rules.** Both forms post to constant paths in `workflows.js` with the id as one
+  percent-encoded segment (never empty, `.` or `..`; the issue #27 rule, pinned in
+  `test_workflow_scripts.py`), never to a URL read from the page. The request and its operation
+  id are kept whole until a definite answer (REC-4): a lost response or a 5xx is retried
+  unchanged, and only a refusal or success ends it. Refusals are listed in the form's error
+  summary (`role="alert"`, focused) with the named field marked `aria-invalid`, in plain words
+  for `SELF_INVALIDATION_FORBIDDEN`, `FORBIDDEN`, `NOT_FOUND`, `BATCH_INVALIDATED`,
+  `PAPER_BATCH_INVALIDATED`, `EXPLANATION_REQUIRED`, `CHAIN_INVALIDATED`,
+  `PAPER_CHECK_NOT_NORMAL`, `REPLACEMENT_NOT_APPLICABLE`, `REPLACEMENT_BATCH_MISMATCH`,
+  `REPLACEMENT_BATCH_INVALIDATED`, `REPLACEMENT_PERFORMED_LATER` and
+  `REPLACEMENT_CHECK_MISSING`.
+
+**Participation credit (RPT-4, LATE-3).** History credits the attributed performers of a paper
+check ("performed … by A, B") and shows the entry actor only as the person who entered it. A
+future participation report must do the same: count a paper check for each of its batch's
+`paper_entry_performer` rows, and give the entry actor no participation credit for entering
+someone else's paper work (an entry actor who is also a named performer is credited as a
+performer). **Gap:** the app has no participation report yet (RPT-4 is not implemented), so
+nothing counts participation today; this rule is recorded here for when it is built.
 
 ## Performer search
 
@@ -418,3 +475,8 @@ printed kit content, a kit moved after the paper time, the batch's check through
 invalidation, item reads, paper sources), `cya/inspections/tests/test_paper_entry_ui.py` (pages,
 access, config, escaping, the checklist read and its refusals), and the Node harnesses
 `paper_entry_script_harness.js` and `workflow_script_harness.js` (paper mode).
+Part B6b: `cya/inspections/tests/test_paper_history_ui.py` (paper marks, On time and Late
+completion apart from the source, the paper entries list, batch and mistaken-Normal form
+visibility per role including the entry actor, replacement candidates, escaping),
+`test_workflow_scripts.py` (the constant invalidation paths) and `workflow_script_harness.js`
+(both forms' payloads, paths, error texts, `aria-invalid` and operation-id reuse).
