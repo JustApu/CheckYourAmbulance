@@ -224,6 +224,7 @@ class AuditIntegrityTests(TestCase):
             "paper_entry_batch",  # issue #9 Part B: SPEC 8.0.0 paper-entry batch header (18.4)
             "paper_entry_performer",  # issue #9 Part B: attributed paper performers (LATE-3)
             "paper_entry_kit_version",  # issue #9 Part B: printed kit-definition versions (LATE-4)
+            "paper_entry_invalidation_event",  # issue #9 Part B5: batch invalidation (INV-8)
             "item_requirement_cutover",  # issue #256: SPEC 6.0.0 item requirements (CHK-11, 18.3)
             "item_requirement_map",  # issue #256: SPEC 6.0.0 item requirements (CHK-11, 18.3)
             "deficiency_place",  # issue #256: place of a loose-item deficiency (18.3 item 2)
@@ -371,6 +372,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "paper_entry_batch",
                         "paper_entry_performer",
                         "paper_entry_kit_version",
+                        "paper_entry_invalidation_event",
                     },
                 )
             finally:
@@ -499,6 +501,7 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                     "paper_entry_batch",
                     "paper_entry_performer",
                     "paper_entry_kit_version",
+                    "paper_entry_invalidation_event",
                 },
             )
             cursor.execute(

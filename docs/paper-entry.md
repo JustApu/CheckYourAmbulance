@@ -15,7 +15,8 @@ B lists them. This page grows with each part.
 | B2: paper item checks | this page |
 | B3: paper odometer and engine-hours readings | this page |
 | B4: paper seal verification, seal break and paper reseal | this page |
-| B5 and B6: invalidation, crew UI | later |
+| B5: batch invalidation and mistaken-Normal invalidation | this page |
+| B6: crew UI | later |
 
 ## Batch header (Part B1)
 
@@ -82,7 +83,7 @@ checklist in force at the performance instant; child rows must belong to their b
 command; a performer other than the entry actor needs a Supervisor or Administrator role
 snapshot; and a kit version must be published, in force and placed by the batch's checklist
 version. A batch is never edited: wrong metadata is corrected by invalidating the batch and
-entering a new one (LATE-6, INV-8; Part B5).
+entering a new one (LATE-6, INV-8; [Part B5](#batch-invalidation-part-b5)).
 
 ## Paper item checks (Part B2)
 
@@ -256,6 +257,106 @@ its own batch (a live one only live checks made after its start), with kit assig
 its instant, and takes no nested kit verification; a paper substitution cannot be nested in a
 live cabinet inspection.
 
+## Batch invalidation (Part B5)
+
+Code: `cya/paper/invalidation.py` (`invalidate_paper_entry_batch`), `cya/paper/api.py`; guards in
+migrations `cya/paper/migrations/0003_paper_invalidation.py`, `cya/checks/migrations/0023_paper_invalidation.py`,
+`cya/odometer/migrations/0006_paper_invalidation.py`, `cya/seals/migrations/0011_paper_invalidation.py`
+and `cya/deficiencies/migrations/0029_paper_batch_invalidation.py`.
+
+A wrong paper time or performer is never edited (SPEC 8.0.0 INV-8, LATE-6). A Supervisor or
+Administrator invalidates the whole batch, with a mandatory explanation, and the form is entered
+again as a new batch.
+
+`POST /api/v1/paper-entry-batches/{batch_id}/invalidations` takes `{operation_id, explanation}`.
+In one transaction it appends, and never modifies:
+
+- an `INVALIDATION` `check_event` for every check chain of the batch, with the ordinary chain
+  consequences: a Failed check's deficiency stays open (INV-3), a deficiency the chain's
+  correction put in Reported in Error reopens (INV-7), a supervisor completion it supported is
+  voided and supervisors are notified (UTI-3);
+- an `INVALIDATION` `reading_event` for every odometer and engine-hours chain of the batch, so the
+  reading sequence and odometer compliance are recomputed without it;
+- last, one `paper_entry_invalidation_event` naming the batch. Its guard refuses it while any
+  check or reading chain of the batch is not invalidated, so the batch is invalidated as a unit.
+
+A chain an Administrator had already invalidated keeps its own event. Paper seal records get no
+event of their own; every reader applies the batch event from its instant:
+
+- **Seal substitutions** (paper "Seal intact" verifications) and the **full inspection of a paper
+  reseal** are void: they satisfy no obligation, so a fresh check, inspection or seal verification
+  can take the obligation, and a voided substitution is no longer "later evidence" that blocks a
+  paper seal event.
+- **A paper reseal cannot support reliance** (INV-8, LATE-7). From the invalidation the seal reads
+  as open: neither a live nor a paper verification may rely on that reseal (a paper verification
+  at an instant after it finds no intact seal), and a fresh full inspection and reseal may start
+  without a new break. Its paper `AUDIT_FULFILLED` no longer ends a pending audit, so the audit
+  stays pending until a live or valid paper reseal fulfils it (fail closed).
+- **Seal breaks stay in force.** The seal stays open, and a new full inspection and reseal are
+  required before reliance resumes. Reviving the earlier seal would fabricate reliance no one
+  recorded.
+
+The seal readers apply only the invalidations known at their instant, so an as-of view before
+the invalidation still shows the paper seal in force. Reliance is recomputed without the batch's
+records, so any other substitution, live or paper, that relied on one of its paper reseals (for
+example a later live "Seal intact") is void from the invalidation as well; as-of views before it
+keep it.
+
+Every record keeps its original performance and server-entry times and stays visible. Derived
+compliance is recomputed without the batch's records; an as-of view before the invalidation still
+shows them as they were (REG-6). An invalidated batch takes no further record: a paper check,
+reading or seal record naming it is `409 PAPER_BATCH_INVALIDATED`. An invalidation is never
+undone (INV-6).
+
+**Who.** A Supervisor or Administrator (`invalidate_paper_entry_batch`), never the batch's entry
+actor: they get `403 SELF_INVALIDATION_FORBIDDEN`, and another Supervisor or Administrator must do
+it. "Own entry" is the batch's entry actor, not its performers: a Supervisor may invalidate a batch
+another user entered that names them as a performer. Crew members and Supply Officers get `403
+FORBIDDEN`. Refusals are audited as the actor's denied action.
+
+**Response** (`201`): `batch_id`, `invalidation_event_id`, `check_invalidation_event_ids`,
+`invalidated_check_root_ids`, `reading_invalidation_event_ids`, `invalidated_reading_root_ids`,
+`voided_substitution_ids`, `dependent_substitution_ids` (other substitutions, live or paper,
+that relied on the batch's paper reseals), `voided_inspection_ids` (inspections of the batch's paper reseals),
+`voided_reseal_event_ids` (paper reseals that no longer support reliance),
+`voided_audit_fulfillment_event_ids`, `seal_break_event_ids` (breaks that stay in force),
+`affected_obligation_ids`, `voided_determination_ids` and `reopened_deficiency_ids`. A replay with
+the same `operation_id` returns the stored result. The explanation is not copied into the audit
+snapshot.
+
+| HTTP | Code | When |
+|---|---|---|
+| 400 | `MALFORMED_REQUEST` | bad JSON or fields, a batch id that is not a UUID, an explanation over 4000 characters |
+| 403 | `SELF_INVALIDATION_FORBIDDEN` | the actor entered the batch |
+| 403 | `FORBIDDEN` | the actor is neither a Supervisor nor an Administrator |
+| 404 | `NOT_FOUND` | no such batch in the organization |
+| 409 | `BATCH_INVALIDATED` | the batch is already invalidated |
+| 409 | `OPERATION_REUSED` | the operation id was used for another request |
+| 422 | `EXPLANATION_REQUIRED` | the explanation is missing or blank |
+| 503 | `RETRY_LATER`, `AUDIT_UNAVAILABLE`, `CONFIGURATION_UNAVAILABLE` | not confirmed; retry with the same `operation_id` (also when a batch holds more than 1000 check and reading chains) |
+
+**Lock order.** Vehicle, batch, the item locks of the batch's checks (in item order), then their
+deficiencies (sorted), as for the paper record commands, so a record being added to the batch
+either commits first and is invalidated too, or waits and is then refused.
+
+**A check mistakenly saved in Normal mode.** Re-enter the same work in Paper entry mode first.
+Then a Supervisor or Administrator other than the check's author invalidates the mistaken check
+through `POST /api/v1/checks/{check_id}/invalidations` with `replacement_paper_entry_batch_id`
+(see [paper-entry invalidation](check-records.md#paper-entry-invalidation-spec-800-inv-8) for its
+rules and refusals). The Supervisor who entered the replacement batch may do it, since it is not
+their check. This and batch invalidation are the only Supervisor exceptions to INV-1; every other
+check invalidation stays Administrator-only.
+
+**Database guards.** `paper_entry_invalidation_event` is append-only, one per batch; its insert
+trigger requires its `PAPER_ENTRY_BATCH_INVALIDATION` receipt (naming the batch), a Supervisor or
+Administrator role snapshot, an actor other than the entry actor, and every check, odometer and
+engine-hours chain of the batch invalidated. The `check_event` and `reading_event` triggers accept
+a batch invalidation's events only from such an actor for chains of the named batch. The check,
+reading, seal event and seal substitution insert triggers refuse a paper record of an invalidated
+batch; the paper-event guard ignores a voided substitution as later evidence; a seal
+substitution may not rely on a paper reseal of an invalidated batch; and the
+`deficiency_event` trigger accepts an INV-7 reopening under a batch invalidation receipt.
+
 ## Performer search
 
 `GET /api/v1/paper-entry-performers?q=<2 to 100 characters>` finds users by display name or
@@ -280,4 +381,6 @@ replay, CSRF, and the performer search) and `test_paper_checks.py` (timing, curr
 compliance, printed version, refusals, conflicts, ordering, corrections, guards) and
 `test_paper_readings.py` (obligations, sequence and both-neighbour anomalies, corrections) and
 `test_paper_seals.py` (verification at the performance instant, seal intact then, breaks, later
-evidence, paper kit and cabinet reseals, refusals and guards).
+evidence, paper kit and cabinet reseals, refusals and guards) and `test_invalidation.py`
+(batch invalidation of checks, readings and seal records, as-of history, deficiency effects,
+permissions, refusals, database guards, HTTP, and the mistaken-Normal invalidation).

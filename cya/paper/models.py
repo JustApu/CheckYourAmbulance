@@ -6,20 +6,20 @@ vehicle-checklist version, any printed kit-definition versions, the original per
 instant and the attributed performer(s). Each row also keeps who entered it and when
 (the Evidence columns), which are never replaced by the paper facts (§7.2, TIME-4).
 
-All three tables are append-only (A). Their rows are written only by
+All four tables are append-only (A). The header rows are written only by
 cya.paper.commands.record_paper_entry_batch, inside one command receipt; migration 0002
 installs the guards that repeat its rules in the database. The records a batch groups (checks,
-readings and seal records) reference it from their own tables, added by later parts of
-issue #9 Part B. A batch is never edited: wrong metadata is corrected by invalidating the batch
-and entering a new one (LATE-6, INV-8).
+readings and seal records) reference it from their own tables. A batch is never edited: wrong
+metadata is corrected by invalidating the batch (PaperEntryInvalidationEvent, written only by
+cya.paper.invalidation; guards in migration 0003) and entering a new one (LATE-6, INV-8).
 """
 
 from django.db import models
 
 from cya.accounts.fields import IdentityIDField, new_id
-from cya.checklists.models import ChecklistVersion, Vehicle, organization_fk
+from cya.checklists.models import ChecklistVersion, Vehicle, non_blank, organization_fk
 from cya.kits.models import KitDefinitionVersion
-from cya.operations.models import Evidence
+from cya.operations.models import MAX_TEXT, Evidence
 
 # How the entered local date-time became an instant (SPEC TIME-3, LATE-2): an ordinary local
 # time, a time inside a spring-forward gap (moved to the first valid instant after it), or a
@@ -117,3 +117,31 @@ class PaperEntryKitVersion(Evidence):
 
     def __str__(self):
         return f"PaperEntryKitVersion {self.pk}"
+
+
+class PaperEntryInvalidationEvent(Evidence):
+    """The invalidation of a whole batch and its linked records (SPEC 8.0.0 INV-8, LATE-6, 18.4).
+
+    Appended last by cya.paper.invalidation.invalidate_paper_entry_batch, after an INVALIDATION
+    event for every check and reading chain of the batch; its insert trigger (migration 0003)
+    refuses it otherwise. Its actor is a Supervisor or Administrator other than the batch's entry
+    actor. Nothing is edited: the batch, its records and their times stay as recorded and are
+    read as invalidated from this row on. A batch is invalidated at most once (INV-6).
+    """
+
+    id = IdentityIDField(primary_key=True, default=new_id, editable=False)
+    organization = organization_fk()
+    batch = models.OneToOneField(PaperEntryBatch, on_delete=models.PROTECT, related_name="+")
+    explanation = models.CharField(max_length=MAX_TEXT)
+
+    class Meta:
+        db_table = "paper_entry_invalidation_event"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "id"], name="paperinvalid_org_id"),
+            models.CheckConstraint(
+                condition=non_blank("explanation"), name="paperinvalid_explanation"
+            ),
+        ]
+
+    def __str__(self):
+        return f"PaperEntryInvalidationEvent {self.pk}"

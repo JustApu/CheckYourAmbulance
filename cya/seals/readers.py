@@ -75,7 +75,7 @@ def subjects(organization_id, vehicle_id, *, at=None):
 
     def state(kind, subject_id, label, slot_id=None):
         stream = streams[(kind, subject_id)]
-        seal, pending = _event_state(stream)
+        seal, pending = _event_state(stream, as_of=at)
         status = (
             "OPEN"
             if seal is None

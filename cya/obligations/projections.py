@@ -6,7 +6,8 @@ from functools import lru_cache
 from itertools import islice
 
 from django.db import connection
-from django.db.models import F, Q
+from django.db.models import F, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce, Least
 
 from cya.checklists.models import Vehicle
 from cya.checks.models import (
@@ -73,6 +74,20 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
     ids = tuple(obligation_ids)
     if not ids:
         return ()
+    from cya.paper.models import PaperEntryInvalidationEvent
+
+    # SPEC 8.0.0 INV-8: a substitution is void from the invalidation, if known by T, of its own
+    # paper-entry batch or of the batch of the paper reseal it relied on (live or paper).
+    def invalidation(batch):
+        return Subquery(
+            PaperEntryInvalidationEvent.objects.filter(
+                batch_id=OuterRef(batch), recorded_at__lte=instant
+            ).values("recorded_at")[:1]
+        )
+
+    own = invalidation("substitution__paper_entry_batch_id")
+    reseal = invalidation("substitution__seal_event__paper_entry_batch_id")
+    voided = Least(Coalesce(own, reseal), Coalesce(reseal, own))
     rows = _bounded(
         SealSubstitutionObligation.objects.filter(
             organization_id=organization_id,
@@ -80,6 +95,7 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
             recorded_at__lte=instant,
         )
         .select_related("substitution")
+        .annotate(voided_at=voided)
         .order_by("recorded_at", "id")[: limit + 1],
         limit,
     )
@@ -91,6 +107,7 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
             row.recorded_at,
             row.late_eligible,
             row.substitution.performed_at,
+            row.voided_at,
         )
         for row in rows
     )
@@ -102,11 +119,19 @@ def stored_seal_inspections(organization_id, obligation_ids, instant, *, limit=N
     ids = tuple(obligation_ids)
     if not ids:
         return ()
+    from cya.paper.models import PaperEntryInvalidationEvent
+
+    # SPEC 8.0.0 INV-8: a paper reseal's inspection is void from its batch's invalidation.
+    voided = PaperEntryInvalidationEvent.objects.filter(
+        batch_id=OuterRef("inspection_item__inspection__reseal__paper_entry_batch_id"),
+        recorded_at__lte=instant,
+    ).values("recorded_at")[:1]
     rows = _bounded(
         SealInspectionObligation.objects.filter(
             organization_id=organization_id, obligation_id__in=ids, recorded_at__lte=instant
         )
         .select_related("inspection_item__inspection__reseal")
+        .annotate(voided_at=Subquery(voided))
         .order_by("recorded_at", "id")[: limit + 1],
         limit,
     )
@@ -119,6 +144,7 @@ def stored_seal_inspections(organization_id, obligation_ids, instant, *, limit=N
             row.inspection_item.outcome,
             row.late_eligible,
             row.inspection_item.inspection.reseal.performed_at,
+            row.voided_at,
         )
         for row in rows
     )

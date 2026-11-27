@@ -279,6 +279,35 @@ held, so the comparison below and the insert are atomic (CON-5).
   after the obligation was satisfied was never linked to it, so it does not satisfy the
   obligation when the first chain is invalidated; a fresh check is needed (INV-2a).
 
+### Paper-entry invalidation (SPEC 8.0.0 INV-8)
+
+[Issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B5 adds the two
+Supervisor exceptions to INV-1 (migration `0023_paper_invalidation`; see
+[batch invalidation](paper-entry.md#batch-invalidation-part-b5)):
+
+- **A check mistakenly saved in Normal mode.** The same endpoint accepts an optional
+  `replacement_paper_entry_batch_id`. The same work is first re-entered in Paper entry mode;
+  then a Supervisor or Administrator other than the check's author may invalidate the mistaken
+  check (`invalidate_mistaken_normal_paper_check`), with the mandatory explanation, and the
+  `check_event` stores the batch in `replacement_paper_entry_batch_id`. The batch must exist
+  (`404 NOT_FOUND`) and be for the check's vehicle (`422 REPLACEMENT_BATCH_MISMATCH`), not
+  invalidated (`422 REPLACEMENT_BATCH_INVALIDATED`), performed no later than the mistaken check
+  was saved (`422 REPLACEMENT_PERFORMED_LATER`), and hold an effective paper check of the same
+  work: the same item, kit instance, kit line or presence, and item requirement
+  (`422 REPLACEMENT_CHECK_MISSING`). The check must be a routine live check
+  (`422 PAPER_CHECK_NOT_NORMAL`, `422 REPLACEMENT_NOT_APPLICABLE`). The author gets `403
+  SELF_INVALIDATION_FORBIDDEN`; any other refusal of the request is `403 FORBIDDEN`. The
+  response adds `replacement_paper_entry_batch_id`. The consequences are those above. Without the
+  field, the request, its digest and its response are unchanged.
+- **A whole paper-entry batch.** `POST /api/v1/paper-entry-batches/{batch_id}/invalidations`
+  appends an `INVALIDATION` for every check chain of the batch, under a
+  `PAPER_ENTRY_BATCH_INVALIDATION` receipt whose response body names the batch, with the same
+  consequences (INV-2a, INV-3, INV-4, INV-7, UTI-3).
+- **Database guard.** The `check_event` trigger accepts these two kinds only from a Supervisor or
+  Administrator other than the check's author (mistaken Normal) or the batch's entry actor (batch),
+  and only for a check of the named batch (batch) or with the replacement rules above (mistaken
+  Normal). The check insert trigger refuses a paper check of an invalidated batch.
+
 ## Verification checks
 
 A check with `purpose` `VERIFICATION` and `verification_for_deficiency_id` (SPEC VER-4 to VER-6,

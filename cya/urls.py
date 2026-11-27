@@ -499,6 +499,11 @@ urlpatterns = [
     path("api/v1/odometer-entries", odometer_api.odometer_entries, name="api-odometer-entries"),
     # SPEC 8.0.0 7.9 (issue #9 Part B): paper entry of outage records.
     path("api/v1/paper-entry-batches", paper_api.batches, name="api-paper-entry-batches"),
+    path(
+        "api/v1/paper-entry-batches/<str:batch_id>/invalidations",
+        paper_api.invalidations,
+        name="api-paper-entry-batch-invalidations",
+    ),
     path("api/v1/paper-entry-performers", paper_api.performers, name="api-paper-entry-performers"),
     path(
         "api/v1/readings/<str:kind>/<str:reading_id>/corrections",
