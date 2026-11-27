@@ -160,8 +160,9 @@ class SealSubstitutionEvidence:
     # SPEC 8.0.0 LATE-7: a paper substitution's performance instant; windows, completion and
     # lateness are judged at it, while recorded_at still decides as-of inclusion.
     performed_at: datetime | None = None
-    # SPEC 8.0.0 INV-8, LATE-7: when the substitution's paper-entry batch was invalidated. From
-    # then on it supports nothing; as-of views before that instant still count it (19.3).
+    # SPEC 8.0.0 INV-8, LATE-7: when the substitution's paper-entry batch, or that of the paper
+    # reseal it relied on, was invalidated. From then on it supports nothing; as-of views before
+    # that instant still count it (19.3).
     voided_at: datetime | None = None
 
     @property

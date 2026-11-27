@@ -108,16 +108,28 @@ def _satisfied_by(recorded_at, ignore_root_check_id):
     from cya.paper.models import PaperEntryInvalidationEvent
     from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
 
-    already_substituted = SealSubstitutionObligation.objects.filter(
-        organization_id=OuterRef("organization_id"),
-        obligation_id=OuterRef("pk"),
-        recorded_at__lte=recorded_at,
-    ).exclude(
-        # A substitution of an invalidated paper-entry batch supports nothing (INV-8, LATE-7).
-        Exists(
-            PaperEntryInvalidationEvent.objects.filter(
-                batch_id=OuterRef("substitution__paper_entry_batch_id"),
-                recorded_at__lte=recorded_at,
+    already_substituted = (
+        SealSubstitutionObligation.objects.filter(
+            organization_id=OuterRef("organization_id"),
+            obligation_id=OuterRef("pk"),
+            recorded_at__lte=recorded_at,
+        )
+        .exclude(
+            # A substitution of an invalidated paper-entry batch supports nothing (INV-8, LATE-7).
+            Exists(
+                PaperEntryInvalidationEvent.objects.filter(
+                    batch_id=OuterRef("substitution__paper_entry_batch_id"),
+                    recorded_at__lte=recorded_at,
+                )
+            )
+        )
+        .exclude(
+            # Nor does one that relied on a paper reseal of an invalidated batch.
+            Exists(
+                PaperEntryInvalidationEvent.objects.filter(
+                    batch_id=OuterRef("substitution__seal_event__paper_entry_batch_id"),
+                    recorded_at__lte=recorded_at,
+                )
             )
         )
     )

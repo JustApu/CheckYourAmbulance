@@ -63,16 +63,29 @@ def _events_at(events, at):
 def _later_evidence(organization_id, vehicle_id, kit_id, slot_id, at):
     """Whether any seal event or substitution of the subject has a qualifying instant after `at`.
 
-    A substitution of an invalidated paper-entry batch relies on nothing any more and is not
-    later evidence (SPEC 8.0.0 INV-8); every seal event, an invalidated paper break included,
+    A substitution of an invalidated paper-entry batch, or one that relied on a paper reseal of
+    such a batch, relies on nothing any more and is not later evidence (SPEC 8.0.0 INV-8); every
+    seal event, an invalidated paper break included,
     still is (the break stays in force: fail closed).
     """
     from cya.paper.models import PaperEntryInvalidationEvent
 
     events = SealEvent.objects.filter(organization_id=organization_id)
-    substitutions = SealSubstitution.objects.filter(organization_id=organization_id).exclude(
-        Exists(
-            PaperEntryInvalidationEvent.objects.filter(batch_id=OuterRef("paper_entry_batch_id"))
+    substitutions = (
+        SealSubstitution.objects.filter(organization_id=organization_id)
+        .exclude(
+            Exists(
+                PaperEntryInvalidationEvent.objects.filter(
+                    batch_id=OuterRef("paper_entry_batch_id")
+                )
+            )
+        )
+        .exclude(  # nor one that relied on a paper reseal of an invalidated batch
+            Exists(
+                PaperEntryInvalidationEvent.objects.filter(
+                    batch_id=OuterRef("seal_event__paper_entry_batch_id")
+                )
+            )
         )
     )
     if kit_id is not None:

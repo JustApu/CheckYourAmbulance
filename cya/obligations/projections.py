@@ -7,6 +7,7 @@ from itertools import islice
 
 from django.db import connection
 from django.db.models import F, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce, Least
 
 from cya.checklists.models import Vehicle
 from cya.checks.models import (
@@ -75,10 +76,18 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
         return ()
     from cya.paper.models import PaperEntryInvalidationEvent
 
-    # SPEC 8.0.0 INV-8: a paper substitution is void from its batch's invalidation, if known by T.
-    voided = PaperEntryInvalidationEvent.objects.filter(
-        batch_id=OuterRef("substitution__paper_entry_batch_id"), recorded_at__lte=instant
-    ).values("recorded_at")[:1]
+    # SPEC 8.0.0 INV-8: a substitution is void from the invalidation, if known by T, of its own
+    # paper-entry batch or of the batch of the paper reseal it relied on (live or paper).
+    def invalidation(batch):
+        return Subquery(
+            PaperEntryInvalidationEvent.objects.filter(
+                batch_id=OuterRef(batch), recorded_at__lte=instant
+            ).values("recorded_at")[:1]
+        )
+
+    own = invalidation("substitution__paper_entry_batch_id")
+    reseal = invalidation("substitution__seal_event__paper_entry_batch_id")
+    voided = Least(Coalesce(own, reseal), Coalesce(reseal, own))
     rows = _bounded(
         SealSubstitutionObligation.objects.filter(
             organization_id=organization_id,
@@ -86,7 +95,7 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
             recorded_at__lte=instant,
         )
         .select_related("substitution")
-        .annotate(voided_at=Subquery(voided))
+        .annotate(voided_at=voided)
         .order_by("recorded_at", "id")[: limit + 1],
         limit,
     )

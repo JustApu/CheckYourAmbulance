@@ -2,7 +2,8 @@
 
 Once its paper-entry batch is invalidated, a paper seal substitution supports nothing: obligation
 state and linking read it as void from the invalidation, and it is no longer later evidence for
-a paper event, so the paper-event guard of seal_event ignores it. A paper break of an
+a paper event, so the paper-event guard of seal_event ignores it; so is any substitution, live
+or paper, that relied on a paper reseal of the invalidated batch. A paper break of an
 invalidated batch stays in force (the seal stays open until a full inspection and reseal; fail
 closed), so it is still later evidence. A paper reseal of an invalidated batch cannot support
 reliance: no seal substitution may rely on it (the commands read the seal as open, and its
@@ -31,7 +32,9 @@ def event_guard():
         " AND COALESCE(s.performed_at,s.recorded_at)>NEW.performed_at)",
         " AND COALESCE(s.performed_at,s.recorded_at)>NEW.performed_at\n"
         " AND NOT EXISTS (SELECT 1 FROM paper_entry_invalidation_event i"
-        " WHERE i.batch_id=s.paper_entry_batch_id))",
+        " WHERE i.batch_id=s.paper_entry_batch_id)\n"
+        " AND NOT EXISTS (SELECT 1 FROM paper_entry_invalidation_event j"
+        " WHERE j.batch_id=e.paper_entry_batch_id))",
     )
     return sql + INVALIDATED_BATCH
 

@@ -34,6 +34,7 @@ from cya.seals.commands import (
     _event_state,
     request_seal_audit,
     start_inspection,
+    verify_seal,
 )
 from cya.seals.models import (
     SealEvent,
@@ -673,6 +674,40 @@ class ResealInvalidationTests(ResealCase):
             if row["id"] == self.kit_id
         )
         self.assertEqual(before["state"], "SEALED")
+
+    def test_a_live_verification_that_relied_on_the_reseal_is_void_too(self):
+        batch_id = self.batch()
+        event = self.paper_reseal(batch_id)
+        # The next day's obligation, which the paper reseal's inspection did not complete.
+        self.clock.set(self.at(days=1, hours=5, minutes=30))
+        live = verify_seal(
+            vehicle_id=str(self.vehicle.pk),
+            kit_id=self.kit_id,
+            expected_tip_id=str(event.pk),
+            marking="paper-id",
+            attested=True,
+            **self.context(self.crew),
+        )
+        substitution = live.body["substitution_id"]
+        link = SealSubstitutionObligation.objects.get(substitution_id=substitution)
+        self.clock.set(self.at(days=1, hours=5, minutes=40))
+        body = invalidate_paper_entry_batch(
+            batch_id=batch_id, explanation="Wrong paper time.", **self.context(self.supervisor)
+        ).body
+        self.assertEqual(body["dependent_substitution_ids"], [substitution])
+        self.assertIn(str(link.obligation_id), body["affected_obligation_ids"])
+        voided = PaperEntryInvalidationEvent.objects.get().recorded_at
+
+        def state(instant):
+            states = get_vehicle_obligations_as_of(
+                str(self.vehicle.pk), instant, organization_id=str(self.org.pk)
+            )
+            return next(s for s in states if s.obligation.id == str(link.obligation_id))
+
+        self.assertEqual(state(voided - timedelta(microseconds=1)).state, State.SATISFIED)
+        self.assertNotEqual(state(voided).state, State.SATISFIED)
+        facts = ObligationProjection.objects.get(obligation_id=link.obligation_id).facts
+        self.assertTrue(all("voided_at" in row for row in facts["seal_substitutions"]))
 
     def test_its_audit_fulfilment_does_not_end_a_pending_audit(self):
         self.clock.set(self.at(hours=5, minutes=10))

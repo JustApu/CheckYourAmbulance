@@ -6,6 +6,8 @@ updates are used. Existing publication/kit/binding reconciliation still appends 
 its own audited transactions; those transactions refresh their replacements and retirements.
 """
 
+from django.db.models import Q
+
 from cya.checks.models import CheckEvent, CheckObligationLink, CheckRecord
 from cya.conditions.models import ObligationDetermination
 from cya.deficiencies.models import CheckSuspension
@@ -79,7 +81,10 @@ def refresh_for_receipt(receipt):
         batches = PaperEntryInvalidationEvent.objects.filter(command=receipt).values("batch_id")
         ids.update(
             SealSubstitutionObligation.objects.filter(
-                organization_id=org, substitution__paper_entry_batch_id__in=batches
+                Q(substitution__paper_entry_batch_id__in=batches)
+                # A substitution that relied on one of its paper reseals is void too.
+                | Q(substitution__seal_event__paper_entry_batch_id__in=batches),
+                organization_id=org,
             ).values_list("obligation_id", flat=True)
         )
         # So are the inspections of its paper reseals.

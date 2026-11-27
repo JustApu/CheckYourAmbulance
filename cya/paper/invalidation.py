@@ -17,7 +17,8 @@ batch. In one transaction (cya.core.audit_commands.run_command) it appends, and 
   unless every check, odometer and engine-hours chain of the batch is invalidated by then.
 
 Paper seal records are not given events of their own; readers apply the batch event. A seal
-substitution of the batch, and the inspection of a paper reseal of the batch, are void from it
+substitution of the batch, any substitution (live or paper) that relied on a paper reseal of the
+batch, and the inspection of a paper reseal of the batch, are void from it
 (obligation state, linking and later-evidence rules read them so), so they satisfy nothing
 (LATE-7). A paper RESEAL of the batch no longer supports reliance and its paper AUDIT_FULFILLED
 no longer ends a pending audit: the seal reads as open. A paper break stays in force. Either
@@ -189,8 +190,8 @@ def _lock_items(organization_id, vehicle_id, item_ids):
 def _seal_records(organization_id, batch):
     """The batch's seal records, by what the invalidation does to them, and their obligations.
 
-    Substitutions and the inspections of paper reseals are void (their obligations are
-    re-derived); a paper RESEAL no longer supports reliance and its AUDIT_FULFILLED no longer
+    Substitutions, those of other batches or live that relied on its paper reseals, and the
+    inspections of its paper reseals are void (their obligations are re-derived); a paper RESEAL no longer supports reliance and its AUDIT_FULFILLED no longer
     ends an audit; a paper BREAK stays in force (LATE-7, INV-8).
     """
     from cya.seals.models import (
@@ -213,10 +214,17 @@ def _seal_records(organization_id, batch):
             organization_id=organization_id, reseal__paper_entry_batch=batch
         )
     )
+    # Any other substitution, live or paper, that relied on one of the batch's paper reseals is
+    # void too: reliance is recomputed without the batch's records (INV-8).
+    dependent = ids(
+        SealSubstitution.objects.filter(
+            organization_id=organization_id, seal_event__paper_entry_batch=batch
+        ).exclude(pk__in=substitutions)
+    )
     obligations = {
         str(pk)
         for pk in SealSubstitutionObligation.objects.filter(
-            organization_id=organization_id, substitution_id__in=substitutions
+            organization_id=organization_id, substitution_id__in=[*substitutions, *dependent]
         ).values_list("obligation_id", flat=True)
     }
     obligations.update(
@@ -227,6 +235,7 @@ def _seal_records(organization_id, batch):
     )
     return {
         "voided_substitution_ids": substitutions,
+        "dependent_substitution_ids": dependent,
         "voided_inspection_ids": inspections,
         # A paper reseal cannot support reliance: a new full inspection and reseal are required.
         "voided_reseal_event_ids": ids(events.filter(event_type="RESEAL")),

@@ -297,8 +297,10 @@ event of their own; every reader applies the batch event from its instant:
   recorded.
 
 The seal readers apply only the invalidations known at their instant, so an as-of view before
-the invalidation still shows the paper seal in force. A substitution recorded before the
-invalidation that relied on the paper reseal (a later live "Seal intact") is left as recorded.
+the invalidation still shows the paper seal in force. Reliance is recomputed without the batch's
+records, so any other substitution, live or paper, that relied on one of its paper reseals (for
+example a later live "Seal intact") is void from the invalidation as well; as-of views before it
+keep it.
 
 Every record keeps its original performance and server-entry times and stays visible. Derived
 compliance is recomputed without the batch's records; an as-of view before the invalidation still
@@ -314,7 +316,8 @@ FORBIDDEN`. Refusals are audited as the actor's denied action.
 
 **Response** (`201`): `batch_id`, `invalidation_event_id`, `check_invalidation_event_ids`,
 `invalidated_check_root_ids`, `reading_invalidation_event_ids`, `invalidated_reading_root_ids`,
-`voided_substitution_ids`, `voided_inspection_ids` (inspections of the batch's paper reseals),
+`voided_substitution_ids`, `dependent_substitution_ids` (other substitutions, live or paper,
+that relied on the batch's paper reseals), `voided_inspection_ids` (inspections of the batch's paper reseals),
 `voided_reseal_event_ids` (paper reseals that no longer support reliance),
 `voided_audit_fulfillment_event_ids`, `seal_break_event_ids` (breaks that stay in force),
 `affected_obligation_ids`, `voided_determination_ids` and `reopened_deficiency_ids`. A replay with
