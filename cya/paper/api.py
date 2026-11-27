@@ -1,9 +1,10 @@
-"""Paper-entry HTTP endpoints (SPEC 8.0.0 LATE-2, LATE-3, REC-5; issue #9 Part B1).
+"""Paper-entry HTTP endpoints (SPEC 8.0.0 LATE-2, LATE-3, REC-5, INV-8; issue #9 Part B).
 
 - POST /api/v1/paper-entry-batches saves a batch header (cya.paper.commands).
+- POST /api/v1/paper-entry-batches/{id}/invalidations invalidates a batch (cya.paper.invalidation).
 - GET /api/v1/paper-entry-performers?q= finds users to attribute paper work to.
 
-Both use the /api/v1/checks error shape: {status: "REJECTED", code, correlation_id,
+All use the /api/v1/checks error shape: {status: "REJECTED", code, correlation_id,
 field_errors: [{path, code}]}, with schema paths that never echo user content. Actor,
 organization and roles come from the signed-in user, never the body (SPEC 3.2).
 """
@@ -25,9 +26,11 @@ from cya.authorization.backend import AuthorizationUnavailable
 from cya.authorization.persistence import current_role_codes
 from cya.authorization.policy import permitted
 from cya.checks.api import Rejected, _read_body, _reply
+from cya.checks.commands import CheckError, SelfInvalidationForbidden
 from cya.core.audit_commands import CommandDenied, OperationConflict, OutcomeUnknown, RetryLater
 from cya.core.audit_transactions import AuditPersistenceFailure
 from cya.paper.commands import OTHERS_ACTION, PaperEntryError, record_paper_entry_batch
+from cya.paper.invalidation import invalidate_paper_entry_batch
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +135,73 @@ def batches(request):
         return _reply(503, "CONFIGURATION_UNAVAILABLE", correlation_id)
     except (RetryLater, OutcomeUnknown, DatabaseError):
         logger.error("paper entry batch not confirmed: retry with the same operation id")
+        return _reply(503, "RETRY_LATER", correlation_id)
+
+
+@never_cache
+@require_http_methods(["POST"])
+def invalidations(request, batch_id):
+    """POST /api/v1/paper-entry-batches/{batch_id}/invalidations (SPEC 8.0.0 INV-8, Part B5).
+
+    Body: {operation_id, explanation}. A Supervisor or Administrator other than the batch's
+    entry actor invalidates the batch and its linked records as a unit.
+    """
+    correlation_id = str(uuid.uuid4())
+    user = request.cya_user
+    if user is None:
+        return _reply(401, "AUTHENTICATION_REQUIRED", correlation_id)
+    try:
+        if request.content_type != "application/json":
+            raise Rejected(400, "MALFORMED_REQUEST")
+        try:
+            body = json.loads(_read_body(request).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            raise Rejected(400, "MALFORMED_REQUEST") from None
+        if not isinstance(body, dict) or set(body) != {"operation_id", "explanation"}:
+            raise Rejected(400, "MALFORMED_REQUEST", [("$", "INVALID_FIELDS")])
+        result = invalidate_paper_entry_batch(
+            batch_id=batch_id,
+            explanation=body["explanation"],
+            operation_id=body["operation_id"],
+            organization_id=str(user.organization_id),
+            actor_id=str(user.pk),
+            correlation_id=correlation_id,
+            request_attempt_id=str(uuid.uuid4()),
+        )
+        if result.operation_reused:
+            return _reply(409, "OPERATION_REUSED", correlation_id, [("operation_id", "REUSED")])
+        acknowledgement = dict(result.body)
+        acknowledgement.pop("code", None)
+        return JsonResponse(
+            {
+                "status": "COMMITTED",
+                "operation_id": body["operation_id"],
+                "correlation_id": result.correlation_id,
+                "result": acknowledgement,
+            },
+            status=result.status,
+        )
+    except Rejected as error:
+        return _reply(error.status, error.code, correlation_id, error.field_errors)
+    except (PaperEntryError, CheckError) as error:
+        paths = [(error.path, error.code)] if error.path else []
+        return _reply(error.status, error.code, correlation_id, paths)
+    except SelfInvalidationForbidden:
+        return _reply(403, "SELF_INVALIDATION_FORBIDDEN", correlation_id)
+    except CommandDenied:
+        return _reply(403, "FORBIDDEN", correlation_id)
+    except OperationConflict:
+        return _reply(409, "OPERATION_OWNED_BY_ANOTHER_ACTOR", correlation_id)
+    except AuditPersistenceFailure:
+        logger.error("paper entry batch invalidation not confirmed: audit unavailable")
+        return _reply(503, "AUDIT_UNAVAILABLE", correlation_id)
+    except AuthorizationUnavailable:
+        logger.error("paper entry batch invalidation not confirmed: authorization unavailable")
+        return _reply(503, "CONFIGURATION_UNAVAILABLE", correlation_id)
+    except (RetryLater, OutcomeUnknown, DatabaseError):
+        logger.error(
+            "paper entry batch invalidation not confirmed: retry with the same operation id"
+        )
         return _reply(503, "RETRY_LATER", correlation_id)
 
 

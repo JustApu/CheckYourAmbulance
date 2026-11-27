@@ -29,7 +29,7 @@ from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from uuid import UUID
 
-from django.db.models import Max
+from django.db.models import Exists, Max, OuterRef
 from django.utils import timezone
 
 from cya.accounts.fields import new_id
@@ -95,6 +95,7 @@ COMMAND_TYPE = "CHECK_RECORD"
 CORRECTION_COMMAND_TYPE = "CHECK_CORRECTION"
 INVALIDATION_COMMAND_TYPE = "CHECK_INVALIDATION"
 INVALIDATION_ACTION = "invalidate_others_check"
+MISTAKEN_NORMAL_ACTION = "invalidate_mistaken_normal_paper_check"
 MAX_QUANTITY = 1_000_000
 MEASUREMENT_PLACES = 10
 MEASUREMENT_LIMIT = Decimal(10) ** 19
@@ -470,9 +471,15 @@ def _paper_batch(organization_id, actor, shape):
 
     Only the batch's entry actor adds records to it: another user's batch answers as absent, so
     its existence is not revealed. The batch row is locked (without updating it) so the records
-    of one batch and a later batch invalidation serialize (Part B5).
+    of one batch and a later batch invalidation serialize (Part B5): once invalidated, a batch
+    takes no further record (SPEC 8.0.0 INV-8; a new batch is entered instead).
     """
-    from cya.paper.models import PaperEntryBatch, PaperEntryKitVersion, PaperEntryPerformer
+    from cya.paper.models import (
+        PaperEntryBatch,
+        PaperEntryInvalidationEvent,
+        PaperEntryKitVersion,
+        PaperEntryPerformer,
+    )
 
     batch = (
         PaperEntryBatch.objects.select_for_update()
@@ -484,6 +491,13 @@ def _paper_batch(organization_id, actor, shape):
             "NOT_FOUND",
             "paper-entry batch was not found",
             status=404,
+            path="paper_entry_batch_id",
+        )
+    if PaperEntryInvalidationEvent.objects.filter(batch=batch).exists():
+        raise CheckError(
+            "PAPER_BATCH_INVALIDATED",
+            "the paper-entry batch is invalidated; enter a new batch",
+            status=409,
             path="paper_entry_batch_id",
         )
     if str(batch.vehicle_id) != shape["vehicle_id"]:
@@ -2058,14 +2072,19 @@ def correct_check(
     )
 
 
-def _invalidation_authorizer(organization_id, actor_id, check_id):
+def _invalidation_authorizer(organization_id, actor_id, check_id, *, mistaken_normal=False):
     """Authorize with the author of the targeted chain loaded under the identity locks.
 
     Only administrators may invalidate (SPEC 3.3, INV-1); a refusal is audited as a denial. The
     author is read here, after the role check inputs are fixed, so the matrix's "other only"
     rule sees a trusted fact; an administrator naming their own chain gets a distinct error.
+
+    mistaken_normal is the one Supervisor exception (SPEC 8.0.0 INV-8, LATE-6): invalidating a
+    check mistakenly saved in Normal mode once its replacement paper-entry batch is saved. A
+    Supervisor or Administrator may then invalidate it, never their own check.
     """
     backend = DatabaseRoleBackend()
+    action = MISTAKEN_NORMAL_ACTION if mistaken_normal else INVALIDATION_ACTION
 
     def authorize(_org):
         with locked_identities(organization_id, [actor_id], lock_organization=False) as (
@@ -2086,9 +2105,10 @@ def _invalidation_authorizer(organization_id, actor_id, check_id):
                 .first()
             )
             author_id = str(canonical_id(target)) if target is not None else ""
-            if Role.ADMINISTRATOR in roles and _self_invalidation_forbidden(
-                actor_id=actor_id, author_id=author_id
-            ):
+            invalidators = (Role.SUPERVISOR, Role.ADMINISTRATOR) if mistaken_normal else ()
+            if (
+                Role.ADMINISTRATOR in roles or any(role in roles for role in invalidators)
+            ) and _self_invalidation_forbidden(actor_id=actor_id, author_id=author_id):
                 # A denial that carries the trusted actor, so it is audited as the administrator's
                 # denied action (AUD-1, AUD-3) rather than as an anonymous failure.
                 raise SelfInvalidationForbidden(actor)
@@ -2096,7 +2116,7 @@ def _invalidation_authorizer(organization_id, actor_id, check_id):
                 require_permission(
                     principal,
                     organization_id,
-                    INVALIDATION_ACTION,
+                    action,
                     context=ResourceContext(author_id=author_id),
                 )
             except PermissionDenied:
@@ -2104,6 +2124,179 @@ def _invalidation_authorizer(organization_id, actor_id, check_id):
             return actor
 
     return authorize
+
+
+@dataclass(frozen=True)
+class ChainInvalidation:
+    """What appending one chain's INVALIDATION does, decided under the chain's item lock."""
+
+    root: CheckRecord
+    tip: CheckRecord
+    event_id: str
+    affected: list
+    effects: list
+    completions: tuple
+
+
+def _chain_invalidated(root):
+    return CheckEvent.objects.filter(root_check=root, event_type="INVALIDATION").exists()
+
+
+def _plan_chain_invalidation(organization_id, root):
+    """Plan the INVALIDATION of a chain not yet invalidated; the caller holds its item lock.
+
+    INV-3, INV-7, INV-4: nothing is closed or cancelled; a deficiency this chain's correction
+    reported in error, or whose automatic closure this verification chain supported, is
+    reopened in the same transaction. UTI-3: a supervisor completion it supported is voided.
+    """
+    tip = _chain_tip(root)
+    affected = sorted(
+        str(obligation_id)
+        for obligation_id in CheckObligationLink.objects.filter(check_record=tip).values_list(
+            "obligation_id", flat=True
+        )
+    )
+    event_id = new_id()
+    effects = _planned(deficiency_effects.plan_invalidation_effects, organization_id, root)
+    completions = _completion_effects(organization_id, root.pk)
+    return ChainInvalidation(root, tip, event_id, affected, effects, completions)
+
+
+def _apply_chain_invalidation(
+    plan, receipt, current, *, organization_id, explanation, replacement_batch_id=None
+):
+    """Append the planned INVALIDATION and its effects inside the command's apply."""
+    root = plan.root
+    CheckEvent.objects.create(
+        id=plan.event_id,
+        organization_id=organization_id,
+        command=receipt,
+        recorded_at=receipt.recorded_at,
+        actor_user=current.user,
+        actor_roles_at_time=list(current.roles),
+        root_check=root,
+        selected_check=plan.tip,
+        event_type="INVALIDATION",
+        replacement_check=None,
+        explanation=explanation,
+        replacement_paper_entry_batch_id=replacement_batch_id,
+    )
+    completion_effects.append_check_effects(
+        plan.completions,
+        receipt,
+        current,
+        root_id=root.pk,
+        event_id=plan.event_id,
+        determination_type="INVALIDATED",
+    )
+    for completion in plan.completions:
+        # Supervisors resolve a voided supervisor completion (owner decision, issue 14).
+        notify(
+            receipt,
+            event_type="check.supervisor_completion_voided",
+            source_event_type="obligation_determination",
+            source_event_id=completion.id,
+            deep_link=f"/inspection/vehicles/{root.vehicle_id}/check-history/",
+            payload={
+                "vehicle_id": str(root.vehicle_id),
+                "obligation_id": str(completion.prior.obligation_id),
+                "determination_id": str(completion.prior.pk),
+            },
+            actor_user_id=receipt.actor_user_id,
+        )
+    for effect in plan.effects:
+        deficiency_effects.append_effect(
+            receipt,
+            current,
+            organization_id=organization_id,
+            effect=effect,
+            root_id=root.pk,
+        )
+    from cya.live_updates.publish import publish_vehicle_update
+
+    publish_vehicle_update(
+        organization_id=organization_id,
+        vehicle_id=root.vehicle_id,
+        event_id=plan.event_id,
+        kind="check.invalidated",
+    )
+    for effect in plan.effects:
+        publish_vehicle_update(
+            organization_id=organization_id,
+            vehicle_id=root.vehicle_id,
+            event_id=effect.event_id,
+            kind="deficiency.changed",
+        )
+
+
+def _replacement_batch(organization_id, batch_id):
+    """The named replacement paper-entry batch, locked before the item lock (lock order)."""
+    from cya.paper.models import PaperEntryBatch
+
+    batch = (
+        PaperEntryBatch.objects.select_for_update()
+        .filter(organization_id=organization_id, pk=batch_id)
+        .first()
+    )
+    if batch is None:
+        raise CheckError(
+            "NOT_FOUND",
+            "replacement paper-entry batch was not found",
+            status=404,
+            path="replacement_paper_entry_batch_id",
+        )
+    return batch
+
+
+def _replacement_refusal(organization_id, root, batch):
+    """Why `batch` cannot be the replacement of the mistaken Normal check `root`, or None.
+
+    SPEC 8.0.0 INV-8, LATE-6, AC-43 (7): the same work must first be re-entered in Paper entry
+    mode. The batch must be for the root's vehicle, not invalidated, performed no later than
+    the mistaken check was saved, and hold an effective paper check of the same work: the same
+    item, kit instance, kit line or presence, and item requirement.
+    """
+    from cya.paper.models import PaperEntryInvalidationEvent
+
+    if root.paper_entry_batch_id is not None:
+        return "PAPER_CHECK_NOT_NORMAL", "the check was entered in Paper entry mode"
+    if root.purpose != "ROUTINE":
+        return "REPLACEMENT_NOT_APPLICABLE", "only a routine check is replaced by paper entry"
+    if batch.vehicle_id != root.vehicle_id:
+        return "REPLACEMENT_BATCH_MISMATCH", "the replacement batch is for another vehicle"
+    if PaperEntryInvalidationEvent.objects.filter(batch=batch).exists():
+        return "REPLACEMENT_BATCH_INVALIDATED", "the replacement batch is invalidated"
+    if batch.performed_at > root.recorded_at:
+        return (
+            "REPLACEMENT_PERFORMED_LATER",
+            "the replacement batch was performed after the mistaken check was saved",
+        )
+    same_work = CheckRecord.objects.filter(
+        organization_id=organization_id,
+        paper_entry_batch=batch,
+        item_id=root.item_id,
+        kit_id=root.kit_id,
+        kit_requirement_id=root.kit_requirement_id,
+        kit_presence=root.kit_presence,
+    ).exclude(
+        Exists(
+            CheckEvent.objects.filter(
+                root_check_id=OuterRef("root_check_id"), event_type="INVALIDATION"
+            )
+        )
+    )
+    if root.item_requirement_version_id is None:
+        same_work = same_work.filter(item_requirement_version__isnull=True)
+    else:
+        same_work = same_work.filter(
+            item_requirement_version__requirement_id=root.item_requirement_version.requirement_id
+        )
+    if not same_work.exists():
+        return (
+            "REPLACEMENT_CHECK_MISSING",
+            "the replacement batch has no effective paper check of the same work",
+        )
+    return None
 
 
 def invalidate_chain(
@@ -2115,26 +2308,38 @@ def invalidate_chain(
     actor_id,
     correlation_id,
     request_attempt_id,
+    replacement_paper_entry_batch_id=None,
 ):
     """Append an administrator's INVALIDATION of a whole correction chain (SPEC 7.8, INV-1..INV-6).
 
     Any row of the chain resolves to its root. The chain is excluded from compliance and no
     earlier outcome revives (INV-2a); nothing is modified, the event is appended. Not undoable.
+
+    replacement_paper_entry_batch_id invalidates a routine check mistakenly saved in Normal mode
+    after the same work was re-entered in that paper-entry batch (SPEC 8.0.0 INV-8, LATE-6): a
+    Supervisor or Administrator other than the check's author may then do it, and the event
+    names the batch. Without it the request, digest and response are as before.
     """
     for value in (organization_id, actor_id):
         canonical_id(value)
     check_id = _id(check_id, "check_id")
     _operation_id(operation_id)
+    replacement = _optional_id(replacement_paper_entry_batch_id, "replacement_paper_entry_batch_id")
     if not isinstance(explanation, str) or not explanation.strip():
         raise CheckError(
             "EXPLANATION_REQUIRED", "an invalidation needs an explanation", path="explanation"
         )
     explanation = _explanation(explanation)
+    request = {"check_id": check_id, "explanation": explanation}
+    if replacement is not None:
+        request["replacement_paper_entry_batch_id"] = replacement  # live digests unchanged
 
     def build(actor):
         target = CheckRecord.objects.filter(organization_id=organization_id, pk=check_id).first()
         if target is None:
             raise CheckError("NOT_FOUND", "check was not found", status=404, path="check_id")
+        # Lock order: paper-entry batch, then item (as for a paper check).
+        batch = _replacement_batch(organization_id, replacement) if replacement else None
         lock = (
             ItemLock.objects.select_for_update()
             .filter(
@@ -2147,119 +2352,65 @@ def invalidate_chain(
         if lock is None:
             raise CheckError("CONFIGURATION_UNAVAILABLE", "item lock is unavailable", status=503)
         root = CheckRecord.objects.get(organization_id=organization_id, pk=target.root_check_id)
-        if CheckEvent.objects.filter(root_check=root, event_type="INVALIDATION").exists():
+        if _chain_invalidated(root):
             raise CheckError(
                 "CHAIN_INVALIDATED", "the check chain is already invalidated", status=409
             )
-        tip = _chain_tip(root)
-        affected = sorted(
-            str(obligation_id)
-            for obligation_id in CheckObligationLink.objects.filter(check_record=tip).values_list(
-                "obligation_id", flat=True
-            )
-        )
-        event_id = new_id()
-        # INV-3, INV-7, INV-4: nothing is closed or cancelled; a deficiency this chain's correction
-        # reported in error, or whose automatic closure this verification chain supported, is
-        # reopened in this transaction.
-        effects = _planned(deficiency_effects.plan_invalidation_effects, organization_id, root)
-        completions = _completion_effects(organization_id, root.pk)
+        if batch is not None:
+            refusal = _replacement_refusal(organization_id, root, batch)
+            if refusal is not None:
+                raise CheckError(*refusal, path="replacement_paper_entry_batch_id")
+        plan = _plan_chain_invalidation(organization_id, root)
 
         def apply(receipt, current):
-            CheckEvent.objects.create(
-                id=event_id,
-                organization_id=organization_id,
-                command=receipt,
-                recorded_at=receipt.recorded_at,
-                actor_user=current.user,
-                actor_roles_at_time=list(current.roles),
-                root_check=root,
-                selected_check=tip,
-                event_type="INVALIDATION",
-                replacement_check=None,
-                explanation=explanation,
-            )
-            completion_effects.append_check_effects(
-                completions,
+            _apply_chain_invalidation(
+                plan,
                 receipt,
                 current,
-                root_id=root.pk,
-                event_id=event_id,
-                determination_type="INVALIDATED",
-            )
-            for completion in completions:
-                # Supervisors resolve a voided supervisor completion (owner decision, issue 14).
-                notify(
-                    receipt,
-                    event_type="check.supervisor_completion_voided",
-                    source_event_type="obligation_determination",
-                    source_event_id=completion.id,
-                    deep_link=f"/inspection/vehicles/{root.vehicle_id}/check-history/",
-                    payload={
-                        "vehicle_id": str(root.vehicle_id),
-                        "obligation_id": str(completion.prior.obligation_id),
-                        "determination_id": str(completion.prior.pk),
-                    },
-                    actor_user_id=receipt.actor_user_id,
-                )
-            for effect in effects:
-                deficiency_effects.append_effect(
-                    receipt,
-                    current,
-                    organization_id=organization_id,
-                    effect=effect,
-                    root_id=root.pk,
-                )
-            from cya.live_updates.publish import publish_vehicle_update
-
-            publish_vehicle_update(
                 organization_id=organization_id,
-                vehicle_id=root.vehicle_id,
-                event_id=event_id,
-                kind="check.invalidated",
+                explanation=explanation,
+                replacement_batch_id=replacement,
             )
-            for effect in effects:
-                publish_vehicle_update(
-                    organization_id=organization_id,
-                    vehicle_id=root.vehicle_id,
-                    event_id=effect.event_id,
-                    kind="deficiency.changed",
-                )
 
+        body = {
+            "code": "CHECK_CHAIN_INVALIDATED",
+            "root_check_id": root.pk,
+            "invalidation_event_id": plan.event_id,
+            "affected_obligation_ids": plan.affected,
+            "voided_determination_ids": [str(e.prior.pk) for e in plan.completions],
+            "reopened_deficiency_ids": [e.deficiency_id for e in plan.effects],
+        }
         # No explanation text in the audit snapshot: it is free text from the administrator.
+        values = {
+            "event_id": plan.event_id,
+            "root_check_id": root.pk,
+            "selected_check_id": plan.tip.pk,
+            "affected_obligation_ids": plan.affected,
+            "reopened_deficiency_ids": [e.deficiency_id for e in plan.effects],
+            "voided_determination_ids": [str(e.prior.pk) for e in plan.completions],
+        }
+        if replacement is not None:
+            # Only a mistaken-Normal invalidation reports its batch, so others are unchanged.
+            body["replacement_paper_entry_batch_id"] = replacement
+            values["replacement_paper_entry_batch_id"] = replacement
         return Plan(
-            response_body={
-                "code": "CHECK_CHAIN_INVALIDATED",
-                "root_check_id": root.pk,
-                "invalidation_event_id": event_id,
-                "affected_obligation_ids": affected,
-                "voided_determination_ids": [str(e.prior.pk) for e in completions],
-                "reopened_deficiency_ids": [e.deficiency_id for e in effects],
-            },
+            response_body=body,
             apply=apply,
             response_status=201,
             target_type="ORGANIZATION",
             target_id=organization_id,
-            new_snapshot={
-                "schema_version": 1,
-                "values": {
-                    "event_id": event_id,
-                    "root_check_id": root.pk,
-                    "selected_check_id": tip.pk,
-                    "affected_obligation_ids": affected,
-                    "reopened_deficiency_ids": [e.deficiency_id for e in effects],
-                    "voided_determination_ids": [str(e.prior.pk) for e in completions],
-                },
-            },
+            new_snapshot={"schema_version": 1, "values": values},
         )
 
     return run_command(
         organization_id=organization_id,
         operation_id=operation_id,
         command_type=INVALIDATION_COMMAND_TYPE,
-        request_digest=digest({"check_id": check_id, "explanation": explanation}),
+        request_digest=digest(request),
         correlation_id=correlation_id,
         request_attempt_id=request_attempt_id,
-        authorize=_invalidation_authorizer(organization_id, actor_id, check_id),
+        authorize=_invalidation_authorizer(
+            organization_id, actor_id, check_id, mistaken_normal=replacement is not None
+        ),
         prepare=build,
     )

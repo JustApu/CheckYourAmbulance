@@ -258,6 +258,17 @@ class CheckEvent(Evidence):
         CheckRecord, null=True, on_delete=models.PROTECT, related_name="+"
     )
     explanation = models.CharField(max_length=MAX_TEXT, null=True)  # noqa: DJ001
+    # SPEC 8.0.0 INV-8, LATE-6, 18.4 (issue #9 Part B5): the replacement paper-entry batch an
+    # INVALIDATION of a check mistakenly saved in Normal mode must name. Null for every other
+    # event, including the per-chain events of a whole-batch invalidation.
+    replacement_paper_entry_batch = models.ForeignKey(
+        "cya_paper.PaperEntryBatch",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0023.
+        db_constraint=False,
+    )
 
     class Meta:
         db_table = "check_event"
@@ -280,6 +291,11 @@ class CheckEvent(Evidence):
             ),
             models.UniqueConstraint(
                 fields=["replacement_check"], name="check_event_replacement_once"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(replacement_paper_entry_batch__isnull=True)
+                | models.Q(event_type="INVALIDATION"),
+                name="check_event_replacement_batch_shape",
             ),
         ]
 

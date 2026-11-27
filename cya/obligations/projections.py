@@ -6,7 +6,7 @@ from functools import lru_cache
 from itertools import islice
 
 from django.db import connection
-from django.db.models import F, Q
+from django.db.models import F, OuterRef, Q, Subquery
 
 from cya.checklists.models import Vehicle
 from cya.checks.models import (
@@ -73,6 +73,12 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
     ids = tuple(obligation_ids)
     if not ids:
         return ()
+    from cya.paper.models import PaperEntryInvalidationEvent
+
+    # SPEC 8.0.0 INV-8: a paper substitution is void from its batch's invalidation, if known by T.
+    voided = PaperEntryInvalidationEvent.objects.filter(
+        batch_id=OuterRef("substitution__paper_entry_batch_id"), recorded_at__lte=instant
+    ).values("recorded_at")[:1]
     rows = _bounded(
         SealSubstitutionObligation.objects.filter(
             organization_id=organization_id,
@@ -80,6 +86,7 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
             recorded_at__lte=instant,
         )
         .select_related("substitution")
+        .annotate(voided_at=Subquery(voided))
         .order_by("recorded_at", "id")[: limit + 1],
         limit,
     )
@@ -91,6 +98,7 @@ def stored_seal_substitutions(organization_id, obligation_ids, instant, *, limit
             row.recorded_at,
             row.late_eligible,
             row.substitution.performed_at,
+            row.voided_at,
         )
         for row in rows
     )

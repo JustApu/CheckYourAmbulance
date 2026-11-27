@@ -10,6 +10,7 @@ rewritten. A paper reseal, inspection or audit is not accepted (owner question o
 
 from zoneinfo import ZoneInfo
 
+from django.db.models import Exists, OuterRef
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -59,9 +60,20 @@ def _events_at(events, at):
 
 
 def _later_evidence(organization_id, vehicle_id, kit_id, slot_id, at):
-    """Whether any seal event or substitution of the subject has a qualifying instant after `at`."""
+    """Whether any seal event or substitution of the subject has a qualifying instant after `at`.
+
+    A substitution of an invalidated paper-entry batch relies on nothing any more and is not
+    later evidence (SPEC 8.0.0 INV-8); every seal event, an invalidated paper break included,
+    still is (the break stays in force: fail closed).
+    """
+    from cya.paper.models import PaperEntryInvalidationEvent
+
     events = SealEvent.objects.filter(organization_id=organization_id)
-    substitutions = SealSubstitution.objects.filter(organization_id=organization_id)
+    substitutions = SealSubstitution.objects.filter(organization_id=organization_id).exclude(
+        Exists(
+            PaperEntryInvalidationEvent.objects.filter(batch_id=OuterRef("paper_entry_batch_id"))
+        )
+    )
     if kit_id is not None:
         events = events.filter(kit_id=kit_id)
         substitutions = substitutions.filter(seal_event__kit_id=kit_id)

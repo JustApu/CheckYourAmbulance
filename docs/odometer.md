@@ -13,6 +13,9 @@ guards in migrations `0002_odometer_guards.py`, `0003_reading_decisions.py` and
 [Issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B3 adds paper readings
 (`paper_entry_batch_id`, SPEC 8.0.0 ODO-6): placed in the sequence by their performance instant
 and compared with both neighbours; see [Paper entry](paper-entry.md#paper-readings-part-b3).
+Part B5 lets a Supervisor or Administrator other than the entry actor invalidate a whole
+paper-entry batch, which appends an `INVALIDATION` reading event for each of its reading chains
+(SPEC 8.0.0 INV-8); see [batch invalidation](paper-entry.md#batch-invalidation-part-b5).
 
 ## What a call does
 

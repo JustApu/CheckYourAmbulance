@@ -113,10 +113,12 @@ def _check_facts(check):
 
 
 def _seal_facts(substitution):
-    """A substitution's stored facts; performed_at only for a paper one (SPEC 8.0.0 LATE-7)."""
+    """A substitution's stored facts; performed_at only for a paper one (SPEC 8.0.0 LATE-7) and
+    voided_at only once its batch is invalidated (INV-8), so other facts are unchanged."""
     facts = asdict(substitution)
-    if facts.get("performed_at") is None:
-        facts.pop("performed_at", None)
+    for optional in ("performed_at", "voided_at"):
+        if facts.get(optional) is None:
+            facts.pop(optional, None)
     return facts
 
 
@@ -231,6 +233,8 @@ def evidence_instants(evidence):
         found.update((suspension.recorded_at, suspension.ended_at))
     for seal in (*seals, *inspections):
         found.add(seal.recorded_at)
+    for seal in seals:
+        found.add(getattr(seal, "voided_at", None))
     found.discard(None)
     return tuple(sorted(found))
 

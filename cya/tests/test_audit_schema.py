@@ -92,6 +92,7 @@ class PhysicalAuditManifestTests(TestCase):
                     "paper_entry_batch",
                     "paper_entry_performer",
                     "paper_entry_kit_version",
+                    "paper_entry_invalidation_event",
                 },
             )
 

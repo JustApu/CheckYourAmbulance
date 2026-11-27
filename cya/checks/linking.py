@@ -105,12 +105,21 @@ def _satisfied_by(recorded_at, ignore_root_check_id):
         )
     # A seal substitution is separate evidence but has already satisfied the
     # linked obligation just as a qualifying check has.
+    from cya.paper.models import PaperEntryInvalidationEvent
     from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
 
     already_substituted = SealSubstitutionObligation.objects.filter(
         organization_id=OuterRef("organization_id"),
         obligation_id=OuterRef("pk"),
         recorded_at__lte=recorded_at,
+    ).exclude(
+        # A substitution of an invalidated paper-entry batch supports nothing (INV-8, LATE-7).
+        Exists(
+            PaperEntryInvalidationEvent.objects.filter(
+                batch_id=OuterRef("substitution__paper_entry_batch_id"),
+                recorded_at__lte=recorded_at,
+            )
+        )
     )
     already_inspected = SealInspectionObligation.objects.filter(
         organization_id=OuterRef("organization_id"),

@@ -160,6 +160,9 @@ class SealSubstitutionEvidence:
     # SPEC 8.0.0 LATE-7: a paper substitution's performance instant; windows, completion and
     # lateness are judged at it, while recorded_at still decides as-of inclusion.
     performed_at: datetime | None = None
+    # SPEC 8.0.0 INV-8, LATE-7: when the substitution's paper-entry batch was invalidated. From
+    # then on it supports nothing; as-of views before that instant still count it (19.3).
+    voided_at: datetime | None = None
 
     @property
     def qualifying_at(self):
@@ -465,11 +468,14 @@ def evaluate_obligation(
         aware(evidence.recorded_at)
         if evidence.performed_at is not None:
             aware(evidence.performed_at)
+        if evidence.voided_at is not None:
+            aware(evidence.voided_at)
         qualifying = evidence.qualifying_at
         if (
             evidence.organization_id == obligation.organization_id
             and evidence.obligation_id == obligation.id
             and evidence.recorded_at <= instant
+            and (evidence.voided_at is None or evidence.voided_at > instant)
             and obligation.early_at <= qualifying
             and (
                 qualifying <= obligation.grace_at
