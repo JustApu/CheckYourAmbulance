@@ -368,6 +368,9 @@ class AuditSchemaLifecycleTests(TransactionTestCase):
                         "vehicle_kit_list_publication",
                         "position_key",
                         "kit_instance_definition",
+                        "paper_entry_batch",
+                        "paper_entry_performer",
+                        "paper_entry_kit_version",
                     },
                 )
             finally:
