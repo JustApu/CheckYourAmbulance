@@ -8,12 +8,13 @@ from pathlib import Path
 from unittest import mock, skipUnless
 
 from django.db import connection
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from cya.attention import readiness
+from cya.attention import readiness, shared_picture
 from cya.attention.tests.support import AttentionCase
+from cya.checklists.models import Vehicle
 from cya.checks.commands import correct_check, invalidate_chain
 from cya.deficiencies import acknowledgement, service
 from cya.deficiencies.closure import close_administrator
@@ -442,8 +443,8 @@ class ReadinessHttpTests(CrewUiCase):
         self.assertContains(page, "readiness-config")
         self.assertContains(page, "Required checks by state")
         self.assertNotContains(page, 'compliant" flag:')
-        # Issue #278: vehicles past the live sockets update only on the timer, and SPEC §17.3
-        # wants a change shown within 30 s, so the timer plus one read must fit in that.
+        # Issue #278: SPEC 8.4.0 §17.3 wants a change shown within 60 s; with a shared picture up
+        # to 15 s old, 15 s + this timer + one read must fit in that.
         self.assertEqual(page.context["config"]["refresh_seconds"], 20)
         self.assertContains(page, "Updates every 20 seconds.")
 
@@ -528,6 +529,74 @@ class ReadinessHttpTests(CrewUiCase):
         fold = sup.get("/fleet/readiness/", {"as_of": "2025-11-02T01:30"})
         self.assertEqual(fold.status_code, 200)
         self.assertContains(fold, "As of 2025-11-02 01:30:00 EDT")
+
+
+@override_settings(CYA_READINESS_SHARED_PICTURE_SECONDS=15)
+class SharedPictureHttpTests(CrewUiCase):
+    """SPEC 8.4.0 §17.3 (OQ-89, issue #278 Part J): only live panel re-reads share a picture."""
+
+    PANEL = "/fleet/readiness/panel/"
+
+    def setUp(self):
+        super().setUp()
+        shared_picture.STORE.clear()
+        self.addCleanup(shared_picture.STORE.clear)
+        self.sup, user = self.harness.sign_in("shared-sup")
+        self.grant(user, "SUPERVISOR")
+
+    def rename(self, name):
+        Vehicle.objects.filter(pk=self.vehicle.pk).update(display_name=name)
+
+    def test_a_panel_re_read_may_show_the_picture_the_first_load_stored(self):
+        first = self.sup.get("/fleet/readiness/")
+        # SPEC 8.4.0 §17.3: the screen promises 60 s, typically 30 s, not a tighter push bound.
+        self.assertContains(
+            first, "Changes usually show within 30 seconds, and always within a minute."
+        )
+        self.assertNotContains(first, "plus the time to refresh")
+        name = self.vehicle.display_name
+        self.rename("Renamed medic")
+        # The test clock advances a microsecond per reading, so stay clear of the exact bound
+        # here; LivePictureTests checks exactly 15 s and 15 s + 1 µs.
+        stored_at = first.context["picture"].as_of
+        self.clock.set(stored_at + timedelta(seconds=14))
+        shared = self.sup.get(self.PANEL)
+        self.assertContains(shared, name)
+        self.assertNotContains(shared, "Renamed medic")
+        self.assertEqual(shared.context["picture"].as_of, stored_at)
+        # Older than 15 s: the re-read computes and stores its own.
+        self.clock.set(stored_at + timedelta(seconds=16))
+        self.assertContains(self.sup.get(self.PANEL), "Renamed medic")
+
+    def test_a_first_load_never_shows_a_shared_picture(self):
+        self.sup.get("/fleet/readiness/")
+        self.rename("Renamed medic")
+        self.assertContains(self.sup.get("/fleet/readiness/"), "Renamed medic")
+        self.assertContains(self.sup.get(self.PANEL), "Renamed medic")  # it stored its own
+
+    def test_the_api_and_as_of_views_neither_read_nor_store_a_shared_picture(self):
+        self.sup.get("/fleet/readiness/")
+        stored = shared_picture.STORE.get(str(self.org.pk))
+        self.rename("Renamed medic")
+        self.clock.set(self.clock.now + timedelta(seconds=1))
+        names = [
+            v["display_name"] for v in self.sup.get("/api/v1/fleet-readiness").json()["vehicles"]
+        ]
+        self.assertIn("Renamed medic", names)
+        then = self.clock.now.isoformat()
+        self.assertContains(self.sup.get(self.PANEL, {"as_of": then}), "Renamed medic")
+        self.assertContains(self.sup.get("/fleet/readiness/", {"as_of": then}), "Renamed medic")
+        self.assertEqual(shared_picture.STORE.get(str(self.org.pk)), stored)
+
+    def test_the_role_check_runs_before_any_shared_picture(self):
+        self.sup.get("/fleet/readiness/")
+        self.assertEqual(self.client.get(self.PANEL).status_code, 403)  # crew
+
+    @override_settings(CYA_READINESS_SHARED_PICTURE_SECONDS=0)
+    def test_zero_turns_sharing_off(self):
+        self.sup.get("/fleet/readiness/")
+        self.rename("Renamed medic")
+        self.assertContains(self.sup.get(self.PANEL), "Renamed medic")
 
 
 class ReadinessScriptTests(SimpleTestCase):
