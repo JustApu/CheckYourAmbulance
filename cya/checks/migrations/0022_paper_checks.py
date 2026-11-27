@@ -134,8 +134,9 @@ class Migration(migrations.Migration):
         ("cya_paper", "0002_paper_entry_guards"),
     ]
 
+    # The reverse guard is the last operation, so on unapply it runs first, while the columns
+    # still exist; MariaDB DDL is not transactional, so a later refusal would leave it half done.
     operations = [
-        migrations.RunPython(migrations.RunPython.noop, refuse_reverse_with_paper_checks),
         migrations.AddField(
             model_name="checkrecord",
             name="paper_entry_batch",
@@ -172,4 +173,5 @@ class Migration(migrations.Migration):
                 "ALTER TABLE check_record DROP INDEX cya_check_record_paper_batch_org_fk",
             ],
         ),
+        migrations.RunPython(migrations.RunPython.noop, refuse_reverse_with_paper_checks),
     ]
