@@ -3,7 +3,7 @@ A paper reseal section (SPEC 8.5.0 SEAL-1, CAB-9): every item the seal covers, w
 fresh result, count and expiration date, then the marking written on the new seal. Definitions
 only: no results or personal data.
 {% endcomment %}<section class="sheet-section reseal-section" aria-labelledby="reseal-{{ reseal_prefix }}-{{ reseal_id }}">
-<table>
+<table aria-label="{{ reseal.heading }}">
   <colgroup><col class="col-item"><col class="col-result"><col class="col-value"><col class="col-expiry"></colgroup>
   <thead>
     <tr class="repeat-identity"><th colspan="4">{{ vehicle.display_name }} · {% for v in versions %}{{ v.label }} <span class="version-id">{{ v.id }}</span>{% if not forloop.last %}; {% endif %}{% endfor %}</th></tr>
