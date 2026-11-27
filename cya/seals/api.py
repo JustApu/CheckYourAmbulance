@@ -116,6 +116,13 @@ def vehicle_subjects(request, vehicle_id):
 @never_cache
 @require_http_methods(["GET"])
 def inspection_scope(request, vehicle_id, kind, subject_id):
+    """The scope to inspect before a reseal; ?paper_entry_batch_id= reads it at the sheet's time.
+
+    A paper reseal is judged at the batch's performance instant (SPEC 8.5.0 LATE-7), so the
+    paper seals page reads the scope as it stood then. Only the batch's entry actor adds records
+    to it (Part B2): another user's batch, or one of another vehicle, answers 404 like one that
+    does not exist. The batch key takes no other query key with it.
+    """
     correlation_id = str(uuid.uuid4())
     user = request.cya_user
     if user is None:
@@ -127,10 +134,35 @@ def inspection_scope(request, vehicle_id, kind, subject_id):
             raise ValueError
     except ValueError:
         return _reply(404, "NOT_FOUND", correlation_id)
+    at = None
+    if "paper_entry_batch_id" in request.GET:
+        from cya.paper.readers import own_batch, parse_batch_id
+
+        values = request.GET.getlist("paper_entry_batch_id")
+        if set(request.GET) != {"paper_entry_batch_id"} or len(values) != 1:
+            return _reply(400, "MALFORMED_REQUEST", correlation_id, [("$", "INVALID_FIELDS")])
+        batch_id = parse_batch_id(values[0])
+        if batch_id is None:
+            return _reply(
+                400, "MALFORMED_REQUEST", correlation_id, [("paper_entry_batch_id", "INVALID")]
+            )
+        try:
+            batch = own_batch(user, batch_id, vehicle_id=canonical_id(vehicle_id))
+        except DatabaseError:
+            return _reply(503, "CONFIGURATION_UNAVAILABLE", correlation_id)
+        if batch is None:
+            return _reply(404, "NOT_FOUND", correlation_id)
+        at = batch.performed_at
     try:
-        return JsonResponse(
-            readers.inspection_scope(str(user.organization_id), vehicle_id, kind, subject_id)
-        )
+        if at is None:
+            scope = readers.inspection_scope(
+                str(user.organization_id), vehicle_id, kind, subject_id
+            )
+        else:
+            scope = readers.inspection_scope(
+                str(user.organization_id), vehicle_id, kind, subject_id, at=at
+            )
+        return JsonResponse(scope)
     except LookupError:
         return _reply(404, "NOT_FOUND", correlation_id)
     except (DatabaseError, ValueError):

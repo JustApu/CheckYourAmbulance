@@ -211,9 +211,15 @@ class PaperScreenTests(PaperUiCase):
                 "deficiency_detail",
                 "print_checklist",
                 "kit_reference",
+                "paper_seals",
             },
         )
-        self.assertNotIn("/seals/", json.dumps(config["urls"]), "paper seals come later (B6c)")
+        # The sheet's seal records (B6c); never the live seal page of the vehicle.
+        self.assertEqual(
+            config["urls"]["paper_seals"], f"/inspection/paper-entry/{batch_id}/seals/"
+        )
+        self.assertIn("Seal records from this sheet", page)
+        self.assertNotIn(f"/inspection/vehicles/{self.vehicle.pk}/seals/", page)
         self.assertIn("Paper entry", page)
         self.assertIn(
             "2026-06-02 06:15 (America/New_York); saved as 2026-06-02 10:15 UTC.",

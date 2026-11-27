@@ -18,7 +18,7 @@ B lists them. This page grows with each part.
 | B5: batch invalidation and mistaken-Normal invalidation | this page |
 | B6a: crew setup page and paper checklist screen | this page |
 | B6b: history marks, timing and invalidation UI; participation credit note | this page |
-| B6c: paper seal page | later |
+| B6c: paper seal page | this page |
 
 ## Batch header (Part B1)
 
@@ -383,8 +383,8 @@ this section lists what they read and send. Code: `cya/inspections/paper_views.p
 - **Fresh print (LATE-4, LATE-8, AC-43 (9)).** The page config says whether the batch already has
   a record (`has_records`: a check, reading, seal event or seal substitution names it); if not,
   the first acknowledged record shows the print offer once.
-
-Not in B6a: paper seal records from the sheet (B6c).
+- **Seal records link.** The paper checklist screen links "Seal records from this sheet"
+  (`config.urls.paper_seals`, Part B6c below).
 
 ## History and invalidation UI (Part B6b)
 
@@ -443,6 +443,46 @@ someone else's paper work (an entry actor who is also a named performer is credi
 performer). **Gap:** the app has no participation report yet (RPT-4 is not implemented), so
 nothing counts participation today; this rule is recorded here for when it is built.
 
+## Paper seals page (Part B6c)
+
+The page is described in [crew inspection screens](crew-inspection-ui.md#paper-seal-records);
+this section lists what it reads and sends. Code: `cya/seals/views.py` (`paper_seals`),
+`cya/seals/api.py` (`inspection_scope`), `templates/seals/vehicle.html` and `vehicle.js` with
+`config.paper_entry`.
+
+- **Page** (`/inspection/paper-entry/{batch}/seals/`, the batch's entry actor only; anyone else's
+  batch and a malformed id answer 404). The live seal page's template and script in paper mode:
+  `config.paper_entry` carries the batch id, the printed `checklist_version_id`, the performance
+  instant and its label, the performers (plain text, read through `json_script`), `has_records`
+  and `state` (`OPEN` or `INVALIDATED`). `can_request_audit` is false: an audit request is never
+  entered from paper (B4). The subject list is the live one (`GET /api/v1/vehicles/{id}/seals`),
+  so each command's `expected_tip_id` is the current tip the B4 commands compare against; the
+  commands judge everything else at the sheet's time.
+- **Scope at the sheet's time.** `GET /api/v1/vehicles/{id}/seals/{kit|slot}/{subject}?paper_entry_batch_id={batch}`
+  reads the reseal scope (items, kit presence, kit-list lines) at the batch's `performed_at`. The
+  batch must be the user's own and of that vehicle (else `404 NOT_FOUND`). No other query key is
+  taken with it, the key is given once, and a malformed id is `400 MALFORMED_REQUEST`. Without
+  the key the read is unchanged (now). A subject not sealable at the sheet's time is 404.
+- **Seal intact on the sheet** sends B4's `POST /api/v1/seals/verify` with `paper_entry_batch_id`.
+  **Seal broken on the sheet** (offered unless the seal is open now) sends `POST /api/v1/seals/break`
+  with it. **Resealed on the sheet** (offered when the seal is open now; a seal still intact is
+  first broken from the sheet) reads the scope at the sheet's time, with no inspection start.
+  Its kit-list counts and kit-presence counts are B2 paper checks: `paper_entry_batch_id` and the
+  batch's `checklist_version_id`, never `inspection_start_operation_id` or `session_id`. The reseal
+  (`POST /api/v1/seals/reseal`) names the batch and those checks, never `start_operation_id` or
+  `nested_substitution_ids`; a cabinet's nested kit seals are not offered for verification.
+- **Client rules.** A request and its operation id are kept whole until a definite answer
+  (REC-4): a lost response or a 5xx is retried unchanged, and no other record starts meanwhile.
+  Refusals are announced in an alert summary (`role="alert"`), with the input to fix marked
+  `aria-invalid` for a missing entry, in plain words for `SEAL_NOT_INTACT_AT_PERFORMANCE`,
+  `SEAL_LATER_EVIDENCE`, `PAPER_ITEM_UNIDENTIFIABLE`, `KIT_MOVED_SINCE_PAPER`,
+  `PAPER_BATCH_INVALIDATED`, `PAPER_BATCH_MISMATCH`, `NOT_FOUND`, `SEAL_CHANGED`, `FORBIDDEN`,
+  `INVALID_SEAL_REQUEST` and the paper check codes (`PAPER_VERSION_MISMATCH`,
+  `PRINTED_KIT_VERSION_MISSING`, `ITEM_NOT_IN_CHECKLIST`, `CHECKLIST_UNAVAILABLE`); any other
+  code is named. The page navigates only by server-rendered links, so it adds no script path.
+- **Print offer.** As on the paper checklist screen: once, after the first acknowledged record of
+  a batch with no records when the page opened.
+
 ## Performer search
 
 `GET /api/v1/paper-entry-performers?q=<2 to 100 characters>` finds users by display name or
@@ -480,3 +520,9 @@ completion apart from the source, the paper entries list, batch and mistaken-Nor
 visibility per role including the entry actor, replacement candidates, escaping),
 `test_workflow_scripts.py` (the constant invalidation paths) and `workflow_script_harness.js`
 (both forms' payloads, paths, error texts, `aria-invalid` and operation-id reuse).
+Part B6c: `cya/seals/tests/test_paper_seals_ui.py` (page access for the entry actor only, config,
+banner, ordering hint, escaping, an invalidated batch, the paper screen's link, the scope read at
+the performance instant, its 404s and its refusal of other keys) and
+`cya/seals/tests/vehicle_script_harness.js` (paper buttons, the verify, break, count, presence and
+reseal payloads, no inspection start or nested verification, refusal texts, `aria-invalid`,
+operation-id reuse and the print offer).

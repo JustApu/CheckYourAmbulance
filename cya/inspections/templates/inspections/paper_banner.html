@@ -13,7 +13,7 @@
     <dt>Kit reference</dt>
     <dd>{% for k in paper.kit_versions %}{{ k.label }}, revision {{ k.revision }} — Kit version {{ k.version_id }}{% if not forloop.last %}; {% endif %}{% empty %}No kit version named.{% endfor %}{% if paper.unprinted_kit_labels %} The contents of {{ paper.unprinted_kit_labels|join:", " }} are not listed, because no kit version was named for them.{% endif %}</dd>
   </dl>
-  {% if state == "OPEN" %}<p>Tap each result as it is written on the sheet. Each tap saves one record, at the sheet's time; there is no Submit button.</p>{% endif %}
+  {% if state == "OPEN" %}{% if paper_seals_page %}<p>Copy each seal record as it is written on the sheet. Each one is saved on its own when you save it, at the sheet's time; there is no Submit button for the sheet.</p>{% else %}<p>Tap each result as it is written on the sheet. Each tap saves one record, at the sheet's time; there is no Submit button.</p>{% endif %}{% endif %}
   <div id="paper-print-offer" class="paper-print-offer" role="region" aria-labelledby="paper-print-heading" hidden>
     <h3 id="paper-print-heading">Print fresh copies for the rig</h3>
     <p>The first record from this sheet is saved. Print a current outage sheet and kit reference, so the copy kept for the next outage is as recent as possible.</p>
