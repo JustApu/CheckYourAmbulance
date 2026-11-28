@@ -605,6 +605,35 @@ function generic(kind) {
     run.get("conflict-dialog").fire("cancel"); assert.equal(!!run.get("conflict-dialog").open, false);
   }
   {
+    const run = checklist();
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    const unable = findAction(run.elements.items.children[0], "unable_to_inspect");
+    unable.fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run); run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
+    run.get("outcome-form").fire("submit");
+    const firstSave = run.posts()[0];
+    response(firstSave, 409, {status: "CONFLICT", newest_check: {check_id: "conflict-basis", outcome: "PASSED"}}); await tick();
+    assert.equal(run.get("conflict-dialog").invoker, unable, "the duplicate-record dialog remembers the original Unable action");
+    assert.equal(run.document.activeElement, run.get("conflict-dialog"), "the conflict dialog owns focus while open");
+    run.get("conflict-proceed").focus();
+    run.get("conflict-proceed").fire("click");
+    assert.equal(run.document.activeElement, unable, "Record mine too restores focus to the same Unable action");
+    assert.equal(run.document.contains(unable), true, "the original Unable action remains attached through conflict confirmation");
+    assert.deepEqual(run.focusHistory.at(-1), {from: "conflict-proceed", to: "unable_to_inspect"},
+      "closing the duplicate-record dialog returns directly to the original action");
+    assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li", "home-link", "banner"].includes(change.to)),
+      "the duplicate-record path never parks focus on the document, list, row, banner, or home link");
+    const retry = run.posts()[1];
+    assert.equal(retry.body.outcome, "UNABLE_TO_INSPECT");
+    assert.equal(retry.body.acknowledges_check_id, "conflict-basis");
+    response(retry, 201, {status: "COMMITTED", result: {check_id: "unable-check", outcome: "UNABLE_TO_INSPECT", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.document.activeElement, unable, "the acknowledged duplicate-path save keeps the same action focused");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Unable to inspect for Portable suction unit (Airway response kit A).", announce: true});
+    assert.equal(run.window.cyaShell.toasts.filter(toast => toast.text.startsWith("Saved:")).length, 1,
+      "the duplicate-record path announces one Saved toast");
+  }
+  {
     const run = checklist(); run.context.testUI.openOutcome(row, "UNABLE_TO_INSPECT"); newReport(run);
     run.get("outcome-form").fire("submit"); assert.equal(run.posts().length, 0); assert(run.get("outcome-error").textContent.includes("reason"));
     run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";

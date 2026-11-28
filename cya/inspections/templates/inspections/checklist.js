@@ -336,20 +336,29 @@
     // Attention Only on) can drop it from the list while this dialog is open (CON-2).
     dialog.row = row;
     dialog.newest = newest.check_id; dialog.entry = entry;
+    var intent = focusIntent && focusIntent.key === key(row) ? focusIntent : null;
+    var invokerItem = itemForKey(key(row));
+    dialog.invoker = intent && invokerItem ? actionIn(invokerItem, intent.action) : document.activeElement;
     if (typeof dialog.showModal === "function") { dialog.showModal(); } else { dialog.setAttribute("open", ""); }
   }
   function closeDialog(keepFocusIntent) {
     conflictShowing = false;
+    var invoker = dialog.invoker;
     if (dialog.close) { dialog.close(); }
     dialog.removeAttribute("open");
     // Keep the intent through the pending render; it will focus the named action after acknowledgement.
     if (keepFocusIntent && focusIntent) {
-      var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
+      var item = itemForKey(focusIntent.key), target = invoker && document.contains(invoker) ? invoker : item && actionIn(item, focusIntent.action);
       if (target && document.activeElement !== target) { target.focus({preventScroll: true}); }
-      else if (!target) { focusStatusMessage("This item is no longer on the checklist. Refresh and try again."); }
+      else if (!target) {
+        focusStatusMessage("This item is no longer on the checklist. Refresh and try again.");
+        focusIntent = null;
+      }
+      dialog.invoker = null;
       return;
     }
     else { restoreFocusIntent(); focusIntent = null; }
+    dialog.invoker = null;
     if (deferredListRender) { deferredListRender = false; render(); }
   }
   function nextConflict() {
