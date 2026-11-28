@@ -862,7 +862,7 @@
     var pending = [item];
     while (pending.length) {
       var node = pending.shift();
-      if (String(node.className || "").split(/\\s+/).indexOf("item-controls") !== -1) { return node; }
+      if (String(node.className || "").split(/\s+/).indexOf("item-controls") !== -1) { return node; }
       Array.prototype.push.apply(pending, node.children || []);
     }
     return null;
