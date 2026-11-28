@@ -414,7 +414,7 @@
     row = latestRow(row);
     if (!row) {
       closeOutcome(false);
-      $("outcome-error").textContent = "This item is no longer on the checklist. Refresh and try again.";
+      $("session-message").textContent = "This item is no longer on the checklist. Refresh and try again.";
       return;
     }
     closeOutcome(true); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
@@ -1467,3 +1467,4 @@
   connect();
   document.addEventListener("visibilitychange", function () { if (!document.hidden) { scheduleReload(0); } });
 })();
+
