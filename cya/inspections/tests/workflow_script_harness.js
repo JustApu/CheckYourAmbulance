@@ -14,7 +14,7 @@ class Element {
     this.parentNode = null; this._document = null;
   }
   set textContent(text) {
-    if (this._document && this._document.activeElement && this.contains(this._document.activeElement)) this._document.activeElement = null;
+    if (this._document && this._document.activeElement && this._document.activeElement !== this && this.contains(this._document.activeElement)) this._document.activeElement = null;
     for (const child of this.children) child.parentNode = null;
     this._text = text; this.children = [];
   }
@@ -23,6 +23,17 @@ class Element {
   getAttribute(name) { return this[name] === undefined ? null : String(this[name]); }
   removeAttribute(name) { if (name === "open") this.open = false; else delete this[name]; }
   addEventListener(name, fn) { this.listeners[name] = fn; }
+  cloneNode(deep) {
+    const copy = new Element(this.id, this.type);
+    copy.value = this.value; copy.defaultValue = this.defaultValue; copy.className = this.className;
+    copy.disabled = this.disabled; copy.checked = this.checked; copy._text = this._text;
+    copy.dataset = {...this.dataset};
+    for (const name of ["aria-label", "aria-hidden", "aria-disabled", "role"]) {
+      if (this[name] !== undefined) copy[name] = this[name];
+    }
+    if (deep) for (const child of this.children) copy.appendChild(child.cloneNode(true));
+    return copy;
+  }
   fire(name) {
     if (name === "click" && this.type === "button" && this._document && !this.disabled) this._document.activeElement = this;
     if (this.listeners[name]) this.listeners[name]({preventDefault() {}});
@@ -195,8 +206,8 @@ function generic(kind) {
     assert(run.elements.items.children.some(child => child.textContent.includes("Updated synthetic other")),
       "a live render still refreshes other checklist items while the dialog is open");
     run.get("outcome-cancel").fire("click");
-    assert.notEqual(run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a"), invokingRow,
-      "closing the dialog reconciles the preserved invoker row");
+    assert.equal(run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a"), invokingRow,
+      "closing the dialog keeps the focused invoker row attached while reconciling it");
   }
   {
     const run = checklist();
@@ -226,7 +237,7 @@ function generic(kind) {
     assert.equal(run.document.activeElement, run.elements.items, "focus falls back to the checklist after the item is removed");
   }
   {
-    const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index}));
+    const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index, obligation_state: "DUE"}));
     run.context.testUI.setRows(rows); run.context.testUI.render();
     run.window.scrollY = 500; run.window.simulateListJump = true;
     const target = run.elements.items.children[5], pass = findAction(target, "pass"); pass.fire("click");
@@ -235,10 +246,13 @@ function generic(kind) {
     assert.equal(run.document.activeElement.getAttribute("aria-disabled"), "true", "the pending action is announced as unavailable");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 1, "activating a pending Pass action does not send a duplicate save");
-    response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    const focusedPass = run.document.activeElement;
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "pass-check", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
-    assert.equal(run.frames.length, 0, "focus moves directly to the acknowledged replacement action");
-    assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
+    assert.equal(run.frames.length, 0, "an acknowledged save needs no deferred focus move");
+    assert.equal(run.document.activeElement, focusedPass, "acknowledged render keeps the same focused action node attached");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Pass"),
+      "the focused Pass action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
     assert.equal(run.document.activeElement.dataset.action, "pass", "the follow-up live row refresh keeps the focused action connected");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
@@ -251,10 +265,12 @@ function generic(kind) {
     assert.equal(run.document.activeElement.dataset.action, "failed", "dialog submission keeps focus on the named Fail action while saving");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 2, "activating a pending Fail action does not send a duplicate save");
-    response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    const focusedFail = run.document.activeElement;
+    response(failed, 201, {status: "COMMITTED", result: {check_id: "fail-check", outcome: "FAILED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
-    assert.equal(run.frames.length, 0, "failed check focus transfers directly to the acknowledged action");
-    assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
+    assert.equal(run.frames.length, 0, "an acknowledged Fail needs no deferred focus move");
+    assert.equal(run.document.activeElement, focusedFail, "failed check acknowledgement keeps the same focused action node attached");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Fail"), "the focused Fail action's updated name includes the result");
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
     assert.equal(run.document.activeElement.dataset.action, "failed", "the follow-up live row refresh keeps the Fail action focused");
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
@@ -263,7 +279,7 @@ function generic(kind) {
   }
   {
     const run = checklist(), item = () => run.elements.items.children[0];
-    run.context.testUI.setRows([row]); run.context.testUI.render();
+    run.context.testUI.setRows([{...row, obligation_state: "DUE"}]); run.context.testUI.render();
     findAction(item(), "unable_to_inspect").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     newReport(run);
@@ -273,8 +289,11 @@ function generic(kind) {
     assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable submission keeps its named action focused while saving");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 1, "activating a pending Unable action does not send a duplicate save");
-    response(unable, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
-    assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable acknowledgement retains focus on its action");
+    const focusedUnable = run.document.activeElement;
+    response(unable, 201, {status: "COMMITTED", result: {check_id: "unable-check", outcome: "UNABLE_TO_INSPECT", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.document.activeElement, focusedUnable, "Unable acknowledgement keeps the same focused action node attached");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Unable to inspect"),
+      "the focused Unable action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
   }
   {
     // Issue #140 (owner decision): the button matching the current window's recorded result is
