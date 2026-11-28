@@ -1349,4 +1349,3 @@ function generic(kind) {
   }
   console.log("Offline workflow script regressions passed: checklist item reads (issue #278 B), checklist pushed rows (SPEC 8.3.0), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
-
