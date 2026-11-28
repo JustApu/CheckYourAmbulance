@@ -212,6 +212,20 @@ function generic(kind) {
     assert.equal(run.document.activeElement, null, "a later live render does not reuse Escape's cancelled focus intent");
   }
   {
+    const run = checklist();
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    findAction(run.elements.items.children[0], "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.context.testUI.setRows([]); run.context.testUI.render();
+    newReport(run);
+    run.get("outcome-form").fire("submit");
+    assert.equal(run.get("outcome-dialog").open, false, "submitting for a removed item closes the stale dialog");
+    assert.equal(run.get("session-message").textContent, "This item is no longer on the checklist. Refresh and try again.",
+      "the reason is announced outside the closed dialog");
+    assert.equal(run.posts().length, 0, "a removed item does not submit a check");
+    assert.equal(run.document.activeElement, run.elements.items, "focus falls back to the checklist after the item is removed");
+  }
+  {
     const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index}));
     run.context.testUI.setRows(rows); run.context.testUI.render();
     run.window.scrollY = 500; run.window.simulateListJump = true;
@@ -1335,3 +1349,4 @@ function generic(kind) {
   }
   console.log("Offline workflow script regressions passed: checklist item reads (issue #278 B), checklist pushed rows (SPEC 8.3.0), checklist live hints (own saves read once), checklist scroll/focus preservation, checklist bar progress and Next unchecked item, loading placeholders, split view, outcomes, kit scope, explicit match choice, reasons, exact retries, full conflict payloads, hidden rows, labels, permissions, single-flight forms and supervisor forms.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
