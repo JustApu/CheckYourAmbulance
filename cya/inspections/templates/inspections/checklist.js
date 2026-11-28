@@ -80,7 +80,6 @@
   }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
   var focusRestoreScheduled = false;
-  var savedActionAnnouncementTimer = null, savedActionAnnouncementGeneration = 0;
   function focusStatusMessage(message) {
     var status = $("session-message");
     if (!status) { return; }
@@ -169,25 +168,6 @@
   function say(code) { return MESSAGES[code] || ("Not accepted (" + code + ")."); }
   // The shell's Saved toast (issue #194); absent when the shell script is not on the page.
   function toast(text, options) { if (window.cyaShell && window.cyaShell.toast) { window.cyaShell.toast(text, options); } }
-  function announceSavedAction(row, entry) {
-    var action = entry.savedOutcome === "FAILED" ? "failed" : entry.savedOutcome === "UNABLE_TO_INSPECT" ? "unable_to_inspect" :
-      row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
-    var item = itemForKey(key(row)), target = item && actionIn(item, action), announcement = $("checklist-action-announcement");
-    if (!target || !announcement || document.activeElement !== target) { return; }
-    var name = target.getAttribute("aria-label") || target.textContent.trim();
-    var generation = ++savedActionAnnouncementGeneration;
-    if (savedActionAnnouncementTimer !== null) { clearTimeout(savedActionAnnouncementTimer); }
-    announcement.textContent = "";
-    // Let the shell's single Saved toast finish first; then announce the focused control's full
-    // updated name from a separate status region without moving focus or rereading the page.
-    savedActionAnnouncementTimer = setTimeout(function () {
-      if (generation !== savedActionAnnouncementGeneration || document.activeElement !== target ||
-          actionIn(itemForKey(key(row)), action) !== target) { return; }
-      announcement.textContent = name;
-      savedActionAnnouncementTimer = null;
-    }, 1500);
-  }
-
   // ---- sending ---------------------------------------------------------------------------
   // Outcome of one POST: {kind: "committed"|"conflict"|"rejected"|"unconfirmed", ...}.
   // Anything that is not a definite answer from the server is "unconfirmed": the write may or
@@ -326,7 +306,6 @@
       }
       if (answer.kind !== "conflict") { focusIntent = null; }
       render();
-      if (answer.kind === "committed") { announceSavedAction(row, entry); }
       announceHidden(row, entry);
     });
   }
@@ -435,15 +414,20 @@
       });
       $("outcome-matches").textContent = body.suggestions.length ? "Choose a matching existing report yourself, or describe a new one." : "No possible matches found. Describe a new problem.";
     }).catch(function () { if (generation === outcomeGeneration) { $("outcome-matches").textContent = "Possible matches could not be loaded. Refresh to choose an existing report, or explicitly report a new one."; } });
+    var invokerItem = itemForKey(key(row));
+    outcomeDialog.invoker = invokerItem && actionIn(invokerItem, outcome.toLowerCase());
+    if (!outcomeDialog.invoker) { outcomeDialog.invoker = document.activeElement; }
     if (typeof outcomeDialog.showModal === "function") { outcomeDialog.showModal(); } else { outcomeDialog.setAttribute("open", ""); }
   }
   function closeOutcome(keepFocusIntent) {
     outcomeGeneration += 1;
+    var invoker = outcomeDialog.invoker;
     if (outcomeDialog.close) { outcomeDialog.close(); }
     outcomeDialog.removeAttribute("open");
     if (keepFocusIntent && focusIntent) {
-      var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
-      if (target) { target.focus({preventScroll: true}); }
+      var item = itemForKey(focusIntent.key), target = invoker && document.contains(invoker) ? invoker : item && actionIn(item, focusIntent.action);
+      if (target && document.activeElement !== target) { target.focus({preventScroll: true}); }
+      else if (!target) { focusStatusMessage("This item is no longer on the checklist. Refresh and try again."); }
       return;
     }
     else {
