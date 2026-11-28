@@ -1409,7 +1409,7 @@ function generic(kind) {
     assert.ok(fresh.timers.length > 0 && fresh.requests.length === before, "a reload is scheduled");
     fresh.context.testUI.startCheck(open, null);
     response(fresh.posts().at(-1), 422, {status: "REJECTED", code: "KIT_MOVED_SINCE_PAPER"}); await tick();
-    assert.ok(fresh.context.testUI.getEntry({...open, item_id: "kit-content"}).text.includes("left the vehicle"));
+    assert.ok(fresh.context.testUI.getEntry(open).text.includes("left the vehicle"));
   }
   {
     // Paper mode: an earlier record of the batch means no second offer; area cards count what
