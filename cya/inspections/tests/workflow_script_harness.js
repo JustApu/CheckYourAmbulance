@@ -195,7 +195,7 @@ function environment(config, forms = []) {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function flushFrames(run) {
-  for (let frame = 0; frame < 20 && run.frames.length; frame++) {
+  for (let frame = 0; frame < 40 && run.frames.length; frame++) {
     const pending = run.frames.splice(0);
     for (const callback of pending) callback();
   }
@@ -204,19 +204,12 @@ function flushOneFrame(run) {
   const pending = run.frames.splice(0);
   for (const callback of pending) callback();
 }
-function assertFocusPathIsolated(run, target, message) {
+function assertFocusTreeRestored(run, target, message) {
   const root = run.document.body.children.find(child => child.contains(target));
   assert(root, message + ": target has a body-level ancestor");
   assert.equal(root.inert, false, message + ": the target's page region is available");
-  for (let node = target; node !== root; node = node.parentNode) {
-    for (const sibling of node.parentNode.children) {
-      if (sibling !== node) assert.equal(sibling.inert, true, message + ": sibling " + (sibling.id || sibling.type) + " remains inert");
-    }
-  }
   for (const sibling of run.document.body.children) {
-    if (sibling !== root && sibling !== run.get("outcome-dialog") && sibling !== run.get("conflict-dialog") && sibling.tagName !== "SCRIPT") {
-      assert.equal(sibling.inert, true, message + ": unrelated page region remains inert");
-    }
+    if (sibling.tagName !== "SCRIPT") assert.equal(sibling.inert, false, message + ": page region " + (sibling.id || sibling.type) + " is restored");
   }
 }
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
@@ -282,11 +275,13 @@ function generic(kind) {
     assert.equal(run.get("outcome-dialog").open, true, "Cancel keeps the dialog present through the synchronous focus return");
     assert.equal(run.document.activeElement, run.get("session-message"), "Cancel returns focus before the dialog closes");
     assert.equal(run.get("outcome-dialog").getAttribute("aria-modal"), null, "the dialog stops claiming modality before focus returns");
-    assertFocusPathIsolated(run, run.get("session-message"), "Cancel focus return");
+    assertFocusTreeRestored(run, run.get("session-message"), "Cancel focus return");
     flushOneFrame(run);
-    assert.equal(run.get("outcome-dialog").open, false, "Cancel closes the dialog on the next frame");
-    assertFocusPathIsolated(run, run.get("session-message"), "post-close focus retention");
+    assert.equal(run.get("outcome-dialog").open, true, "Cancel keeps the dialog in the accessibility tree during the settling delay");
+    assert(String(run.get("outcome-dialog").className).includes("cya-dialog-closing"), "Cancel hides the dialog visually without removing it from the accessibility tree");
+    assertFocusTreeRestored(run, run.get("session-message"), "focus retention during close delay");
     flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Cancel closes the dialog after the screen-reader settling delay");
     assert.equal(run.document.activeElement, run.get("session-message"), "Cancel focuses the visible explanation if the item disappeared");
     assert(run.document.body.children.filter(child => child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => !child.inert),
       "closing the outcome dialog restores page sibling inertness");
@@ -368,11 +363,12 @@ function generic(kind) {
     newReport(run); run.get("outcome-form").fire("submit");
     assert.equal(run.get("outcome-dialog").open, true, "Fail keeps the dialog present through the focus return");
     assert.equal(run.document.activeElement.dataset.action, "failed", "Fail returns focus before the dialog closes");
-    assertFocusPathIsolated(run, run.document.activeElement, "Fail focus return");
+    assertFocusTreeRestored(run, run.document.activeElement, "Fail focus return");
     flushOneFrame(run);
-    assert.equal(run.get("outcome-dialog").open, false, "Fail closes on the first animation frame");
-    assertFocusPathIsolated(run, run.document.activeElement, "post-close Fail focus retention");
+    assert.equal(run.get("outcome-dialog").open, true, "Fail keeps the dialog in the tree while focus settles");
+    assertFocusTreeRestored(run, run.document.activeElement, "Fail focus retention during close delay");
     flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Fail closes after the screen-reader settling delay");
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
     assert.equal(run.document.activeElement.dataset.action, "failed", "dialog submission keeps focus on the named Fail action while saving");
@@ -407,11 +403,12 @@ function generic(kind) {
     run.get("outcome-form").fire("submit");
     assert.equal(run.get("outcome-dialog").open, true, "Unable keeps the dialog present through the focus return");
     assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable returns focus before the dialog closes");
-    assertFocusPathIsolated(run, run.document.activeElement, "Unable focus return");
+    assertFocusTreeRestored(run, run.document.activeElement, "Unable focus return");
     flushOneFrame(run);
-    assert.equal(run.get("outcome-dialog").open, false, "Unable closes on the first animation frame");
-    assertFocusPathIsolated(run, run.document.activeElement, "post-close Unable focus retention");
+    assert.equal(run.get("outcome-dialog").open, true, "Unable keeps the dialog in the tree while focus settles");
+    assertFocusTreeRestored(run, run.document.activeElement, "Unable focus retention during close delay");
     flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Unable closes after the screen-reader settling delay");
     const unable = run.posts()[0]; assert.equal(unable.body.outcome, "UNABLE_TO_INSPECT");
     assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable submission keeps its named action focused while saving");
     assert.equal(run.focusHistory.at(-1).to, "unable_to_inspect",

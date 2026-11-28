@@ -87,13 +87,13 @@
     status.tabIndex = -1;
     if (document.activeElement !== status) { status.focus({preventScroll: true}); }
   }
-  var inertPageChildren = [], pendingFocusRestore = null;
+  var inertPageChildren = [], pendingDialogClose = null;
   function restorePendingFocusState() {
-    var pending = pendingFocusRestore;
+    var pending = pendingDialogClose;
     if (!pending) { return; }
-    pendingFocusRestore = null;
-    pending.restore();
-    if (pending.afterClose) { pending.afterClose(); }
+    pendingDialogClose = null;
+    if (pending.cancel) { pending.cancel(); }
+    pending.finish();
   }
   function focusableIn(dialog) {
     var candidates = Array.prototype.slice.call(dialog.querySelectorAll("a[href], button, input, select, textarea, [tabindex]"));
@@ -137,6 +137,7 @@
   function openFocusDialog(dialog) {
     restorePendingFocusState();
     dialog.closeScheduled = false;
+    dialog.className = String(dialog.className || "").replace(/\s*cya-dialog-closing\b/g, "");
     dialog.hidden = false;
     dialog.setAttribute("aria-modal", "true");
     if (typeof dialog.show === "function") { dialog.show(); }
@@ -153,63 +154,36 @@
   function closeFocusDialog(dialog, target, afterClose) {
     if (dialog.closeScheduled) { return; }
     dialog.closeScheduled = true;
-    var canRestoreTarget = target && document.contains(target), restoreStates = inertPageChildren.slice(), focusRoot = null;
+    var canRestoreTarget = target && document.contains(target), restoreStates = inertPageChildren.slice();
     inertPageChildren = [];
-    function setTemporaryInert(node, value) {
-      var saved = restoreStates.some(function (entry) { return entry.node === node; });
-      if (!saved) { restoreStates.push({node: node, wasInert: node.inert}); }
-      node.inert = value;
-    }
-    if (canRestoreTarget) {
-      Array.prototype.some.call(document.body.children, function (child) {
-        if (child !== dialog && child.contains(target)) { focusRoot = child; child.inert = false; return true; }
-        return false;
-      });
-      if (focusRoot) {
-        var path = [], node = target;
-        while (node && node !== focusRoot) { path.unshift(node); node = node.parentNode; }
-        var parent = focusRoot;
-        path.forEach(function (pathNode) {
-          Array.prototype.forEach.call(parent.children, function (sibling) {
-            if (sibling !== pathNode) { setTemporaryInert(sibling, true); }
-          });
-          pathNode.inert = false;
-          parent = pathNode;
-        });
-      }
-    }
-    if (!focusRoot) {
-      restoreStates.forEach(function (entry) { entry.node.inert = entry.wasInert; });
-      restoreStates = [];
-    }
+    // Restore the complete page tree before moving focus. Keeping the target's list ancestry
+    // stable avoids a second NVDA focus report when inert siblings are exposed again.
+    restoreStates.forEach(function (entry) { entry.node.inert = entry.wasInert; });
     dialog.removeAttribute("aria-modal");
     if (canRestoreTarget) { target.focus({preventScroll: true}); }
     function finishClose() {
+      if (pendingDialogClose && pendingDialogClose.dialog === dialog) { pendingDialogClose = null; }
       if (typeof dialog.close === "function") { dialog.close(); }
       else { dialog.removeAttribute("open"); }
       dialog.hidden = true;
-      function restoreBackground() {
-        restoreStates.forEach(function (entry) { entry.node.inert = entry.wasInert; });
-        dialog.closeScheduled = false;
-      }
-      function restoreAfterFocusSettles() {
-        var frames = 8;
-        var pending = {restore: restoreBackground, afterClose: afterClose};
-        pendingFocusRestore = pending;
-        function waitFrame() {
-          if (pendingFocusRestore !== pending) { return; }
-          frames -= 1;
-          if (frames <= 0) { restorePendingFocusState(); }
-          else if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(waitFrame); }
-          else { setTimeout(waitFrame, 16); }
-        }
-        waitFrame();
-      }
-      if (restoreStates.length) { restoreAfterFocusSettles(); }
-      else { restoreBackground(); if (afterClose) { afterClose(); } }
+      dialog.className = String(dialog.className || "").replace(/\s*cya-dialog-closing\b/g, "");
+      dialog.closeScheduled = false;
+      if (afterClose) { afterClose(); }
     }
-    if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(finishClose); }
-    else { setTimeout(finishClose, 0); }
+    dialog.className = (String(dialog.className || "").replace(/\s*cya-dialog-closing\b/g, "") + " cya-dialog-closing").trim();
+    // Keep the still-open dialog in the accessibility tree long enough for NVDA to process
+    // focus on the restored action, while removing its visual overlay and pointer target.
+    var pending = {dialog: dialog, finish: finishClose, cancel: function () { pendingDialogClose = null; }};
+    pendingDialogClose = pending;
+    var frames = 30;
+    function waitForScreenReader() {
+      if (pendingDialogClose !== pending) { return; }
+      frames -= 1;
+      if (frames <= 0) { finishClose(); }
+      else if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(waitForScreenReader); }
+      else { setTimeout(waitForScreenReader, 16); }
+    }
+    waitForScreenReader();
   }
   function restoreFocusIntent(afterRender) {
     if (!focusIntent) { return; }

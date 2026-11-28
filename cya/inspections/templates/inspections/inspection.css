@@ -103,6 +103,7 @@
 dialog { max-width: 32rem; width: calc(100% - 2rem); color: var(--fg); background: var(--bg); border: 3px solid var(--line); border-radius: .75rem; }
 dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .focus-managed-dialog[open] { box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .6); }
+.focus-managed-dialog.cya-dialog-closing[open] { opacity: 0; pointer-events: none; box-shadow: none; }
 .dialog-buttons { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; }
 
 .workflow-write { margin: .75rem 0; }
