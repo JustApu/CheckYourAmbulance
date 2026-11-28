@@ -82,6 +82,7 @@
   {% block page_heading %}<h1>{{ title }}</h1>{% endblock %}
   {% block content %}{{ body }}{% endblock %}
 </main>
+{% block after_main %}{% endblock %}
 <script>{% include "shell/shell.js" %}</script>
 {% block scripts %}{% endblock %}
 </body>

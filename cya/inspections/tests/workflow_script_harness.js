@@ -6,42 +6,90 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const root = path.resolve(__dirname, "../../..");
+function focusName(node) { return !node ? "body" : node.id || (node.dataset && node.dataset.action) || node.type || "element"; }
 class Element {
   constructor(id = "", type = "") {
     this.id = id; this.type = type; this.value = ""; this.defaultValue = "";
+    this.tagName = type === "text" || type === "radio" || type === "hidden" ? "INPUT" : type.toUpperCase();
     this.children = []; this.listeners = {}; this.dataset = {}; this.fields = {}; this.queries = {};
-    this.hidden = false; this.disabled = false; this.checked = false; this._text = "";
+    this.hidden = false; this.inert = false; this.disabled = false; this.checked = false; this._text = "";
+    this.tabIndex = type === "dialog" ? -1 : 0;
     this.parentNode = null; this._document = null;
   }
   set textContent(text) {
-    if (this._document && this._document.activeElement && this.contains(this._document.activeElement)) this._document.activeElement = null;
+    if (this._document && this._document.activeElement && this._document.activeElement !== this && this.contains(this._document.activeElement)) {
+      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: "body"});
+      this._document.activeElement = null;
+    }
     for (const child of this.children) child.parentNode = null;
     this._text = text; this.children = [];
   }
   get textContent() { return this._text || this.children.map(e => e.textContent).join(""); }
-  setAttribute(name, value) { this[name] = value; }
+  setAttribute(name, value) {
+    this[name] = value;
+    if (name === "inert") this.inert = true;
+    if (name === "hidden") this.hidden = true;
+    if (name === "tabindex") this.tabIndex = Number(value);
+  }
   getAttribute(name) { return this[name] === undefined ? null : String(this[name]); }
-  removeAttribute(name) { if (name === "open") this.open = false; else delete this[name]; }
+  removeAttribute(name) {
+    if (name === "open") this.open = false;
+    else if (name === "inert") { this.inert = false; delete this[name]; }
+    else if (name === "hidden") { this.hidden = false; delete this[name]; }
+    else delete this[name];
+  }
   addEventListener(name, fn) { this.listeners[name] = fn; }
-  fire(name) {
-    if (name === "click" && this.type === "button" && this._document && !this.disabled) this._document.activeElement = this;
-    if (this.listeners[name]) this.listeners[name]({preventDefault() {}});
+  cloneNode(deep) {
+    const copy = new Element(this.id, this.type);
+    copy.value = this.value; copy.defaultValue = this.defaultValue; copy.className = this.className;
+    copy.disabled = this.disabled; copy.checked = this.checked; copy._text = this._text;
+    copy.dataset = {...this.dataset};
+    for (const name of ["aria-label", "aria-hidden", "aria-disabled", "role"]) {
+      if (this[name] !== undefined) copy[name] = this[name];
+    }
+    if (deep) for (const child of this.children) copy.appendChild(child.cloneNode(true));
+    return copy;
+  }
+  fire(name, properties = {}) {
+    if (name === "click" && this.type === "button" && this._document && !this.disabled) this.focus();
+    if (this.listeners[name]) {
+      const event = Object.assign({defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {}}, properties);
+      this.listeners[name](event);
+      return event;
+    }
+    return null;
   }
   appendChild(node) { node.parentNode = this; node._document = this._document; this.children.push(node); return node; }
+  insertBefore(node, reference) {
+    const index = this.children.indexOf(reference);
+    if (index < 0) { return this.appendChild(node); }
+    node.parentNode = this; node._document = this._document;
+    this.children.splice(index, 0, node); return node;
+  }
   removeChild(node) {
     this.children.splice(this.children.indexOf(node), 1);
-    if (this._document.activeElement && node.contains(this._document.activeElement)) this._document.activeElement = null;
+    if (this._document.activeElement && node.contains(this._document.activeElement)) {
+      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: "body"});
+      this._document.activeElement = null;
+    }
     node.parentNode = null;
     if (this.id === "items" && this._document.defaultView.simulateListJump) { this._document.defaultView.scrollY = 0; }
   }
   get firstChild() { return this.children[0]; }
   get selectedOptions() { return this.children.filter(node => node.selected); }
   contains(node) { for (let current = node; current; current = current.parentNode) { if (current === this) return true; } return false; }
-  showModal() { this.open = true; if (this._document) this._document.activeElement = this; }
-  close() { this.open = false; if (this._document) this._document.activeElement = null; }
+  show() { this.open = true; }
+  close() {
+    this.open = false;
+  }
   focus(options) {
     this.focusOptions = options;
-    if (!this.disabled && this._document && this._document.contains(this)) this._document.activeElement = this;
+    let blocked = false;
+    for (let parent = this; parent; parent = parent.parentNode) if (parent.inert) blocked = true;
+    if (!this.disabled && !blocked && this._document && this._document.contains(this) && this._document.activeElement !== this) {
+      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: focusName(this)});
+      this._document.activeElement = this;
+    }
   }
   getBoundingClientRect() {
     if (this.type !== "li" || !this.parentNode || this.parentNode.id !== "items") return {top: 0, bottom: 0};
@@ -58,15 +106,30 @@ class Element {
     if (selector === "input, select, textarea, button") return [...Object.values(this.fields), this.querySelector('button[type="submit"]')];
     if (selector === '[name="system_ids"]:checked') return this.systems || [];
     if (selector === '[name="items"]:checked') return (this.items || []).filter(node => node.checked);
+    if (selector === "a[href], button, input, select, textarea, [tabindex]") {
+      const controls = [];
+      const visit = node => {
+        for (const child of node.children) {
+          if (["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(child.tagName) || child.getAttribute("tabindex") !== null) controls.push(child);
+          visit(child);
+        }
+      };
+      visit(this);
+      return controls;
+    }
     return [];
   }
 }
 function field(form, name, value = "", type = "text") {
   const node = new Element(name, type); node.value = value; node.defaultValue = value;
-  form.fields[name] = node; return node;
+  form.fields[name] = node; form.appendChild(node); return node;
 }
 function environment(config, forms = []) {
   const elements = {}, requests = [], sockets = [], timers = [], frames = [];
+  const body = new Element("body", "body");
+  const shellRoots = [new Element("skip-link", "a"), new Element("site-header", "header"), new Element("app-nav", "nav"),
+    new Element("connection-banner", "div"), new Element("main", "main")];
+  shellRoots.forEach(node => body.appendChild(node));
   const window = {scrollY: 0, innerHeight: 200, simulateListJump: false,
     requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
     CyaTimezones: {
@@ -78,22 +141,33 @@ function environment(config, forms = []) {
     scrollBy(_x, y) { this.scrollY += y; }};
   const document = {
     defaultView: window,
+    body,
     activeElement: null,
+    focusHistory: [],
     getElementById(id) {
       if (((config.state && config.state !== "OPEN") || config.verification_for_deficiency_id) && /^(odometer-form|odo-)/.test(id)) return null;
       if (!elements[id]) {
-        elements[id] = new Element(id);
+        const dialogRoot = id === "conflict-dialog" || id === "outcome-dialog";
+        const dialogChild = /^(conflict-(title|text|cancel|proceed)|outcome-(title|form|reason-label|existing|matches|create-fields|error|cancel))$/.test(id);
+        elements[id] = new Element(id, dialogRoot ? "dialog" : dialogChild && /-(cancel|proceed)$/.test(id) ? "button" : dialogChild && id === "outcome-form" ? "form" : "");
+        elements[id]._document = document;
         if (id === "outcome-form") {
-          for (const name of ["outcome_explanation", "category_id", "summary", "description"]) field(elements[id], name);
+          field(elements[id], "outcome_explanation", "", "textarea");
+          field(elements[id], "category_id", "", "select");
+          field(elements[id], "summary"); field(elements[id], "description");
           field(elements[id], "severity", "HIGH", "radio");
+          const submit = new Element("outcome-submit", "button"); submit.type = "submit"; elements[id].appendChild(submit);
+          elements[id].queries['button[type="submit"]'] = submit;
         }
+        const parent = dialogRoot ? body : dialogChild ?
+          (id.startsWith("conflict-") ? document.getElementById("conflict-dialog") :
+            id === "outcome-title" || id === "outcome-form" ? document.getElementById("outcome-dialog") : document.getElementById("outcome-form")) : shellRoots[4];
+        if (parent && parent !== elements[id] && !parent.children.includes(elements[id])) parent.appendChild(elements[id]);
       }
       elements[id]._document = document; return elements[id];
     },
     contains(node) {
-      const roots = Object.values(elements);
-      for (let current = node; current; current = current.parentNode) { if (roots.includes(current)) return true; }
-      return false;
+      return body.contains(node);
     },
     querySelector() { return {value: "synthetic-csrf"}; },
     querySelectorAll(selector) { return selector === ".workflow-write" ? forms : []; },
@@ -101,6 +175,7 @@ function environment(config, forms = []) {
     createTextNode(text) { const node = new Element(); node._document = document; node.textContent = text; return node; },
     addEventListener() {},
   };
+  body._document = document; shellRoots.forEach(node => { node._document = document; });
   const context = {
     document, window, crypto: crypto.webcrypto, Uint8Array,
     location: {protocol: "https:", host: "example.invalid"},
@@ -113,12 +188,30 @@ function environment(config, forms = []) {
     },
   };
   vm.createContext(context);
-  return {context, document, window, elements, requests, sockets, timers, frames,
+  return {context, document, window, elements, requests, sockets, timers, frames, focusHistory: document.focusHistory,
     get: id => document.getElementById(id), posts: () => requests.filter(r => r.body),
     run(file, transform = source => source) { vm.runInContext(transform(fs.readFileSync(path.join(root, file), "utf8")), context); },
   };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
+function flushFrames(run) {
+  for (let frame = 0; frame < 40 && run.frames.length; frame++) {
+    const pending = run.frames.splice(0);
+    for (const callback of pending) callback();
+  }
+}
+function flushOneFrame(run) {
+  const pending = run.frames.splice(0);
+  for (const callback of pending) callback();
+}
+function assertFocusTreeRestored(run, target, message) {
+  const root = run.document.body.children.find(child => child.contains(target));
+  assert(root, message + ": target has a body-level ancestor");
+  assert.equal(root.inert, false, message + ": the target's page region is available");
+  for (const sibling of run.document.body.children) {
+    if (sibling.tagName !== "SCRIPT") assert.equal(sibling.inert, false, message + ": page region " + (sibling.id || sibling.type) + " is restored");
+  }
+}
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
   const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
@@ -127,7 +220,7 @@ function checklist(state = "OPEN", extra = {}) {
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   if (config.test_wide) run.window.matchMedia = () => ({matches: true, addEventListener() {}});
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},groups(){return groupProgressRows;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;loadedOnce=true;},setGroups(value){groupProgressRows=value;},groups(){return groupProgressRows;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   // Verification regressions exercise item actions, including the no-session retry path.
   if (config.verification_for_deficiency_id) run.get("layout-flat").fire("click");
   return run;
@@ -169,13 +262,48 @@ function generic(kind) {
     run.context.testUI.setRows([row]); run.context.testUI.render();
     findAction(run.elements.items.children[0], "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    assert.equal(run.document.activeElement, run.get("outcome-form").fields.outcome_explanation, "the outcome dialog initially focuses its first control");
+    assert.equal(run.get("outcome-dialog").getAttribute("aria-modal"), "true", "the open dialog is announced as modal");
+    assert(run.document.body.children.filter(child => child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
+      "the open outcome dialog makes all page siblings inert");
+    const firstTab = run.get("outcome-dialog").fire("keydown", {key: "Tab", shiftKey: true});
+    assert.equal(firstTab.defaultPrevented, true, "Shift+Tab wraps within the dialog");
+    assert.equal(run.document.activeElement, run.get("outcome-cancel"), "Shift+Tab from the first field wraps to the last control");
     run.context.testUI.setRows([]); run.context.testUI.render();
-    assert.equal(run.document.activeElement, run.get("outcome-dialog"), "a live update keeps focus in the dialog when the item disappears");
+    assert.equal(run.document.activeElement, run.get("outcome-cancel"), "a live update keeps focus in the dialog when the item disappears");
     run.get("outcome-cancel").fire("click");
-    assert.equal(run.document.activeElement, run.elements.items, "Cancel falls back to the checklist if the item disappeared");
+    assert.equal(run.get("outcome-dialog").open, true, "Cancel keeps the dialog present through the synchronous focus return");
+    assert.equal(run.document.activeElement, run.get("session-message"), "Cancel returns focus before the dialog closes");
+    assert.equal(run.get("outcome-dialog").getAttribute("aria-modal"), null, "the dialog stops claiming modality before focus returns");
+    assertFocusTreeRestored(run, run.get("session-message"), "Cancel focus return");
+    flushOneFrame(run);
+    assert.equal(run.get("outcome-dialog").open, true, "Cancel keeps the dialog in the accessibility tree during the settling delay");
+    assert(String(run.get("outcome-dialog").className).includes("cya-dialog-closing"), "Cancel hides the dialog visually without removing it from the accessibility tree");
+    assertFocusTreeRestored(run, run.get("session-message"), "focus retention during close delay");
+    flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Cancel closes the dialog after the screen-reader settling delay");
+    assert.equal(run.document.activeElement, run.get("session-message"), "Cancel focuses the visible explanation if the item disappeared");
+    assert(run.document.body.children.filter(child => child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => !child.inert),
+      "closing the outcome dialog restores page sibling inertness");
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse the cancelled focus intent");
+  }
+  {
+    const run = checklist(), other = {...row, item_id: "other-item", item_label: "Synthetic other"};
+    run.context.testUI.setRows([row, other]); run.context.testUI.render();
+    const invokingRow = run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a");
+    findAction(invokingRow, "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.context.testUI.setRows([row, {...other, item_label: "Updated synthetic other"}]); run.context.testUI.render();
+    assert.equal(run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a"), invokingRow,
+      "a live render keeps the existing item's dialog invoker attached");
+    assert(run.elements.items.children.some(child => child.textContent.includes("Updated synthetic other")),
+      "a live render still refreshes other checklist items while the dialog is open");
+    run.get("outcome-cancel").fire("click");
+    flushFrames(run);
+    assert.equal(run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a"), invokingRow,
+      "closing the dialog keeps the focused invoker row attached while reconciling it");
   }
   {
     const run = checklist();
@@ -183,52 +311,136 @@ function generic(kind) {
     findAction(run.elements.items.children[0], "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     run.context.testUI.setRows([]); run.context.testUI.render();
-    run.get("outcome-dialog").fire("cancel");
+    const escape = run.get("outcome-dialog").fire("keydown", {key: "Escape"});
+    assert.equal(escape.defaultPrevented, true, "Escape is handled by the dialog's managed close path");
+    flushFrames(run);
     assert.equal(run.get("outcome-dialog").open, false, "Escape closes the outcome dialog through its cancel handler");
-    assert.equal(run.document.activeElement, run.elements.items, "Escape falls back to the checklist if the item disappeared");
+    assert.equal(run.document.activeElement, run.get("session-message"), "Escape focuses the visible explanation if the item disappeared");
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse Escape's cancelled focus intent");
   }
   {
-    const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index}));
+    const run = checklist();
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    findAction(run.elements.items.children[0], "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.context.testUI.setRows([]); run.context.testUI.render();
+    newReport(run);
+    run.get("outcome-form").fire("submit"); flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "submitting for a removed item closes the stale dialog");
+    assert.equal(run.get("session-message").textContent, "This item is no longer on the checklist. Refresh and try again.",
+      "the reason is announced outside the closed dialog");
+    assert.equal(run.posts().length, 0, "a removed item does not submit a check");
+    assert.equal(run.document.activeElement, run.get("session-message"), "focus moves to the visible explanation after the item is removed");
+  }
+  {
+    const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index, obligation_state: "DUE"}));
     run.context.testUI.setRows(rows); run.context.testUI.render();
     run.window.scrollY = 500; run.window.simulateListJump = true;
     const target = run.elements.items.children[5], pass = findAction(target, "pass"); pass.fire("click");
     assert.equal(run.window.scrollY, 500, "pending render keeps the active checklist item in place");
-    assert.equal(run.document.activeElement.type, "li", "pending render moves focus to the item while its action is disabled");
-    assert.equal(run.document.activeElement.dataset.itemKey, "item-5|kit-a");
-    response(run.posts()[0], 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.document.activeElement.dataset.action, "pass", "pending save keeps focus on the same named action");
+    assert.equal(run.document.activeElement.getAttribute("aria-disabled"), null, "pending state does not announce the focused action as unavailable");
+    run.document.activeElement.fire("click");
+    assert.equal(run.posts().length, 1, "activating a pending Pass action does not send a duplicate save");
+    const focusedPass = run.document.activeElement;
+    const focusChangesBeforePassAck = run.focusHistory.length;
+    response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "pass-check", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
-    assert.equal(run.frames.length, 1, "focus restoration waits until the replacement button is rendered");
-    run.frames.splice(0).forEach(callback => callback(0));
-    assert.equal(run.document.activeElement.dataset.action, "pass", "acknowledged render restores the same action focus");
+    assert.equal(run.frames.length, 0, "an acknowledged save needs no deferred focus move");
+    assert.equal(run.document.activeElement, focusedPass, "acknowledged render keeps the same focused action node attached");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Pass"),
+      "the focused Pass action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
+    assert.equal(run.focusHistory.length, focusChangesBeforePassAck, "Pass acknowledgement does not move focus");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Pass for Synthetic item 5 (Airway response kit A).", announce: true});
+    run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
+    assert.equal(run.document.activeElement.dataset.action, "pass", "the follow-up live row refresh keeps the focused action connected");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
     response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
-    assert.equal(run.document.activeElement, run.get("outcome-dialog"), "a live rerender keeps focus inside the open deficiency dialog");
+    assert.equal(run.document.activeElement, run.get("outcome-form").fields.outcome_explanation, "a live rerender keeps focus inside the open deficiency dialog");
     newReport(run); run.get("outcome-form").fire("submit");
+    assert.equal(run.get("outcome-dialog").open, true, "Fail keeps the dialog present through the focus return");
+    assert.equal(run.document.activeElement.dataset.action, "failed", "Fail returns focus before the dialog closes");
+    assertFocusTreeRestored(run, run.document.activeElement, "Fail focus return");
+    flushOneFrame(run);
+    assert.equal(run.get("outcome-dialog").open, true, "Fail keeps the dialog in the tree while focus settles");
+    assertFocusTreeRestored(run, run.document.activeElement, "Fail focus retention during close delay");
+    flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Fail closes after the screen-reader settling delay");
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
-    assert.equal(run.document.activeElement.type, "li", "deficiency submission moves focus to the failed item while its action is disabled");
-    response(failed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.document.activeElement.dataset.action, "failed", "dialog submission keeps focus on the named Fail action while saving");
+    assert.equal(run.focusHistory.at(-1).to, "failed",
+      "the outcome dialog returns focus directly to its original Fail action");
+    run.document.activeElement.fire("click");
+    assert.equal(run.posts().length, 2, "activating a pending Fail action does not send a duplicate save");
+    const focusedFail = run.document.activeElement;
+    const focusChangesBeforeFailAck = run.focusHistory.length;
+    response(failed, 201, {status: "COMMITTED", result: {check_id: "fail-check", outcome: "FAILED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
-    assert.equal(run.frames.length, 1, "failed check focus waits until the replacement button is rendered");
-    run.frames.splice(0).forEach(callback => callback(0));
-    assert.equal(run.document.activeElement.dataset.action, "failed", "failed check acknowledgement restores its action focus");
+    assert.equal(run.frames.length, 0, "an acknowledged Fail needs no deferred focus move");
+    assert.equal(run.document.activeElement, focusedFail, "failed check acknowledgement keeps the same focused action node attached");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Fail"), "the focused Fail action's updated name includes the result");
+    assert.equal(run.focusHistory.length, focusChangesBeforeFailAck, "Fail acknowledgement does not move focus");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Fail for Synthetic item 6 (Airway response kit A).", announce: true});
+    assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li"].includes(change.to)),
+      "Pass and Fail never park focus on the list, a row, or the document");
+    run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
+    assert.equal(run.document.activeElement.dataset.action, "failed", "the follow-up live row refresh keeps the Fail action focused");
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
-    assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
+    assert.equal(run.document.activeElement, run.get("session-message"), "if a live update removes the active row, focus moves to the status message");
     assert.equal(run.elements.items.children[4].getBoundingClientRect().top, 100, "removed active row keeps the nearest visible row in place");
+  }
+  {
+    const run = checklist(), item = () => run.elements.items.children[0];
+    run.context.testUI.setRows([{...row, obligation_state: "DUE", due_at: "2026-06-01T06:00:00Z"}]); run.context.testUI.render();
+    findAction(item(), "unable_to_inspect").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run);
+    run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
+    run.get("outcome-form").fire("submit");
+    assert.equal(run.get("outcome-dialog").open, true, "Unable keeps the dialog present through the focus return");
+    assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable returns focus before the dialog closes");
+    assertFocusTreeRestored(run, run.document.activeElement, "Unable focus return");
+    flushOneFrame(run);
+    assert.equal(run.get("outcome-dialog").open, true, "Unable keeps the dialog in the tree while focus settles");
+    assertFocusTreeRestored(run, run.document.activeElement, "Unable focus retention during close delay");
+    flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Unable closes after the screen-reader settling delay");
+    const unable = run.posts()[0]; assert.equal(unable.body.outcome, "UNABLE_TO_INSPECT");
+    assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable submission keeps its named action focused while saving");
+    assert.equal(run.focusHistory.at(-1).to, "unable_to_inspect",
+      "the outcome dialog returns focus directly to its original Unable action");
+    run.document.activeElement.fire("click");
+    assert.equal(run.posts().length, 1, "activating a pending Unable action does not send a duplicate save");
+    const focusedUnable = run.document.activeElement;
+    const focusChangesBeforeUnableAck = run.focusHistory.length;
+    response(unable, 201, {status: "COMMITTED", result: {check_id: "unable-check", outcome: "UNABLE_TO_INSPECT", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.document.activeElement, focusedUnable, "Unable acknowledgement keeps the same focused action node attached");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Unable to inspect"),
+      "the focused Unable action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
+    assert.equal(run.focusHistory.length, focusChangesBeforeUnableAck, "Unable acknowledgement does not move focus");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Unable to inspect for Portable suction unit (Airway response kit A).", announce: true});
+    run.context.testUI.setRows([{...row, due_at: "2026-06-01T06:00:00Z", latest_check_id: "unable-check", latest_check_outcome: "UNABLE_TO_INSPECT",
+      latest_check_at: "2026-06-01T00:00:00Z", obligation_state: "DUE"}]);
+    run.context.testUI.render();
+    assert.equal(run.document.activeElement, focusedUnable, "a live row update keeps focus on the Unable action");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Unable to inspect"),
+      "the Unable name remains current once the live row reports the saved check");
+    assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li"].includes(change.to)),
+      "Unable never parks focus on the list, a row, or the document");
   }
   {
     // Issue #140 (owner decision): the button matching the current window's recorded result is
     // marked with a check mark and named as recorded; issue 87: a saved Fail is never shown as Pass.
-    const run = checklist(), open = {...row, obligation_state: "DUE"}, item = () => run.elements.items.children[0];
+    const run = checklist(), open = {...row, obligation_state: "DUE", due_at: "2026-06-01T06:00:00Z"}, item = () => run.elements.items.children[0];
     run.context.testUI.setRows([open]); run.context.testUI.render();
     assert.deepEqual(marked(item()), [], "nothing is marked while the window has no result");
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     const posted = run.posts()[0];
     assert.equal(posted.body.outcome, "FAILED"); assert.equal(posted.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(findClass(item(), "save-state").textContent, "⌛Saving…", "pending is said in words, not as a result");
@@ -270,7 +482,7 @@ function generic(kind) {
     assert.deepEqual(marked(item()), ["pass"], "a window satisfied by Pass marks Pass");
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "FAILED", server_recorded_at: "2026-06-01T05:40:00Z"}}); await tick();
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
     assert.deepEqual(marked(item()), ["failed"], "immediately after the acknowledged Fail, Fail (not Pass) is marked");
@@ -443,7 +655,7 @@ function generic(kind) {
     run.context.testUI.setRows([{...row, obligation_state: "DUE"}]); run.context.testUI.render();
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     if (outcome === "unconfirmed") run.posts()[0].reject(new Error("synthetic lost response"));
     else response(run.posts()[0], 400, {status: "REJECTED", code: "INVALID_OUTCOME"});
     await tick();
@@ -462,13 +674,14 @@ function generic(kind) {
     assert.equal(run.get("outcome-existing").value, ""); // a match never selects itself
     assert(run.get("outcome-existing").children[1].textContent.includes("<script>")); // remains text, never markup
     newReport(run); run.get("outcome-form").fire("submit");
+    flushFrames(run);
     const failed = run.posts()[0]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.kit_id, "kit-a");
     assert.equal(failed.body.deficiency.create.severity, "HIGH");
     failed.reject(new Error("synthetic lost response")); await tick();
     run.context.testUI.retryCheck({...row, checklist_version_id: "different", unit: "changed"});
     assert.equal(run.posts()[1].options.body, failed.options.body); // exact frozen retry despite changed row
     response(run.posts()[1], 409, {status: "CONFLICT", newest_check: {check_id: "basis-b", outcome: "PASSED", actor: {display_name: "Synthetic Crew"}}}); await tick();
-    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click");
+    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click"); flushFrames(run);
     const proceed = run.posts()[2]; assert.equal(proceed.body.acknowledges_check_id, "basis-b"); assert.equal(proceed.body.basis_check_id, "basis-b");
     assert.notEqual(proceed.body.operation_id, failed.body.operation_id); assert.deepEqual(proceed.body.deficiency, failed.body.deficiency);
     response(proceed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
@@ -482,22 +695,61 @@ function generic(kind) {
     response(run.posts()[1], 409, {status: "CONFLICT", newest_check: {check_id: "warning-b", outcome: "PASSED"}}); await tick();
     assert.equal(run.get("conflict-dialog").newest, "warning-a");
     run.get("conflict-proceed").fire("click");
+    flushFrames(run);
     assert.equal(run.posts()[2].body.acknowledges_check_id, "warning-a");
     assert.equal(run.posts()[2].body.deficiency.create.summary, "Synthetic first failure");
     assert.equal(run.get("conflict-dialog").newest, "warning-b");
-    run.get("conflict-dialog").fire("cancel"); assert.equal(!!run.get("conflict-dialog").open, false);
+    run.get("conflict-dialog").fire("cancel"); flushFrames(run); assert.equal(!!run.get("conflict-dialog").open, false);
+  }
+  {
+    const run = checklist();
+    run.context.testUI.setRows([row]); run.context.testUI.render();
+    const unable = findAction(run.elements.items.children[0], "unable_to_inspect");
+    unable.fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    newReport(run); run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
+    run.get("outcome-form").fire("submit"); flushFrames(run);
+    const firstSave = run.posts()[0];
+    response(firstSave, 409, {status: "CONFLICT", newest_check: {check_id: "conflict-basis", outcome: "PASSED"}}); await tick();
+    assert.equal(run.get("conflict-dialog").invoker, unable, "the duplicate-record dialog remembers the original Unable action");
+    assert.equal(run.document.activeElement, run.get("conflict-cancel"), "the conflict dialog focuses its first control while open");
+    assert.equal(run.get("conflict-dialog").getAttribute("aria-modal"), "true");
+    assert(run.document.body.children.filter(child => child !== run.get("conflict-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
+      "the conflict dialog makes all page siblings inert");
+    const wrap = run.get("conflict-dialog").fire("keydown", {key: "Tab", shiftKey: true});
+    assert.equal(wrap.defaultPrevented, true, "Shift+Tab wraps inside the conflict dialog");
+    assert.equal(run.document.activeElement, run.get("conflict-proceed"), "the conflict dialog traps focus at its first control");
+    run.get("conflict-proceed").focus();
+    run.get("conflict-proceed").fire("click");
+    assert.equal(run.get("conflict-dialog").open, true, "Record mine too keeps the dialog present through the focus return");
+    assert.equal(run.document.activeElement, unable, "Record mine too restores focus before the dialog closes");
+    flushFrames(run);
+    assert.equal(run.document.activeElement, unable, "Record mine too restores focus to the same Unable action");
+    assert.equal(run.document.contains(unable), true, "the original Unable action remains attached through conflict confirmation");
+    assert.deepEqual(run.focusHistory.at(-1), {from: "conflict-proceed", to: "unable_to_inspect"},
+      "closing the duplicate-record dialog returns directly to the original action");
+    assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li", "home-link", "banner"].includes(change.to)),
+      "the duplicate-record path never parks focus on the document, list, row, banner, or home link");
+    const retry = run.posts()[1];
+    assert.equal(retry.body.outcome, "UNABLE_TO_INSPECT");
+    assert.equal(retry.body.acknowledges_check_id, "conflict-basis");
+    response(retry, 201, {status: "COMMITTED", result: {check_id: "unable-check", outcome: "UNABLE_TO_INSPECT", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
+    assert.equal(run.document.activeElement, unable, "the acknowledged duplicate-path save keeps the same action focused");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Unable to inspect for Portable suction unit (Airway response kit A).", announce: true});
+    assert.equal(run.window.cyaShell.toasts.filter(toast => toast.text.startsWith("Saved:")).length, 1,
+      "the duplicate-record path announces one Saved toast");
   }
   {
     const run = checklist(); run.context.testUI.openOutcome(row, "UNABLE_TO_INSPECT"); newReport(run);
     run.get("outcome-form").fire("submit"); assert.equal(run.posts().length, 0); assert(run.get("outcome-error").textContent.includes("reason"));
     run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
-    run.get("outcome-existing").value = "existing"; run.get("outcome-form").fire("submit");
+    run.get("outcome-existing").value = "existing"; run.get("outcome-form").fire("submit"); flushFrames(run);
     const body = run.posts()[0].body; assert.equal(body.outcome, "UNABLE_TO_INSPECT"); assert.equal(body.explanation, "Synthetic access restriction.");
     assert.deepEqual(body.deficiency, {existing_id: "existing"}); assert(!("quantity" in body)); assert(!("measurement" in body));
   }
   {
     const run = checklist(); const quantity = {...row, kind: "QUANTITY", expected_quantity: 6};
-    run.context.testUI.drafts["item|kit-a"] = "2"; run.context.testUI.openOutcome(quantity, "FAILED"); newReport(run); run.get("outcome-form").fire("submit");
+    run.context.testUI.drafts["item|kit-a"] = "2"; run.context.testUI.openOutcome(quantity, "FAILED"); newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     assert.equal(run.posts()[0].body.quantity, 2);
     assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "FAILED"}), "Failed");
     assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "SUPERVISOR_COMPLETED"}), "Supervisor completed: unable to inspect");
@@ -713,7 +965,7 @@ function generic(kind) {
     run.context.testUI.retryCheck({...row, checklist_version_id: "new-version"});
     assert.equal(run.posts()[1].options.body, first.options.body);
     response(run.posts()[1], 409, {status: "CONFLICT", newest_check: {check_id: "new-basis", outcome: "PASSED"}}); await tick();
-    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click");
+    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click"); flushFrames(run);
     const proceed = run.posts()[2];
     assert.notEqual(proceed.body.operation_id, first.body.operation_id);
     assert.equal(proceed.body.purpose, "VERIFICATION"); assert.equal(proceed.body.verification_for_deficiency_id, "deficiency");
@@ -1328,7 +1580,7 @@ function generic(kind) {
     run.context.testUI.setRows([{...open, latest_check_id: "x"}]); run.context.testUI.render();
     findAction(item(), "failed").fire("click");
     response(run.requests.at(-1), 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     response(run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "paper-2", outcome: "FAILED", server_recorded_at: "2026-06-03T12:01:00Z",
       paper_entry: {batch_id: "batch", performed_at: "2026-06-02T10:15:00Z"}}}); await tick();
     assert.equal(run.get("paper-print-offer").hidden, true, "the offer is made once per batch");
@@ -1346,14 +1598,14 @@ function generic(kind) {
     assert.deepEqual(marked(freshItem()), [], "a window satisfied by another check marks nothing on the sheet");
     assert.equal(findClass(freshItem(), "paper-copied"), null);
     // A refused record says why in plain words; an invalidated batch reloads the screen.
-    fresh.context.testUI.startCheck({...open, item_id: "other"}, null);
+    fresh.context.testUI.startCheck(open, null);
     const before = fresh.requests.length;
     response(fresh.posts().at(-1), 409, {status: "REJECTED", code: "PAPER_BATCH_INVALIDATED"}); await tick();
-    assert.equal(fresh.context.testUI.getEntry({...open, item_id: "other"}).text, "This paper entry was invalidated. Start a new paper entry from the vehicle page.");
+    assert.equal(fresh.context.testUI.getEntry(open).text, "This paper entry was invalidated. Start a new paper entry from the vehicle page.");
     assert.ok(fresh.timers.length > 0 && fresh.requests.length === before, "a reload is scheduled");
-    fresh.context.testUI.startCheck({...open, item_id: "kit-content"}, null);
+    fresh.context.testUI.startCheck(open, null);
     response(fresh.posts().at(-1), 422, {status: "REJECTED", code: "KIT_MOVED_SINCE_PAPER"}); await tick();
-    assert.ok(fresh.context.testUI.getEntry({...open, item_id: "kit-content"}).text.includes("left the vehicle"));
+    assert.ok(fresh.context.testUI.getEntry(open).text.includes("left the vehicle"));
   }
   {
     // Paper mode: an earlier record of the batch means no second offer; area cards count what

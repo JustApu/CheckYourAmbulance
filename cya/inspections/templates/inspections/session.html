@@ -95,7 +95,11 @@
 </section>
 {% if paper %}{% include "inspections/paper_finish.html" %}{% endif %}
 
-<dialog id="conflict-dialog" aria-labelledby="conflict-title">
+{{ config|json_script:"cya-config" }}
+{% endblock %}
+
+{% block after_main %}
+<dialog id="conflict-dialog" class="focus-managed-dialog" role="dialog" aria-labelledby="conflict-title" tabindex="-1" hidden>
   <h2 id="conflict-title">Someone else already checked this</h2>
   <p id="conflict-text"></p>
   <p>You can cancel, or record your check as well. Both records are kept.</p>
@@ -104,7 +108,7 @@
     <button type="button" id="conflict-proceed" class="button primary">Record mine too</button>
   </div>
 </dialog>
-<dialog id="outcome-dialog" aria-labelledby="outcome-title">
+<dialog id="outcome-dialog" class="focus-managed-dialog" role="dialog" aria-labelledby="outcome-title" tabindex="-1" hidden>
   <h2 id="outcome-title">Record a failed or unable check</h2>
   <form id="outcome-form" class="panel" novalidate>
     <label id="outcome-reason-label">Reason <textarea name="outcome_explanation" maxlength="4000"></textarea></label>
@@ -118,6 +122,5 @@
     <button type="button" id="outcome-cancel" class="button">Cancel</button>
   </form>
 </dialog>
-{{ config|json_script:"cya-config" }}
 {% endblock %}
 {% block scripts %}<script>{% include "inspections/checklist.js" %}</script>{% endblock %}
