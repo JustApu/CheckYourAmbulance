@@ -45,6 +45,18 @@ class _Reading(Evidence):
     # the confirmer is the entry's own actor_user.
     anomaly_confirmed = models.BooleanField(default=False)
     confirmation_explanation = models.CharField(max_length=MAX_TEXT, null=True)  # noqa: DJ001
+    # SPEC 8.0.0 ODO-6 (issue #9 Part B3): a reading copied from an outage paper form names its
+    # batch and repeats the batch's performance instant. The reading's place in the vehicle's
+    # sequence, and its compliance time, is COALESCE(root's performed_at, root's recorded_at);
+    # recorded_at stays the server entry instant. Both are null for a live reading.
+    paper_entry_batch = models.ForeignKey(
+        "cya_paper.PaperEntryBatch",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        db_constraint=False,  # organization-pair key in migration 0005
+    )
+    performed_at = models.DateTimeField(null=True)
 
     class Meta:
         abstract = True

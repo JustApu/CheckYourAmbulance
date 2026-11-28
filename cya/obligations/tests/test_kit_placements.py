@@ -442,12 +442,17 @@ class PlacedKitCheckTests(PlacedKitCase):
         from cya.inspections.printable import kit_reference
 
         reference = kit_reference(str(self.org.pk), self.at(hours=5))
-        kit_types = dict(
-            next(t for t in reference if t["id"] == self.checklist_version)["kit_types"]
-        )
-        rows = kit_types["Synthetic jump kit"]
+        kit_types = {
+            name: (rows, version_id)
+            for name, rows, version_id in next(
+                t for t in reference if t["id"] == self.checklist_version
+            )["kit_types"]
+        }
+        rows, version_id = kit_types["Synthetic jump kit"]
         self.assertEqual([r.label for r in rows], ["Synthetic kit contents", "Synthetic gauze"])
         self.assertIn("4", rows[0].expected)
+        # SPEC 8.0.0 DEP-11 and LATE-4: the reference names the kit definition version printed.
+        self.assertEqual(version_id, str(self.kit_version))
 
     def test_an_ad_hoc_request_can_name_placed_kit_content(self):
         from cya.obligations.adhoc import request_inspection

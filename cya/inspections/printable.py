@@ -4,8 +4,11 @@ The app is online-only, so crews record checks on paper during an outage. The ou
 the vehicle's current checklist rows, grouped the way the checklist screen groups them, with
 blank space to record the result by hand. A kit gets one row, not its contents: the crew either
 confirms the seal or checks the contents against the separate kit reference, which is printed
-once per checklist revision and laminated (owner decisions on issue #9). Both documents carry only
-checklist definitions: no check results, crew names or other personal data.
+once per checklist revision and laminated (owner decisions on issue #9). Each sealed kit and
+sealable compartment also prints a paper reseal section listing everything its seal covers, with
+blanks for fresh counts and expiration dates and for the new seal's marking, used only when the
+seal is broken and resealed during an outage (SPEC 8.5.0 SEAL-1, CAB-9). Both documents carry
+only checklist definitions: no check results, crew names or other personal data.
 """
 
 from dataclasses import dataclass, field
@@ -43,11 +46,37 @@ class PrintRow:
 
 
 @dataclass
+class ResealRow:
+    """One line of a paper reseal section: a fresh result, count and expiration date."""
+
+    label: str
+    expected: str
+    outcomes: tuple
+    value_unit: str | None  # a blank for a fresh count or value, with its unit; None for none
+    expiration: bool  # a blank for a fresh expiration date (expiration-tracked items)
+
+
+@dataclass
+class ResealSection:
+    """What a seal covers, printed for a reseal during an outage (SPEC 8.5.0 SEAL-1, CAB-9).
+
+    kit_versions names the kit-definition version each listed kit's contents come from, which
+    a paper entry batch names (LATE-4).
+    """
+
+    heading: str
+    rows: list = field(default_factory=list)
+    kit_versions: list = field(default_factory=list)  # [(kit definition label, version id)]
+
+
+@dataclass
 class PrintSection:
     heading: str
     rows: list = field(default_factory=list)
     # A sealable compartment (SPEC 10.2 CAB-9) prints one seal-or-contents row, not its items.
     sealed: bool = False
+    compartment_id: str | None = None  # a sealed section's compartment, as the rows name it
+    reseal: ResealSection | None = None
 
 
 @dataclass
@@ -58,6 +87,8 @@ class KitRow:
     sealed: bool = False
     # Inside a sealable compartment, whose intact seal covers the kit (CAB-2).
     in_sealed_compartment: bool = False
+    kit_id: str | None = None
+    reseal: ResealSection | None = None
 
 
 def _expected(kind, quantity, unit):
@@ -111,7 +142,7 @@ def outage_sheet(rows, sealable_compartments=frozenset(), sealed_kits=frozenset(
         sealed_place = bool(row.compartment_id) and str(row.compartment_id) in sealable_compartments
         if sealed_place and ("compartment", row.compartment_id) not in found:
             found[("compartment", row.compartment_id)] = PrintSection(
-                heading=row.compartment_label, sealed=True
+                heading=row.compartment_label, sealed=True, compartment_id=str(row.compartment_id)
             )
         if row.kit_id:
             if row.kit_id not in kits:
@@ -120,6 +151,7 @@ def outage_sheet(rows, sealable_compartments=frozenset(), sealed_kits=frozenset(
                     place=row.compartment_label or "",
                     sealed=str(row.kit_id) in sealed_kits,
                     in_sealed_compartment=sealed_place,
+                    kit_id=str(row.kit_id),
                 )
             continue
         key, heading = _section_key(row)
@@ -149,6 +181,137 @@ def sealable_designations(organization_id, checklist):
     return frozenset(sealable), frozenset(sealed)
 
 
+RESEAL_OUTCOMES = ("PASSED", "FAILED")  # a full inspection passes or fails each item (SEAL-6)
+
+
+def add_reseal_sections(organization_id, vehicle_id, as_of, sections, kits):
+    """Attach a paper reseal section to each sealed compartment section and sealed kit row.
+
+    The section lists what the seal covers at as_of, exactly as a reseal resolves it
+    (cya.seals.scope): for a kit, every item of its kit-definition version in force; for a
+    cabinet, every covered loose item, each covered kit's presence, each applicable kit-list
+    line and each covered kit's items (SPEC 8.5.0 SEAL-1, CAB-9, CAB-2). A scope that cannot be
+    resolved raises (a ValueError), so the sheet is never printed with a partial section.
+    """
+    slots = {
+        str(pk): str(slot)
+        for pk, slot in Compartment.objects.filter(
+            organization_id=organization_id,
+            pk__in=[s.compartment_id for s in sections if s.sealed and s.compartment_id],
+        ).values_list("pk", "stable_slot_id")
+    }
+    for section in sections:
+        if section.sealed and section.compartment_id in slots:
+            section.reseal = _reseal_section(
+                organization_id,
+                vehicle_id,
+                as_of,
+                f"Paper reseal: {section.heading}",
+                slot_id=slots[section.compartment_id],
+            )
+    for kit in kits:
+        if kit.sealed and kit.kit_id:
+            kit.reseal = _reseal_section(
+                organization_id, vehicle_id, as_of, f"Paper reseal: {kit.label}", kit_id=kit.kit_id
+            )
+
+
+def _reseal_section(organization_id, vehicle_id, as_of, heading, *, kit_id=None, slot_id=None):
+    from cya.checklists.models import Item, KitInstance
+    from cya.kits.models import KitDefinition, KitDefinitionItem
+    from cya.seals.scope import resolve_kit_lines, resolve_kit_presence, resolve_scope
+
+    scope, assignments = resolve_scope(
+        organization_id, vehicle_id, as_of, kit_id=kit_id, slot_id=slot_id
+    )
+    presence = resolve_kit_presence(organization_id, vehicle_id, assignments, as_of)
+    lines = (
+        resolve_kit_lines(organization_id, vehicle_id, slot_id, as_of, assignments)
+        if slot_id is not None
+        else ()
+    )
+    labels = dict(
+        Item.objects.filter(
+            organization_id=organization_id,
+            pk__in={i.item_id for i in scope} | {p.item_id for p in presence},
+        ).values_list("pk", "label")
+    )
+    labels = {str(k): v for k, v in labels.items()}
+    kit_labels = {
+        str(pk): label
+        for pk, label in KitInstance.objects.filter(
+            organization_id=organization_id, pk__in=list(assignments)
+        ).values_list("pk", "label")
+    }
+    kit_items = {
+        str(row.pk): row
+        for row in KitDefinitionItem.objects.filter(
+            organization_id=organization_id,
+            pk__in=[i.definition_id for i in scope if i.source == "KIT_DEFINITION"],
+        ).select_related("version__definition")
+    }
+    orders = {key: row.display_order for key, row in kit_items.items()}
+    orders.update(
+        (str(pk), order)
+        for pk, order in ChecklistItemDef.objects.filter(
+            organization_id=organization_id,
+            pk__in=[i.definition_id for i in scope if i.source != "KIT_DEFINITION"],
+        ).values_list("pk", "display_order")
+    )
+    kit_versions = sorted(
+        {(row.version.definition.label, str(row.version_id)) for row in kit_items.values()}
+    )
+    definition_labels = {
+        str(pk): label
+        for pk, label in KitDefinition.objects.filter(
+            organization_id=organization_id, pk__in={line.definition_id for line in lines}
+        ).values_list("pk", "label")
+    }
+
+    def item_row(item, prefix):
+        return ResealRow(
+            label=prefix + labels.get(item.item_id, ""),
+            expected=_expected(item.kind, item.expected_quantity, item.unit),
+            outcomes=tuple(
+                OUTCOME_LABELS[code] for code in RESEAL_OUTCOMES if code in item.allowed_outcomes
+            ),
+            value_unit=(item.unit or "") if item.kind in ("QUANTITY", "MEASUREMENT") else None,
+            expiration=item.expiration_tracked,
+        )
+
+    def ordered(items):
+        return sorted(
+            items, key=lambda i: (orders.get(i.definition_id, 0), labels.get(i.item_id, ""))
+        )
+
+    rows = [item_row(i, "") for i in ordered(i for i in scope if i.kit_id is None)]
+    for line in lines:
+        rows.append(
+            ResealRow(
+                label=f"Kit count: {definition_labels.get(line.definition_id, '')}",
+                expected=str(line.required_count),
+                outcomes=(),
+                value_unit="",
+                expiration=False,
+            )
+        )
+    present = {p.kit_id: p for p in presence}
+    for covered in sorted(assignments, key=lambda k: (kit_labels.get(k, ""), k)):
+        prefix = f"{kit_labels.get(covered, '')}: " if slot_id is not None else ""
+        if covered in present:
+            rows.append(
+                ResealRow(
+                    label=f"{kit_labels.get(covered, '')}: kit present",
+                    expected="",
+                    outcomes=("Present", "Missing"),
+                    value_unit=None,
+                    expiration=False,
+                )
+            )
+        rows.extend(item_row(i, prefix) for i in ordered(i for i in scope if i.kit_id == covered))
+    return ResealSection(heading=heading, rows=rows, kit_versions=kit_versions)
+
+
 def versions(organization_id, rows):
     """'Template label, revision N' for each checklist version the rows come from, in order."""
     ids = list(dict.fromkeys(row.checklist_version_id for row in rows if row.checklist_version_id))
@@ -173,9 +336,10 @@ def versions(organization_id, rows):
 
 
 def _placed_kit_types(organization_id, version, as_of):
-    """[(kit definition label, [PrintRow])] for the kits the version places by definition.
+    """[(kit definition label, [PrintRow], kit definition version id)] for placed kits.
 
-    Each placed definition prints the contents of its version in force at as_of (KDEF-7).
+    Each placed definition prints the contents of its version in force at as_of (KDEF-7), and
+    that version's identifier, which a paper entry names (SPEC 8.0.0 DEP-11, LATE-4).
     """
     from cya.kits.models import ChecklistKitPlacement, KitDefinitionItem
     from cya.kits.placements import definition_version_at
@@ -208,12 +372,15 @@ def _placed_kit_types(organization_id, version, as_of):
         ]
         if len(rows) > REFERENCE_ITEM_LIMIT:
             raise ValueError(f"kit definition {definition.key} lists too many items to print")
-        kinds[(definition.label, definition.pk)] = rows
-    return [(name, rows) for (name, _pk), rows in kinds.items()]
+        kinds[(definition.label, definition.pk)] = (rows, str(version_id))
+    return [(name, rows, version_id) for (name, _pk), (rows, version_id) in kinds.items()]
 
 
 def _kit_types(version):
-    """[(kit type name, [PrintRow])] for one template version, in display order.
+    """[(kit type name, [PrintRow], None)] for one template version, in display order.
+
+    These legacy kit rows belong to the checklist version itself, so they have no separate kit
+    definition version identifier.
 
     A definition's kit names the kit type it describes (SPEC 4.2, OQ-53); every instance of that
     type should match this list. Vehicle overrides are not applied: this is the agency standard.
@@ -237,7 +404,7 @@ def _kit_types(version):
                 value_unit=None,
             )
         )
-    return [(name, rows) for (name, _kit_id), rows in kits.items()]
+    return [(name, rows, None) for (name, _kit_id), rows in kits.items()]
 
 
 def kit_reference(organization_id, as_of):

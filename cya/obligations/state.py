@@ -134,6 +134,14 @@ class CheckEvidence:
     late_eligible: bool = False
     supervisor_determination_id: str | None = None
     author_user_id: str | None = None
+    # SPEC 8.0.0 5.3, LATE-5: a paper check's original performance instant. It is the check's
+    # qualifying time for windows, completion time and lateness; recorded_at (the server entry
+    # instant) still decides whether the check is known at an instant (19.3, 19.6).
+    performed_at: datetime | None = None
+
+    @property
+    def qualifying_at(self):
+        return self.performed_at or self.recorded_at
 
 
 @dataclass(frozen=True)
@@ -149,6 +157,17 @@ class SealSubstitutionEvidence:
     obligation_id: str
     recorded_at: datetime
     late_eligible: bool = False
+    # SPEC 8.0.0 LATE-7: a paper substitution's performance instant; windows, completion and
+    # lateness are judged at it, while recorded_at still decides as-of inclusion.
+    performed_at: datetime | None = None
+    # SPEC 8.0.0 INV-8, LATE-7: when the substitution's paper-entry batch, or that of the paper
+    # reseal it relied on, was invalidated. From then on it supports nothing; as-of views before
+    # that instant still count it (19.3).
+    voided_at: datetime | None = None
+
+    @property
+    def qualifying_at(self):
+        return self.performed_at or self.recorded_at
 
 
 @dataclass(frozen=True)
@@ -161,6 +180,16 @@ class SealInspectionEvidence:
     recorded_at: datetime
     outcome: str
     late_eligible: bool = False
+    # SPEC 8.5.0 LATE-7: a paper reseal's performance instant (its reseal event's); windows,
+    # completion and lateness are judged at it, while recorded_at still decides as-of inclusion.
+    performed_at: datetime | None = None
+    # SPEC 8.0.0 INV-8, LATE-7: when the paper reseal's batch was invalidated. From then on the
+    # inspection supports nothing; as-of views before that instant still count it (19.3).
+    voided_at: datetime | None = None
+
+    @property
+    def qualifying_at(self):
+        return self.performed_at or self.recorded_at
 
 
 @dataclass(frozen=True)
@@ -252,8 +281,11 @@ def _checks_for(obligation, checks, instant):
     result = []
     for check in checks:
         aware(check.recorded_at)
+        if check.performed_at is not None:
+            aware(check.performed_at)
         if check.voided_at is not None:
             aware(check.voided_at)
+        qualifying = check.qualifying_at
         if (
             (check.organization_id, check.vehicle_id, check.item_id, check.obligation_id)
             != (
@@ -262,13 +294,15 @@ def _checks_for(obligation, checks, instant):
                 obligation.item_id,
                 obligation.id,
             )
-            or not obligation.early_at <= check.recorded_at <= instant
+            or check.recorded_at > instant
+            or not obligation.early_at <= qualifying
             or (check.voided_at is not None and check.voided_at <= instant)
-            or (check.recorded_at > obligation.grace_at and check.late_eligible is not True)
+            or (qualifying > obligation.grace_at and check.late_eligible is not True)
         ):
             continue
         result.append(check)
-    return sorted(result, key=lambda c: (c.recorded_at, c.id))
+    # The earliest qualifying check satisfies (SCH-7), by qualifying time (19.4, 19.6).
+    return sorted(result, key=lambda c: (c.qualifying_at, c.recorded_at, c.id))
 
 
 def _determination_for(obligation, determinations, instant):
@@ -346,7 +380,7 @@ def _satisfaction(obligation, linked, determination):
         qualifies = check.outcome in ("PASSED", "FAILED")
         if check.outcome == "NOT_APPLICABLE":
             qualifies = check.na_rule is not None and check.na_rule.applies(
-                check.recorded_at, check.recorded_at
+                check.qualifying_at, check.qualifying_at
             )
         if qualifies:
             return ObligationState(
@@ -354,8 +388,8 @@ def _satisfaction(obligation, linked, determination):
                 State.SATISFIED,
                 check.id,
                 check.outcome,
-                check.recorded_at,
-                max(0, (check.recorded_at - obligation.grace_at).total_seconds()),
+                check.qualifying_at,
+                max(0, (check.qualifying_at - obligation.grace_at).total_seconds()),
             )
     if determination is not None and determination.determination_type == "SUPERVISOR_COMPLETED":
         if any(
@@ -443,59 +477,73 @@ def evaluate_obligation(
     substitutions = []
     for evidence in seal_substitutions:
         aware(evidence.recorded_at)
+        if evidence.performed_at is not None:
+            aware(evidence.performed_at)
+        if evidence.voided_at is not None:
+            aware(evidence.voided_at)
+        qualifying = evidence.qualifying_at
         if (
             evidence.organization_id == obligation.organization_id
             and evidence.obligation_id == obligation.id
-            and obligation.early_at <= evidence.recorded_at <= instant
+            and evidence.recorded_at <= instant
+            and (evidence.voided_at is None or evidence.voided_at > instant)
+            and obligation.early_at <= qualifying
             and (
-                evidence.recorded_at <= obligation.grace_at
+                qualifying <= obligation.grace_at
                 or (
                     evidence.late_eligible is True
                     and obligation.late_limit_at is not None
-                    and evidence.recorded_at <= obligation.late_limit_at
+                    and qualifying <= obligation.late_limit_at
                 )
             )
         ):
             substitutions.append(evidence)
     if substitutions:
-        first = min(substitutions, key=lambda e: (e.recorded_at, e.id))
-        if satisfaction is None or first.recorded_at < satisfaction.completed_at:
+        first = min(substitutions, key=lambda e: (e.qualifying_at, e.recorded_at, e.id))
+        if satisfaction is None or first.qualifying_at < satisfaction.completed_at:
             satisfaction = ObligationState(
                 obligation,
                 State.SATISFIED,
                 first.id,
                 "SEAL_SUBSTITUTION",
-                first.recorded_at,
-                max(0, (first.recorded_at - obligation.grace_at).total_seconds()),
+                first.qualifying_at,
+                max(0, (first.qualifying_at - obligation.grace_at).total_seconds()),
             )
     inspections = []
     for evidence in seal_inspections:
         aware(evidence.recorded_at)
+        if evidence.performed_at is not None:
+            aware(evidence.performed_at)
+        if evidence.voided_at is not None:
+            aware(evidence.voided_at)
+        qualifying = evidence.qualifying_at
         if (
             evidence.organization_id == obligation.organization_id
             and evidence.obligation_id == obligation.id
             and evidence.outcome in ("PASSED", "FAILED")
-            and obligation.early_at <= evidence.recorded_at <= instant
+            and evidence.recorded_at <= instant
+            and (evidence.voided_at is None or evidence.voided_at > instant)
+            and obligation.early_at <= qualifying
             and (
-                evidence.recorded_at <= obligation.grace_at
+                qualifying <= obligation.grace_at
                 or (
                     evidence.late_eligible is True
                     and obligation.late_limit_at is not None
-                    and evidence.recorded_at <= obligation.late_limit_at
+                    and qualifying <= obligation.late_limit_at
                 )
             )
         ):
             inspections.append(evidence)
     if inspections:
-        first = min(inspections, key=lambda e: (e.recorded_at, e.id))
-        if satisfaction is None or first.recorded_at < satisfaction.completed_at:
+        first = min(inspections, key=lambda e: (e.qualifying_at, e.recorded_at, e.id))
+        if satisfaction is None or first.qualifying_at < satisfaction.completed_at:
             satisfaction = ObligationState(
                 obligation,
                 State.SATISFIED,
                 first.id,
                 first.outcome,
-                first.recorded_at,
-                max(0, (first.recorded_at - obligation.grace_at).total_seconds()),
+                first.qualifying_at,
+                max(0, (first.qualifying_at - obligation.grace_at).total_seconds()),
             )
     suspension = _suspension_for(obligation, suspensions, instant)
     # A suspension never revokes an obligation already satisfied when it started (owner decision):

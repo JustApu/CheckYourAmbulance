@@ -9,9 +9,16 @@ server warns again and commits nothing, so a Fail is never dropped because a Pas
 
 The comparison and the insert are atomic because record_check holds the ItemLock row for the
 vehicle/item (CON-5) and reads its instant only after taking it; this module runs under that lock.
+
+Paper checks (SPEC 8.0.0 LATE-6, issue #9 Part B2): a check's place in time is its qualifying
+time t_c (the paper performance instant, else the server instant; SPEC 5.3, 19.4), so the
+newest check is the newest by t_c, then server instant, then id. A paper check being entered
+is compared by paper_conflicting_check instead: it warns only about an effective check already
+linked to an obligation the paper performance instant falls in.
 """
 
 from django.db.models import Exists, OuterRef
+from django.db.models.functions import Coalesce
 
 from cya.checks.models import CheckEvent, CheckObligationLink, CheckRecord
 
@@ -34,6 +41,9 @@ class CheckConflict(ValueError):
             "server_recorded_at": newest.recorded_at,
             "outcome": newest.outcome,
         }
+        if newest.performed_at is not None:
+            # A paper check also names when it was performed (SPEC 8.0.0 LATE-3, LATE-5).
+            self.newest["performed_at"] = newest.performed_at
         self.obligation_id = str(obligation.pk) if obligation else None
 
 
@@ -48,6 +58,19 @@ def newest_effective_check(check, obligation):
     effective except those of an invalidated chain (issue 77 (https://github.com/JustApu/CheckYourAmbulance-archive/issues/77)); corrections add rows that are
     always newer than the row they supersede.
     """
+    rows = _effective_rows(check)
+    if obligation is not None:
+        rows = rows.filter(t_c__gte=obligation.early_at)
+    else:
+        on_time = CheckObligationLink.objects.filter(
+            check_record=OuterRef("pk"), obligation__grace_at__gte=OuterRef("t_c")
+        )
+        rows = rows.filter(~Exists(on_time))
+    return rows.select_related("actor_user").order_by("-t_c", "-recorded_at", "-id").first()
+
+
+def _effective_rows(check):
+    """The effective checks of the check's item (kit instance, kit-list line), annotated t_c."""
     rows = CheckRecord.objects.filter(
         organization_id=check.organization_id,
         vehicle_id=check.vehicle_id,
@@ -75,14 +98,7 @@ def newest_effective_check(check, obligation):
             )
         )
     )
-    if obligation is not None:
-        rows = rows.filter(recorded_at__gte=obligation.early_at)
-    else:
-        on_time = CheckObligationLink.objects.filter(
-            check_record=OuterRef("pk"), obligation__grace_at__gte=OuterRef("recorded_at")
-        )
-        rows = rows.filter(~Exists(on_time))
-    return rows.select_related("actor_user").order_by("-recorded_at", "-id").first()
+    return rows.annotate(t_c=Coalesce("performed_at", "recorded_at"))
 
 
 def conflicting_check(check, obligation, *, actor_id, basis_check_id, acknowledges_check_id):
@@ -94,6 +110,37 @@ def conflicting_check(check, obligation, *, actor_id, basis_check_id, acknowledg
     """
     newest = newest_effective_check(check, obligation)
     if newest is None or str(newest.actor_user_id) == str(actor_id):
+        return None
+    if str(newest.pk) in (basis_check_id, acknowledges_check_id):
+        return None
+    return newest
+
+
+def paper_conflicting_check(
+    check, obligations, *, performer_ids, basis_check_id, acknowledges_check_id
+):
+    """The check a paper check being entered must warn about, or None (SPEC 8.0.0 LATE-6).
+
+    Only an effective check already linked to one of `obligations` (those whose window holds
+    the paper performance instant) is in scope; a check for another obligation of the same item
+    is not a conflict by itself. The newest such check by arrival is compared, so a check that
+    arrived after the displayed basis warns again (CON-3). It is not a conflict when its actor is
+    one of the batch's attributed performers: the entry actor alone does not count, and a check
+    by anyone else warns even if some performers overlap.
+    """
+    if not obligations:
+        return None
+    linked = CheckObligationLink.objects.filter(
+        check_record=OuterRef("pk"), obligation_id__in=[o.pk for o in obligations]
+    )
+    newest = (
+        _effective_rows(check)
+        .filter(Exists(linked))
+        .select_related("actor_user")
+        .order_by("-recorded_at", "-id")
+        .first()
+    )
+    if newest is None or str(newest.actor_user_id) in {str(p) for p in performer_ids}:
         return None
     if str(newest.pk) in (basis_check_id, acknowledges_check_id):
         return None

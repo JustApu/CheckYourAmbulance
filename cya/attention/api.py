@@ -2,7 +2,9 @@
 
 GET  /api/v1/vehicles/{id}/checklist        rows, attention, known deficiencies, vehicle status;
                                             ?session_id= lists that session's pinned version
-                                            (participants only, CHK-4)
+                                            (participants only, CHK-4);
+                                            ?paper_entry_batch_id= the version printed on
+                                            the user's own batch (SPEC 8.0.0 LATE-4)
 GET  /api/v1/me/view-preferences            the signed-in user's saved view and filter
 POST /api/v1/me/view-preferences            save them (audited, idempotent on operation_id)
 
@@ -32,16 +34,36 @@ logger = logging.getLogger(__name__)
 
 PREFERENCE_FIELDS = frozenset({"operation_id", "preferred_view", "needs_attention_only"})
 CHECKLIST_QUERY = frozenset(
-    {"view", "needs_attention_only", "checklist_version_id", "session_id", "item_ids"}
+    {
+        "view",
+        "needs_attention_only",
+        "checklist_version_id",
+        "session_id",
+        "item_ids",
+        "paper_entry_batch_id",
+    }
 )
+# Each names the version the rows come from; at most one may be given.
+PINNING_QUERY = ("session_id", "checklist_version_id", "paper_entry_batch_id")
 
 
 def _stamped(value):
     return None if value is None else _stamp(value)
 
 
-def checklist_row(row, authors):
-    """The wire shape of one checklist row; shared by the checklist and workflow readers."""
+def _paper_source(found):
+    if found is None:
+        return None
+    return {**found, "entered_at": _stamp(found["entered_at"])}
+
+
+def checklist_row(row, authors, paper=None):
+    """The wire shape of one checklist row; shared by the checklist and workflow readers.
+
+    paper is check_paper_sources' answer for the rows' newest checks (None reads as none):
+    latest_check_paper names the performers and entry actor when the newest check is a paper
+    check (SPEC 8.0.0 LATE-5: it stays marked Paper entry with both times and performers).
+    """
     return {
         "item_id": row.item_id,
         "item_label": row.item_label,
@@ -76,7 +98,20 @@ def checklist_row(row, authors):
         "expected_quantity": row.expected_quantity,
         "unit": row.unit,
         "allowed_outcomes": list(row.allowed_outcomes),
+        "latest_check_paper": _paper_source((paper or {}).get(row.latest_check_id)),
+        "paper_entry_check": (
+            {"check_id": row.paper_entry_check_id, "outcome": row.paper_entry_check_outcome}
+            if row.paper_entry_check_id
+            else None
+        ),
     }
+
+
+def paper_sources(organization, rows):
+    """check_paper_sources for each row's newest effective check (one or two reads)."""
+    from cya.paper.readers import check_paper_sources
+
+    return check_paper_sources(organization, [row.latest_check_id for row in rows])
 
 
 def check_authors(organization, rows):
@@ -115,6 +150,26 @@ def _session(organization, vehicle, user, session_id):
     return found
 
 
+def _paper_batch(organization, vehicle, user, batch_id):
+    """The user's own paper-entry batch on this vehicle (SPEC 8.0.0 LATE-4), or None.
+
+    Only its entry actor adds records to a batch (Part B2), so only they read its sheet's rows.
+    Another user's batch, another vehicle's or another organization's answers 404 like one
+    that does not exist.
+    """
+    if batch_id is None:
+        return None
+    from cya.paper.readers import own_batch, parse_batch_id
+
+    canonical = parse_batch_id(batch_id)
+    if canonical is None:
+        raise Rejected(400, "MALFORMED_REQUEST", [("paper_entry_batch_id", "INVALID")])
+    found = own_batch(user, canonical, vehicle_id=vehicle)
+    if found is None or str(found.organization_id) != organization:
+        raise Rejected(404, "NOT_FOUND")
+    return found
+
+
 def _flag(value):
     if value in ("true", "false"):
         return value == "true"
@@ -131,9 +186,9 @@ def checklist(request, vehicle_id):
     try:
         if set(request.GET) - CHECKLIST_QUERY:
             raise Rejected(400, "MALFORMED_REQUEST", [("$", "INVALID_FIELDS")])
-        if "session_id" in request.GET and "checklist_version_id" in request.GET:
-            # A session pins its own version, so naming both conflicts; refused before the
-            # session is looked up, whether or not it exists.
+        if sum(name in request.GET for name in PINNING_QUERY) > 1:
+            # A session or a paper-entry batch pins its own version, so naming two conflicts;
+            # refused before either is looked up, whether or not it exists.
             raise Rejected(400, "MALFORMED_REQUEST", [("$", "INVALID_FIELDS")])
         try:
             vehicle = canonical_id(vehicle_id)
@@ -156,6 +211,9 @@ def checklist(request, vehicle_id):
             session=_session(organization, vehicle, user, request.GET.get("session_id")),
             # Issue #278: comma-separated item ids read only those rows, without group progress.
             item_ids=(request.GET["item_ids"].split(",") if "item_ids" in request.GET else None),
+            paper_batch=_paper_batch(
+                organization, vehicle, user, request.GET.get("paper_entry_batch_id")
+            ),
         )
     except Rejected as error:
         return _reply(error.status, error.code, correlation_id, error.field_errors)
@@ -166,6 +224,7 @@ def checklist(request, vehicle_id):
         return _reply(503, "RETRY_LATER", correlation_id)
     status = result.vehicle_status
     authors = check_authors(organization, result.rows)
+    paper = paper_sources(organization, result.rows)
     return JsonResponse(
         {
             "status": "OK",
@@ -178,7 +237,9 @@ def checklist(request, vehicle_id):
             "group_progress": (
                 None if result.group_progress is None else list(result.group_progress)
             ),
-            "items": [checklist_row(row, authors.get(row.latest_check_id)) for row in result.rows],
+            "items": [
+                checklist_row(row, authors.get(row.latest_check_id), paper) for row in result.rows
+            ],
         }
     )
 

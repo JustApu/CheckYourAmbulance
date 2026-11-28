@@ -1,0 +1,36 @@
+{% comment %}
+A paper reseal section (SPEC 8.5.0 SEAL-1, CAB-9): every item the seal covers, with blanks for a
+fresh result, count and expiration date, then the marking written on the new seal. Definitions
+only: no results or personal data.
+{% endcomment %}<section class="sheet-section reseal-section" aria-labelledby="reseal-{{ reseal_prefix }}-{{ reseal_id }}">
+<table aria-label="{{ reseal.heading }}">
+  <colgroup><col class="col-item"><col class="col-result"><col class="col-value"><col class="col-expiry"></colgroup>
+  <thead>
+    <tr class="repeat-identity"><th colspan="4">{{ vehicle.display_name }} · {% for v in versions %}{{ v.label }} <span class="version-id">{{ v.id }}</span>{% if not forloop.last %}; {% endif %}{% endfor %}</th></tr>
+    <tr class="section-heading"><th colspan="4" id="reseal-{{ reseal_prefix }}-{{ reseal_id }}" scope="colgroup">{{ reseal.heading }}</th></tr>
+    <tr class="reseal-rule"><th colspan="4">Use only if the seal is broken and everything below is inspected and resealed during an outage. Write a fresh count and expiration date for every item; never copy them from the old seal or an earlier sheet.{% if reseal.kit_versions %} Kit definition version{{ reseal.kit_versions|length|pluralize }}: {% for label, version_id in reseal.kit_versions %}{{ label }} <span class="version-id">{{ version_id }}</span>{% if not forloop.last %}; {% endif %}{% endfor %}{% endif %}</th></tr>
+    <tr class="column-heads">
+      <th scope="col">Item</th>
+      <th scope="col">Result</th>
+      <th scope="col">Fresh count or value</th>
+      <th scope="col">Fresh expiration date</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in reseal.rows %}
+    <tr>
+      <th scope="row" class="item">{{ row.label }}{% if row.expected %} <span class="expected">Expected: {{ row.expected }}</span>{% endif %}</th>
+      <td class="outcomes" data-label="Result">{% for label in row.outcomes %}<span class="tick"><span class="box" aria-hidden="true"></span>{{ label }}</span>{% endfor %}</td>
+      <td class="value" data-label="Fresh count or value">{% if row.value_unit is not None %}<span class="blank short"></span>{% if row.value_unit %} {{ row.value_unit }}{% endif %}{% endif %}</td>
+      <td class="expiry" data-label="Fresh expiration date">{% if row.expiration %}<span class="blank"></span>{% endif %}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="4">This seal covers no listed item.</td></tr>
+  {% endfor %}
+    <tr class="new-seal">
+      <th scope="row" class="item">Written on the new seal</th>
+      <td colspan="3" data-label="Written on the new seal"><span class="seal-field">Crew ID <span class="blank short"></span></span><span class="seal-field">Earliest expiration <span class="blank"></span> or <span class="tick"><span class="box" aria-hidden="true"></span>No expiration</span></span></td>
+    </tr>
+  </tbody>
+</table>
+</section>

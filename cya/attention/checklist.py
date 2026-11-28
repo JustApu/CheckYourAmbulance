@@ -129,6 +129,9 @@ class ChecklistRow:
     # SPEC 5.0.0 CHK-9: a checklist item with no position. It is still due and checked, and is
     # listed under "Not placed", never under a compartment or system.
     not_placed: bool = False
+    # A paper-entry read (SPEC 8.0.0 LATE-6): this row's effective check copied under the batch.
+    paper_entry_check_id: str | None = None
+    paper_entry_check_outcome: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,7 +157,55 @@ class _Pin:
 
     resolved: object
     opened_at: datetime
-    recorded_before: datetime
+    recorded_before: datetime | None
+    # A paper-entry batch's pin (SPEC 8.0.0 LATE-4): the kit-definition versions printed on its
+    # kit reference, the performance instant kits on the vehicle are read at, and the batch.
+    printed: dict | None = None
+    kits_at: datetime | None = None
+    paper_batch_id: str | None = None
+
+
+def _paper_pin(organization_id, vehicle_id, batch):
+    """A paper-entry batch's _Pin: its printed version as a paper check resolves it.
+
+    Mirrors cya.checks.commands._paper_resolved_item: the printed checklist version as in force
+    at the performance instant t (even after a later version replaced it), with stocking
+    deviations at t, kit content only through the kit-definition versions printed on the batch,
+    and kits on the vehicle as at t. Obligations, attention, checks and deficiencies are still
+    read as of the query, so the screen shows what the vehicle needs now.
+    """
+    from cya.paper.models import PaperEntryKitVersion
+
+    if str(batch.vehicle_id) != str(vehicle_id):
+        raise ChecklistQueryError("NOT_FOUND", "paper-entry batch was not found", 404)
+    try:
+        resolved = resolve_checklist(
+            organization_id=organization_id,
+            vehicle_id=vehicle_id,
+            template_id=batch.checklist_version.template_id,
+            as_of=batch.performed_at,
+            template_version_id=batch.checklist_version_id,
+        )
+    except ResolutionError as error:
+        raise ChecklistQueryError("CHECKLIST_UNAVAILABLE", str(error), 409) from None
+    if str(resolved.template_version_id) != str(batch.checklist_version_id):
+        raise ChecklistQueryError(
+            "CHECKLIST_UNAVAILABLE", "the printed checklist version cannot be resolved", 409
+        )
+    printed = {
+        str(definition): str(version)
+        for definition, version in PaperEntryKitVersion.objects.filter(batch=batch).values_list(
+            "kit_definition_version__definition_id", "kit_definition_version_id"
+        )
+    }
+    return _Pin(
+        resolved,
+        batch.performed_at,
+        None,
+        printed=printed,
+        kits_at=batch.performed_at,
+        paper_batch_id=str(batch.pk),
+    )
 
 
 def _session_pin(organization_id, vehicle_id, session, instant):
@@ -307,7 +358,7 @@ def _placed_content(organization_id, vehicle_id, as_of, pin=None, bound=None):
         return [
             (0, item, version_id, list(item.kits))
             for item in placed_items(
-                organization_id, pin.resolved, pin.opened_at, pin.recorded_before
+                organization_id, pin.resolved, pin.opened_at, pin.recorded_before, pin.printed
             )
         ]
     found = []
@@ -391,7 +442,12 @@ def _presence_of(organization_id, order, resolved, as_of):
 
 
 def _presence_rows(organization_id, vehicle_id, as_of, pin=None, bound=None):
-    """(order, resolved presence item, version, kit id, label, placement order) per assigned unit."""
+    """(order, resolved presence item, version, kit id, label, placement order) per assigned unit.
+
+    A paper pin reads the kits on the vehicle at its performance instant, with every
+    assignment known now, as a paper presence check does.
+    """
+    kit_at, kit_before = _kit_instant(pin, as_of)
     if pin is not None:
         resolved_rows = [(0, pin.resolved, str(pin.resolved.template_version_id))]
     else:
@@ -415,7 +471,7 @@ def _presence_rows(organization_id, vehicle_id, as_of, pin=None, bound=None):
     assignment_events = {
         kit.kit_id: kit
         for kit in active_kits_on_vehicle(
-            organization_id, vehicle_id, as_of, recorded_before=as_of + timedelta(microseconds=1)
+            organization_id, vehicle_id, kit_at, recorded_before=kit_before
         )
     }
     compartment_ids = {
@@ -443,8 +499,8 @@ def _presence_rows(organization_id, vehicle_id, as_of, pin=None, bound=None):
                     kit_id,
                     item_id,
                     compartment_labels=compartment_labels,
-                    as_of=as_of,
-                    recorded_before=as_of + timedelta(microseconds=1),
+                    as_of=kit_at,
+                    recorded_before=kit_before,
                     assignment_events=assignment_events,
                 )
                 if row is not None:
@@ -454,10 +510,19 @@ def _presence_rows(organization_id, vehicle_id, as_of, pin=None, bound=None):
     return found
 
 
-def _kits_at(organization_id, vehicle_id, reference_kit_id, as_of, slots):
+def _kit_instant(pin, as_of):
+    """(instant, recorded_before) to read kits on the vehicle at: as of the query, or at a
+    paper pin's performance instant with every assignment known now (as its checks do)."""
+    if pin is not None and pin.kits_at is not None:
+        return pin.kits_at, None
+    return as_of, as_of + timedelta(microseconds=1)
+
+
+def _kits_at(organization_id, vehicle_id, reference_kit_id, as_of, slots, recorded_before):
     """(kit id, label) of the vehicle's kits in the reference kit's slot, from assignment history.
 
     The kit_instance row is only the current placement, so a past instant must not read it.
+    recorded_before is as _kit_instant gives it.
     """
     if reference_kit_id not in slots:
         slots[reference_kit_id] = slot_of_reference_kit(reference_kit_id)
@@ -468,7 +533,7 @@ def _kits_at(organization_id, vehicle_id, reference_kit_id, as_of, slots):
         vehicle_id,
         slots[reference_kit_id],
         as_of,
-        recorded_before=as_of + timedelta(microseconds=1),
+        recorded_before=recorded_before,
     )
     labels = dict(
         KitInstance.objects.filter(
@@ -674,10 +739,13 @@ def _placements(organization_id, vehicle_id, as_of, pin=None):
     # so each kit's presence line comes before its contents (KDEF-10).
     placed = []
     slots = {}
+    kit_at, kit_before = _kit_instant(pin, as_of)
     for order, item_id, resolved, version_id in items:
         requirement = resolved.requirement
         if requirement.kit_id:  # one row per kit instance; none means nothing is owed
-            kits = _kits_at(organization_id, vehicle_id, str(requirement.kit_id), as_of, slots)
+            kits = _kits_at(
+                organization_id, vehicle_id, str(requirement.kit_id), kit_at, slots, kit_before
+            )
             for kit_id, kit_label in kits:
                 placed.append(
                     (
@@ -797,6 +865,11 @@ def _rows(
     newest = latest_checks(checks)
     dtos = _deficiency_dtos(organization_id, facts, as_of)
     pinned = _pinned_presence_lines(placed, keys, obligations)
+    copied = {}
+    if pin is not None and pin.paper_batch_id is not None:
+        from cya.paper.readers import batch_effective_checks
+
+        copied = batch_effective_checks(organization_id, pin.paper_batch_id, as_of)
     rows = []
     for (_order, _display, item_id, kit_id, kit_label, resolved, version_id), key in zip(
         placed, keys, strict=True
@@ -848,7 +921,10 @@ def _rows(
                 check_suspended=state is not None and state.suspension_in_force,
                 latest_check_id=last.check_id if last else None,
                 latest_check_outcome=last.outcome if last else None,
-                latest_check_at=last.recorded_at if last else None,
+                # Normalized performance time (SPEC 8.0.0 19.4), as the obligation's completion.
+                latest_check_at=(last.performed_at or last.recorded_at) if last else None,
+                paper_entry_check_id=copied[key][0] if key in copied else None,
+                paper_entry_check_outcome=copied[key][1] if key in copied else None,
             )
         )
     return rows
@@ -937,6 +1013,7 @@ def vehicle_checklist(
     checklist_version_id=None,
     session=None,
     item_ids=None,
+    paper_batch=None,
 ):
     """The vehicle's checklist rows for a view and filter, as of an instant (default now).
 
@@ -952,10 +1029,17 @@ def vehicle_checklist(
     those of the version the session pins, resolved as a check in the session is (SPEC CHK-4,
     5.7.1): an item a later version removes is still listed and one it adds is not. Each row
     still shows the vehicle's state for its item as of the instant. Not with checklist_version_id.
+
+    With paper_batch (a PaperEntryBatch on this vehicle the caller has authorized), the rows are
+    those of the version printed on its sheet, resolved as a paper check of the batch is (SPEC
+    8.0.0 LATE-4; _paper_pin), and each row names the batch's effective check of it, if any
+    (paper_entry_check_id/outcome). Not with session or checklist_version_id.
     """
-    if session is not None and checklist_version_id is not None:
+    if sum(value is not None for value in (session, checklist_version_id, paper_batch)) > 1:
         raise ChecklistQueryError(
-            "INVALID_CHECKLIST_VERSION", "give a session or a checklist version, not both", 400
+            "INVALID_CHECKLIST_VERSION",
+            "give one of a session, a paper-entry batch or a checklist version",
+            400,
         )
     if view not in (NORMAL, PRIORITY):
         raise ChecklistQueryError("INVALID_VIEW", "view must be NORMAL or PRIORITY", 400)
@@ -982,11 +1066,12 @@ def vehicle_checklist(
         raise ChecklistQueryError("INVALID_AS_OF", "as_of must be timezone-aware", 400)
     if not Vehicle.objects.filter(organization_id=organization_id, pk=vehicle_id).exists():
         raise ChecklistQueryError("NOT_FOUND", "vehicle was not found", 404)
-    pin = (
-        None
-        if session is None
-        else _session_pin(organization_id, str(vehicle_id), session, instant)
-    )
+    if session is not None:
+        pin = _session_pin(organization_id, str(vehicle_id), session, instant)
+    elif paper_batch is not None:
+        pin = _paper_pin(organization_id, str(vehicle_id), paper_batch)
+    else:
+        pin = None
     rows = _rows(
         organization_id,
         str(vehicle_id),

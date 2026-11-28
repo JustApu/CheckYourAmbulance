@@ -108,6 +108,20 @@ class CheckRecord(Evidence):
     # The scope revision of that deficiency this check was recorded against (VER-4): a Pass counts
     # only for rows of the same revision, so a Pass never carries over to a later revision.
     verification_scope_revision = models.PositiveIntegerField(null=True)
+    # SPEC 8.0.0 7.2, 7.9 (issue #9 Part B2): a check copied from an outage paper form names its
+    # paper-entry batch and repeats the batch's original performance instant. performed_at is
+    # the qualifying time t_c for compliance and current ordering (5.3, TIME-4, 19.4, 19.6);
+    # recorded_at stays the server entry instant for as-of history. Both are null for a live
+    # check. The insert trigger (migration 0022) keeps them equal to the batch's.
+    paper_entry_batch = models.ForeignKey(
+        "cya_paper.PaperEntryBatch",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0022.
+        db_constraint=False,
+    )
+    performed_at = models.DateTimeField(null=True)
 
     class Meta:
         db_table = "check_record"
@@ -223,6 +237,11 @@ class CheckRecord(Evidence):
             ),
         ]
 
+    @property
+    def qualifying_at(self):
+        """t_c of SPEC 5.3: the paper performance instant, else the server-recorded instant."""
+        return self.performed_at or self.recorded_at
+
     def __str__(self):
         return f"CheckRecord {self.pk}"
 
@@ -239,6 +258,17 @@ class CheckEvent(Evidence):
         CheckRecord, null=True, on_delete=models.PROTECT, related_name="+"
     )
     explanation = models.CharField(max_length=MAX_TEXT, null=True)  # noqa: DJ001
+    # SPEC 8.0.0 INV-8, LATE-6, 18.4 (issue #9 Part B5): the replacement paper-entry batch an
+    # INVALIDATION of a check mistakenly saved in Normal mode must name. Null for every other
+    # event, including the per-chain events of a whole-batch invalidation.
+    replacement_paper_entry_batch = models.ForeignKey(
+        "cya_paper.PaperEntryBatch",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        # Enforced by the organization-pair key of migration 0023.
+        db_constraint=False,
+    )
 
     class Meta:
         db_table = "check_event"
@@ -261,6 +291,11 @@ class CheckEvent(Evidence):
             ),
             models.UniqueConstraint(
                 fields=["replacement_check"], name="check_event_replacement_once"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(replacement_paper_entry_batch__isnull=True)
+                | models.Q(event_type="INVALIDATION"),
+                name="check_event_replacement_batch_shape",
             ),
         ]
 

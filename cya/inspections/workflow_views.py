@@ -51,6 +51,7 @@ from cya.inspections.workflows import (
     OUTCOME_LABELS,
     check_history,
     deficiency_history,
+    paper_batches,
     report_options,
     verification_scope,
 )
@@ -919,20 +920,24 @@ def checks(request, user, vehicle_id):
         ):
             raise Http404
 
+    roles = roles_for(user)
     all_checks = check_history(
         user,
         vehicle,
-        roles_for(user),
+        roles,
         instant,
         root_ids={selected.root_check_id} if detail_id else None,
         include_obligations=bool(detail_id),
     )
+    batches = []
     if detail_id:
         checks_for_page = all_checks
         actors = []
         filter_query = urlencode({k: v for k, v in params.items() if v})
         page_context = {}
     else:
+        # SPEC 8.0.0 LATE-6, INV-8 (issue #9 B6b): the vehicle's recent paper entries.
+        batches = paper_batches(user, vehicle, roles, instant)
         # One compact row per immutable chain. Its newest recorded entry is the list summary.
         summaries = []
         seen = set()
@@ -997,6 +1002,7 @@ def checks(request, user, vehicle_id):
             "title": "Check history",
             "vehicle": vehicle,
             "checks": checks_for_page,
+            "paper_batches": batches,
             "detail": bool(detail_id),
             "filters": params,
             "actors": actors,

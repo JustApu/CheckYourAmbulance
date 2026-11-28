@@ -244,7 +244,7 @@ and auto-close compare under the same lock so a delayed job cannot erase work.
 | Table | Kind | Columns and keys beyond common identity |
 |---|---|---|
 | `check_record` | A | operation_id, vehicle_id ref, item_id ref, item_def_id? ref, checklist_version_id? ref, session_id? ref, kit_id? ref, `kit_presence` boolean, asset_id? ref, outcome, quantity?, measurement?, explanation?, client_observed_at?, roster_snapshot_id? ref, root_check_id ref, predecessor_check_id? ref, basis_check_id? ref, acknowledges_check_id? ref, purpose, verification_for_deficiency_id? ref, bulk_group_id? (must be null in R1); exactly one source: item_def_id, kit_definition_item_id (placed kit content with kit_id), physical kit presence (`kit_presence=true` with kit_id), or legacy kit_requirement_id (historical kit-list count). Physical presence checks link to obligations for that same instance. Item-requirement-version checks outside kits retain their place pin (CHK-11). |
-| `check_event` | A | root_check_id ref, selected_check_id ref, type (`CORRECTION`, `INVALIDATION`), replacement_check_id? ref, explanation?; correction replacement unique; invalidation unique per root |
+| `check_event` | A | root_check_id ref, selected_check_id ref, type (`CORRECTION`, `INVALIDATION`), replacement_check_id? ref, explanation?, replacement_paper_entry_batch_id? ref (only on an invalidation of a check mistakenly saved in Normal mode, SPEC 8.0.0 INV-8); correction replacement unique; invalidation unique per root |
 | `check_obligation_link` | A | check_id ref, obligation_id ref, ordinal, shared_rule_id? ref; unique check/obligation and check/ordinal |
 | `deficiency_category` | V | label, supply_related, revision, effective_at; category flag changes audited |
 | `deficiency_severity` | V | code, revision, label, description (concise criteria), rank, active, effective_at; levels are administrator data (SPEC DEF-8) |
@@ -348,6 +348,17 @@ it does not create fabricated item checks. An ordinary cabinet reseal may use a
 fresh verification of an intact nested kit seal, but a pending full-content audit
 requires direct inspection of every nested kit item; nested seal substitution
 cannot fulfill the audit. Event-tip conflicts fail without writing.
+
+### Paper entry
+
+[issue #9](https://github.com/JustApu/CheckYourAmbulance/issues/9) Part B1 implements the paper-entry batch header of SPEC 8.0.0 §18.4 (LATE-1 to LATE-4); see [Paper entry](paper-entry.md). Part B2 adds `check_record.paper_entry_batch_id` and `check_record.performed_at` (both null for a live check; see [paper item checks](paper-entry.md#paper-item-checks-part-b2)). Part B3 adds the same two columns to `odometer_entry` and `engine_hours_entry` (see [paper readings](paper-entry.md#paper-readings-part-b3)). Part B4 adds them to `seal_event` (paper breaks, reseals and audit fulfilments) and `seal_substitution` (see [paper seal records](paper-entry.md#paper-seal-records-part-b4)); a paper reseal's `seal_inspection` and child rows gain no columns and reach the batch through their reseal event, and its kit-count and kit-presence rows name paper checks of the same batch (SPEC 8.5.0 LATE-7). Part B5 adds `paper_entry_invalidation_event` and `check_event.replacement_paper_entry_batch_id` (see [batch invalidation](paper-entry.md#batch-invalidation-part-b5)).
+
+| Table | Kind | Columns and keys beyond common identity |
+|---|---|---|
+| `paper_entry_batch` | A | vehicle_id ref, checklist_version_id ref (the printed vehicle-checklist version: of that vehicle's own checklist, published by the entry instant and in force at the performance instant), performed_at (UTC, not after recorded_at), performed_local_date, performed_local_time, performed_zone, performed_utc_offset_minutes, performed_resolution (`EXACT`, `GAP_FORWARD`, `AMBIGUOUS_FIRST`); recorded_at and actor are the separate server entry instant and entry actor; one receipt (`PAPER_ENTRY_BATCH_RECORD`) per batch |
+| `paper_entry_performer` | A | batch_id ref, performer_id ref (any user of the organization, active or not); unique batch/performer; same receipt as its batch; a performer other than the entry actor needs a Supervisor or Administrator role snapshot |
+| `paper_entry_kit_version` | A | batch_id ref, kit_definition_version_id ref (printed on the kit reference: published by the entry instant, in force at the performance instant, placed by the batch's checklist version); unique batch/version; same receipt as its batch |
+| `paper_entry_invalidation_event` | A | batch_id ref (unique: a batch is invalidated at most once, INV-6), explanation (mandatory, non-blank); actor a Supervisor or Administrator other than the batch's entry actor; one receipt (`PAPER_ENTRY_BATCH_INVALIDATION`) whose response body names the batch; appended only once every check, odometer and engine-hours chain of the batch is invalidated |
 
 ### Command, audit and delivery infrastructure
 

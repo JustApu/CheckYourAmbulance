@@ -269,9 +269,10 @@ class InstantTests(OdometerCase):
         seen = {}
         real = odometer_commands._obligation_to_satisfy
 
-        def wrapper(organization_id, vehicle_id, now):
+        def wrapper(organization_id, vehicle_id, now, at=None):
             seen["now"] = now
-            found = real(organization_id, vehicle_id, now)
+            seen["at"] = at  # the qualifying instant: None for a live reading (SPEC 8.0.0 ODO-6)
+            found = real(organization_id, vehicle_id, now, at)
             if after is not None:
                 self.clock.set(after)  # the window opens after the decision, before the write
             return found
@@ -285,6 +286,7 @@ class InstantTests(OdometerCase):
             result = self.record(100)
         entry = OdometerEntry.objects.get(pk=result.body["entry_id"])
         self.assertEqual(entry.recorded_at, seen["now"])
+        self.assertIsNone(seen["at"])
         self.assertEqual(entry.command.recorded_at, seen["now"])
         self.assertEqual(OdometerObligationLink.objects.get().recorded_at, seen["now"])
 

@@ -40,6 +40,7 @@
       {% else %}
       <button type="button" class="button primary start-session" data-template="{{ c.id }}">Start {{ c.label }} inspection</button>
       {% endif %}
+      {% if can_paper and c.paper %}<a class="button paper-entry-link" href="{% url 'inspection-paper-entry-new' vehicle.pk %}?template={{ c.id }}">Paper entry: copy an outage sheet<span class="visually-hidden"> for {{ c.label }}</span></a>{% endif %}
     </li>
   {% endfor %}
   </ul>
@@ -47,6 +48,20 @@
   {% if cya_admin_url %}{% include "shell/empty_state.html" with message="No inspection checklist is set up for this vehicle." hint="Bind a checklist template to this vehicle in Administration." action_url=cya_admin_url action_label="Open Administration" %}{% else %}{% include "shell/empty_state.html" with message="No inspection checklist is set up for this vehicle." hint="Ask an administrator to set one up. You can still report a problem." %}{% endif %}
   {% endif %}
 </section>
+
+{% if paper_batches %}
+<section aria-labelledby="paper-heading">
+  <h2 id="paper-heading">Your recent paper entries</h2>
+  <ul class="plain">
+  {% for b in paper_batches %}
+    <li class="session-row">
+      <span class="session-row-status"><span class="pill pill-paper">Paper entry</span> <strong>{{ b.template_label }}</strong>, revision {{ b.revision }} · performed <time datetime="{{ b.performed_at.isoformat }}">{{ b.performed_at|station_time }}</time> · entered <time datetime="{{ b.recorded_at.isoformat }}">{{ b.recorded_at|station_time }}</time></span>
+      <a class="button" href="{{ b.url }}">Continue copying<span class="visually-hidden"> the {{ b.template_label }} sheet performed {{ b.performed_at|station_time }}</span></a>
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
 
 <section aria-labelledby="sessions-heading">
   <h2 id="sessions-heading">Active and recent inspections</h2>

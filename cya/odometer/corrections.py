@@ -147,6 +147,9 @@ def correct_reading(
                 prior_entry=prior,
                 root_entry=root,
                 predecessor_entry=tip,
+                # A correction keeps its chain's paper batch and place (SPEC 8.0.0 LATE-6).
+                paper_entry_batch_id=root.paper_entry_batch_id,
+                performed_at=root.performed_at,
                 anomaly_confirmed=is_anomalous,
                 confirmation_explanation=explanation if is_anomalous else None,
             )

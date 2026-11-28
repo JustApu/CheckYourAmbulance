@@ -11,6 +11,9 @@ class CheckSnapshot:
     predecessor_id: str | None
     recorded_at: datetime
     outcome: str
+    # SPEC 8.0.0 5.3: the paper performance instant of a paper check, else None. recorded_at
+    # still decides as-of visibility and chain order.
+    performed_at: datetime | None = None
 
 
 @dataclass(frozen=True)

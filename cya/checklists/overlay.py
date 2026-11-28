@@ -222,26 +222,35 @@ def effective_template_version(organization_id, template_id, as_of):
     return publication.checklist_version if publication else None
 
 
-def governing_versions(organization_id, vehicle_id, template_id, as_of, recorded_before=None):
+def governing_versions(
+    organization_id, vehicle_id, template_id, as_of, recorded_before=None, template_version_id=None
+):
     """Return (template version, override version or None) effective at as_of.
 
     With recorded_before, only publications recorded strictly before that instant count: what
     would have governed as the records stood then (used to judge a change against a window).
+
+    With template_version_id, that version is used instead of the latest one, provided it was
+    in force by as_of: the version printed on an outage paper form governs a paper entry even
+    if a later version has replaced it since (SPEC 8.0.0 LATE-4). Its override is the latest one
+    in force that overlays that same version, or none.
     """
     publications = ChecklistPublication.objects.filter(organization_id=organization_id)
+    if template_version_id is None:
+        chosen = publications.filter(checklist_version__template_id=template_id)
+        overrides = {"override_version__template_version__template_id": template_id}
+    else:
+        chosen = publications.filter(
+            checklist_version__template_id=template_id, checklist_version_id=template_version_id
+        )
+        overrides = {"override_version__template_version_id": template_version_id}
     template_publication = _latest_publication(
-        publications.filter(checklist_version__template_id=template_id),
-        as_of,
-        "checklist_version__revision",
-        recorded_before,
+        chosen, as_of, "checklist_version__revision", recorded_before
     )
     if template_publication is None:
         raise NoEffectiveVersionError(f"template {template_id} has no version effective at {as_of}")
     override_publication = _latest_publication(
-        publications.filter(
-            override_version__vehicle_id=vehicle_id,
-            override_version__template_version__template_id=template_id,
-        ),
+        publications.filter(override_version__vehicle_id=vehicle_id, **overrides),
         as_of,
         "override_version__revision",
         recorded_before,
@@ -513,17 +522,27 @@ def _resolved_placements(organization_id, vehicle_id, template_version_id, as_of
     return tuple(resolved)
 
 
-def resolve_checklist(*, organization_id, vehicle_id, template_id, as_of, recorded_before=None):
+def resolve_checklist(
+    *,
+    organization_id,
+    vehicle_id,
+    template_id,
+    as_of,
+    recorded_before=None,
+    template_version_id=None,
+):
     """Effective checklist for one vehicle at as_of (a timezone-aware instant).
 
     recorded_before (optional, timezone-aware) ignores publications recorded at or after it.
+    template_version_id (optional) resolves that printed version instead of the latest one
+    (governing_versions; SPEC 8.0.0 LATE-4).
     """
     if not isinstance(as_of, datetime) or as_of.tzinfo is None:
         raise ValueError("as_of must be a timezone-aware datetime")
     if not Vehicle.objects.filter(organization_id=organization_id, pk=vehicle_id).exists():
         raise ResolutionError(f"vehicle {vehicle_id} is not in organization {organization_id}")
     version, override = governing_versions(
-        organization_id, vehicle_id, template_id, as_of, recorded_before
+        organization_id, vehicle_id, template_id, as_of, recorded_before, template_version_id
     )
     requirements = _with_item_requirements(_requirements(version, override), as_of, recorded_before)
     compartments = vehicle_slots(

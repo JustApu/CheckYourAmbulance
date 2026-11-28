@@ -10,6 +10,7 @@ from cya.checks import api as check_api
 from cya.conditions import api as condition_api
 from cya.deficiencies import api as deficiency_api
 from cya.inspections import api as inspection_api
+from cya.inspections import paper_views as inspection_paper_views
 from cya.inspections import settings_views as inspection_settings_views
 from cya.inspections import views as inspection_views
 from cya.inspections import workflow_views
@@ -35,6 +36,7 @@ from cya.operations import (
     vehicle_admin_views,
 )
 from cya.operations import views as operations_views
+from cya.paper import api as paper_api
 from cya.seals import api as seal_api
 from cya.seals import views as seal_views
 from cya.shell import brand_views
@@ -71,6 +73,23 @@ urlpatterns = [
         "inspection/sessions/<str:session_id>/",
         inspection_views.session,
         name="inspection-session",
+    ),
+    # SPEC 8.0.0 REC-5, 7.9 (issue #9 Part B6): Paper entry setup and the paper checklist screen.
+    path(
+        "inspection/vehicles/<str:vehicle_id>/paper-entry/",
+        inspection_paper_views.paper_entry_new,
+        name="inspection-paper-entry-new",
+    ),
+    path(
+        "inspection/paper-entry/<str:batch_id>/",
+        inspection_paper_views.paper_entry,
+        name="inspection-paper-entry",
+    ),
+    # SPEC 8.5.0 LATE-7 (issue #9 Part B6c): the sheet's seal records.
+    path(
+        "inspection/paper-entry/<str:batch_id>/seals/",
+        seal_views.paper_seals,
+        name="inspection-paper-entry-seals",
     ),
     path("problems/", workflow_views.deficiencies, name="deficiencies"),
     path("problems/queue/", workflow_views.queue, name="deficiency-queue"),
@@ -496,6 +515,14 @@ urlpatterns = [
         name="api-status-request-decisions",
     ),
     path("api/v1/odometer-entries", odometer_api.odometer_entries, name="api-odometer-entries"),
+    # SPEC 8.0.0 7.9 (issue #9 Part B): paper entry of outage records.
+    path("api/v1/paper-entry-batches", paper_api.batches, name="api-paper-entry-batches"),
+    path(
+        "api/v1/paper-entry-batches/<str:batch_id>/invalidations",
+        paper_api.invalidations,
+        name="api-paper-entry-batch-invalidations",
+    ),
+    path("api/v1/paper-entry-performers", paper_api.performers, name="api-paper-entry-performers"),
     path(
         "api/v1/readings/<str:kind>/<str:reading_id>/corrections",
         odometer_api.reading_corrections,

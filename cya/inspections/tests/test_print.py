@@ -196,9 +196,64 @@ class PrintPageTests(CrewUiCase):
         text = strip_tags(html)
         self.assertEqual(html.count('class="sealed-compartment"'), 1)
         self.assertIn("An intact seal covers every item and kit inside", text)
-        self.assertNotIn(self.suction.label, text)  # the cabinet's items are covered by its seal
+        # The cabinet's items are covered by its seal: they print only in its reseal section.
+        checklist = strip_tags(
+            re.sub(
+                r'<section class="sheet-section reseal-section".*?</section>', "", html, flags=re.S
+            )
+        )
+        self.assertNotIn(self.suction.label, checklist)
         self.assertIn(self.siren.label, text)  # a vehicle-system item is not in the cabinet
         self.assertEqual(text.count("Inside a sealed cabinet"), 2)  # both kits are in it
+
+    def reseal_sections(self, html):
+        return {
+            strip_tags(
+                re.search(r'<tr class="section-heading">(.*?)</tr>', body, re.S).group(1)
+            ): body
+            for body in re.findall(
+                r'<section class="sheet-section reseal-section".*?</section>', html, re.S
+            )
+        }
+
+    def test_each_seal_prints_a_paper_reseal_section_of_everything_it_covers(self):
+        # SPEC 8.5.0 SEAL-1, CAB-9: only sealed kits and sealable cabinets get one.
+        self.assertEqual(self.reseal_sections(self.client.get(self.url()).content.decode()), {})
+        designate_kit_sealable(kit_id=self.kit_b, sealable=True, **self.context(self.supervisor))
+        designate_compartment_sealable(
+            vehicle_id=str(self.vehicle.pk),
+            compartment_id=str(self.cabinet.pk),
+            sealable=True,
+            **self.context(self.supervisor),
+        )
+        html = self.client.get(self.url()).content.decode()
+        sections = self.reseal_sections(html)
+        self.assertEqual(len(sections), 2)
+        [cabinet] = [body for heading, body in sections.items() if self.cabinet.label in heading]
+        [kit] = [body for heading, body in sections.items() if self.cabinet.label not in heading]
+        cabinet_text, kit_text = strip_tags(cabinet), strip_tags(kit)
+        # The kit section lists the kit's own contents; the cabinet section its loose items and
+        # every covered kit's contents (CAB-2), each with fresh blanks.
+        self.assertIn(self.kit_item.label, kit_text)
+        self.assertNotIn(self.suction.label, kit_text)
+        self.assertIn(self.suction.label, cabinet_text)
+        self.assertGreaterEqual(cabinet_text.count(self.kit_item.label), 2)  # both kits inside
+        self.assertNotIn(self.siren.label, cabinet_text)
+        for body in (cabinet, kit):
+            text = strip_tags(body)
+            for words in (
+                "Fresh count or value",
+                "Fresh expiration date",
+                "Written on the new seal",
+                "Crew ID",
+                "Earliest expiration",
+                "No expiration",
+                "never copy them",
+            ):
+                self.assertIn(words, text)
+            # Each printed page of the section still names the vehicle and checklist version.
+            self.assertIn('<tr class="repeat-identity">', body)
+        self.assertNotIn(self.user.display_name, html)
 
     def test_the_printed_instant_is_in_station_time(self):
         self.org.station_zone = "America/New_York"

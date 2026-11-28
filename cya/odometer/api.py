@@ -28,7 +28,7 @@ from cya.odometer.models import OdometerEntry, ReadingEvent
 logger = logging.getLogger(__name__)
 
 REQUIRED = ("operation_id", "vehicle_id", "value", "unit")
-OPTIONAL = ("engine_hours", "confirm_anomaly", "explanation", "session_id")
+OPTIONAL = ("engine_hours", "confirm_anomaly", "explanation", "session_id", "paper_entry_batch_id")
 ALLOWED = frozenset(REQUIRED + OPTIONAL)
 
 
@@ -62,13 +62,17 @@ def _acknowledgement(result, user):
     if row is None:
         raise DatabaseError("committed odometer entry could not be read back")
     recorded = row["recorded_at"].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    return {
+    acknowledgement = {
         "entry_id": result.body["entry_id"],
         "engine_hours_entry_id": result.body["engine_hours_entry_id"],
         "server_recorded_at": recorded,
         "anomaly_confirmed": result.body["anomaly_confirmed"],
         "obligation_links": result.body["obligation_links"],
     }
+    if "paper_entry" in result.body:
+        # Only a paper reading reports its batch and performance time (SPEC 8.0.0 ODO-6).
+        acknowledgement["paper_entry"] = result.body["paper_entry"]
+    return acknowledgement
 
 
 @never_cache

@@ -30,10 +30,11 @@ class KitCountCheckTests(SimpleTestCase):
             outcome="PASSED",
             quantity=2,
             recorded_at=self.at,
+            paper_entry_batch_id=None,  # a live check (SPEC 8.0.0 paper checks are refused here)
         )
         self.selections = [{"line_id": self.line_id, "check_id": self.check_id}]
 
-    def run_case(self, *, invalid=(), superseded=()):
+    def run_case(self, *, invalid=(), superseded=(), paper_batch_id=None, start="live"):
         initial, later = Mock(), Mock()
         initial.select_related.return_value = [self.check]
         later.values_list.return_value = list(superseded)
@@ -49,8 +50,9 @@ class KitCountCheckTests(SimpleTestCase):
                 "actor",
                 [self.line],
                 self.selections,
-                start=self.start,
+                start=self.start if start == "live" else start,
                 at=self.at,
+                paper_batch_id=paper_batch_id,
             )
 
     def test_current_fresh_check_matches_its_line(self):
@@ -72,6 +74,22 @@ class KitCountCheckTests(SimpleTestCase):
             self.run_case(invalid=[self.check_id])
         with self.assertRaises(ValueError):
             self.run_case(superseded=[self.check_id])
+
+    def test_a_paper_check_is_not_fresh_evidence_for_a_live_reseal(self):
+        self.check.paper_entry_batch_id = "batch"  # SPEC 8.0.0 LATE-7
+        with self.assertRaises(ValueError):
+            self.run_case()
+
+    def test_a_paper_reseal_takes_only_checks_copied_from_its_own_batch(self):
+        # SPEC 8.5.0 LATE-7: fresh for that paper inspection only; no live start is needed.
+        self.check.paper_entry_batch_id = self.check.root_check.paper_entry_batch_id = "batch"
+        self.assertEqual(
+            self.run_case(paper_batch_id="batch", start=None), [(self.line, self.check)]
+        )
+        for other in ("other-batch", None):
+            self.check.paper_entry_batch_id = self.check.root_check.paper_entry_batch_id = other
+            with self.subTest(check_batch=other), self.assertRaises(ValueError):
+                self.run_case(paper_batch_id="batch", start=None)
 
     def test_missing_duplicate_or_unstarted_count_is_rejected(self):
         with self.assertRaises(ValueError):

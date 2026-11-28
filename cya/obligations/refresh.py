@@ -6,6 +6,8 @@ updates are used. Existing publication/kit/binding reconciliation still appends 
 its own audited transactions; those transactions refresh their replacements and retirements.
 """
 
+from django.db.models import Q
+
 from cya.checks.models import CheckEvent, CheckObligationLink, CheckRecord
 from cya.conditions.models import ObligationDetermination
 from cya.deficiencies.models import CheckSuspension
@@ -14,6 +16,9 @@ from cya.obligations.models import Obligation, ObligationSelection
 from cya.obligations.state import NO_KIT
 
 CHECK_COMMANDS = frozenset(("CHECK_RECORD", "CHECK_CORRECTION", "CHECK_INVALIDATION"))
+# SPEC 8.0.0 INV-8 (issue #9 Part B5): invalidates the batch's check chains (check_event rows,
+# UTI-3 determinations) and voids its seal substitutions.
+PAPER_INVALIDATION = "PAPER_ENTRY_BATCH_INVALIDATION"
 DETERMINATION_COMMANDS = frozenset(
     (
         "RECORD_OBLIGATION_DETERMINATION",
@@ -31,7 +36,7 @@ def refresh_for_receipt(receipt):
     """Run after ALL domain effects, before success audit/COMMIT. Any failure rolls back both."""
     kind, org = receipt.command_type, str(receipt.organization_id)
     ids = set()
-    if kind in CHECK_COMMANDS:
+    if kind in CHECK_COMMANDS or kind == PAPER_INVALIDATION:
         roots = set(
             CheckRecord.objects.filter(command=receipt).values_list("root_check_id", flat=True)
         )
@@ -44,7 +49,7 @@ def refresh_for_receipt(receipt):
                 check_record__root_check_id__in=roots,
             ).values_list("obligation_id", flat=True)
         )
-    if kind in CHECK_COMMANDS | DETERMINATION_COMMANDS | OBLIGATION_COMMANDS:
+    if kind in CHECK_COMMANDS | DETERMINATION_COMMANDS | OBLIGATION_COMMANDS | {PAPER_INVALIDATION}:
         ids.update(
             ObligationDetermination.objects.filter(command=receipt).values_list(
                 "obligation_id", flat=True
@@ -68,6 +73,27 @@ def refresh_for_receipt(receipt):
                     "obligation_id", flat=True
                 )
             )
+    if kind == PAPER_INVALIDATION:
+        # The batch's substitutions are void from now: their obligations are re-derived.
+        from cya.paper.models import PaperEntryInvalidationEvent
+        from cya.seals.models import SealInspectionObligation, SealSubstitutionObligation
+
+        batches = PaperEntryInvalidationEvent.objects.filter(command=receipt).values("batch_id")
+        ids.update(
+            SealSubstitutionObligation.objects.filter(
+                Q(substitution__paper_entry_batch_id__in=batches)
+                # A substitution that relied on one of its paper reseals is void too.
+                | Q(substitution__seal_event__paper_entry_batch_id__in=batches),
+                organization_id=org,
+            ).values_list("obligation_id", flat=True)
+        )
+        # So are the inspections of its paper reseals.
+        ids.update(
+            SealInspectionObligation.objects.filter(
+                organization_id=org,
+                inspection_item__inspection__reseal__paper_entry_batch_id__in=batches,
+            ).values_list("obligation_id", flat=True)
+        )
     # Vehicle status is read-time evidence. Keeping it out of projection facts means a status
     # command never refreshes and locks every future routine obligation on the vehicle.
     if kind in CHECK_COMMANDS or kind.startswith("DEFICIENCY_"):

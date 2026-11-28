@@ -16,10 +16,11 @@ which keeps "the previous reading" and "one entry per obligation" exact.
 """
 
 import re
-from datetime import timedelta
+from datetime import UTC, timedelta
 from decimal import Decimal
 
 from django.db.models import Q
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from cya.accounts.fields import new_id
@@ -29,7 +30,16 @@ from cya.authorization.guard import PermissionDenied, Principal, require_permiss
 from cya.authorization.locking import locked_identities
 from cya.authorization.persistence import DatabaseRoleBackend, digest
 from cya.authorization.policy import Role
-from cya.checks.commands import CheckError, _explanation, _id, _operation_id, _vehicle
+from cya.checks.commands import (
+    CheckError,
+    _explanation,
+    _id,
+    _operation_id,
+    _optional_id,
+    _paper_action,
+    _paper_batch,
+    _vehicle,
+)
 from cya.core.audit_commands import Actor, CommandDenied, Plan, run_command
 from cya.obligations.queries import odometer_obligations
 from cya.odometer.models import (
@@ -94,7 +104,7 @@ def _shape(*, vehicle_id, value, unit, engine_hours, confirm_anomaly, explanatio
     }
 
 
-def _authorize(organization_id, actor_id, action):
+def _authorize(organization_id, actor_id, action, paper_batch_id=None):
     backend = DatabaseRoleBackend()
 
     def authorize(_org):
@@ -110,8 +120,21 @@ def _authorize(organization_id, actor_id, action):
             principal = Principal(
                 organization_id, actor_id, roles, user.active and current_org.active
             )
+            actions = [action]
+            if paper_batch_id is not None:
+                # SPEC 3.3 paper-entry roles, checked again for every paper record (LATE-3).
+                actions.append(
+                    _paper_action(
+                        organization_id,
+                        actor_id,
+                        paper_batch_id,
+                        roles,
+                        user.active and current_org.active,
+                    )
+                )
             try:
-                require_permission(principal, organization_id, action)
+                for each in actions:
+                    require_permission(principal, organization_id, each)
             except PermissionDenied:
                 raise CommandDenied(actor) from None
             return actor
@@ -119,13 +142,16 @@ def _authorize(organization_id, actor_id, action):
     return authorize
 
 
-def previous_reading(model, organization_id, vehicle_id, *, before_root=None):
-    """The newest effective reading by root chronology, optionally before one root.
+def sequence_key(root):
+    """A root reading's place in its vehicle's sequence (SPEC 8.0.0 ODO-6, LATE-5).
 
-    Corrections are recorded later than the reading they replace, but do not move that reading's
-    place in the odometer sequence. Order by the root's recorded instant and id, not the current
-    chain tip's timestamp.
+    (qualifying instant, recorded instant, id): a paper reading sits at its performance instant,
+    a live one at its recorded instant, as before.
     """
+    return (root.performed_at or root.recorded_at, root.recorded_at, str(root.pk))
+
+
+def _effective_tips(model, organization_id, vehicle_id):
     root_field = "root_odometer_id" if model is OdometerEntry else "root_hours_id"
     invalidated = ReadingEvent.objects.filter(
         organization_id=organization_id,
@@ -135,53 +161,48 @@ def previous_reading(model, organization_id, vehicle_id, *, before_root=None):
     superseded = model.objects.filter(
         organization_id=organization_id, predecessor_entry__isnull=False
     ).values("predecessor_entry_id")
-    rows = model.objects.filter(organization_id=organization_id, vehicle_id=vehicle_id)
-    if before_root is not None:
-        rows = rows.filter(
-            Q(root_entry__recorded_at__lt=before_root.recorded_at)
-            | Q(
-                root_entry__recorded_at=before_root.recorded_at,
-                root_entry_id__lt=before_root.pk,
-            )
-        )
     return (
-        rows.exclude(root_entry_id__in=invalidated)
+        model.objects.filter(organization_id=organization_id, vehicle_id=vehicle_id)
+        .exclude(root_entry_id__in=invalidated)
         .exclude(pk__in=superseded)
-        .order_by("-root_entry__recorded_at", "-root_entry_id")
-        .first()
+        .annotate(seq_at=Coalesce("root_entry__performed_at", "root_entry__recorded_at"))
     )
 
 
-def next_reading(model, organization_id, vehicle_id, *, after_root):
-    """The oldest effective reading by root chronology strictly after one root.
+def _relative(key, before):
+    at, recorded, pk = key
+    if before:
+        return (
+            Q(seq_at__lt=at)
+            | Q(seq_at=at, root_entry__recorded_at__lt=recorded)
+            | Q(seq_at=at, root_entry__recorded_at=recorded, root_entry_id__lt=pk)
+        )
+    return (
+        Q(seq_at__gt=at)
+        | Q(seq_at=at, root_entry__recorded_at__gt=recorded)
+        | Q(seq_at=at, root_entry__recorded_at=recorded, root_entry_id__gt=pk)
+    )
+
+
+def previous_reading(model, organization_id, vehicle_id, *, before_root=None, before=None):
+    """The newest effective reading in sequence order, optionally before one root or key.
 
     Corrections are recorded later than the reading they replace, but do not move that reading's
-    place in the odometer sequence. Order by the root's recorded instant and id, not the current
-    chain tip's timestamp.
+    place in the odometer sequence: order by the root's sequence_key, not the current chain
+    tip's timestamp.
     """
-    root_field = "root_odometer_id" if model is OdometerEntry else "root_hours_id"
-    invalidated = ReadingEvent.objects.filter(
-        organization_id=organization_id,
-        event_type="INVALIDATION",
-        **{f"{root_field}__isnull": False},
-    ).values(root_field)
-    superseded = model.objects.filter(
-        organization_id=organization_id, predecessor_entry__isnull=False
-    ).values("predecessor_entry_id")
-    rows = model.objects.filter(organization_id=organization_id, vehicle_id=vehicle_id)
-    rows = rows.filter(
-        Q(root_entry__recorded_at__gt=after_root.recorded_at)
-        | Q(
-            root_entry__recorded_at=after_root.recorded_at,
-            root_entry_id__gt=after_root.pk,
-        )
-    )
-    return (
-        rows.exclude(root_entry_id__in=invalidated)
-        .exclude(pk__in=superseded)
-        .order_by("root_entry__recorded_at", "root_entry_id")
-        .first()
-    )
+    rows = _effective_tips(model, organization_id, vehicle_id)
+    key = sequence_key(before_root) if before_root is not None else before
+    if key is not None:
+        rows = rows.filter(_relative(key, before=True))
+    return rows.order_by("-seq_at", "-root_entry__recorded_at", "-root_entry_id").first()
+
+
+def next_reading(model, organization_id, vehicle_id, *, after_root=None, after=None):
+    """The oldest effective reading in sequence order strictly after one root or key."""
+    key = sequence_key(after_root) if after_root is not None else after
+    rows = _effective_tips(model, organization_id, vehicle_id).filter(_relative(key, before=False))
+    return rows.order_by("seq_at", "root_entry__recorded_at", "root_entry_id").first()
 
 
 def threshold_for(organization_id, unit):
@@ -205,20 +226,22 @@ def anomaly(value, prior, limit):
     return None
 
 
-def _obligation_to_satisfy(organization_id, vehicle_id, now):
+def _obligation_to_satisfy(organization_id, vehicle_id, now, at=None):
     """The unsatisfied odometer obligation this reading satisfies, or None (ODO-2).
 
     The earliest-due one whose window contains the instant (SCH-6). Only when none does, the
     earliest-due one past grace but not past its pinned late limit L (a late completion, SCH-2);
     one further past stays missed. An obligation whose early window has not opened is never
-    eligible.
+    eligible. `at` is the qualifying instant (a paper reading's performance instant; SPEC 8.0.0
+    5.3, ODO-6); what is known, and so what is already satisfied, is read at `now`.
     """
+    at = now if at is None else at
     candidates = [
         o
         for o in odometer_obligations(
-            organization_id, now - LOOKBACK, now + LOOKAHEAD, vehicle_id=vehicle_id, as_of=now
+            organization_id, at - LOOKBACK, at + LOOKAHEAD, vehicle_id=vehicle_id, as_of=now
         )
-        if o.early_at <= now
+        if o.early_at <= at
     ]
     invalidated = ReadingEvent.objects.filter(
         organization_id=organization_id,
@@ -233,11 +256,20 @@ def _obligation_to_satisfy(organization_id, vehicle_id, now):
         .values_list("obligation_id", flat=True)
     )
     open_ = [o for o in candidates if o.pk not in satisfied]
-    on_time = [o for o in open_ if now <= o.grace_at]
+    on_time = [o for o in open_ if at <= o.grace_at]
     # SCH-2: up to the obligation's pinned late limit L, inclusive (issue #80).
-    late = [o for o in open_ if o.grace_at < now <= o.late_limit_at]
+    late = [o for o in open_ if o.grace_at < at <= o.late_limit_at]
     chosen = on_time or late
     return chosen[0] if chosen else None
+
+
+ANOMALY_TEXT = {
+    "LOWER": "lower than the previous reading",
+    "JUMP": "much higher than the previous reading",
+    # SPEC 8.0.0 ODO-6: a paper reading placed before later readings is compared with both.
+    "HIGHER_THAN_NEXT": "higher than the next reading",
+    "FAR_BELOW_NEXT": "much lower than the next reading",
+}
 
 
 def _confirmation(kind, shape, path):
@@ -247,8 +279,7 @@ def _confirmation(kind, shape, path):
     if not shape["confirm"]:
         raise CheckError(
             "ANOMALY_CONFIRMATION_REQUIRED",
-            f"the {path} is {'lower than' if kind == 'LOWER' else 'much higher than'} the previous "
-            "reading; correct it or confirm it",
+            f"the {path} is {ANOMALY_TEXT[kind]}; correct it or confirm it",
             status=409,
             path=path,
         )
@@ -264,6 +295,7 @@ def record_odometer(
     confirm_anomaly=False,
     explanation=None,
     session_id=None,
+    paper_entry_batch_id=None,
     organization_id,
     actor_id,
     operation_id,
@@ -271,6 +303,10 @@ def record_odometer(
     request_attempt_id,
 ):
     """Record one attributed odometer reading (ODO-1), optionally with engine hours (ODO-4).
+
+    paper_entry_batch_id makes it a paper reading (SPEC 8.0.0 ODO-6): placed in the vehicle's
+    sequence, and judged for its obligation, at the batch's performance instant, and compared
+    with the readings on both sides of it.
 
     Idempotent on operation_id. The actor is the authenticated user; nothing here accepts a
     client-supplied actor or roles. A reading lower than the previous valid one, or above it by
@@ -298,25 +334,47 @@ def record_odometer(
         "explanation": explanation,
         "session_id": session_id,
     }
+    batch_id = _optional_id(paper_entry_batch_id, "paper_entry_batch_id")
+    if batch_id is not None:
+        request["paper_entry_batch_id"] = batch_id  # only when given: live digests unchanged
 
     def build(actor):
         _vehicle(organization_id, shape["vehicle_id"], lock=True)
-        now = timezone.now()  # read under the lock, so it never precedes a concurrent entry
-        prior = previous_reading(OdometerEntry, organization_id, shape["vehicle_id"])
-        if prior is not None and prior.unit != shape["unit"]:
-            raise CheckError(
-                "UNIT_MISMATCH",
-                f"this vehicle's readings are in {prior.unit}",
-                path="unit",
+        paper = (
+            _paper_batch(
+                organization_id,
+                actor,
+                {"paper_entry_batch_id": batch_id, "vehicle_id": shape["vehicle_id"]},
             )
+            if batch_id is not None
+            else None
+        )
+        now = timezone.now()  # read under the lock, so it never precedes a concurrent entry
+        entry_id = new_id()
+        hours_id = new_id() if shape["engine_hours"] is not None else None
+        at = paper.performed_at if paper else None
+        prior, following = _neighbours(OdometerEntry, organization_id, shape, at, now, entry_id)
+        for neighbour in (prior, following):
+            if neighbour is not None and neighbour.unit != shape["unit"]:
+                raise CheckError(
+                    "UNIT_MISMATCH",
+                    f"this vehicle's readings are in {neighbour.unit}",
+                    path="unit",
+                )
         limit = threshold_for(organization_id, shape["unit"])
-        kind = anomaly(shape["value"], prior, limit)
+        kind = anomaly(shape["value"], prior, limit) or _against_next(
+            shape["value"], following, limit
+        )
         confirmed = _confirmation(kind, shape, "value")
         prior_hours = None
         hours_confirmed = False
         if shape["engine_hours"] is not None:
-            prior_hours = previous_reading(EngineHoursEntry, organization_id, shape["vehicle_id"])
-            hours_kind = anomaly(shape["engine_hours"], prior_hours, None)
+            prior_hours, next_hours = _neighbours(
+                EngineHoursEntry, organization_id, shape, at, now, hours_id
+            )
+            hours_kind = anomaly(shape["engine_hours"], prior_hours, None) or _against_next(
+                shape["engine_hours"], next_hours, None
+            )
             hours_confirmed = _confirmation(hours_kind, shape, "engine_hours")
         if shape["explanation"] is not None and not (confirmed or hours_confirmed):
             raise CheckError(
@@ -324,9 +382,7 @@ def record_odometer(
                 "an explanation is accepted only when confirming an anomalous reading",
                 path="explanation",
             )
-        obligation = _obligation_to_satisfy(organization_id, shape["vehicle_id"], now)
-        entry_id = new_id()
-        hours_id = new_id() if shape["engine_hours"] is not None else None
+        obligation = _obligation_to_satisfy(organization_id, shape["vehicle_id"], now, at)
         link_id = new_id() if obligation is not None else None
         explanation_text = shape["explanation"]
 
@@ -339,6 +395,8 @@ def record_odometer(
                 "actor_roles_at_time": list(current.roles),
                 "operation_id": operation_id,
                 "vehicle_id": shape["vehicle_id"],
+                "paper_entry_batch_id": paper.batch_id if paper else None,
+                "performed_at": at,
             }
             OdometerEntry.objects.create(
                 id=entry_id,
@@ -404,6 +462,13 @@ def record_odometer(
             "anomaly_confirmed": confirmed or hours_confirmed,
             "obligation_links": [str(obligation.pk)] if obligation else [],
         }
+        if paper is not None:
+            # Only a paper reading reports its source, so a live response is unchanged.
+            body["paper_entry"] = {
+                "batch_id": paper.batch_id,
+                "performed_at": at.astimezone(UTC).isoformat(),
+            }
+            snapshot["values"]["paper_entry_batch_id"] = paper.batch_id
         return Plan(
             response_body=body,
             apply=apply,
@@ -423,9 +488,35 @@ def record_odometer(
         request_digest=digest(request),
         correlation_id=correlation_id,
         request_attempt_id=request_attempt_id,
-        authorize=_authorize(organization_id, actor_id, RECORD_ACTION),
+        authorize=_authorize(organization_id, actor_id, RECORD_ACTION, batch_id),
         prepare=build,
     )
+
+
+def _neighbours(model, organization_id, shape, at, now, new_root_id):
+    """(previous, next) effective readings around a new reading's place in the sequence.
+
+    A live reading's place is now, after every reading, so it has no next one and its previous
+    one is the vehicle's latest, as before. A paper reading's place is its performance instant.
+    """
+    if at is None:
+        return previous_reading(model, organization_id, shape["vehicle_id"]), None
+    key = (at, now, new_root_id)
+    return (
+        previous_reading(model, organization_id, shape["vehicle_id"], before=key),
+        next_reading(model, organization_id, shape["vehicle_id"], after=key),
+    )
+
+
+def _against_next(value, following, limit):
+    """ODO-6: a paper reading is anomalous above the next reading, or far below it (odometer)."""
+    if following is None:
+        return None
+    if value > following.value:
+        return "HIGHER_THAN_NEXT"
+    if limit is not None and following.value - value > limit:
+        return "FAR_BELOW_NEXT"
+    return None
 
 
 def set_odometer_threshold(

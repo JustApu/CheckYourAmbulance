@@ -18,7 +18,7 @@ All mutations use the existing audited [check](check-records.md) and
 | `/problems/{id}/verification/` | The existing checklist screen in verification mode, without creating a session. A deficiency that is not Pending Verification answers 409 with its current status and a link back to it, not the 503 outage page (issue #20). |
 | `/problems/{id}/verification-items/` | Read-only JSON: current outstanding scope rows available on the vehicle checklist, deficiency status and unavailable-row count, plus an always-empty `group_progress` list that the checklist script requires (the verification screen has no compartment overview; issue #234). Without a session it answers 401 (the verification screen then stops re-reading; issue #37). |
 | `/inspection/vehicles/{id}/problems/new/` | Independent item, compartment or selected vehicle-systems report. |
-| `/inspection/vehicles/{id}/check-history/` | Searchable, paginated summaries of recent check chains, with a per-chain detail view for complete history; own corrections, administrator invalidation and supervisor Unable completion. |
+| `/inspection/vehicles/{id}/check-history/` | Searchable, paginated summaries of recent check chains, with a per-chain detail view for complete history; own corrections, administrator invalidation and supervisor Unable completion. Paper entries are marked, with timing, and can be invalidated as described in [crew inspection screens](crew-inspection-ui.md#paper-entries-in-check-history). |
 
 Pages require an active signed-in user with an organization role, like the shell. Missing,
 malformed and other-organization resources answer 404. A user without a permitted role gets

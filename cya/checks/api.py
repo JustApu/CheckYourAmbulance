@@ -53,6 +53,7 @@ OPTIONAL = (
     "inspection_start_operation_id",
     "verification_for_deficiency_id",
     "deficiency",
+    "paper_entry_batch_id",
 )
 ALLOWED = frozenset(REQUIRED + OPTIONAL)
 
@@ -78,9 +79,9 @@ def _reply(status, code, correlation_id, field_errors=()):
 def _conflict(conflict, operation_id, correlation_id):
     """The dedicated warning shape; it carries only fields every signed-in user may see."""
     newest = dict(conflict.newest)
-    newest["server_recorded_at"] = (
-        newest["server_recorded_at"].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    )
+    for key in ("server_recorded_at", "performed_at"):
+        if key in newest:
+            newest[key] = newest[key].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     return JsonResponse(
         {
             "status": "CONFLICT",
@@ -160,6 +161,9 @@ def _acknowledgement(result, user):
 
     if "verification" in result.body:
         acknowledgement["verification"] = result.body["verification"]
+    if "paper_entry" in result.body:
+        # Only a paper check reports its batch and performance time (SPEC 8.0.0 LATE-1, LATE-2).
+        acknowledgement["paper_entry"] = result.body["paper_entry"]
     return acknowledgement
 
 
@@ -314,7 +318,7 @@ def _invalidation_acknowledgement(result, user):
     )
     if row is None:
         raise DatabaseError("committed invalidation could not be read back")
-    return {
+    acknowledgement = {
         "root_check_id": result.body["root_check_id"],
         "invalidation_event_id": result.body["invalidation_event_id"],
         "server_recorded_at": row["recorded_at"].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
@@ -322,16 +326,27 @@ def _invalidation_acknowledgement(result, user):
         "reopened_deficiency_ids": result.body["reopened_deficiency_ids"],
         "voided_determination_ids": result.body["voided_determination_ids"],
     }
+    if "replacement_paper_entry_batch_id" in result.body:
+        # Only a mistaken-Normal invalidation names its replacement batch (SPEC 8.0.0 INV-8).
+        acknowledgement["replacement_paper_entry_batch_id"] = result.body[
+            "replacement_paper_entry_batch_id"
+        ]
+    return acknowledgement
 
 
 @never_cache
 @require_http_methods(["POST"])
 def invalidations(request, check_id):
-    """POST /api/v1/checks/{check_id}/invalidations: administrators only (contracts)."""
+    """POST /api/v1/checks/{check_id}/invalidations: administrators only (contracts).
+
+    With replacement_paper_entry_batch_id, a check mistakenly saved in Normal mode is invalidated
+    after its paper re-entry (SPEC 8.0.0 INV-8): a Supervisor or Administrator may do that.
+    """
     correlation_id = str(uuid.uuid4())
     user = request.cya_user
     if user is None:
         return _reply(401, "AUTHENTICATION_REQUIRED", correlation_id)
+    replacement = False
     try:
         if request.content_type != "application/json":
             raise Rejected(400, "MALFORMED_REQUEST")
@@ -339,8 +354,24 @@ def invalidations(request, check_id):
             body = json.loads(_read_body(request).decode("utf-8"))
         except (UnicodeDecodeError, ValueError, RecursionError):
             raise Rejected(400, "MALFORMED_REQUEST") from None
-        if not isinstance(body, dict) or set(body) != {"operation_id", "explanation"}:
+        if not isinstance(body, dict) or not (
+            {"operation_id", "explanation"}
+            <= set(body)
+            <= {"operation_id", "explanation", "replacement_paper_entry_batch_id"}
+        ):
             raise Rejected(400, "MALFORMED_REQUEST", [("$", "INVALID_FIELDS")])
+        replacement = "replacement_paper_entry_batch_id" in body
+        extra = (
+            {"replacement_paper_entry_batch_id": body["replacement_paper_entry_batch_id"]}
+            if replacement
+            else {}
+        )
+        if replacement and not isinstance(body["replacement_paper_entry_batch_id"], str):
+            raise Rejected(
+                400,
+                "MALFORMED_REQUEST",
+                [("replacement_paper_entry_batch_id", "INVALID")],
+            )
         result = invalidate_chain(
             check_id=check_id,
             explanation=body["explanation"],
@@ -349,6 +380,7 @@ def invalidations(request, check_id):
             actor_id=str(user.pk),
             correlation_id=correlation_id,
             request_attempt_id=str(uuid.uuid4()),
+            **extra,
         )
         if result.operation_reused:
             return _reply(409, "OPERATION_REUSED", correlation_id, [("operation_id", "REUSED")])
@@ -373,7 +405,9 @@ def invalidations(request, check_id):
     except SelfInvalidationForbidden:
         return _reply(403, "SELF_INVALIDATION_FORBIDDEN", correlation_id)
     except CommandDenied:
-        return _reply(403, "ADMINISTRATOR_REQUIRED", correlation_id)
+        # A Supervisor may make a mistaken-Normal invalidation, so that refusal is not
+        # "administrator required".
+        return _reply(403, "FORBIDDEN" if replacement else "ADMINISTRATOR_REQUIRED", correlation_id)
     except OperationConflict:
         return _reply(409, "OPERATION_OWNED_BY_ANOTHER_ACTOR", correlation_id)
     except AuditPersistenceFailure:

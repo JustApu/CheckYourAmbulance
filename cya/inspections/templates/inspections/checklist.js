@@ -7,6 +7,10 @@
   var csrf = document.querySelector("[name=csrfmiddlewaretoken]").value;
   var $ = function (id) { return document.getElementById(id); };
   var list = $("items"), liveBanner = $("live-banner"), notice = $("screen-notice");
+  // Paper entry (SPEC 8.0.0 REC-5, LATE-4 to LATE-8): the rows of the version printed on one
+  // batch's sheet. Each tap saves one check naming the batch, never a session; the view is the
+  // sheet's own order, so no view preference is read or saved and the progress bar is not shown.
+  var paper = config.paper_entry || null, paperOffered = !!(paper && paper.has_records);
   var deferredListRender = false;
   list.tabIndex = -1;
   var entries = {};       // item key -> {status, payload, text, operationId}
@@ -139,7 +143,15 @@
     ANOMALY_CONFIRMATION_REQUIRED: "That reading looks unusual.",
     AUDIT_UNAVAILABLE: "The service cannot record this right now.",
     CONFIGURATION_UNAVAILABLE: "The service is not configured to record this. Tell an administrator.",
-    RETRY_LATER: "The service is busy."
+    RETRY_LATER: "The service is busy.",
+    PAPER_BATCH_INVALIDATED: "This paper entry was invalidated. Start a new paper entry from the vehicle page.",
+    PAPER_BATCH_MISMATCH: "This paper entry is for another vehicle. Reload the page.",
+    PAPER_VERSION_MISMATCH: "This row is not on the checklist version printed on the sheet. Reload the page.",
+    PRINTED_KIT_VERSION_MISSING: "No kit version was named for this kit, so its contents cannot be copied. Start a new paper entry naming the kit reference used.",
+    KIT_MOVED_SINCE_PAPER: "This kit has left the vehicle since the sheet's time, so it cannot be copied from the sheet.",
+    ITEM_NOT_IN_CHECKLIST: "This item is not on the checklist version printed on the sheet.",
+    CHECKLIST_UNAVAILABLE: "The printed checklist cannot be read right now. Try again later.",
+    PERFORMED_IN_FUTURE: "The sheet's time is later than now."
   };
   function say(code) { return MESSAGES[code] || ("Not accepted (" + code + ")."); }
   // The shell's Saved toast (issue #194); absent when the shell script is not on the page.
@@ -177,6 +189,7 @@
       basis_check_id: entry.basis
     };
     if (config.session_id) { p.session_id = config.session_id; }
+    if (paper) { p.paper_entry_batch_id = paper.batch_id; }   // a paper check takes no session
     if (config.verification_for_deficiency_id) {
       p.purpose = "VERIFICATION";
       p.verification_for_deficiency_id = config.verification_for_deficiency_id;
@@ -237,6 +250,12 @@
       if (answer.kind !== "committed" && hintWaiting && !savesInFlight) { scheduleRead(250); }
       if (answer.kind === "committed") {
         entry.status = "saved"; entry.text = "Recorded " + when(answer.body.result.server_recorded_at);
+        if (paper) {
+          var copied = answer.body.result.paper_entry;
+          entry.text = "Saved as performed " + when(copied && copied.performed_at || paper.performed_at) +
+            "; entered " + when(answer.body.result.server_recorded_at);
+          paperRecorded();
+        }
         // The server's outcome is authoritative (a count can derive Fail); remember which check it is.
         entry.savedOutcome = answer.body.result.outcome || entry.outcome || "PASSED";
         entry.checkId = answer.body.result.check_id;
@@ -267,7 +286,7 @@
       } else if (answer.kind === "rejected") {
         entry.status = "failed"; entry.text = say(answer.code);
         if (answer.code === "CHECKLIST_VERSION_NOT_CURRENT" || answer.code === "SESSION_NOT_OPEN" ||
-            answer.code === "SESSION_DEADLINE_PASSED") {
+            answer.code === "SESSION_DEADLINE_PASSED" || answer.code === "PAPER_BATCH_INVALIDATED") {
           scheduleReload(0);
         }
       } else {
@@ -297,7 +316,10 @@
     conflictShowing = true;
     $("conflict-text").textContent = (newest.actor && newest.actor.display_name ? newest.actor.display_name : "Another crew member") +
       " recorded " + (newest.outcome || "a check").replace(/_/g, " ").toLowerCase() + " for \"" + row.item_label +
-      "\" at " + when(newest.server_recorded_at) + ". Nothing has been saved from your tap.";
+      "\" at " + when(newest.server_recorded_at) +
+      // A paper check names when it was performed as well (SPEC 8.0.0 LATE-6).
+      (newest.performed_at ? " (copied from paper; performed " + when(newest.performed_at) + ")" : "") +
+      ". Nothing has been saved from your tap.";
     dialog.dataset.key = key(row);
     // The row itself is kept: a live reload (for example the other person's Pass, with Needs
     // Attention Only on) can drop it from the list while this dialog is open (CON-2).
@@ -442,6 +464,13 @@
   // so the satisfying outcome is shown. A supervisor completion is not a check result: no mark.
   var unmarkedStates = {SUSPENDED: true, EXEMPT: true, WAIVED: true};
   function recordedOutcome(row, entry) {
+    // Paper mode marks what was copied from this sheet, not the current window's result: this
+    // person's acknowledged tap, else the batch's effective check of the row (paper_entry_check).
+    if (paper) {
+      var copied = savedOutcome(entry);
+      if (copied) { return copied; }
+      return row.paper_entry_check ? row.paper_entry_check.outcome : null;
+    }
     // Issue #235 B3: with no current window ("No check is currently required", or "Not due" before the
     // window opens) there is no window result to show, even right after this person's tap.
     if (!config.verification_for_deficiency_id &&
@@ -560,6 +589,7 @@
     return box;
   }
   function navigationStorageKey() {
+    if (config.user_id && paper) { return "cya.inspection.navigation.v1:" + config.user_id + ":paper:" + paper.batch_id; }
     return config.user_id && config.session_id ?
       "cya.inspection.navigation.v1:" + config.user_id + ":" + config.session_id : null;
   }
@@ -616,6 +646,14 @@
       group.no_obligation + " not required · " + group.exceptions + " exception" +
       (group.exceptions === 1 ? "" : "s");
   }
+  // Paper mode: how many of an area's rows the batch holds a check for (or this page just saved).
+  function copiedText(group) {
+    var copied = 0;
+    checklistRows().forEach(function (row) {
+      if (groupKeyForRow(row) === group.key && (row.paper_entry_check || savedOutcome(entries[key(row)]))) { copied += 1; }
+    });
+    return copied + " of " + group.total + " copied from this sheet";
+  }
   function renderAreaCards() {
     var cards = $("area-cards"), focusedGroup = null, focusedDetails = false, openDetails = {};
     // In split view the list stays on screen through live updates: keep a focused card focused,
@@ -635,15 +673,22 @@
       var button = el("button", "area-card", "");
       button.type = "button"; button.dataset.groupKey = group.key;
       button.appendChild(el("span", "area-card-title", group.label));
-      button.appendChild(el("span", "area-card-summary", progressText(group)));
       var left = group.due + group.due_soon + group.overdue;
-      button.appendChild(el("span", "area-card-short", left ? left + " still due" : "Nothing due"));
+      if (paper) {
+        button.appendChild(el("span", "area-card-summary", copiedText(group)));
+        button.appendChild(el("span", "area-card-short", copiedText(group)));
+      } else {
+        button.appendChild(el("span", "area-card-summary", progressText(group)));
+        button.appendChild(el("span", "area-card-short", left ? left + " still due" : "Nothing due"));
+      }
       if (group.key === selectedGroupKey) { button.setAttribute("aria-current", "true"); }
       button.addEventListener("click", function () {
         layoutMode = "COMPARTMENTS"; selectedGroupKey = group.key; navigationAnchorKey = null;
         saveNavigation(); render(); $("area-heading").focus({preventScroll: true});
       });
       card.appendChild(button);
+      // The window breakdown says nothing about the sheet, so paper mode leaves it out.
+      if (paper) { cards.appendChild(card); if (group.key === focusedGroup) { button.focus({preventScroll: true}); } return; }
       var details = el("details", "area-card-details");
       var summary = el("summary", "area-card-details-toggle");
       summary.appendChild(el("span", "", "Details"));
@@ -763,7 +808,8 @@
       attentionPill.appendChild(document.createTextNode(" Needs attention"));
       head.appendChild(attentionPill);
     }
-    var st = stateText(row);
+    // Paper mode shows what was copied from the sheet, not the current window's state.
+    var st = paper ? "" : stateText(row);
     if (st) {
       var status = el("span", "window-status", st);
       status.setAttribute("aria-label", (config.verification_for_deficiency_id ? "Verification state: " : "Current-window state: ") + st);
@@ -784,10 +830,29 @@
       box.appendChild(historyLink);
       li.appendChild(box);
     });
-    if (row.latest_check_id) {
+    if (row.latest_check_id && row.latest_check_paper) {
+      // A paper check stays marked Paper entry, with its performers and who entered it when
+      // (SPEC 8.0.0 LATE-5), in every mode.
+      var source = row.latest_check_paper, line = el("p", "last-check");
+      line.appendChild(document.createTextNode("Latest recorded check: " +
+        (outcomeWords[row.latest_check_outcome] || "Outcome unavailable") + " at " + when(row.latest_check_at) + " "));
+      line.appendChild(el("span", "pill pill-paper", "Paper entry"));
+      line.appendChild(document.createTextNode(" performed by " +
+        ((source.performers || []).join(", ") || "unknown") + "; entered by " +
+        (source.entered_by || "unknown") + " at " + when(source.entered_at)));
+      li.appendChild(line);
+    } else if (row.latest_check_id) {
       var outcome = outcomeWords[row.latest_check_outcome] || "Outcome unavailable";
       li.appendChild(el("p", "last-check", "Latest recorded check: " + outcome +
         (row.latest_check_by ? " by " + row.latest_check_by : "") + " at " + when(row.latest_check_at)));
+    }
+    if (paper && row.paper_entry_check) {
+      var copiedLine = el("p", "paper-copied");
+      var tick = el("span", "", "✓ "); tick.setAttribute("aria-hidden", "true");
+      copiedLine.appendChild(tick);
+      copiedLine.appendChild(document.createTextNode("Copied from this sheet: " +
+        (outcomeWords[row.paper_entry_check.outcome] || "recorded")));
+      li.appendChild(copiedLine);
     }
     li.appendChild(controls(row, li));
     if (entry && entry.status !== "idle") { li.appendChild(saveIndicator(entry)); }
@@ -990,7 +1055,7 @@
   }
   function renderBar() {
     var bar = $("checklist-bar");
-    if (!bar || config.verification_for_deficiency_id || config.state !== "OPEN") { return; }
+    if (!bar || paper || config.verification_for_deficiency_id || config.state !== "OPEN") { return; }
     bar.hidden = !groupProgressRows.length;
     var counts = progressCounts(), total = counts.done + counts.left;
     var progress = $("checklist-progress");
@@ -1079,7 +1144,7 @@
     $("jump-sections").setAttribute("aria-expanded", "false");
     if (returnFocus) { $("jump-sections").focus({preventScroll: true}); }
   }
-  if ($("checklist-bar") && !config.verification_for_deficiency_id && config.state === "OPEN") {
+  if (!paper && $("checklist-bar") && !config.verification_for_deficiency_id && config.state === "OPEN") {
     $("next-unchecked").addEventListener("click", function () { closeJump(false); nextUnchecked(); });
     $("jump-sections").addEventListener("click", function () {
       if (!$("jump-panel").hidden) { closeJump(true); return; }
@@ -1178,6 +1243,9 @@
     // shared state (SPEC 6.0.0 VW-5, issue #256).
     if (config.session_id && !config.verification_for_deficiency_id) {
       q += "&session_id=" + encodeURIComponent(config.session_id);
+    } else if (paper) {
+      // The version printed on the sheet, as a paper check of the batch resolves it (LATE-4).
+      q += "&paper_entry_batch_id=" + encodeURIComponent(paper.batch_id);
     } else if (config.checklist_version_id && !config.verification_for_deficiency_id) {
       q += "&checklist_version_id=" + encodeURIComponent(config.checklist_version_id);
     }
@@ -1356,7 +1424,7 @@
 
   // ---- view and filter (VW-1, VW-2) ------------------------------------------------------
   function syncControls() {
-    if (config.verification_for_deficiency_id) { return; }
+    if (config.verification_for_deficiency_id || paper) { return; }
     $("view-normal").setAttribute("aria-pressed", String(view === "NORMAL"));
     $("view-priority").setAttribute("aria-pressed", String(view === "PRIORITY"));
     $("only-attention").checked = onlyAttention;
@@ -1370,7 +1438,7 @@
     });
   }
   function changeView(next) { view = next; syncControls(); savePreferences(); scheduleReload(0); }
-  if (!config.verification_for_deficiency_id) {
+  if (!config.verification_for_deficiency_id && !paper) {
     $("view-normal").addEventListener("click", function () { changeView("NORMAL"); });
     $("view-priority").addEventListener("click", function () { changeView("PRIORITY"); });
     $("only-attention").addEventListener("change", function () {
@@ -1422,6 +1490,7 @@
         };
         var hours = $("odo-hours").value.trim();
         if (hours) { payload.engine_hours = hours; }
+        if (paper) { payload.paper_entry_batch_id = paper.batch_id; }
         if (confirm && $("odo-why").value.trim()) { payload.explanation = $("odo-why").value.trim(); }
         odo.request = payload;
       }
@@ -1430,7 +1499,11 @@
       post(config.urls.odometer, odo.request).then(function (a) {
         odo.sending = false; odoControls(false);
         if (a.kind === "committed") {
-          odoStatus("saved", "Recorded " + when(a.body.result.server_recorded_at));
+          odoStatus("saved", paper ? "Saved as performed " +
+            when(a.body.result.paper_entry && a.body.result.paper_entry.performed_at || paper.performed_at) +
+            "; entered " + when(a.body.result.server_recorded_at) :
+            "Recorded " + when(a.body.result.server_recorded_at));
+          paperRecorded();
           toast("Readings saved.", {announce: false});
           $("odo-confirm").hidden = true; odo.request = null; scheduleReload(0);
         } else if (a.kind === "rejected" && a.code === "ANOMALY_CONFIRMATION_REQUIRED") {
@@ -1459,6 +1532,28 @@
     var onWide = function () { if (loadedOnce) { render(); } };
     if (wideQuery.addEventListener) { wideQuery.addEventListener("change", onWide); }
     else if (wideQuery.addListener) { wideQuery.addListener(onWide); }
+  }
+
+  // ---- paper entry (SPEC 8.0.0 REC-5, LATE-8) ----------------------------------------------
+  // After the first acknowledged record of the batch, offer once to print a fresh outage sheet
+  // and kit reference. The offer is not a dialog and takes no focus; it is announced once.
+  function paperRecorded() {
+    if (!paper || paperOffered) { return; }
+    paperOffered = true;
+    if ($("paper-print-offer")) { $("paper-print-offer").hidden = false; }
+    if ($("paper-print-status")) {
+      $("paper-print-status").textContent = "First record saved. You can print a fresh outage sheet and kit reference for the rig.";
+    }
+  }
+  if (paper) {
+    if ($("paper-performers")) { $("paper-performers").textContent = (paper.performers || []).join(", "); }
+    if ($("paper-print-dismiss")) {
+      $("paper-print-dismiss").addEventListener("click", function () {
+        $("paper-print-offer").hidden = true;
+        // The dismissed button is gone: focus returns to the banner, not the top of the page.
+        if ($("paper-banner-heading")) { $("paper-banner-heading").focus({preventScroll: true}); }
+      });
+    }
   }
 
   // ---- start ------------------------------------------------------------------------------

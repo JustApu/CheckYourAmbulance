@@ -25,6 +25,10 @@ tr { break-inside: avoid; }
 .col-result { width: 26%; }
 .col-value { width: 12%; }
 .col-initials, .col-time { width: 9%; }
+/* A paper reseal section (SPEC 8.5.0 SEAL-1, CAB-9) has four columns: 44 + 26 + 15 + 15. */
+.reseal-section .col-value, .col-expiry { width: 15%; }
+.reseal-rule th { font-weight: 400; font-size: .9em; }
+.new-seal th, .new-seal td { border-top: 2px solid #000000; }
 .kit-reference h2 { font-size: 1.1rem; margin: 1rem 0 .5rem; border-bottom: 2px solid #000000; overflow-wrap: anywhere; }
 .kit-columns { column-width: 15rem; column-gap: 1.5rem; }
 .kit-type { break-inside: avoid; margin: 0 0 .75rem; }

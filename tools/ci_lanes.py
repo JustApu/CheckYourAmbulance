@@ -171,6 +171,9 @@ SCRIPT_HARNESSES = {
     "cya/inspections/templates/inspections/checklist.js": "cya/inspections/tests/workflow_script_harness.js",
     "cya/inspections/templates/inspections/workflows.js": "cya/inspections/tests/workflow_script_harness.js",
     "cya/inspections/templates/inspections/vehicle.js": "cya/inspections/tests/vehicle_script_harness.js",
+    "cya/inspections/templates/inspections/paper_entry.js": (
+        "cya/inspections/tests/paper_entry_script_harness.js"
+    ),
     "cya/operations/templates/operations/status.js": "cya/operations/tests/status_script_harness.js",
     "cya/seals/templates/seals/vehicle.js": "cya/seals/tests/vehicle_script_harness.js",
 }

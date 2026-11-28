@@ -66,6 +66,7 @@ DATE_FIELDS = frozenset(
         "voided_at",
         "effective_at",
         "ended_at",
+        "performed_at",
     )
 )
 
@@ -97,6 +98,26 @@ def _obligation_facts(obligation):
     every other obligation's facts, and so its digest, are unchanged."""
     facts = asdict(obligation)
     for optional in ("kit_key", "mapped_requirement_id"):  # absent when unset: digests unchanged
+        if facts.get(optional) is None:
+            facts.pop(optional, None)
+    return facts
+
+
+def _check_facts(check):
+    """A check's stored facts; performed_at only for a paper check (SPEC 8.0.0), so every live
+    check's facts, and so its obligation's digest, are unchanged."""
+    facts = asdict(check)
+    if facts.get("performed_at") is None:
+        facts.pop("performed_at", None)
+    return facts
+
+
+def _seal_facts(substitution):
+    """A substitution's or inspection's stored facts; performed_at only for a paper one (SPEC
+    8.0.0 and 8.5.0 LATE-7) and voided_at only once its batch is invalidated (INV-8), so every
+    live record's facts and digests are unchanged."""
+    facts = asdict(substitution)
+    for optional in ("performed_at", "voided_at"):
         if facts.get(optional) is None:
             facts.pop(optional, None)
     return facts
@@ -213,6 +234,8 @@ def evidence_instants(evidence):
         found.update((suspension.recorded_at, suspension.ended_at))
     for seal in (*seals, *inspections):
         found.add(seal.recorded_at)
+    for seal in (*seals, *inspections):
+        found.add(getattr(seal, "voided_at", None))
     found.discard(None)
     return tuple(sorted(found))
 
@@ -389,7 +412,7 @@ def compile_history(history, instant):
             {
                 "version": FACTS_VERSION,
                 "obligation": _obligation_facts(obligation),
-                "checks": [asdict(c) for c in by_check.get(obligation.id, ())],
+                "checks": [_check_facts(c) for c in by_check.get(obligation.id, ())],
                 "determinations": [asdict(d) for d in determinations.get(obligation.id, ())],
                 "statuses": [asdict(status)] if status else [],
                 "suspensions": [asdict(s) for s in suspensions.get(obligation.id, ())],
@@ -398,11 +421,11 @@ def compile_history(history, instant):
         )
         if obligation.id in seals:
             result[obligation.id]["seal_substitutions"] = _json(
-                [asdict(s) for s in seals[obligation.id]]
+                [_seal_facts(s) for s in seals[obligation.id]]
             )
         if obligation.id in inspections:
             result[obligation.id]["seal_inspections"] = _json(
-                [asdict(s) for s in inspections[obligation.id]]
+                [_seal_facts(s) for s in inspections[obligation.id]]
             )
     return result
 
