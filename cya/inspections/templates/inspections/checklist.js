@@ -80,14 +80,22 @@
   }
   function rememberFocus(row, action) { focusIntent = {key: key(row), action: action}; }
   var focusRestoreScheduled = false;
+  var savedActionAnnouncementTimer = null, savedActionAnnouncementGeneration = 0;
+  function focusStatusMessage(message) {
+    var status = $("session-message");
+    if (!status) { return; }
+    if (message) { status.textContent = message; }
+    status.tabIndex = -1;
+    if (document.activeElement !== status) { status.focus({preventScroll: true}); }
+  }
   function restoreFocusIntent(afterRender) {
     if (!focusIntent) { return; }
     var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
-    if (!target) { (item || list).focus({preventScroll: true}); return; }
+    if (!target) { focusStatusMessage("This item is no longer on the checklist. Refresh and try again."); focusIntent = null; return; }
     // Busy actions use aria-disabled so focus remains on the named action during a save.
-    // Native-disabled controls cannot receive focus and fall back to the row or checklist.
-    if (target.disabled) { if (!afterRender) { (item || list).focus({preventScroll: true}); } return; }
-    if (!afterRender) { target.focus({preventScroll: true}); focusIntent = null; return; }
+    // Native-disabled controls cannot receive focus and use the visible status message instead.
+    if (target.disabled) { if (!afterRender) { focusStatusMessage("This checklist action is no longer available."); focusIntent = null; } return; }
+    if (!afterRender) { if (document.activeElement !== target) { target.focus({preventScroll: true}); } focusIntent = null; return; }
     if (focusRestoreScheduled) { return; }
     focusRestoreScheduled = true;
     var defer = typeof window.requestAnimationFrame === "function" ?
@@ -99,8 +107,13 @@
       var intent = focusIntent, active = document.activeElement;
       if (active && active !== document.body && active !== list) { focusIntent = null; return; }
       var item = itemForKey(intent.key), target = item && actionIn(item, intent.action);
-      if (target && !target.disabled) { target.focus({preventScroll: true}); focusIntent = null; }
-      else { (item || list).focus({preventScroll: true}); }
+      if (target && !target.disabled) {
+        if (document.activeElement !== target) { target.focus({preventScroll: true}); }
+        focusIntent = null;
+      } else {
+        focusStatusMessage(target ? "This checklist action is no longer available." : "This item is no longer on the checklist. Refresh and try again.");
+        focusIntent = null;
+      }
     });
   }
   function itemForKey(itemKey) {
@@ -156,6 +169,24 @@
   function say(code) { return MESSAGES[code] || ("Not accepted (" + code + ")."); }
   // The shell's Saved toast (issue #194); absent when the shell script is not on the page.
   function toast(text, options) { if (window.cyaShell && window.cyaShell.toast) { window.cyaShell.toast(text, options); } }
+  function announceSavedAction(row, entry) {
+    var action = entry.savedOutcome === "FAILED" ? "failed" : entry.savedOutcome === "UNABLE_TO_INSPECT" ? "unable_to_inspect" :
+      row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
+    var item = itemForKey(key(row)), target = item && actionIn(item, action), announcement = $("checklist-action-announcement");
+    if (!target || !announcement || document.activeElement !== target) { return; }
+    var name = target.getAttribute("aria-label") || target.textContent.trim();
+    var generation = ++savedActionAnnouncementGeneration;
+    if (savedActionAnnouncementTimer !== null) { clearTimeout(savedActionAnnouncementTimer); }
+    announcement.textContent = "";
+    // Let the shell's single Saved toast finish first; then announce the focused control's full
+    // updated name from a separate status region without moving focus or rereading the page.
+    savedActionAnnouncementTimer = setTimeout(function () {
+      if (generation !== savedActionAnnouncementGeneration || document.activeElement !== target ||
+          actionIn(itemForKey(key(row)), action) !== target) { return; }
+      announcement.textContent = name;
+      savedActionAnnouncementTimer = null;
+    }, 1500);
+  }
 
   // ---- sending ---------------------------------------------------------------------------
   // Outcome of one POST: {kind: "committed"|"conflict"|"rejected"|"unconfirmed", ...}.
@@ -295,6 +326,7 @@
       }
       if (answer.kind !== "conflict") { focusIntent = null; }
       render();
+      if (answer.kind === "committed") { announceSavedAction(row, entry); }
       announceHidden(row, entry);
     });
   }
@@ -334,7 +366,8 @@
     // Keep the intent through the pending render; it will focus the named action after acknowledgement.
     if (keepFocusIntent && focusIntent) {
       var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
-      if (target) { target.focus({preventScroll: true}); }
+      if (target && document.activeElement !== target) { target.focus({preventScroll: true}); }
+      else if (!target) { focusStatusMessage("This item is no longer on the checklist. Refresh and try again."); }
       return;
     }
     else { restoreFocusIntent(); focusIntent = null; }
@@ -1067,8 +1100,10 @@
       } else if (focusInList) {
         var restoredItem = itemForKey(focusKey);
         var target = restoredItem && actionIn(restoredItem, focusAction);
-        if (!target || target.disabled) { target = restoredItem || list; }
-        target.focus({preventScroll: true});
+        if (!target || target.disabled) {
+          if (focusAction) { focusStatusMessage("This checklist action is no longer available."); }
+          else { (restoredItem || list).focus({preventScroll: true}); }
+        } else if (document.activeElement !== target) { target.focus({preventScroll: true}); }
       } else if (focusIntent) {
         focusIntent = null;
       } else if (focusId && $(focusId)) { $(focusId).focus({preventScroll: true}); }
