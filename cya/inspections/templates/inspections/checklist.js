@@ -1467,4 +1467,3 @@
   connect();
   document.addEventListener("visibilitychange", function () { if (!document.hidden) { scheduleReload(0); } });
 })();
-
