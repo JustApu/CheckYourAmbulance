@@ -19,6 +19,7 @@
   <strong>This list could not be refreshed.</strong> It may be out of date.
 </div>
 <p id="session-message" class="notice" role="status"></p>
+<p id="checklist-action-announcement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
 <form id="csrf-holder">{% csrf_token %}</form>
 <p><a href="{% url 'inspection-check-history' vehicle.pk %}">Check history, correct entry and supervisor completion</a> · <a href="{% url 'inspection-deficiency-report' vehicle.pk %}">Independent problem report</a></p>
 {% if not verification and not paper %}<p><a class="button" href="{% url 'inspection-vehicle-seals' vehicle.pk %}">Sealed kits and cabinets</a></p>{% endif %}
