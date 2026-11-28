@@ -133,7 +133,7 @@ function checklist(state = "OPEN", extra = {}) {
   const run = environment(config); run.get("cya-config").textContent = JSON.stringify(config);
   if (config.test_wide) run.window.matchMedia = () => ({matches: true, addEventListener() {}});
   run.run("cya/inspections/templates/inspections/checklist.js", source => source.replace("  // ---- start ",
-    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;},setGroups(value){groupProgressRows=value;},groups(){return groupProgressRows;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
+    "  globalThis.testUI={startCheck,retryCheck,openOutcome,askConflict,stateText,controls,reload,render,setLayout,selectGroup(key,group){layoutMode=\"COMPARTMENTS\";selectedGroupKey=key;groupProgressRows=[group];render();},setRows(value){rows=value;loadedOnce=true;},setGroups(value){groupProgressRows=value;},groups(){return groupProgressRows;},nextUnchecked,drafts,getEntry(row){return entries[key(row)];},odo,submitOdometer};\n  // ---- start "));
   // Verification regressions exercise item actions, including the no-session retry path.
   if (config.verification_for_deficiency_id) run.get("layout-flat").fire("click");
   return run;
@@ -182,6 +182,21 @@ function generic(kind) {
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse the cancelled focus intent");
+  }
+  {
+    const run = checklist(), other = {...row, item_id: "other-item", item_label: "Synthetic other"};
+    run.context.testUI.setRows([row, other]); run.context.testUI.render();
+    const invokingRow = run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a");
+    findAction(invokingRow, "failed").fire("click");
+    response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    run.context.testUI.setRows([row, {...other, item_label: "Updated synthetic other"}]); run.context.testUI.render();
+    assert.equal(run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a"), invokingRow,
+      "a live render keeps the existing item's dialog invoker attached");
+    assert(run.elements.items.children.some(child => child.textContent.includes("Updated synthetic other")),
+      "a live render still refreshes other checklist items while the dialog is open");
+    run.get("outcome-cancel").fire("click");
+    assert.notEqual(run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a"), invokingRow,
+      "closing the dialog reconciles the preserved invoker row");
   }
   {
     const run = checklist();

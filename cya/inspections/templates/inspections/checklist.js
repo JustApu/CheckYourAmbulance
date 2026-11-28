@@ -80,8 +80,8 @@
     if (!focusIntent) { return; }
     var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
     if (!target) { (item || list).focus({preventScroll: true}); return; }
-    // While a save is pending, leave focus alone. Parking it on the row/list is announced
-    // as generic context by some screen readers; restore the named action after the result render.
+    // Busy actions use aria-disabled so focus remains on the named action during a save.
+    // Native-disabled controls cannot receive focus and fall back to the row or checklist.
     if (target.disabled) { if (!afterRender) { (item || list).focus({preventScroll: true}); } return; }
     if (!afterRender) { target.focus({preventScroll: true}); focusIntent = null; return; }
     if (focusRestoreScheduled) { return; }
@@ -111,15 +111,6 @@
     while (pending.length) {
       var node = pending.shift();
       if (node.dataset && node.dataset.action === action) { return node; }
-      Array.prototype.push.apply(pending, node.children || []);
-    }
-    return null;
-  }
-  function descendantWithClass(root, className) {
-    var pending = Array.prototype.slice.call(root.children || []);
-    while (pending.length) {
-      var node = pending.shift();
-      if (String(node.className || "").split(/\s+/).indexOf(className) >= 0) { return node; }
       Array.prototype.push.apply(pending, node.children || []);
     }
     return null;
@@ -210,6 +201,7 @@
     // A focused action may stay in the DOM until focus moves, so use the newest server row
     // rather than the snapshot captured by that action's original click handler.
     row = latestRow(row);
+    if (!row) { return; }
     var k = key(row);
     if (entries[k] && (entries[k].status === "pending" || entries[k].status === "unconfirmed")) { return; }
     if (k === targetKey) { targetKey = null; }
@@ -221,11 +213,12 @@
     send(row, entry);
   }
   function latestRow(row) {
+    if (!row) { return null; }
     var rowKey = key(row);
     for (var i = 0; i < rows.length; i++) {
       if (key(rows[i]) === rowKey) { return rows[i]; }
     }
-    return row;
+    return loadedOnce ? null : row;
   }
   function retryCheck(row) {
     var entry = entries[key(row)];
@@ -281,6 +274,7 @@
         entry.status = "unconfirmed";
         entry.text = "The server did not answer. This may or may not have been recorded. Retry sends the same request.";
       }
+      if (answer.kind !== "conflict") { focusIntent = null; }
       render();
       announceHidden(row, entry);
     });
@@ -322,6 +316,7 @@
       return;
     }
     else { restoreFocusIntent(); focusIntent = null; }
+    if (deferredListRender) { deferredListRender = false; render(); }
   }
   function nextConflict() {
     if (!conflictQueue.length) { return; }
@@ -399,6 +394,7 @@
     else {
       restoreFocusIntent(); focusIntent = null;
     }
+    if (deferredListRender) { deferredListRender = false; render(); }
   }
   $("outcome-cancel").addEventListener("click", function () { closeOutcome(false); });
   outcomeDialog.addEventListener("cancel", function (event) { event.preventDefault(); closeOutcome(false); });
@@ -414,6 +410,12 @@
         summary: outcomeValue("summary"), description: outcomeValue("description")};
       if (!fields.category_id || !fields.severity || !fields.summary || !fields.description) { $("outcome-error").textContent = "Choose a category and severity, and describe the new problem."; return; }
       deficiency = {create: fields};
+    }
+    row = latestRow(row);
+    if (!row) {
+      closeOutcome(false);
+      $("outcome-error").textContent = "This item is no longer on the checklist. Refresh and try again.";
+      return;
     }
     closeOutcome(true); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
   });
@@ -792,13 +794,8 @@
     return li;
   }
   function render() {
-    // Keep dialog invokers attached until the dialog closes. Native dialog focus restoration
-    // otherwise targets a detached action and can briefly park NVDA on the document/list.
-    if ((dialog && dialog.open) || (outcomeDialog && outcomeDialog.open)) {
-      deferredListRender = true;
-      return;
-    }
-    deferredListRender = false;
+    var modalOpen = (dialog && dialog.open) || (outcomeDialog && outcomeDialog.open);
+    deferredListRender = modalOpen;
     var focused = document.activeElement, focusId = focused && focused.id && list.contains(focused) ? focused.id : null;
     var focusKey = null, focusAction = null, focusInList = false;
     for (var parent = focused; parent && parent !== list; parent = parent.parentNode) {
@@ -860,52 +857,32 @@
     }
     replacementNodes = Array.prototype.slice.call(replacement.children);
     var preservedIndex = -1;
-    var focusUpdatedInPlace = false;
-    // A screen-reader user should keep the same focused button through its save. Replacing its
-    // row, even after moving focus to the replacement, can expose an intermediate document
-    // context in Chrome/NVDA. Update the focused button and save indicator in place, then defer
-    // the full list refresh until the user moves focus.
-    if (focusIntent && focusKey === focusIntent.key && focusAction === focusIntent.action) {
-      var currentRow = itemForKey(focusIntent.key), currentAction = currentRow && actionIn(currentRow, focusIntent.action);
-      var nextRow = null, nextAction = null;
-      for (var focusedIndex = 0; focusedIndex < replacementNodes.length; focusedIndex++) {
-        if (replacementNodes[focusedIndex].dataset.itemKey === focusIntent.key) {
-          nextRow = replacementNodes[focusedIndex];
-          nextAction = actionIn(nextRow, focusIntent.action);
+    var preserveKey = focusIntent && focusKey === focusIntent.key ? focusIntent.key : focusKey;
+    var preserveAction = focusIntent && focusKey === focusIntent.key ? focusIntent.action : focusAction;
+    // A modal's invoking row stays attached while the rest of the list refreshes. If the item
+    // disappeared, it is removed; closing the dialog then falls back to the checklist.
+    var dialogKey = modalOpen && dialog.open ? dialog.dataset.key :
+      modalOpen && outcomeDialog.row ? key(outcomeDialog.row) : null;
+    if (dialogKey) {
+      var dialogRowExists = rows.some(function (row) {
+        return key(row) === dialogKey && (config.verification_for_deficiency_id || row.checklist_version_id === config.checklist_version_id);
+      });
+      for (var modalIndex = 0; modalIndex < replacementNodes.length; modalIndex++) {
+        if (replacementNodes[modalIndex].dataset.itemKey === dialogKey) {
+          if (dialogRowExists) {
+            preservedRow = itemForKey(dialogKey);
+            preservedIndex = modalIndex;
+            if (preservedRow) { replacement.removeChild(replacementNodes[modalIndex]); }
+          }
           break;
         }
       }
-      if (currentRow && currentAction && nextAction) {
-        currentAction.className = nextAction.className;
-        var nextMark = descendantWithClass(nextAction, "outcome-mark-new");
-        var oldMark = descendantWithClass(currentAction, "outcome-mark-new");
-        if (oldMark && oldMark.parentNode) { oldMark.parentNode.removeChild(oldMark); }
-        if (nextMark) {
-          var mark = document.createElement("span");
-          mark.className = nextMark.className;
-          mark.setAttribute("aria-hidden", "true");
-          mark.textContent = nextMark.textContent;
-          currentAction.insertBefore(mark, currentAction.firstChild);
-        }
-        ["aria-label", "aria-disabled"].forEach(function (name) {
-          var value = nextAction.getAttribute(name);
-          if (value === null) { currentAction.removeAttribute(name); }
-          else { currentAction.setAttribute(name, value); }
-        });
-        currentAction.disabled = nextAction.disabled;
-        if (nextAction.dataset.recorded === undefined) { delete currentAction.dataset.recorded; }
-        else { currentAction.dataset.recorded = nextAction.dataset.recorded; }
-        var oldIndicator = descendantWithClass(currentRow, "save-state");
-        if (oldIndicator && oldIndicator.parentNode) { oldIndicator.parentNode.removeChild(oldIndicator); }
-        var currentEntry = entries[focusIntent.key];
-        if (currentEntry && currentEntry.status !== "idle") { currentRow.appendChild(saveIndicator(currentEntry)); }
-        focusUpdatedInPlace = true;
-        deferredListRender = true;
+      if (dialogRowExists && !preservedRow) {
+        preservedRow = itemForKey(dialogKey);
+        if (preservedRow) { preservedIndex = replacementNodes.length; }
       }
     }
-    var preserveKey = focusIntent && focusKey === focusIntent.key ? focusIntent.key : focusKey;
-    var preserveAction = focusIntent && focusKey === focusIntent.key ? focusIntent.action : focusAction;
-    if (!focusUpdatedInPlace && preserveKey && preserveAction) {
+    if (!preservedRow && preserveKey && preserveAction) {
       for (var nextIndex = 0; nextIndex < replacementNodes.length; nextIndex++) {
         var nextRow = replacementNodes[nextIndex];
         if (nextRow.dataset && nextRow.dataset.itemKey === preserveKey) {
@@ -924,17 +901,15 @@
         }
       }
     }
-    if (!focusUpdatedInPlace) {
-      Array.prototype.slice.call(list.children).forEach(function (child) {
-        if (child !== preservedRow) { list.removeChild(child); }
-      });
-      replacementNodes.forEach(function (child, index) {
-        if (child.parentNode === replacement) { replacement.removeChild(child); }
-        if (child === preservedRow) { return; }
-        if (preservedRow && index < preservedIndex) { list.insertBefore(child, preservedRow); }
-        else { list.appendChild(child); }
-      });
-    }
+    Array.prototype.slice.call(list.children).forEach(function (child) {
+      if (child !== preservedRow) { list.removeChild(child); }
+    });
+    replacementNodes.forEach(function (child, index) {
+      if (child.parentNode === replacement) { replacement.removeChild(child); }
+      if (child === preservedRow) { return; }
+      if (preservedRow && index < preservedIndex) { list.insertBefore(child, preservedRow); }
+      else { list.appendChild(child); }
+    });
     list.hidden = overview;
     var message = "";
     if (rows.length && !allShown.length) {
@@ -945,8 +920,7 @@
       message = onlyAttention ? detail ? "Nothing in this area needs attention." : "Nothing needs attention right now." : "No checklist items are available in this area.";
     }
     notice.textContent = message; notice.hidden = !message;
-    var modalOpen = dialog.open || outcomeDialog.open;
-    if (!modalOpen && !focusUpdatedInPlace) {
+    if (!modalOpen) {
       if (focusTransferred && focusIntent) {
         if (entries[focusIntent.key] && entries[focusIntent.key].status !== "pending") { focusIntent = null; }
       } else if (focusIntent && (focusKey === focusIntent.key || focused === list || !focused || focused === document.body)) {
@@ -987,16 +961,6 @@
     return null;
   }
   list.addEventListener("focusin", function (event) { lastItemKey = itemKeyFrom(event.target) || lastItemKey; });
-  list.addEventListener("focusout", function (event) {
-    if (!deferredListRender) { return; }
-    var leavingKey = itemKeyFrom(event.target);
-    if (focusIntent && focusIntent.key === leavingKey) { focusIntent = null; }
-    setTimeout(function () {
-      if (!deferredListRender || (dialog && dialog.open) || (outcomeDialog && outcomeDialog.open)) { return; }
-      deferredListRender = false;
-      render();
-    }, 0);
-  });
   function needsCheck(row) {
     var entry = entries[key(row)];
     if (entry && entry.status === "pending") { return false; }
@@ -1503,4 +1467,3 @@
   connect();
   document.addEventListener("visibilitychange", function () { if (!document.hidden) { scheduleReload(0); } });
 })();
-
