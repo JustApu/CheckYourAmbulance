@@ -608,7 +608,15 @@
     if (unmarkedStates[row.obligation_state] ||
         (row.obligation_state === "SATISFIED" && row.obligation_outcome === "SUPERVISOR_COMPLETED")) { return null; }
     var mine = savedOutcome(entry);
-    if (mine && entry.checkId && row.latest_check_id !== entry.checkId) {
+    if (mine && entry.checkId) {
+      // A refreshed row can acknowledge this exact check while its obligation remains due,
+      // notably for Unable to inspect. Keep the action marked with the result we just recorded.
+      if (row.latest_check_id === entry.checkId) {
+        var dueAt = row.due_at ? Date.parse(row.due_at) : NaN;
+        var mineRecordedAt = entry.recordedAt ? Date.parse(entry.recordedAt) : NaN;
+        if (row.obligation_state !== "SATISFIED" && !isNaN(dueAt) && !isNaN(mineRecordedAt) && dueAt > mineRecordedAt) { return null; }
+        return mine;
+      }
       var rowAt = row.latest_check_at ? Date.parse(row.latest_check_at) : NaN;
       var mineAt = entry.recordedAt ? Date.parse(entry.recordedAt) : NaN;
       if (!row.latest_check_id || rowAt <= mineAt) { return mine; }

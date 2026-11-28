@@ -423,6 +423,12 @@ function generic(kind) {
       "the focused Unable action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
     assert.equal(run.focusHistory.length, focusChangesBeforeUnableAck, "Unable acknowledgement does not move focus");
     assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Unable to inspect for Portable suction unit (Airway response kit A).", announce: true});
+    run.context.testUI.setRows([{...row, latest_check_id: "unable-check", latest_check_outcome: "UNABLE_TO_INSPECT",
+      latest_check_at: "2026-06-01T00:00:00Z", obligation_state: "DUE"}]);
+    run.context.testUI.render();
+    assert.equal(run.document.activeElement, focusedUnable, "a live row update keeps focus on the Unable action");
+    assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Unable to inspect"),
+      "the Unable name remains current once the live row reports the saved check");
     assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li"].includes(change.to)),
       "Unable never parks focus on the list, a row, or the document");
   }
