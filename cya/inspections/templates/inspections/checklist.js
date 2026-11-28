@@ -858,6 +858,74 @@
     if (entry && entry.status !== "idle") { li.appendChild(saveIndicator(entry)); }
     return li;
   }
+  function controlsIn(item) {
+    var pending = [item];
+    while (pending.length) {
+      var node = pending.shift();
+      if (String(node.className || "").split(/\\s+/).indexOf("item-controls") !== -1) { return node; }
+      Array.prototype.push.apply(pending, node.children || []);
+    }
+    return null;
+  }
+  function syncFocusedControl(current, replacement) {
+    current.className = replacement.className;
+    current.disabled = replacement.disabled;
+    current.value = replacement.value;
+    current.checked = replacement.checked;
+    if (current.dataset && replacement.dataset) {
+      Object.keys(current.dataset).forEach(function (name) {
+        if (!Object.prototype.hasOwnProperty.call(replacement.dataset, name)) { delete current.dataset[name]; }
+      });
+      Object.keys(replacement.dataset).forEach(function (name) { current.dataset[name] = replacement.dataset[name]; });
+    }
+    ["aria-label", "aria-disabled"].forEach(function (name) {
+      var value = replacement.getAttribute(name);
+      if (value === null) { current.removeAttribute(name); }
+      else { current.setAttribute(name, value); }
+    });
+    if (current.type === "button") {
+      current.textContent = "";
+      var content = replacement.childNodes || replacement.children;
+      if (!content.length) { current.textContent = replacement.textContent; }
+      Array.prototype.forEach.call(content, function (child) {
+        current.appendChild(child.cloneNode(true));
+      });
+    }
+  }
+  function preserveFocusedItem(current, replacement, action) {
+    var currentControls = controlsIn(current), replacementControls = controlsIn(replacement);
+    if (!currentControls || !replacementControls) { return false; }
+    if (!actionIn(currentControls, action) || !actionIn(replacementControls, action)) { return false; }
+    var desiredControls = Array.prototype.map.call(replacementControls.children, function (next) {
+      if (!next.dataset || !next.dataset.action) { return next; }
+      var existing = actionIn(currentControls, next.dataset.action);
+      if (!existing || existing.type !== next.type) { return next; }
+      syncFocusedControl(existing, next);
+      return existing;
+    });
+    Array.prototype.slice.call(currentControls.children).forEach(function (child) {
+      if (desiredControls.indexOf(child) === -1) { currentControls.removeChild(child); }
+    });
+    desiredControls.forEach(function (child, index) {
+      if (currentControls.children[index] !== child) {
+        currentControls.insertBefore(child, currentControls.children[index] || null);
+      }
+    });
+    current.id = replacement.id;
+    current.className = replacement.className;
+    current.dataset.itemKey = replacement.dataset.itemKey;
+    current.dataset.groupKey = replacement.dataset.groupKey;
+    Array.prototype.slice.call(current.children).forEach(function (child) {
+      if (child !== currentControls) { current.removeChild(child); }
+    });
+    var afterControls = false;
+    Array.prototype.forEach.call(replacement.children, function (child) {
+      if (child === replacementControls) { afterControls = true; return; }
+      if (afterControls) { current.appendChild(child); }
+      else { current.insertBefore(child, currentControls); }
+    });
+    return true;
+  }
   function render() {
     var modalOpen = (dialog && dialog.open) || (outcomeDialog && outcomeDialog.open);
     deferredListRender = modalOpen;
@@ -911,10 +979,8 @@
     }
     var shown = allShown;
     if (detail) { shown = shown.filter(function (row) { return groupKeyForRow(row) === selectedGroupKey; }); }
-    // Build the replacement off-screen. If an action had focus, attach its new row first and
-    // transfer focus directly to the matching control before removing the old row. Removing the
-    // focused subtree first makes browsers report focus on the document; NVDA then announces the
-    // whole page before the save toast and restored button (#283).
+    // Build rows off-screen. Keep the focused row and its action controls attached while refreshing
+    // its label and status; replacing that subtree makes NVDA announce generic document context.
     var replacement = document.createElement("ol"), replacementNodes, preservedRow = null, focusTransferred = false;
     if (!overview) {
       if (detail) { appendItemRows(replacement, shown); }
@@ -953,13 +1019,21 @@
         if (nextRow.dataset && nextRow.dataset.itemKey === preserveKey) {
           var nextAction = actionIn(nextRow, preserveAction);
           if (nextAction) {
-            preservedRow = nextRow;
-            preservedIndex = nextIndex;
-            replacement.removeChild(preservedRow);
             var previousRow = itemForKey(preserveKey);
-            if (previousRow) { list.insertBefore(preservedRow, previousRow); }
-            else { list.appendChild(preservedRow); }
-            nextAction.focus({preventScroll: true});
+            if (previousRow && preserveFocusedItem(previousRow, nextRow, preserveAction)) {
+              preservedRow = previousRow;
+              replacement.removeChild(nextRow);
+              replacementNodes[nextIndex] = preservedRow;
+            } else {
+              preservedRow = nextRow;
+            }
+            preservedIndex = nextIndex;
+            if (preservedRow === nextRow) {
+              replacement.removeChild(preservedRow);
+              if (previousRow) { list.insertBefore(preservedRow, previousRow); }
+              else { list.appendChild(preservedRow); }
+              nextAction.focus({preventScroll: true});
+            }
             focusTransferred = true;
           }
           break;
