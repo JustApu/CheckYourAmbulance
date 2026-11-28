@@ -146,7 +146,7 @@ function environment(config, forms = []) {
   const context = {
     document, window, crypto: crypto.webcrypto, Uint8Array,
     location: {protocol: "https:", host: "example.invalid"},
-    setTimeout(fn, ms) { fn.delay = ms || 0; timers.push(fn); return timers.length; }, clearTimeout() {},
+    setTimeout(fn) { timers.push(fn); return timers.length; }, clearTimeout() {},
     WebSocket: class { constructor() { sockets.push(this); } },
     fetch(url, options = {}) {
       const request = {url, options, body: options.body ? JSON.parse(options.body) : null};
@@ -161,11 +161,6 @@ function environment(config, forms = []) {
   };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function announceSavedAction(run) {
-  const timer = run.timers.filter(fn => fn.delay === 1500).at(-1);
-  assert.ok(timer, "the updated action name is queued after the Saved toast");
-  timer();
-}
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
   const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
@@ -285,9 +280,7 @@ function generic(kind) {
     assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Pass"),
       "the focused Pass action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
     assert.equal(run.focusHistory.length, focusChangesBeforePassAck, "Pass acknowledgement does not move focus");
-    announceSavedAction(run);
-    assert.equal(run.get("checklist-action-announcement").textContent, run.document.activeElement.getAttribute("aria-label"),
-      "after the Saved toast, a live status announces the full focused Pass action name");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Pass for Synthetic item 5 (Airway response kit A).", announce: true});
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
     assert.equal(run.document.activeElement.dataset.action, "pass", "the follow-up live row refresh keeps the focused action connected");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
@@ -298,6 +291,8 @@ function generic(kind) {
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
     assert.equal(run.document.activeElement.dataset.action, "failed", "dialog submission keeps focus on the named Fail action while saving");
+    assert.deepEqual(run.focusHistory.at(-1), {from: "outcome-dialog", to: "failed"},
+      "the outcome dialog returns focus directly to its original Fail action");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 2, "activating a pending Fail action does not send a duplicate save");
     const focusedFail = run.document.activeElement;
@@ -308,9 +303,7 @@ function generic(kind) {
     assert.equal(run.document.activeElement, focusedFail, "failed check acknowledgement keeps the same focused action node attached");
     assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Fail"), "the focused Fail action's updated name includes the result");
     assert.equal(run.focusHistory.length, focusChangesBeforeFailAck, "Fail acknowledgement does not move focus");
-    announceSavedAction(run);
-    assert.equal(run.get("checklist-action-announcement").textContent, run.document.activeElement.getAttribute("aria-label"),
-      "after the Saved toast, a live status announces the full focused Fail action name");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Fail for Synthetic item 6 (Airway response kit A).", announce: true});
     assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li"].includes(change.to)),
       "Pass and Fail never park focus on the list, a row, or the document");
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
@@ -329,6 +322,8 @@ function generic(kind) {
     run.get("outcome-form").fire("submit");
     const unable = run.posts()[0]; assert.equal(unable.body.outcome, "UNABLE_TO_INSPECT");
     assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable submission keeps its named action focused while saving");
+    assert.deepEqual(run.focusHistory.at(-1), {from: "outcome-dialog", to: "unable_to_inspect"},
+      "the outcome dialog returns focus directly to its original Unable action");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 1, "activating a pending Unable action does not send a duplicate save");
     const focusedUnable = run.document.activeElement;
@@ -338,9 +333,7 @@ function generic(kind) {
     assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Unable to inspect"),
       "the focused Unable action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
     assert.equal(run.focusHistory.length, focusChangesBeforeUnableAck, "Unable acknowledgement does not move focus");
-    announceSavedAction(run);
-    assert.equal(run.get("checklist-action-announcement").textContent, run.document.activeElement.getAttribute("aria-label"),
-      "after the Saved toast, a live status announces the full focused Unable action name");
+    assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Unable to inspect for Portable suction unit (Airway response kit A).", announce: true});
     assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li"].includes(change.to)),
       "Unable never parks focus on the list, a row, or the document");
   }
