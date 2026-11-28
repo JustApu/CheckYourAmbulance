@@ -195,6 +195,12 @@ function environment(config, forms = []) {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function flushFrames(run) {
+  for (let frame = 0; frame < 8 && run.frames.length; frame++) {
+    const pending = run.frames.splice(0);
+    for (const callback of pending) callback();
+  }
+}
+function flushOneFrame(run) {
   const pending = run.frames.splice(0);
   for (const callback of pending) callback();
 }
@@ -261,8 +267,16 @@ function generic(kind) {
     assert.equal(run.get("outcome-dialog").open, true, "Cancel keeps the dialog present through the synchronous focus return");
     assert.equal(run.document.activeElement, run.get("session-message"), "Cancel returns focus before the dialog closes");
     assert.equal(run.get("outcome-dialog").getAttribute("aria-modal"), null, "the dialog stops claiming modality before focus returns");
-    flushFrames(run);
+    const shell = run.document.body.children;
+    const main = shell.find(child => child.id === "main");
+    assert.equal(main.inert, false, "the focused main region is available for focus restoration");
+    assert(shell.filter(child => child !== main && child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
+      "header, navigation and other page regions stay inert through dialog close");
+    flushOneFrame(run);
     assert.equal(run.get("outcome-dialog").open, false, "Cancel closes the dialog on the next frame");
+    assert(shell.filter(child => child !== main && child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
+      "other page regions remain inert for a frame after dialog close");
+    flushFrames(run);
     assert.equal(run.document.activeElement, run.get("session-message"), "Cancel focuses the visible explanation if the item disappeared");
     assert(run.document.body.children.filter(child => child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => !child.inert),
       "closing the outcome dialog restores page sibling inertness");

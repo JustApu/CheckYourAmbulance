@@ -145,16 +145,28 @@
   function closeFocusDialog(dialog, target, afterClose) {
     if (dialog.closeScheduled) { return; }
     dialog.closeScheduled = true;
-    inertPageChildren.forEach(function (entry) { entry.node.inert = entry.wasInert; });
+    var canRestoreTarget = target && document.contains(target), deferredRestore = [];
+    inertPageChildren.forEach(function (entry) {
+      if (canRestoreTarget && entry.node.contains(target)) { entry.node.inert = entry.wasInert; }
+      else if (canRestoreTarget) { deferredRestore.push(entry); }
+      else { entry.node.inert = entry.wasInert; }
+    });
     inertPageChildren = [];
     dialog.removeAttribute("aria-modal");
-    if (target && document.contains(target)) { target.focus({preventScroll: true}); }
+    if (canRestoreTarget) { target.focus({preventScroll: true}); }
     function finishClose() {
       if (typeof dialog.close === "function") { dialog.close(); }
       else { dialog.removeAttribute("open"); }
       dialog.hidden = true;
-      dialog.closeScheduled = false;
-      if (afterClose) { afterClose(); }
+      function restoreBackground() {
+        deferredRestore.forEach(function (entry) { entry.node.inert = entry.wasInert; });
+        dialog.closeScheduled = false;
+        if (afterClose) { afterClose(); }
+      }
+      if (deferredRestore.length && typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(restoreBackground);
+      } else if (deferredRestore.length) { setTimeout(restoreBackground, 0); }
+      else { restoreBackground(); }
     }
     if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(finishClose); }
     else { setTimeout(finishClose, 0); }
