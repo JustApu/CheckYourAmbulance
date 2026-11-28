@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const root = path.resolve(__dirname, "../../..");
+function focusName(node) { return !node ? "body" : node.id || (node.dataset && node.dataset.action) || node.type || "element"; }
 class Element {
   constructor(id = "", type = "") {
     this.id = id; this.type = type; this.value = ""; this.defaultValue = "";
@@ -14,7 +15,10 @@ class Element {
     this.parentNode = null; this._document = null;
   }
   set textContent(text) {
-    if (this._document && this._document.activeElement && this._document.activeElement !== this && this.contains(this._document.activeElement)) this._document.activeElement = null;
+    if (this._document && this._document.activeElement && this._document.activeElement !== this && this.contains(this._document.activeElement)) {
+      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: "body"});
+      this._document.activeElement = null;
+    }
     for (const child of this.children) child.parentNode = null;
     this._text = text; this.children = [];
   }
@@ -35,7 +39,7 @@ class Element {
     return copy;
   }
   fire(name) {
-    if (name === "click" && this.type === "button" && this._document && !this.disabled) this._document.activeElement = this;
+    if (name === "click" && this.type === "button" && this._document && !this.disabled) this.focus();
     if (this.listeners[name]) this.listeners[name]({preventDefault() {}});
   }
   appendChild(node) { node.parentNode = this; node._document = this._document; this.children.push(node); return node; }
@@ -47,18 +51,38 @@ class Element {
   }
   removeChild(node) {
     this.children.splice(this.children.indexOf(node), 1);
-    if (this._document.activeElement && node.contains(this._document.activeElement)) this._document.activeElement = null;
+    if (this._document.activeElement && node.contains(this._document.activeElement)) {
+      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: "body"});
+      this._document.activeElement = null;
+    }
     node.parentNode = null;
     if (this.id === "items" && this._document.defaultView.simulateListJump) { this._document.defaultView.scrollY = 0; }
   }
   get firstChild() { return this.children[0]; }
   get selectedOptions() { return this.children.filter(node => node.selected); }
   contains(node) { for (let current = node; current; current = current.parentNode) { if (current === this) return true; } return false; }
-  showModal() { this.open = true; if (this._document) this._document.activeElement = this; }
-  close() { this.open = false; if (this._document) this._document.activeElement = null; }
+  showModal() {
+    this.open = true;
+    if (this._document) {
+      this._returnFocus = this._document.activeElement;
+      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: focusName(this)});
+      this._document.activeElement = this;
+    }
+  }
+  close() {
+    this.open = false;
+    if (this._document) {
+      const next = this._returnFocus && this._document.contains(this._returnFocus) ? this._returnFocus : null;
+      if (this._document.activeElement !== next) this._document.focusHistory.push({from: focusName(this._document.activeElement), to: focusName(next)});
+      this._document.activeElement = next;
+    }
+  }
   focus(options) {
     this.focusOptions = options;
-    if (!this.disabled && this._document && this._document.contains(this)) this._document.activeElement = this;
+    if (!this.disabled && this._document && this._document.contains(this) && this._document.activeElement !== this) {
+      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: focusName(this)});
+      this._document.activeElement = this;
+    }
   }
   getBoundingClientRect() {
     if (this.type !== "li" || !this.parentNode || this.parentNode.id !== "items") return {top: 0, bottom: 0};
@@ -96,6 +120,7 @@ function environment(config, forms = []) {
   const document = {
     defaultView: window,
     activeElement: null,
+    focusHistory: [],
     getElementById(id) {
       if (((config.state && config.state !== "OPEN") || config.verification_for_deficiency_id) && /^(odometer-form|odo-)/.test(id)) return null;
       if (!elements[id]) {
@@ -121,7 +146,7 @@ function environment(config, forms = []) {
   const context = {
     document, window, crypto: crypto.webcrypto, Uint8Array,
     location: {protocol: "https:", host: "example.invalid"},
-    setTimeout(fn) { timers.push(fn); return timers.length; }, clearTimeout() {},
+    setTimeout(fn, ms) { fn.delay = ms || 0; timers.push(fn); return timers.length; }, clearTimeout() {},
     WebSocket: class { constructor() { sockets.push(this); } },
     fetch(url, options = {}) {
       const request = {url, options, body: options.body ? JSON.parse(options.body) : null};
@@ -130,12 +155,17 @@ function environment(config, forms = []) {
     },
   };
   vm.createContext(context);
-  return {context, document, window, elements, requests, sockets, timers, frames,
+  return {context, document, window, elements, requests, sockets, timers, frames, focusHistory: document.focusHistory,
     get: id => document.getElementById(id), posts: () => requests.filter(r => r.body),
     run(file, transform = source => source) { vm.runInContext(transform(fs.readFileSync(path.join(root, file), "utf8")), context); },
   };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
+function announceSavedAction(run) {
+  const timer = run.timers.filter(fn => fn.delay === 1500).at(-1);
+  assert.ok(timer, "the updated action name is queued after the Saved toast");
+  timer();
+}
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
   const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
@@ -189,7 +219,7 @@ function generic(kind) {
     run.context.testUI.setRows([]); run.context.testUI.render();
     assert.equal(run.document.activeElement, run.get("outcome-dialog"), "a live update keeps focus in the dialog when the item disappears");
     run.get("outcome-cancel").fire("click");
-    assert.equal(run.document.activeElement, run.elements.items, "Cancel falls back to the checklist if the item disappeared");
+    assert.equal(run.document.activeElement, run.get("session-message"), "Cancel focuses the visible explanation if the item disappeared");
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse the cancelled focus intent");
@@ -217,7 +247,7 @@ function generic(kind) {
     run.context.testUI.setRows([]); run.context.testUI.render();
     run.get("outcome-dialog").fire("cancel");
     assert.equal(run.get("outcome-dialog").open, false, "Escape closes the outcome dialog through its cancel handler");
-    assert.equal(run.document.activeElement, run.elements.items, "Escape falls back to the checklist if the item disappeared");
+    assert.equal(run.document.activeElement, run.get("session-message"), "Escape focuses the visible explanation if the item disappeared");
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse Escape's cancelled focus intent");
@@ -234,7 +264,7 @@ function generic(kind) {
     assert.equal(run.get("session-message").textContent, "This item is no longer on the checklist. Refresh and try again.",
       "the reason is announced outside the closed dialog");
     assert.equal(run.posts().length, 0, "a removed item does not submit a check");
-    assert.equal(run.document.activeElement, run.elements.items, "focus falls back to the checklist after the item is removed");
+    assert.equal(run.document.activeElement, run.get("session-message"), "focus moves to the visible explanation after the item is removed");
   }
   {
     const run = checklist(), rows = Array.from({length: 8}, (_, index) => ({...row, item_id: "item-" + index, item_label: "Synthetic item " + index, obligation_state: "DUE"}));
@@ -247,12 +277,17 @@ function generic(kind) {
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 1, "activating a pending Pass action does not send a duplicate save");
     const focusedPass = run.document.activeElement;
+    const focusChangesBeforePassAck = run.focusHistory.length;
     response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "pass-check", outcome: "PASSED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "acknowledged render keeps the active checklist item in place");
     assert.equal(run.frames.length, 0, "an acknowledged save needs no deferred focus move");
     assert.equal(run.document.activeElement, focusedPass, "acknowledged render keeps the same focused action node attached");
     assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Pass"),
       "the focused Pass action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
+    assert.equal(run.focusHistory.length, focusChangesBeforePassAck, "Pass acknowledgement does not move focus");
+    announceSavedAction(run);
+    assert.equal(run.get("checklist-action-announcement").textContent, run.document.activeElement.getAttribute("aria-label"),
+      "after the Saved toast, a live status announces the full focused Pass action name");
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
     assert.equal(run.document.activeElement.dataset.action, "pass", "the follow-up live row refresh keeps the focused action connected");
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
@@ -266,15 +301,22 @@ function generic(kind) {
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 2, "activating a pending Fail action does not send a duplicate save");
     const focusedFail = run.document.activeElement;
+    const focusChangesBeforeFailAck = run.focusHistory.length;
     response(failed, 201, {status: "COMMITTED", result: {check_id: "fail-check", outcome: "FAILED", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.window.scrollY, 500, "failed check acknowledgement keeps the item in place");
     assert.equal(run.frames.length, 0, "an acknowledged Fail needs no deferred focus move");
     assert.equal(run.document.activeElement, focusedFail, "failed check acknowledgement keeps the same focused action node attached");
     assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Fail"), "the focused Fail action's updated name includes the result");
+    assert.equal(run.focusHistory.length, focusChangesBeforeFailAck, "Fail acknowledgement does not move focus");
+    announceSavedAction(run);
+    assert.equal(run.get("checklist-action-announcement").textContent, run.document.activeElement.getAttribute("aria-label"),
+      "after the Saved toast, a live status announces the full focused Fail action name");
+    assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li"].includes(change.to)),
+      "Pass and Fail never park focus on the list, a row, or the document");
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
     assert.equal(run.document.activeElement.dataset.action, "failed", "the follow-up live row refresh keeps the Fail action focused");
     run.context.testUI.setRows(rows.slice(0, 5)); run.context.testUI.render();
-    assert.equal(run.document.activeElement, run.elements.items, "if a live update removes the active row, focus falls back to the checklist");
+    assert.equal(run.document.activeElement, run.get("session-message"), "if a live update removes the active row, focus moves to the status message");
     assert.equal(run.elements.items.children[4].getBoundingClientRect().top, 100, "removed active row keeps the nearest visible row in place");
   }
   {
@@ -290,10 +332,17 @@ function generic(kind) {
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 1, "activating a pending Unable action does not send a duplicate save");
     const focusedUnable = run.document.activeElement;
+    const focusChangesBeforeUnableAck = run.focusHistory.length;
     response(unable, 201, {status: "COMMITTED", result: {check_id: "unable-check", outcome: "UNABLE_TO_INSPECT", server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
     assert.equal(run.document.activeElement, focusedUnable, "Unable acknowledgement keeps the same focused action node attached");
     assert.ok(run.document.activeElement.getAttribute("aria-label").includes("recorded result: Unable to inspect"),
       "the focused Unable action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
+    assert.equal(run.focusHistory.length, focusChangesBeforeUnableAck, "Unable acknowledgement does not move focus");
+    announceSavedAction(run);
+    assert.equal(run.get("checklist-action-announcement").textContent, run.document.activeElement.getAttribute("aria-label"),
+      "after the Saved toast, a live status announces the full focused Unable action name");
+    assert.ok(run.focusHistory.every(change => change.to && !["body", "items", "li"].includes(change.to)),
+      "Unable never parks focus on the list, a row, or the document");
   }
   {
     // Issue #140 (owner decision): the button matching the current window's recorded result is
