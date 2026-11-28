@@ -87,7 +87,14 @@
     status.tabIndex = -1;
     if (document.activeElement !== status) { status.focus({preventScroll: true}); }
   }
-  var inertPageChildren = [];
+  var inertPageChildren = [], pendingFocusRestore = null;
+  function restorePendingFocusState() {
+    var pending = pendingFocusRestore;
+    if (!pending) { return; }
+    pendingFocusRestore = null;
+    pending.restore();
+    if (pending.afterClose) { pending.afterClose(); }
+  }
   function focusableIn(dialog) {
     var candidates = Array.prototype.slice.call(dialog.querySelectorAll("a[href], button, input, select, textarea, [tabindex]"));
     return candidates.filter(function (node) {
@@ -128,6 +135,7 @@
     dialog.addEventListener("cancel", function (event) { event.preventDefault(); cancel(); });
   }
   function openFocusDialog(dialog) {
+    restorePendingFocusState();
     dialog.closeScheduled = false;
     dialog.hidden = false;
     dialog.setAttribute("aria-modal", "true");
@@ -183,12 +191,22 @@
       function restoreBackground() {
         restoreStates.forEach(function (entry) { entry.node.inert = entry.wasInert; });
         dialog.closeScheduled = false;
-        if (afterClose) { afterClose(); }
       }
-      if (restoreStates.length && typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(restoreBackground);
-      } else if (restoreStates.length) { setTimeout(restoreBackground, 0); }
-      else { restoreBackground(); }
+      function restoreAfterFocusSettles() {
+        var frames = 8;
+        var pending = {restore: restoreBackground, afterClose: afterClose};
+        pendingFocusRestore = pending;
+        function waitFrame() {
+          if (pendingFocusRestore !== pending) { return; }
+          frames -= 1;
+          if (frames <= 0) { restorePendingFocusState(); }
+          else if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(waitFrame); }
+          else { setTimeout(waitFrame, 16); }
+        }
+        waitFrame();
+      }
+      if (restoreStates.length) { restoreAfterFocusSettles(); }
+      else { restoreBackground(); if (afterClose) { afterClose(); } }
     }
     if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(finishClose); }
     else { setTimeout(finishClose, 0); }
@@ -197,8 +215,8 @@
     if (!focusIntent) { return; }
     var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
     if (!target) { focusStatusMessage("This item is no longer on the checklist. Refresh and try again."); focusIntent = null; return; }
-    // Busy actions use aria-disabled so focus remains on the named action during a save.
-    // Native-disabled controls cannot receive focus and use the visible status message instead.
+    // Busy actions remain focusable and keep their name stable while a save is pending.
+    // Their click handlers reject duplicate attempts before sending another request.
     if (target.disabled) { if (!afterRender) { focusStatusMessage("This checklist action is no longer available."); focusIntent = null; } return; }
     if (!afterRender) { if (document.activeElement !== target) { target.focus({preventScroll: true}); } focusIntent = null; return; }
     if (focusRestoreScheduled) { return; }
@@ -671,9 +689,8 @@
     var button = el("button", "button",
       row.kind === "QUANTITY" ? "Record count" : "Pass");
     // Keep a busy action focusable so a pending-save render can retain focus on its named control.
-    // Its handler checks the pending state before sending, so aria-disabled is sufficient here.
+    // Its handler checks the pending state before sending, so no disabled state is needed here.
     button.type = "button";
-    if (busy) { button.setAttribute("aria-disabled", "true"); }
     button.dataset.action = row.kind === "QUANTITY" || row.kind === "MEASUREMENT" ? "record" : "pass";
     button.setAttribute("aria-label", (row.kind === "QUANTITY" ? "Record count for " : "Record Pass for ") + label);
     if (row.kind === "QUANTITY" || row.kind === "MEASUREMENT") {
@@ -708,7 +725,6 @@
       if (row.allowed_outcomes.indexOf(outcome) === -1 || (config.verification_for_deficiency_id && outcome === "UNABLE_TO_INSPECT")) { return; }
       var action = el("button", "button", outcome === "FAILED" ? "Fail" : "Unable to inspect");
       action.type = "button";
-      if (busy) { action.setAttribute("aria-disabled", "true"); }
       action.dataset.action = outcome.toLowerCase();
       action.setAttribute("aria-label", "Record " + (outcome === "FAILED" ? "Fail" : "Unable to inspect") + " for " + label);
       action.addEventListener("click", function () { rememberFocus(row, outcome.toLowerCase()); openOutcome(row, outcome); });

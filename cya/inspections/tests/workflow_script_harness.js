@@ -195,7 +195,7 @@ function environment(config, forms = []) {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function flushFrames(run) {
-  for (let frame = 0; frame < 8 && run.frames.length; frame++) {
+  for (let frame = 0; frame < 20 && run.frames.length; frame++) {
     const pending = run.frames.splice(0);
     for (const callback of pending) callback();
   }
@@ -346,7 +346,7 @@ function generic(kind) {
     const target = run.elements.items.children[5], pass = findAction(target, "pass"); pass.fire("click");
     assert.equal(run.window.scrollY, 500, "pending render keeps the active checklist item in place");
     assert.equal(run.document.activeElement.dataset.action, "pass", "pending save keeps focus on the same named action");
-    assert.equal(run.document.activeElement.getAttribute("aria-disabled"), "true", "the pending action is announced as unavailable");
+    assert.equal(run.document.activeElement.getAttribute("aria-disabled"), null, "pending state does not announce the focused action as unavailable");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 1, "activating a pending Pass action does not send a duplicate save");
     const focusedPass = run.document.activeElement;
