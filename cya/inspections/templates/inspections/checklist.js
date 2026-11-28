@@ -145,13 +145,35 @@
   function closeFocusDialog(dialog, target, afterClose) {
     if (dialog.closeScheduled) { return; }
     dialog.closeScheduled = true;
-    var canRestoreTarget = target && document.contains(target), deferredRestore = [];
-    inertPageChildren.forEach(function (entry) {
-      if (canRestoreTarget && entry.node.contains(target)) { entry.node.inert = entry.wasInert; }
-      else if (canRestoreTarget) { deferredRestore.push(entry); }
-      else { entry.node.inert = entry.wasInert; }
-    });
+    var canRestoreTarget = target && document.contains(target), restoreStates = inertPageChildren.slice(), focusRoot = null;
     inertPageChildren = [];
+    function setTemporaryInert(node, value) {
+      var saved = restoreStates.some(function (entry) { return entry.node === node; });
+      if (!saved) { restoreStates.push({node: node, wasInert: node.inert}); }
+      node.inert = value;
+    }
+    if (canRestoreTarget) {
+      Array.prototype.some.call(document.body.children, function (child) {
+        if (child !== dialog && child.contains(target)) { focusRoot = child; child.inert = false; return true; }
+        return false;
+      });
+      if (focusRoot) {
+        var path = [], node = target;
+        while (node && node !== focusRoot) { path.unshift(node); node = node.parentNode; }
+        var parent = focusRoot;
+        path.forEach(function (pathNode) {
+          Array.prototype.forEach.call(parent.children, function (sibling) {
+            if (sibling !== pathNode) { setTemporaryInert(sibling, true); }
+          });
+          pathNode.inert = false;
+          parent = pathNode;
+        });
+      }
+    }
+    if (!focusRoot) {
+      restoreStates.forEach(function (entry) { entry.node.inert = entry.wasInert; });
+      restoreStates = [];
+    }
     dialog.removeAttribute("aria-modal");
     if (canRestoreTarget) { target.focus({preventScroll: true}); }
     function finishClose() {
@@ -159,13 +181,13 @@
       else { dialog.removeAttribute("open"); }
       dialog.hidden = true;
       function restoreBackground() {
-        deferredRestore.forEach(function (entry) { entry.node.inert = entry.wasInert; });
+        restoreStates.forEach(function (entry) { entry.node.inert = entry.wasInert; });
         dialog.closeScheduled = false;
         if (afterClose) { afterClose(); }
       }
-      if (deferredRestore.length && typeof window.requestAnimationFrame === "function") {
+      if (restoreStates.length && typeof window.requestAnimationFrame === "function") {
         window.requestAnimationFrame(restoreBackground);
-      } else if (deferredRestore.length) { setTimeout(restoreBackground, 0); }
+      } else if (restoreStates.length) { setTimeout(restoreBackground, 0); }
       else { restoreBackground(); }
     }
     if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(finishClose); }

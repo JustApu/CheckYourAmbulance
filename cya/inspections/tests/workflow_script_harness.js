@@ -204,6 +204,21 @@ function flushOneFrame(run) {
   const pending = run.frames.splice(0);
   for (const callback of pending) callback();
 }
+function assertFocusPathIsolated(run, target, message) {
+  const root = run.document.body.children.find(child => child.contains(target));
+  assert(root, message + ": target has a body-level ancestor");
+  assert.equal(root.inert, false, message + ": the target's page region is available");
+  for (let node = target; node !== root; node = node.parentNode) {
+    for (const sibling of node.parentNode.children) {
+      if (sibling !== node) assert.equal(sibling.inert, true, message + ": sibling " + (sibling.id || sibling.type) + " remains inert");
+    }
+  }
+  for (const sibling of run.document.body.children) {
+    if (sibling !== root && sibling !== run.get("outcome-dialog") && sibling !== run.get("conflict-dialog") && sibling.tagName !== "SCRIPT") {
+      assert.equal(sibling.inert, true, message + ": unrelated page region remains inert");
+    }
+  }
+}
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
   const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
@@ -267,15 +282,10 @@ function generic(kind) {
     assert.equal(run.get("outcome-dialog").open, true, "Cancel keeps the dialog present through the synchronous focus return");
     assert.equal(run.document.activeElement, run.get("session-message"), "Cancel returns focus before the dialog closes");
     assert.equal(run.get("outcome-dialog").getAttribute("aria-modal"), null, "the dialog stops claiming modality before focus returns");
-    const shell = run.document.body.children;
-    const main = shell.find(child => child.id === "main");
-    assert.equal(main.inert, false, "the focused main region is available for focus restoration");
-    assert(shell.filter(child => child !== main && child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
-      "header, navigation and other page regions stay inert through dialog close");
+    assertFocusPathIsolated(run, run.get("session-message"), "Cancel focus return");
     flushOneFrame(run);
     assert.equal(run.get("outcome-dialog").open, false, "Cancel closes the dialog on the next frame");
-    assert(shell.filter(child => child !== main && child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
-      "other page regions remain inert for a frame after dialog close");
+    assertFocusPathIsolated(run, run.get("session-message"), "post-close focus retention");
     flushFrames(run);
     assert.equal(run.document.activeElement, run.get("session-message"), "Cancel focuses the visible explanation if the item disappeared");
     assert(run.document.body.children.filter(child => child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => !child.inert),
@@ -358,6 +368,10 @@ function generic(kind) {
     newReport(run); run.get("outcome-form").fire("submit");
     assert.equal(run.get("outcome-dialog").open, true, "Fail keeps the dialog present through the focus return");
     assert.equal(run.document.activeElement.dataset.action, "failed", "Fail returns focus before the dialog closes");
+    assertFocusPathIsolated(run, run.document.activeElement, "Fail focus return");
+    flushOneFrame(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Fail closes on the first animation frame");
+    assertFocusPathIsolated(run, run.document.activeElement, "post-close Fail focus retention");
     flushFrames(run);
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
@@ -393,6 +407,10 @@ function generic(kind) {
     run.get("outcome-form").fire("submit");
     assert.equal(run.get("outcome-dialog").open, true, "Unable keeps the dialog present through the focus return");
     assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable returns focus before the dialog closes");
+    assertFocusPathIsolated(run, run.document.activeElement, "Unable focus return");
+    flushOneFrame(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Unable closes on the first animation frame");
+    assertFocusPathIsolated(run, run.document.activeElement, "post-close Unable focus retention");
     flushFrames(run);
     const unable = run.posts()[0]; assert.equal(unable.body.outcome, "UNABLE_TO_INSPECT");
     assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable submission keeps its named action focused while saving");
