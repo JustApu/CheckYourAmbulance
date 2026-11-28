@@ -1402,12 +1402,12 @@ function generic(kind) {
     assert.deepEqual(marked(freshItem()), [], "a window satisfied by another check marks nothing on the sheet");
     assert.equal(findClass(freshItem(), "paper-copied"), null);
     // A refused record says why in plain words; an invalidated batch reloads the screen.
-    fresh.context.testUI.startCheck({...open, item_id: "other"}, null);
+    fresh.context.testUI.startCheck(open, null);
     const before = fresh.requests.length;
     response(fresh.posts().at(-1), 409, {status: "REJECTED", code: "PAPER_BATCH_INVALIDATED"}); await tick();
-    assert.equal(fresh.context.testUI.getEntry({...open, item_id: "other"}).text, "This paper entry was invalidated. Start a new paper entry from the vehicle page.");
+    assert.equal(fresh.context.testUI.getEntry(open).text, "This paper entry was invalidated. Start a new paper entry from the vehicle page.");
     assert.ok(fresh.timers.length > 0 && fresh.requests.length === before, "a reload is scheduled");
-    fresh.context.testUI.startCheck({...open, item_id: "kit-content"}, null);
+    fresh.context.testUI.startCheck(open, null);
     response(fresh.posts().at(-1), 422, {status: "REJECTED", code: "KIT_MOVED_SINCE_PAPER"}); await tick();
     assert.ok(fresh.context.testUI.getEntry({...open, item_id: "kit-content"}).text.includes("left the vehicle"));
   }
