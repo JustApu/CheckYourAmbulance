@@ -395,7 +395,7 @@ function generic(kind) {
   }
   {
     const run = checklist(), item = () => run.elements.items.children[0];
-    run.context.testUI.setRows([{...row, obligation_state: "DUE"}]); run.context.testUI.render();
+    run.context.testUI.setRows([{...row, obligation_state: "DUE", due_at: "2026-06-01T06:00:00Z"}]); run.context.testUI.render();
     findAction(item(), "unable_to_inspect").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     newReport(run);
@@ -423,7 +423,7 @@ function generic(kind) {
       "the focused Unable action's updated name includes the result: " + run.document.activeElement.getAttribute("aria-label"));
     assert.equal(run.focusHistory.length, focusChangesBeforeUnableAck, "Unable acknowledgement does not move focus");
     assert.deepEqual(run.window.cyaShell.toasts.at(-1), {text: "Saved: Unable to inspect for Portable suction unit (Airway response kit A).", announce: true});
-    run.context.testUI.setRows([{...row, latest_check_id: "unable-check", latest_check_outcome: "UNABLE_TO_INSPECT",
+    run.context.testUI.setRows([{...row, due_at: "2026-06-01T06:00:00Z", latest_check_id: "unable-check", latest_check_outcome: "UNABLE_TO_INSPECT",
       latest_check_at: "2026-06-01T00:00:00Z", obligation_state: "DUE"}]);
     run.context.testUI.render();
     assert.equal(run.document.activeElement, focusedUnable, "a live row update keeps focus on the Unable action");
@@ -435,7 +435,7 @@ function generic(kind) {
   {
     // Issue #140 (owner decision): the button matching the current window's recorded result is
     // marked with a check mark and named as recorded; issue 87: a saved Fail is never shown as Pass.
-    const run = checklist(), open = {...row, obligation_state: "DUE"}, item = () => run.elements.items.children[0];
+    const run = checklist(), open = {...row, obligation_state: "DUE", due_at: "2026-06-01T06:00:00Z"}, item = () => run.elements.items.children[0];
     run.context.testUI.setRows([open]); run.context.testUI.render();
     assert.deepEqual(marked(item()), [], "nothing is marked while the window has no result");
     findAction(item(), "failed").fire("click");

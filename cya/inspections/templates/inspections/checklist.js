@@ -610,11 +610,12 @@
     var mine = savedOutcome(entry);
     if (mine && entry.checkId) {
       // A refreshed row can acknowledge this exact check while its obligation remains due,
-      // notably for Unable to inspect. Keep the action marked with the result we just recorded.
+      // notably for Unable to inspect. Compare the due instant captured when the action began:
+      // due_at is the current window's deadline and can still be in the future while DUE.
       if (row.latest_check_id === entry.checkId) {
         var dueAt = row.due_at ? Date.parse(row.due_at) : NaN;
-        var mineRecordedAt = entry.recordedAt ? Date.parse(entry.recordedAt) : NaN;
-        if (row.obligation_state !== "SATISFIED" && !isNaN(dueAt) && !isNaN(mineRecordedAt) && dueAt > mineRecordedAt) { return null; }
+        var entryDueAt = entry.dueAt ? Date.parse(entry.dueAt) : NaN;
+        if (!isNaN(dueAt) && !isNaN(entryDueAt) && dueAt !== entryDueAt) { return null; }
         return mine;
       }
       var rowAt = row.latest_check_at ? Date.parse(row.latest_check_at) : NaN;
