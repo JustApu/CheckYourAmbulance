@@ -10,8 +10,10 @@ function focusName(node) { return !node ? "body" : node.id || (node.dataset && n
 class Element {
   constructor(id = "", type = "") {
     this.id = id; this.type = type; this.value = ""; this.defaultValue = "";
+    this.tagName = type === "text" || type === "radio" || type === "hidden" ? "INPUT" : type.toUpperCase();
     this.children = []; this.listeners = {}; this.dataset = {}; this.fields = {}; this.queries = {};
-    this.hidden = false; this.disabled = false; this.checked = false; this._text = "";
+    this.hidden = false; this.inert = false; this.disabled = false; this.checked = false; this._text = "";
+    this.tabIndex = type === "dialog" ? -1 : 0;
     this.parentNode = null; this._document = null;
   }
   set textContent(text) {
@@ -23,9 +25,19 @@ class Element {
     this._text = text; this.children = [];
   }
   get textContent() { return this._text || this.children.map(e => e.textContent).join(""); }
-  setAttribute(name, value) { this[name] = value; }
+  setAttribute(name, value) {
+    this[name] = value;
+    if (name === "inert") this.inert = true;
+    if (name === "hidden") this.hidden = true;
+    if (name === "tabindex") this.tabIndex = Number(value);
+  }
   getAttribute(name) { return this[name] === undefined ? null : String(this[name]); }
-  removeAttribute(name) { if (name === "open") this.open = false; else delete this[name]; }
+  removeAttribute(name) {
+    if (name === "open") this.open = false;
+    else if (name === "inert") { this.inert = false; delete this[name]; }
+    else if (name === "hidden") { this.hidden = false; delete this[name]; }
+    else delete this[name];
+  }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   cloneNode(deep) {
     const copy = new Element(this.id, this.type);
@@ -38,9 +50,14 @@ class Element {
     if (deep) for (const child of this.children) copy.appendChild(child.cloneNode(true));
     return copy;
   }
-  fire(name) {
+  fire(name, properties = {}) {
     if (name === "click" && this.type === "button" && this._document && !this.disabled) this.focus();
-    if (this.listeners[name]) this.listeners[name]({preventDefault() {}});
+    if (this.listeners[name]) {
+      const event = Object.assign({defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {}}, properties);
+      this.listeners[name](event);
+      return event;
+    }
+    return null;
   }
   appendChild(node) { node.parentNode = this; node._document = this._document; this.children.push(node); return node; }
   insertBefore(node, reference) {
@@ -61,25 +78,15 @@ class Element {
   get firstChild() { return this.children[0]; }
   get selectedOptions() { return this.children.filter(node => node.selected); }
   contains(node) { for (let current = node; current; current = current.parentNode) { if (current === this) return true; } return false; }
-  showModal() {
-    this.open = true;
-    if (this._document) {
-      this._returnFocus = this._document.activeElement;
-      this._document.focusHistory.push({from: focusName(this._document.activeElement), to: focusName(this)});
-      this._document.activeElement = this;
-    }
-  }
+  show() { this.open = true; }
   close() {
     this.open = false;
-    if (this._document) {
-      const next = this._returnFocus && this._document.contains(this._returnFocus) ? this._returnFocus : null;
-      if (this._document.activeElement !== next) this._document.focusHistory.push({from: focusName(this._document.activeElement), to: focusName(next)});
-      this._document.activeElement = next;
-    }
   }
   focus(options) {
     this.focusOptions = options;
-    if (!this.disabled && this._document && this._document.contains(this) && this._document.activeElement !== this) {
+    let blocked = false;
+    for (let parent = this; parent; parent = parent.parentNode) if (parent.inert) blocked = true;
+    if (!this.disabled && !blocked && this._document && this._document.contains(this) && this._document.activeElement !== this) {
       this._document.focusHistory.push({from: focusName(this._document.activeElement), to: focusName(this)});
       this._document.activeElement = this;
     }
@@ -99,15 +106,30 @@ class Element {
     if (selector === "input, select, textarea, button") return [...Object.values(this.fields), this.querySelector('button[type="submit"]')];
     if (selector === '[name="system_ids"]:checked') return this.systems || [];
     if (selector === '[name="items"]:checked') return (this.items || []).filter(node => node.checked);
+    if (selector === "a[href], button, input, select, textarea, [tabindex]") {
+      const controls = [];
+      const visit = node => {
+        for (const child of node.children) {
+          if (["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(child.tagName) || child.getAttribute("tabindex") !== null) controls.push(child);
+          visit(child);
+        }
+      };
+      visit(this);
+      return controls;
+    }
     return [];
   }
 }
 function field(form, name, value = "", type = "text") {
   const node = new Element(name, type); node.value = value; node.defaultValue = value;
-  form.fields[name] = node; return node;
+  form.fields[name] = node; form.appendChild(node); return node;
 }
 function environment(config, forms = []) {
   const elements = {}, requests = [], sockets = [], timers = [], frames = [];
+  const body = new Element("body", "body");
+  const shellRoots = [new Element("skip-link", "a"), new Element("site-header", "header"), new Element("app-nav", "nav"),
+    new Element("connection-banner", "div"), new Element("main", "main")];
+  shellRoots.forEach(node => body.appendChild(node));
   const window = {scrollY: 0, innerHeight: 200, simulateListJump: false,
     requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
     CyaTimezones: {
@@ -119,23 +141,33 @@ function environment(config, forms = []) {
     scrollBy(_x, y) { this.scrollY += y; }};
   const document = {
     defaultView: window,
+    body,
     activeElement: null,
     focusHistory: [],
     getElementById(id) {
       if (((config.state && config.state !== "OPEN") || config.verification_for_deficiency_id) && /^(odometer-form|odo-)/.test(id)) return null;
       if (!elements[id]) {
-        elements[id] = new Element(id);
+        const dialogRoot = id === "conflict-dialog" || id === "outcome-dialog";
+        const dialogChild = /^(conflict-(title|text|cancel|proceed)|outcome-(title|form|reason-label|existing|matches|create-fields|error|cancel))$/.test(id);
+        elements[id] = new Element(id, dialogRoot ? "dialog" : dialogChild && /-(cancel|proceed)$/.test(id) ? "button" : dialogChild && id === "outcome-form" ? "form" : "");
+        elements[id]._document = document;
         if (id === "outcome-form") {
-          for (const name of ["outcome_explanation", "category_id", "summary", "description"]) field(elements[id], name);
+          field(elements[id], "outcome_explanation", "", "textarea");
+          field(elements[id], "category_id", "", "select");
+          field(elements[id], "summary"); field(elements[id], "description");
           field(elements[id], "severity", "HIGH", "radio");
+          const submit = new Element("outcome-submit", "button"); submit.type = "submit"; elements[id].appendChild(submit);
+          elements[id].queries['button[type="submit"]'] = submit;
         }
+        const parent = dialogRoot ? body : dialogChild ?
+          (id.startsWith("conflict-") ? document.getElementById("conflict-dialog") :
+            id === "outcome-title" || id === "outcome-form" ? document.getElementById("outcome-dialog") : document.getElementById("outcome-form")) : shellRoots[4];
+        if (parent && parent !== elements[id] && !parent.children.includes(elements[id])) parent.appendChild(elements[id]);
       }
       elements[id]._document = document; return elements[id];
     },
     contains(node) {
-      const roots = Object.values(elements);
-      for (let current = node; current; current = current.parentNode) { if (roots.includes(current)) return true; }
-      return false;
+      return body.contains(node);
     },
     querySelector() { return {value: "synthetic-csrf"}; },
     querySelectorAll(selector) { return selector === ".workflow-write" ? forms : []; },
@@ -143,6 +175,7 @@ function environment(config, forms = []) {
     createTextNode(text) { const node = new Element(); node._document = document; node.textContent = text; return node; },
     addEventListener() {},
   };
+  body._document = document; shellRoots.forEach(node => { node._document = document; });
   const context = {
     document, window, crypto: crypto.webcrypto, Uint8Array,
     location: {protocol: "https:", host: "example.invalid"},
@@ -161,6 +194,10 @@ function environment(config, forms = []) {
   };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
+function flushFrames(run) {
+  const pending = run.frames.splice(0);
+  for (const callback of pending) callback();
+}
 function response(request, status, body) { request.resolve({ok: status < 400, status, json: async () => body}); }
 function checklist(state = "OPEN", extra = {}) {
   const config = {state, view: "NORMAL", needs_attention_only: false, user_id: "user", session_id: "session", vehicle_id: "vehicle", checklist_version_id: "version", time_zone: "UTC",
@@ -211,10 +248,24 @@ function generic(kind) {
     run.context.testUI.setRows([row]); run.context.testUI.render();
     findAction(run.elements.items.children[0], "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
+    assert.equal(run.document.activeElement, run.get("outcome-form").fields.outcome_explanation, "the outcome dialog initially focuses its first control");
+    assert.equal(run.get("outcome-dialog").getAttribute("aria-modal"), "true", "the open dialog is announced as modal");
+    assert(run.document.body.children.filter(child => child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
+      "the open outcome dialog makes all page siblings inert");
+    const firstTab = run.get("outcome-dialog").fire("keydown", {key: "Tab", shiftKey: true});
+    assert.equal(firstTab.defaultPrevented, true, "Shift+Tab wraps within the dialog");
+    assert.equal(run.document.activeElement, run.get("outcome-cancel"), "Shift+Tab from the first field wraps to the last control");
     run.context.testUI.setRows([]); run.context.testUI.render();
-    assert.equal(run.document.activeElement, run.get("outcome-dialog"), "a live update keeps focus in the dialog when the item disappears");
+    assert.equal(run.document.activeElement, run.get("outcome-cancel"), "a live update keeps focus in the dialog when the item disappears");
     run.get("outcome-cancel").fire("click");
+    assert.equal(run.get("outcome-dialog").open, true, "Cancel keeps the dialog present through the synchronous focus return");
+    assert.equal(run.document.activeElement, run.get("session-message"), "Cancel returns focus before the dialog closes");
+    assert.equal(run.get("outcome-dialog").getAttribute("aria-modal"), null, "the dialog stops claiming modality before focus returns");
+    flushFrames(run);
+    assert.equal(run.get("outcome-dialog").open, false, "Cancel closes the dialog on the next frame");
     assert.equal(run.document.activeElement, run.get("session-message"), "Cancel focuses the visible explanation if the item disappeared");
+    assert(run.document.body.children.filter(child => child !== run.get("outcome-dialog") && child.tagName !== "SCRIPT").every(child => !child.inert),
+      "closing the outcome dialog restores page sibling inertness");
     run.document.activeElement = null;
     run.context.testUI.setRows([row]); run.context.testUI.render();
     assert.equal(run.document.activeElement, null, "a later live render does not reuse the cancelled focus intent");
@@ -231,6 +282,7 @@ function generic(kind) {
     assert(run.elements.items.children.some(child => child.textContent.includes("Updated synthetic other")),
       "a live render still refreshes other checklist items while the dialog is open");
     run.get("outcome-cancel").fire("click");
+    flushFrames(run);
     assert.equal(run.elements.items.children.find(child => child.dataset.itemKey === "item|kit-a"), invokingRow,
       "closing the dialog keeps the focused invoker row attached while reconciling it");
   }
@@ -240,7 +292,9 @@ function generic(kind) {
     findAction(run.elements.items.children[0], "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     run.context.testUI.setRows([]); run.context.testUI.render();
-    run.get("outcome-dialog").fire("cancel");
+    const escape = run.get("outcome-dialog").fire("keydown", {key: "Escape"});
+    assert.equal(escape.defaultPrevented, true, "Escape is handled by the dialog's managed close path");
+    flushFrames(run);
     assert.equal(run.get("outcome-dialog").open, false, "Escape closes the outcome dialog through its cancel handler");
     assert.equal(run.document.activeElement, run.get("session-message"), "Escape focuses the visible explanation if the item disappeared");
     run.document.activeElement = null;
@@ -254,7 +308,7 @@ function generic(kind) {
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     run.context.testUI.setRows([]); run.context.testUI.render();
     newReport(run);
-    run.get("outcome-form").fire("submit");
+    run.get("outcome-form").fire("submit"); flushFrames(run);
     assert.equal(run.get("outcome-dialog").open, false, "submitting for a removed item closes the stale dialog");
     assert.equal(run.get("session-message").textContent, "This item is no longer on the checklist. Refresh and try again.",
       "the reason is announced outside the closed dialog");
@@ -286,12 +340,15 @@ function generic(kind) {
     const fail = findAction(run.elements.items.children[6], "failed"); fail.fire("click");
     response(run.requests[1], 200, {status: "OK", suggestions: []}); await tick();
     run.context.testUI.setRows(rows.slice()); run.context.testUI.render();
-    assert.equal(run.document.activeElement, run.get("outcome-dialog"), "a live rerender keeps focus inside the open deficiency dialog");
+    assert.equal(run.document.activeElement, run.get("outcome-form").fields.outcome_explanation, "a live rerender keeps focus inside the open deficiency dialog");
     newReport(run); run.get("outcome-form").fire("submit");
+    assert.equal(run.get("outcome-dialog").open, true, "Fail keeps the dialog present through the focus return");
+    assert.equal(run.document.activeElement.dataset.action, "failed", "Fail returns focus before the dialog closes");
+    flushFrames(run);
     const failed = run.posts()[1]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(run.window.scrollY, 500, "deficiency submission keeps the failed item in place");
     assert.equal(run.document.activeElement.dataset.action, "failed", "dialog submission keeps focus on the named Fail action while saving");
-    assert.deepEqual(run.focusHistory.at(-1), {from: "outcome-dialog", to: "failed"},
+    assert.equal(run.focusHistory.at(-1).to, "failed",
       "the outcome dialog returns focus directly to its original Fail action");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 2, "activating a pending Fail action does not send a duplicate save");
@@ -320,9 +377,12 @@ function generic(kind) {
     newReport(run);
     run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
     run.get("outcome-form").fire("submit");
+    assert.equal(run.get("outcome-dialog").open, true, "Unable keeps the dialog present through the focus return");
+    assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable returns focus before the dialog closes");
+    flushFrames(run);
     const unable = run.posts()[0]; assert.equal(unable.body.outcome, "UNABLE_TO_INSPECT");
     assert.equal(run.document.activeElement.dataset.action, "unable_to_inspect", "Unable submission keeps its named action focused while saving");
-    assert.deepEqual(run.focusHistory.at(-1), {from: "outcome-dialog", to: "unable_to_inspect"},
+    assert.equal(run.focusHistory.at(-1).to, "unable_to_inspect",
       "the outcome dialog returns focus directly to its original Unable action");
     run.document.activeElement.fire("click");
     assert.equal(run.posts().length, 1, "activating a pending Unable action does not send a duplicate save");
@@ -345,7 +405,7 @@ function generic(kind) {
     assert.deepEqual(marked(item()), [], "nothing is marked while the window has no result");
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     const posted = run.posts()[0];
     assert.equal(posted.body.outcome, "FAILED"); assert.equal(posted.body.deficiency.create.summary, "Synthetic failure");
     assert.equal(findClass(item(), "save-state").textContent, "⌛Saving…", "pending is said in words, not as a result");
@@ -387,7 +447,7 @@ function generic(kind) {
     assert.deepEqual(marked(item()), ["pass"], "a window satisfied by Pass marks Pass");
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     response(run.posts()[0], 201, {status: "COMMITTED", result: {check_id: "mine", outcome: "FAILED", server_recorded_at: "2026-06-01T05:40:00Z"}}); await tick();
     assert(findClass(item(), "save-state").textContent.startsWith("✓Saved: Fail."));
     assert.deepEqual(marked(item()), ["failed"], "immediately after the acknowledged Fail, Fail (not Pass) is marked");
@@ -560,7 +620,7 @@ function generic(kind) {
     run.context.testUI.setRows([{...row, obligation_state: "DUE"}]); run.context.testUI.render();
     findAction(item(), "failed").fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     if (outcome === "unconfirmed") run.posts()[0].reject(new Error("synthetic lost response"));
     else response(run.posts()[0], 400, {status: "REJECTED", code: "INVALID_OUTCOME"});
     await tick();
@@ -579,13 +639,14 @@ function generic(kind) {
     assert.equal(run.get("outcome-existing").value, ""); // a match never selects itself
     assert(run.get("outcome-existing").children[1].textContent.includes("<script>")); // remains text, never markup
     newReport(run); run.get("outcome-form").fire("submit");
+    flushFrames(run);
     const failed = run.posts()[0]; assert.equal(failed.body.outcome, "FAILED"); assert.equal(failed.body.kit_id, "kit-a");
     assert.equal(failed.body.deficiency.create.severity, "HIGH");
     failed.reject(new Error("synthetic lost response")); await tick();
     run.context.testUI.retryCheck({...row, checklist_version_id: "different", unit: "changed"});
     assert.equal(run.posts()[1].options.body, failed.options.body); // exact frozen retry despite changed row
     response(run.posts()[1], 409, {status: "CONFLICT", newest_check: {check_id: "basis-b", outcome: "PASSED", actor: {display_name: "Synthetic Crew"}}}); await tick();
-    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click");
+    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click"); flushFrames(run);
     const proceed = run.posts()[2]; assert.equal(proceed.body.acknowledges_check_id, "basis-b"); assert.equal(proceed.body.basis_check_id, "basis-b");
     assert.notEqual(proceed.body.operation_id, failed.body.operation_id); assert.deepEqual(proceed.body.deficiency, failed.body.deficiency);
     response(proceed, 201, {status: "COMMITTED", result: {server_recorded_at: "2026-06-01T00:00:00Z"}}); await tick();
@@ -599,10 +660,11 @@ function generic(kind) {
     response(run.posts()[1], 409, {status: "CONFLICT", newest_check: {check_id: "warning-b", outcome: "PASSED"}}); await tick();
     assert.equal(run.get("conflict-dialog").newest, "warning-a");
     run.get("conflict-proceed").fire("click");
+    flushFrames(run);
     assert.equal(run.posts()[2].body.acknowledges_check_id, "warning-a");
     assert.equal(run.posts()[2].body.deficiency.create.summary, "Synthetic first failure");
     assert.equal(run.get("conflict-dialog").newest, "warning-b");
-    run.get("conflict-dialog").fire("cancel"); assert.equal(!!run.get("conflict-dialog").open, false);
+    run.get("conflict-dialog").fire("cancel"); flushFrames(run); assert.equal(!!run.get("conflict-dialog").open, false);
   }
   {
     const run = checklist();
@@ -611,13 +673,22 @@ function generic(kind) {
     unable.fire("click");
     response(run.requests[0], 200, {status: "OK", suggestions: []}); await tick();
     newReport(run); run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
-    run.get("outcome-form").fire("submit");
+    run.get("outcome-form").fire("submit"); flushFrames(run);
     const firstSave = run.posts()[0];
     response(firstSave, 409, {status: "CONFLICT", newest_check: {check_id: "conflict-basis", outcome: "PASSED"}}); await tick();
     assert.equal(run.get("conflict-dialog").invoker, unable, "the duplicate-record dialog remembers the original Unable action");
-    assert.equal(run.document.activeElement, run.get("conflict-dialog"), "the conflict dialog owns focus while open");
+    assert.equal(run.document.activeElement, run.get("conflict-cancel"), "the conflict dialog focuses its first control while open");
+    assert.equal(run.get("conflict-dialog").getAttribute("aria-modal"), "true");
+    assert(run.document.body.children.filter(child => child !== run.get("conflict-dialog") && child.tagName !== "SCRIPT").every(child => child.inert),
+      "the conflict dialog makes all page siblings inert");
+    const wrap = run.get("conflict-dialog").fire("keydown", {key: "Tab", shiftKey: true});
+    assert.equal(wrap.defaultPrevented, true, "Shift+Tab wraps inside the conflict dialog");
+    assert.equal(run.document.activeElement, run.get("conflict-proceed"), "the conflict dialog traps focus at its first control");
     run.get("conflict-proceed").focus();
     run.get("conflict-proceed").fire("click");
+    assert.equal(run.get("conflict-dialog").open, true, "Record mine too keeps the dialog present through the focus return");
+    assert.equal(run.document.activeElement, unable, "Record mine too restores focus before the dialog closes");
+    flushFrames(run);
     assert.equal(run.document.activeElement, unable, "Record mine too restores focus to the same Unable action");
     assert.equal(run.document.contains(unable), true, "the original Unable action remains attached through conflict confirmation");
     assert.deepEqual(run.focusHistory.at(-1), {from: "conflict-proceed", to: "unable_to_inspect"},
@@ -637,13 +708,13 @@ function generic(kind) {
     const run = checklist(); run.context.testUI.openOutcome(row, "UNABLE_TO_INSPECT"); newReport(run);
     run.get("outcome-form").fire("submit"); assert.equal(run.posts().length, 0); assert(run.get("outcome-error").textContent.includes("reason"));
     run.get("outcome-form").fields.outcome_explanation.value = "Synthetic access restriction.";
-    run.get("outcome-existing").value = "existing"; run.get("outcome-form").fire("submit");
+    run.get("outcome-existing").value = "existing"; run.get("outcome-form").fire("submit"); flushFrames(run);
     const body = run.posts()[0].body; assert.equal(body.outcome, "UNABLE_TO_INSPECT"); assert.equal(body.explanation, "Synthetic access restriction.");
     assert.deepEqual(body.deficiency, {existing_id: "existing"}); assert(!("quantity" in body)); assert(!("measurement" in body));
   }
   {
     const run = checklist(); const quantity = {...row, kind: "QUANTITY", expected_quantity: 6};
-    run.context.testUI.drafts["item|kit-a"] = "2"; run.context.testUI.openOutcome(quantity, "FAILED"); newReport(run); run.get("outcome-form").fire("submit");
+    run.context.testUI.drafts["item|kit-a"] = "2"; run.context.testUI.openOutcome(quantity, "FAILED"); newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     assert.equal(run.posts()[0].body.quantity, 2);
     assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "FAILED"}), "Failed");
     assert.equal(run.context.testUI.stateText({...row, obligation_state: "SATISFIED", obligation_outcome: "SUPERVISOR_COMPLETED"}), "Supervisor completed: unable to inspect");
@@ -859,7 +930,7 @@ function generic(kind) {
     run.context.testUI.retryCheck({...row, checklist_version_id: "new-version"});
     assert.equal(run.posts()[1].options.body, first.options.body);
     response(run.posts()[1], 409, {status: "CONFLICT", newest_check: {check_id: "new-basis", outcome: "PASSED"}}); await tick();
-    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click");
+    run.context.testUI.setRows([]); run.get("conflict-proceed").fire("click"); flushFrames(run);
     const proceed = run.posts()[2];
     assert.notEqual(proceed.body.operation_id, first.body.operation_id);
     assert.equal(proceed.body.purpose, "VERIFICATION"); assert.equal(proceed.body.verification_for_deficiency_id, "deficiency");
@@ -1474,7 +1545,7 @@ function generic(kind) {
     run.context.testUI.setRows([{...open, latest_check_id: "x"}]); run.context.testUI.render();
     findAction(item(), "failed").fire("click");
     response(run.requests.at(-1), 200, {status: "OK", suggestions: []}); await tick();
-    newReport(run); run.get("outcome-form").fire("submit");
+    newReport(run); run.get("outcome-form").fire("submit"); flushFrames(run);
     response(run.posts().at(-1), 201, {status: "COMMITTED", result: {check_id: "paper-2", outcome: "FAILED", server_recorded_at: "2026-06-03T12:01:00Z",
       paper_entry: {batch_id: "batch", performed_at: "2026-06-02T10:15:00Z"}}}); await tick();
     assert.equal(run.get("paper-print-offer").hidden, true, "the offer is made once per batch");

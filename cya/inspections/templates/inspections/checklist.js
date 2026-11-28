@@ -87,6 +87,78 @@
     status.tabIndex = -1;
     if (document.activeElement !== status) { status.focus({preventScroll: true}); }
   }
+  var inertPageChildren = [];
+  function focusableIn(dialog) {
+    var candidates = Array.prototype.slice.call(dialog.querySelectorAll("a[href], button, input, select, textarea, [tabindex]"));
+    return candidates.filter(function (node) {
+      if (node.disabled || node.hidden || node.getAttribute("aria-hidden") === "true") { return false; }
+      if (node.tabIndex < 0 || node.getAttribute("tabindex") === "-1") { return false; }
+      for (var parent = node; parent && parent !== dialog; parent = parent.parentNode) {
+        if (parent.hidden || parent.inert) { return false; }
+      }
+      return true;
+    });
+  }
+  function bindFocusDialog(dialog, cancel) {
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("tabindex", "-1");
+    dialog.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (event.stopPropagation) { event.stopPropagation(); }
+        cancel();
+        return;
+      }
+      if (event.key !== "Tab") { return; }
+      var controls = focusableIn(dialog), current = document.activeElement;
+      if (!controls.length) {
+        event.preventDefault();
+        dialog.focus({preventScroll: true});
+        return;
+      }
+      var index = controls.indexOf(current);
+      if (event.shiftKey && index <= 0) {
+        event.preventDefault();
+        controls[controls.length - 1].focus({preventScroll: true});
+      } else if (!event.shiftKey && (index < 0 || index === controls.length - 1)) {
+        event.preventDefault();
+        controls[0].focus({preventScroll: true});
+      }
+    });
+    dialog.addEventListener("cancel", function (event) { event.preventDefault(); cancel(); });
+  }
+  function openFocusDialog(dialog) {
+    dialog.closeScheduled = false;
+    dialog.hidden = false;
+    dialog.setAttribute("aria-modal", "true");
+    if (typeof dialog.show === "function") { dialog.show(); }
+    else { dialog.setAttribute("open", ""); }
+    var controls = focusableIn(dialog);
+    (controls[0] || dialog).focus({preventScroll: true});
+    inertPageChildren = [];
+    Array.prototype.forEach.call(document.body.children, function (child) {
+      if (child === dialog || child.tagName === "SCRIPT") { return; }
+      inertPageChildren.push({node: child, wasInert: child.inert});
+      child.inert = true;
+    });
+  }
+  function closeFocusDialog(dialog, target, afterClose) {
+    if (dialog.closeScheduled) { return; }
+    dialog.closeScheduled = true;
+    inertPageChildren.forEach(function (entry) { entry.node.inert = entry.wasInert; });
+    inertPageChildren = [];
+    dialog.removeAttribute("aria-modal");
+    if (target && document.contains(target)) { target.focus({preventScroll: true}); }
+    function finishClose() {
+      if (typeof dialog.close === "function") { dialog.close(); }
+      else { dialog.removeAttribute("open"); }
+      dialog.hidden = true;
+      dialog.closeScheduled = false;
+      if (afterClose) { afterClose(); }
+    }
+    if (typeof window.requestAnimationFrame === "function") { window.requestAnimationFrame(finishClose); }
+    else { setTimeout(finishClose, 0); }
+  }
   function restoreFocusIntent(afterRender) {
     if (!focusIntent) { return; }
     var item = itemForKey(focusIntent.key), target = item && actionIn(item, focusIntent.action);
@@ -339,46 +411,47 @@
     var intent = focusIntent && focusIntent.key === key(row) ? focusIntent : null;
     var invokerItem = itemForKey(key(row));
     dialog.invoker = intent && invokerItem ? actionIn(invokerItem, intent.action) : document.activeElement;
-    if (typeof dialog.showModal === "function") { dialog.showModal(); } else { dialog.setAttribute("open", ""); }
+    openFocusDialog(dialog);
   }
-  function closeDialog(keepFocusIntent) {
+  function closeDialog(keepFocusIntent, afterClose) {
     conflictShowing = false;
     var invoker = dialog.invoker;
-    if (dialog.close) { dialog.close(); }
-    dialog.removeAttribute("open");
-    // Keep the intent through the pending render; it will focus the named action after acknowledgement.
-    if (keepFocusIntent && focusIntent) {
-      var item = itemForKey(focusIntent.key), target = invoker && document.contains(invoker) ? invoker : item && actionIn(item, focusIntent.action);
-      if (target && document.activeElement !== target) { target.focus({preventScroll: true}); }
-      else if (!target) {
-        focusStatusMessage("This item is no longer on the checklist. Refresh and try again.");
-        focusIntent = null;
-      }
-      dialog.invoker = null;
-      return;
-    }
-    else { restoreFocusIntent(); focusIntent = null; }
+    var item = focusIntent && itemForKey(focusIntent.key);
+    var target = invoker && document.contains(invoker) ? invoker : item && actionIn(item, focusIntent.action);
+    if (!target) {
+      var status = $("session-message");
+      if (status) { status.textContent = "This item is no longer on the checklist. Refresh and try again."; status.tabIndex = -1; }
+      target = status;
+      focusIntent = null;
+    } else if (!keepFocusIntent) { focusIntent = null; }
     dialog.invoker = null;
-    if (deferredListRender) { deferredListRender = false; render(); }
+    closeFocusDialog(dialog, target, function () {
+      if (deferredListRender) { deferredListRender = false; render(); }
+      if (afterClose) { afterClose(); }
+    });
   }
   function nextConflict() {
     if (!conflictQueue.length) { return; }
     var next = conflictQueue.shift(); askConflict(next.row, next.entry, next.newest);
   }
-  function cancelConflict() { delete entries[dialog.dataset.key]; closeDialog(); render(); nextConflict(); }
+  function cancelConflict() {
+    delete entries[dialog.dataset.key];
+    closeDialog(false, function () { render(); nextConflict(); });
+  }
   $("conflict-cancel").addEventListener("click", cancelConflict);
-  dialog.addEventListener("cancel", function (event) { event.preventDefault(); cancelConflict(); });
+  bindFocusDialog(dialog, cancelConflict);
   $("conflict-proceed").addEventListener("click", function () {
     var k = dialog.dataset.key, row = dialog.row, previous = dialog.entry, warned = dialog.newest;
-    closeDialog(true);
     // Proceed is a new decision, preserving the full Failed/Unable report and the warning basis.
     // Never substitute a newer background row: another check must receive its own warning.
     var operationId = uuid4();
     var entry = {status: "pending", operationId: operationId, retryable: true,
       payload: Object.assign({}, previous.payload, {operation_id: operationId,
         basis_check_id: warned, acknowledges_check_id: warned})};
-    entries[k] = entry;
-    send(row, entry); nextConflict();
+    closeDialog(true, function () {
+      entries[k] = entry;
+      send(row, entry); nextConflict();
+    });
   });
 
   // ---- Failed/Unable: the reporter explicitly chooses a match or a new report -------------
@@ -426,26 +499,30 @@
     var invokerItem = itemForKey(key(row));
     outcomeDialog.invoker = invokerItem && actionIn(invokerItem, outcome.toLowerCase());
     if (!outcomeDialog.invoker) { outcomeDialog.invoker = document.activeElement; }
-    if (typeof outcomeDialog.showModal === "function") { outcomeDialog.showModal(); } else { outcomeDialog.setAttribute("open", ""); }
+    openFocusDialog(outcomeDialog);
   }
-  function closeOutcome(keepFocusIntent) {
+  function closeOutcome(keepFocusIntent, afterClose) {
     outcomeGeneration += 1;
     var invoker = outcomeDialog.invoker;
-    if (outcomeDialog.close) { outcomeDialog.close(); }
-    outcomeDialog.removeAttribute("open");
-    if (keepFocusIntent && focusIntent) {
-      var item = itemForKey(focusIntent.key), target = invoker && document.contains(invoker) ? invoker : item && actionIn(item, focusIntent.action);
-      if (target && document.activeElement !== target) { target.focus({preventScroll: true}); }
-      else if (!target) { focusStatusMessage("This item is no longer on the checklist. Refresh and try again."); }
-      return;
+    var item = focusIntent && itemForKey(focusIntent.key);
+    var target = invoker && document.contains(invoker) ? invoker : item && actionIn(item, focusIntent.action);
+    if (!target) {
+      var status = $("session-message");
+      if (status) { status.textContent = "This item is no longer on the checklist. Refresh and try again."; status.tabIndex = -1; }
+      target = status;
+      focusIntent = null;
+    } else if (!keepFocusIntent) {
+      focusIntent = null;
     }
-    else {
-      restoreFocusIntent(); focusIntent = null;
-    }
-    if (deferredListRender) { deferredListRender = false; render(); }
+    outcomeDialog.invoker = null;
+    closeFocusDialog(outcomeDialog, target, function () {
+      if (deferredListRender) { deferredListRender = false; render(); }
+      if (afterClose) { afterClose(); }
+    });
   }
-  $("outcome-cancel").addEventListener("click", function () { closeOutcome(false); });
-  outcomeDialog.addEventListener("cancel", function (event) { event.preventDefault(); closeOutcome(false); });
+  function cancelOutcome() { closeOutcome(false); }
+  $("outcome-cancel").addEventListener("click", cancelOutcome);
+  bindFocusDialog(outcomeDialog, cancelOutcome);
   outcomeChoice.addEventListener("change", function () { $("outcome-create-fields").hidden = !!outcomeChoice.value; });
   outcomeForm.addEventListener("submit", function (event) {
     event.preventDefault();
@@ -461,11 +538,11 @@
     }
     row = latestRow(row);
     if (!row) {
-      closeOutcome(false);
       $("session-message").textContent = "This item is no longer on the checklist. Refresh and try again.";
+      closeOutcome(false);
       return;
     }
-    closeOutcome(true); startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation);
+    closeOutcome(true, function () { startCheck(row, outcomeDialog.observation, outcome, deficiency, explanation); });
   });
 
   // ---- rendering -------------------------------------------------------------------------
